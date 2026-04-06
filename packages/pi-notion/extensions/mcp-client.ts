@@ -12,8 +12,11 @@
  *   "Search my Notion for X"    - Natural language (tools auto-discovered after connect)
  */
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { getPort as lookupPort } from "portfinder";
@@ -23,7 +26,56 @@ import { getPort as lookupPort } from "portfinder";
 // =============================================================================
 
 const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
+const NOTION_TOKEN_URL = "https://api.notion.com/v1/oauth/token";
 const CALLBACK_PORT = 3000;
+
+// =============================================================================
+// Config Path Resolution (same as index.ts)
+// =============================================================================
+
+interface NotionOAuthConfig {
+	clientId: string;
+	clientSecret: string;
+	redirectUri?: string;
+}
+
+interface NotionMCPConfig {
+	oauth?: NotionOAuthConfig;
+	[key: string]: unknown;
+}
+
+function _resolveConfigPath(configPath: string): string {
+	const trimmed = configPath.trim();
+	if (trimmed.startsWith("~/")) return join(homedir(), trimmed.slice(2));
+	if (trimmed.startsWith("~")) return join(homedir(), trimmed.slice(1));
+	return resolve(process.cwd(), trimmed);
+}
+
+function getConfigPath(): string {
+	const projectConfigPath = join(process.cwd(), ".pi", "extensions", "notion.json");
+	const globalConfigPath = join(homedir(), ".pi", "agent", "extensions", "notion.json");
+	if (existsSync(projectConfigPath)) return projectConfigPath;
+	return globalConfigPath;
+}
+
+function loadNotionConfig(): NotionMCPConfig | null {
+	const configPath = getConfigPath();
+	if (!existsSync(configPath)) {
+		// Create default config if it doesn't exist
+		try {
+			mkdirSync(dirname(configPath), { recursive: true });
+			writeFileSync(configPath, JSON.stringify({ oauth: null }, null, 2), "utf-8");
+		} catch {
+			// Ignore
+		}
+		return null;
+	}
+	try {
+		return JSON.parse(readFileSync(configPath, "utf-8")) as NotionMCPConfig;
+	} catch {
+		return null;
+	}
+}
 
 // =============================================================================
 // Types
@@ -43,6 +95,91 @@ interface MCPClientState {
 }
 
 // =============================================================================
+// OAuth Token Exchange
+// =============================================================================
+
+interface OAuthTokens {
+	accessToken: string;
+	refreshToken: string;
+	tokenType: string;
+	expiresAt: number;
+}
+
+async function exchangeCodeForTokens(
+	code: string,
+	codeVerifier: string,
+	clientId: string,
+	clientSecret: string,
+	redirectUri: string,
+): Promise<OAuthTokens> {
+	const response = await fetch(NOTION_TOKEN_URL, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+		},
+		body: JSON.stringify({
+			grant_type: "authorization_code",
+			code,
+			redirect_uri: redirectUri,
+			code_verifier: codeVerifier,
+		}),
+	});
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({ error: "Unknown error" }));
+		throw new Error(`Token exchange failed: ${error.error || response.statusText}`);
+	}
+
+	const data = (await response.json()) as {
+		access_token: string;
+		refresh_token: string;
+		token_type: string;
+		expires_in?: number;
+	};
+
+	return {
+		accessToken: data.access_token,
+		refreshToken: data.refresh_token,
+		tokenType: data.token_type,
+		expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
+	};
+}
+
+async function _refreshAccessToken(refreshToken: string, clientId: string, clientSecret: string): Promise<OAuthTokens> {
+	const response = await fetch(NOTION_TOKEN_URL, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+		},
+		body: JSON.stringify({
+			grant_type: "refresh_token",
+			refresh_token: refreshToken,
+		}),
+	});
+
+	if (!response.ok) {
+		const error = await response.json().catch(() => ({ error: "Unknown error" }));
+		throw new Error(`Token refresh failed: ${error.error || response.statusText}`);
+	}
+
+	const data = (await response.json()) as {
+		access_token: string;
+		refresh_token: string;
+		token_type: string;
+		expires_in?: number;
+	};
+
+	return {
+		accessToken: data.access_token,
+		refreshToken: data.refresh_token,
+		tokenType: data.token_type,
+		expiresAt: Date.now() + (data.expires_in || 3600) * 1000,
+	};
+}
+
+// =============================================================================
 // MCP JSON-RPC Client
 // =============================================================================
 
@@ -56,12 +193,25 @@ class SimpleMCPClient {
 
 	private messageId = 0;
 	private sessionId: string | null = null;
-	private accessToken: string | null = null;
+	private _accessToken: string | null = null;
 	private _tools: MCPTool[] = [];
 
+	/**
+	 * Set the access token (obtained from OAuth code exchange)
+	 */
+	setAccessToken(token: string): void {
+		this._accessToken = token;
+		this.state.accessToken = token;
+		this.state.authenticated = true;
+	}
+
 	async connect(): Promise<void> {
+		if (!this._accessToken) {
+			throw new Error("No access token available. Complete OAuth flow first.");
+		}
+
 		// Initialize session
-		const _initResponse = await this.sendRequest("initialize", {
+		await this.sendRequest("initialize", {
 			protocolVersion: "2024-11-05",
 			capabilities: {},
 			clientInfo: { name: "pi-notion", version: "1.0.0" },
@@ -86,6 +236,7 @@ class SimpleMCPClient {
 					headers: {
 						"Content-Type": "application/json",
 						"MCP-Session-Id": this.sessionId,
+						Authorization: this._accessToken ? `Bearer ${this._accessToken}` : "",
 					},
 				});
 			} catch {
@@ -99,7 +250,7 @@ class SimpleMCPClient {
 			accessToken: null,
 		};
 		this.sessionId = null;
-		this.accessToken = null;
+		this._accessToken = null;
 		this._tools = [];
 	}
 
@@ -115,8 +266,8 @@ class SimpleMCPClient {
 		if (this.sessionId) {
 			headers["MCP-Session-Id"] = this.sessionId;
 		}
-		if (this.accessToken) {
-			headers.Authorization = `Bearer ${this.accessToken}`;
+		if (this._accessToken) {
+			headers.Authorization = `Bearer ${this._accessToken}`;
 		}
 		return headers;
 	}
@@ -182,7 +333,7 @@ class SimpleMCPClient {
 }
 
 // =============================================================================
-// OAuth Flow Handler
+// OAuth Callback Handler
 // =============================================================================
 
 async function waitForOAuthCallback(
@@ -363,10 +514,27 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 			if (!connected) {
 				ctx.ui.notify("Not connected to Notion", "info");
 
-				// Start connection flow
+				// Load OAuth config
+				const config = loadNotionConfig();
+				if (!config?.oauth?.clientId || !config?.oauth?.clientSecret) {
+					ctx.ui.notify("OAuth not configured. Run /setup-notion first.", "error");
+					return;
+				}
+				const oauthConfig = config.oauth;
+
+				// Generate PKCE parameters
+				const codeVerifier = randomBytes(32).toString("base64url");
+				const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
 				const state = randomBytes(16).toString("hex");
 				const callbackUrl = `http://localhost:${CALLBACK_PORT}/callback`;
-				const authUrl = `${NOTION_MCP_URL}/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}&state=${state}&response_type=code`;
+
+				const authUrl =
+					`${NOTION_MCP_URL}/authorize?` +
+					`redirect_uri=${encodeURIComponent(callbackUrl)}` +
+					`&state=${state}` +
+					`&response_type=code` +
+					`&code_challenge=${codeChallenge}` +
+					`&code_challenge_method=S256`;
 
 				ctx.ui.notify("Opening Notion authorization page...", "info");
 
@@ -378,14 +546,26 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 							return;
 						}
 
-						ctx.ui.notify("Connecting to MCP server...", "info");
+						ctx.ui.notify("Exchanging authorization code for tokens...", "info");
 						try {
+							const tokens = await exchangeCodeForTokens(
+								result.code,
+								codeVerifier,
+								oauthConfig.clientId,
+								oauthConfig.clientSecret,
+								callbackUrl,
+							);
+
+							// Set the access token in the MCP client
+							mcpClient?.setAccessToken(tokens.accessToken);
+
+							ctx.ui.notify("Connecting to MCP server...", "info");
 							await mcpClient?.connect();
 							registerMCPTools();
 							ctx.ui.notify(`Connected! Session: ${mcpClient?.state.sessionId?.slice(0, 8)}...`, "info");
 						} catch (error) {
 							const message = error instanceof Error ? error.message : String(error);
-							ctx.ui.notify(`Connection failed: ${message}`, "error");
+							ctx.ui.notify(`Token exchange failed: ${message}`, "error");
 						}
 					})
 					.catch((error) => {
@@ -443,9 +623,30 @@ Tools: ${tools.length} available`;
 			try {
 				notify("Initializing connection to Notion MCP...");
 
+				// Load OAuth config
+				const config = loadNotionConfig();
+				if (!config?.oauth?.clientId || !config?.oauth?.clientSecret) {
+					return {
+						content: [{ type: "text", text: "OAuth not configured. Run /setup-notion first." }],
+						isError: true,
+						details: { tool: "notion_mcp_connect" },
+					};
+				}
+				const oauthConfig = config.oauth;
+
+				// Generate PKCE parameters
+				const codeVerifier = randomBytes(32).toString("base64url");
+				const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
 				const state = randomBytes(16).toString("hex");
 				const callbackUrl = `http://localhost:${CALLBACK_PORT}/callback`;
-				const authUrl = `${NOTION_MCP_URL}/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}&state=${state}&response_type=code`;
+
+				const authUrl =
+					`${NOTION_MCP_URL}/authorize?` +
+					`redirect_uri=${encodeURIComponent(callbackUrl)}` +
+					`&state=${state}` +
+					`&response_type=code` +
+					`&code_challenge=${codeChallenge}` +
+					`&code_challenge_method=S256`;
 
 				const callbackPromise = waitForOAuthCallback(CALLBACK_PORT, state);
 
@@ -462,6 +663,18 @@ Tools: ${tools.length} available`;
 						details: { tool: "notion_mcp_connect" },
 					};
 				}
+
+				notify("Exchanging authorization code for tokens...");
+				const tokens = await exchangeCodeForTokens(
+					callbackResult.code,
+					codeVerifier,
+					oauthConfig.clientId,
+					oauthConfig.clientSecret,
+					callbackUrl,
+				);
+
+				// Set the access token in the MCP client
+				mcpClient.setAccessToken(tokens.accessToken);
 
 				notify("Connecting to MCP server...");
 				await mcpClient.connect();
