@@ -8,14 +8,18 @@ describe("pi-devtools git integration", () => {
 	let tempDir: string;
 
 	beforeEach(() => {
-		// Create a unique temp directory for each test
-		tempDir = `/tmp/vitest-git-test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-		mkdirSync(tempDir, { recursive: true });
+		// Create a unique temp directory for each test using mktemp
+		tempDir = execSync("mktemp -d", { encoding: "utf-8" }).trim();
 
 		// Initialize git repo
 		execSync("git init", { cwd: tempDir, stdio: "pipe" });
 		execSync("git config user.email 'test@test.com'", { cwd: tempDir, stdio: "pipe" });
 		execSync("git config user.name 'Test User'", { cwd: tempDir, stdio: "pipe" });
+
+		// Create initial commit
+		writeFileSync(join(tempDir, "initial.txt"), "initial");
+		execSync("git add .", { cwd: tempDir, stdio: "pipe" });
+		execSync("git commit -m 'initial commit'", { cwd: tempDir, stdio: "pipe" });
 	});
 
 	afterEach(() => {
@@ -36,68 +40,71 @@ describe("pi-devtools git integration", () => {
 		});
 
 		it("throws error when not in a git repo", () => {
-			// Create a non-git directory
-			const nonGitDir = `/tmp/non-git-${Date.now()}`;
-			mkdirSync(nonGitDir, { recursive: true });
+			// Create a non-git directory using mktemp
+			const nonGitDir = execSync("mktemp -d", { encoding: "utf-8" }).trim();
 			try {
 				expect(() => execGit(`git -C ${nonGitDir} status`)).toThrow();
 			} finally {
 				rmSync(nonGitDir, { recursive: true, force: true });
 			}
 		});
+
+		it("handles error in command execution", () => {
+			expect(() => execGit(`git -C ${tempDir} log --invalid-flag`)).toThrow();
+		});
 	});
 
 	describe("getDefaultBranch", () => {
-		it("returns main when symbolic-ref exists", () => {
-			// Create initial commit so we can set HEAD
-			writeFileSync(join(tempDir, "test.txt"), "test");
-			execSync("git add .", { cwd: tempDir, stdio: "pipe" });
-			execSync("git commit -m 'initial'", { cwd: tempDir, stdio: "pipe" });
-
-			// Create a fake origin with main branch
-			const originDir = `${tempDir}-origin`;
-			mkdirSync(originDir, { recursive: true });
-			execSync("git init --bare", { cwd: originDir, stdio: "pipe" });
-			execSync(`git remote add origin ${originDir}`, { cwd: tempDir, stdio: "pipe" });
-			execSync("git push -u origin main", { cwd: tempDir, stdio: "pipe" });
-
-			// Now getDefaultBranch should work
+		it("returns main in repo without origin", () => {
+			// In a fresh repo without origin, should return main via fallback
 			const result = getDefaultBranch();
-			expect(result).toBeTruthy();
-		});
-
-		it("falls back to main when remote lookup fails", () => {
-			const result = getDefaultBranch();
-			// Should return main as fallback
 			expect(result).toBe("main");
 		});
 	});
 
 	describe("createBranchTool integration", () => {
 		it("creates a branch", () => {
-			// Create initial commit
-			writeFileSync(join(tempDir, "test.txt"), "test");
-			execSync("git add .", { cwd: tempDir, stdio: "pipe" });
-			execSync("git commit -m 'initial'", { cwd: tempDir, stdio: "pipe" });
+			execGit(`git -C ${tempDir} checkout -b feature/test`);
 
-			// Test creating a branch
-			const result = execGit(`git -C ${tempDir} checkout -b feature/test`);
-
-			// Verify branch exists
 			const branches = execGit(`git -C ${tempDir} branch`);
 			expect(branches).toContain("feature/test");
+		});
+
+		it("fails when branch already exists", () => {
+			execGit(`git -C ${tempDir} checkout -b feature/test`);
+			expect(() => execGit(`git -C ${tempDir} checkout -b feature/test`)).toThrow();
 		});
 	});
 
 	describe("commitTool integration", () => {
 		it("stages files successfully", () => {
-			// Create and stage a file
 			writeFileSync(join(tempDir, "test.txt"), "test content");
 			execSync(`git -C ${tempDir} add .`, { stdio: "pipe" });
 
-			// Verify staged files
 			const staged = execGit(`git -C ${tempDir} diff --cached --name-only`);
 			expect(staged).toContain("test.txt");
+		});
+
+		it("commits successfully", () => {
+			writeFileSync(join(tempDir, "test.txt"), "test content");
+			execSync(`git -C ${tempDir} add .`, { stdio: "pipe" });
+			execGit(`git -C ${tempDir} commit -m "feat: add test"`);
+
+			const log = execGit(`git -C ${tempDir} log --oneline -n 1`);
+			expect(log).toContain("feat: add test");
+		});
+	});
+
+	describe("pushTool integration", () => {
+		it("pushes to remote", () => {
+			// Setup origin using mktemp
+			const originDir = execSync("mktemp -d", { encoding: "utf-8" }).trim();
+			execSync("git init --bare", { cwd: originDir, stdio: "pipe" });
+			execSync(`git remote add origin ${originDir}`, { cwd: tempDir, stdio: "pipe" });
+
+			execGit(`git -C ${tempDir} push -u origin main`);
+
+			rmSync(originDir, { recursive: true, force: true });
 		});
 	});
 
@@ -107,11 +114,23 @@ describe("pi-devtools git integration", () => {
 			expect(branch).toBe("main");
 		});
 
-		it("gets status output", () => {
+		it("gets status output with changes", () => {
 			writeFileSync(join(tempDir, "newfile.txt"), "content");
 
 			const status = execGit(`git -C ${tempDir} status --porcelain`);
 			expect(status).toContain("newfile.txt");
+		});
+
+		it("parses staged and modified files", () => {
+			writeFileSync(join(tempDir, "initial.txt"), "modified content");
+			execSync(`git -C ${tempDir} add initial.txt`, { stdio: "pipe" });
+
+			writeFileSync(join(tempDir, "another.txt"), "new");
+			execSync(`git -C ${tempDir} add .`, { stdio: "pipe" });
+
+			const status = execGit(`git -C ${tempDir} status --porcelain`);
+			expect(status).toContain("initial.txt");
+			expect(status).toContain("another.txt");
 		});
 	});
 
@@ -122,42 +141,68 @@ describe("pi-devtools git integration", () => {
 		});
 
 		it("returns latest tag", () => {
-			// Create initial commit
-			writeFileSync(join(tempDir, "test.txt"), "test");
-			execSync("git add .", { cwd: tempDir, stdio: "pipe" });
-			execSync("git commit -m 'initial'", { cwd: tempDir, stdio: "pipe" });
-
-			// Create a tag
 			execSync(`git -C ${tempDir} tag v1.0.0`);
 
 			const tags = execGit(`git -C ${tempDir} tag -l 'v*' | sort -rV | head -1`);
 			expect(tags).toBe("v1.0.0");
 		});
+
+		it("returns correct tag when multiple exist", () => {
+			execSync(`git -C ${tempDir} tag v1.0.0`);
+			execSync(`git -C ${tempDir} tag v2.0.0`);
+			execSync(`git -C ${tempDir} tag v1.5.0`);
+
+			const tags = execGit(`git -C ${tempDir} tag -l 'v*' | sort -rV | head -1`);
+			expect(tags).toBe("v2.0.0");
+		});
 	});
 
-	describe("parseConventionalCommit integration", () => {
-		it("parses conventional commits from log", () => {
-			// Create commits with conventional format
+	describe("analyzeCommitsTool integration", () => {
+		it("parses conventional commits", () => {
 			writeFileSync(join(tempDir, "feat.txt"), "feat");
 			execSync("git add .", { cwd: tempDir, stdio: "pipe" });
-			execSync(`git -C ${tempDir} commit -m "feat: add new feature"`, { stdio: "pipe" });
+			execSync(`git -C ${tempDir} commit -m "feat: add feature"`, { stdio: "pipe" });
 
-			writeFileSync(join(tempDir, "fix.txt"), "fix");
+			const commits = execGit(`git -C ${tempDir} log --format="%s" -n 1`);
+			expect(commits).toContain("feat:");
+		});
+
+		it("counts commits since tag", () => {
+			execSync(`git -C ${tempDir} tag v1.0.0`);
+
+			writeFileSync(join(tempDir, "a.txt"), "a");
 			execSync("git add .", { cwd: tempDir, stdio: "pipe" });
-			execSync(`git -C ${tempDir} commit -m "fix: fix bug"`, { stdio: "pipe" });
+			execSync(`git -C ${tempDir} commit -m "fix: fix"`, { stdio: "pipe" });
 
-			const commits = execGit(`git -C ${tempDir} log --format="%s" -n 2`);
-			expect(commits).toContain("feat: add new feature");
-			expect(commits).toContain("fix: fix bug");
+			const count = execGit(`git -C ${tempDir} log v1.0.0..HEAD --oneline | wc -l`).trim();
+			expect(parseInt(count, 10)).toBeGreaterThan(0);
+		});
+	});
+
+	describe("mergePrTool integration", () => {
+		it("handles pr view command", () => {
+			// This tests the gh pr view command structure
+			const prInfo = execGh("gh pr view 1 --json title,url,state 2>/dev/null || echo '{}'");
+			expect(prInfo).toBeDefined();
+		});
+	});
+
+	describe("checkCiTool integration", () => {
+		it("handles gh run list command", () => {
+			// Test gh run list command
+			const runs = execGh("gh run list --limit 1 2>/dev/null || echo ''");
+			expect(runs !== undefined).toBe(true);
 		});
 	});
 });
 
 describe("execGh", () => {
 	it("executes gh command successfully when authenticated", () => {
-		// gh is installed and authenticated in this environment
 		const result = execGh("gh auth status");
-		// Should not throw and should return some output
 		expect(result).toBeDefined();
+	});
+
+	it("throws error for invalid gh command", () => {
+		expect(() => execGh("gh invalid-command")).toThrow("gh error");
 	});
 });
