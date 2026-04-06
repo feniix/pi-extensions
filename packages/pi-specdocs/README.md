@@ -2,8 +2,6 @@
 
 Structured spec documentation workflow for [pi](https://pi.dev/) — PRDs, ADRs, and implementation plans with cross-referencing.
 
-Ported from the [specdocs Claude Code plugin](https://github.com/feniix/cc-skills).
-
 ## Features
 
 - **PRD Skill** (`prd`): Draft structured Product Requirements Documents with Gherkin acceptance criteria, design decisions, and concrete file breakdowns
