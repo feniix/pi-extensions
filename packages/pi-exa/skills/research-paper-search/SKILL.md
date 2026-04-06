@@ -1,5 +1,5 @@
 ---
-name: research-paper-search-exa
+name: research-paper-search
 description: Search for research papers and academic content using Exa advanced search. Full filter support including date ranges and text filtering. Use when searching for academic papers, arXiv preprints, or scientific research.
 context: fork
 ---

@@ -1,5 +1,5 @@
 ---
-name: financial-report-search-exa
+name: financial-report-search
 description: Search for financial reports using Exa advanced search. Near-full filter support for finding SEC filings, earnings reports, and financial documents. Use when searching for 10-K filings, quarterly earnings, or annual reports.
 context: fork
 ---

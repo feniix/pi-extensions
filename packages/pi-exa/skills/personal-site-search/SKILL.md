@@ -1,5 +1,5 @@
 ---
-name: personal-site-search-exa
+name: personal-site-search
 description: Search personal websites and blogs using Exa advanced search. Full filter support for finding individual perspectives, portfolios, and personal blogs. Use when searching for personal sites, blog posts, or portfolio websites.
 context: fork
 ---
