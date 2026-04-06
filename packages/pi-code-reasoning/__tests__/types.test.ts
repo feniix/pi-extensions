@@ -56,6 +56,153 @@ describe("validateThoughtData", () => {
 		});
 	});
 
+	it("returns error for negative thought_number", () => {
+		const data = {
+			thought: "My thought",
+			thought_number: -5,
+			total_thoughts: 3,
+			next_thought_needed: true,
+		};
+		expect(validateThoughtData(data)).toContainEqual({
+			field: "thought_number",
+			message: "thought_number must be a positive integer.",
+		});
+	});
+
+	it("returns error for non-integer thought_number", () => {
+		const data = {
+			thought: "My thought",
+			thought_number: 1.5,
+			total_thoughts: 3,
+			next_thought_needed: true,
+		};
+		expect(validateThoughtData(data)).toContainEqual({
+			field: "thought_number",
+			message: "thought_number must be a positive integer.",
+		});
+	});
+
+	it("returns error for negative total_thoughts", () => {
+		const data = {
+			thought: "My thought",
+			thought_number: 1,
+			total_thoughts: 0,
+			next_thought_needed: true,
+		};
+		expect(validateThoughtData(data)).toContainEqual({
+			field: "total_thoughts",
+			message: "total_thoughts must be a positive integer.",
+		});
+	});
+
+	it("returns error for missing next_thought_needed", () => {
+		const data = {
+			thought: "My thought",
+			thought_number: 1,
+			total_thoughts: 3,
+			next_thought_needed: undefined,
+		};
+		expect(validateThoughtData(data)).toContainEqual({
+			field: "next_thought_needed",
+			message: "next_thought_needed must be a boolean.",
+		});
+	});
+
+	it("returns error for invalid is_revision type", () => {
+		const data = {
+			thought: "My thought",
+			thought_number: 1,
+			total_thoughts: 3,
+			next_thought_needed: true,
+			is_revision: "yes",
+		};
+		expect(validateThoughtData(data)).toContainEqual({
+			field: "is_revision",
+			message: "is_revision must be a boolean.",
+		});
+	});
+
+	it("returns error for invalid revises_thought", () => {
+		const data = {
+			thought: "My thought",
+			thought_number: 1,
+			total_thoughts: 3,
+			next_thought_needed: true,
+			revises_thought: -1,
+		};
+		expect(validateThoughtData(data)).toContainEqual({
+			field: "revises_thought",
+			message: "revises_thought must be a positive integer.",
+		});
+	});
+
+	it("returns error for non-integer revises_thought", () => {
+		const data = {
+			thought: "My thought",
+			thought_number: 1,
+			total_thoughts: 3,
+			next_thought_needed: true,
+			revises_thought: 1.5,
+		};
+		expect(validateThoughtData(data)).toContainEqual({
+			field: "revises_thought",
+			message: "revises_thought must be a positive integer.",
+		});
+	});
+
+	it("returns error for invalid branch_from_thought", () => {
+		const data = {
+			thought: "My thought",
+			thought_number: 1,
+			total_thoughts: 3,
+			next_thought_needed: true,
+			branch_from_thought: 0,
+		};
+		expect(validateThoughtData(data)).toContainEqual({
+			field: "branch_from_thought",
+			message: "branch_from_thought must be a positive integer.",
+		});
+	});
+
+	it("returns error for empty branch_id", () => {
+		const data = {
+			thought: "My thought",
+			thought_number: 1,
+			total_thoughts: 3,
+			next_thought_needed: true,
+			branch_id: "   ",
+		};
+		expect(validateThoughtData(data)).toContainEqual({
+			field: "branch_id",
+			message: "branch_id must be a non-empty string.",
+		});
+	});
+
+	it("returns error for non-string branch_id", () => {
+		const data = {
+			thought: "My thought",
+			thought_number: 1,
+			total_thoughts: 3,
+			next_thought_needed: true,
+			branch_id: 123,
+		};
+		expect(validateThoughtData(data)).toContainEqual({
+			field: "branch_id",
+			message: "branch_id must be a non-empty string.",
+		});
+	});
+
+	it("returns multiple errors", () => {
+		const data = {
+			thought: "",
+			thought_number: -1,
+			total_thoughts: 0,
+			next_thought_needed: "yes",
+		};
+		const errors = validateThoughtData(data);
+		expect(errors.length).toBeGreaterThanOrEqual(4);
+	});
+
 	it("accepts valid optional fields", () => {
 		const data = {
 			thought: "My thought",
@@ -68,6 +215,31 @@ describe("validateThoughtData", () => {
 			branch_id: "test-branch",
 		};
 		expect(validateThoughtData(data)).toEqual([]);
+	});
+
+	it("accepts thought at max length", () => {
+		const longThought = "a".repeat(20000);
+		const data = {
+			thought: longThought,
+			thought_number: 1,
+			total_thoughts: 3,
+			next_thought_needed: true,
+		};
+		expect(validateThoughtData(data)).toEqual([]);
+	});
+
+	it("returns error for thought exceeding max length", () => {
+		const longThought = "a".repeat(20001);
+		const data = {
+			thought: longThought,
+			thought_number: 1,
+			total_thoughts: 3,
+			next_thought_needed: true,
+		};
+		expect(validateThoughtData(data)).toContainEqual({
+			field: "thought",
+			message: expect.stringContaining("exceeds"),
+		});
 	});
 });
 

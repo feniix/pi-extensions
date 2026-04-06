@@ -422,7 +422,11 @@ const codeReasoningParams = Type.Object(
 
 export {
 	DEFAULT_CONFIG_FILE,
+	buildError,
+	buildSuccess,
+	createThoughtTracker,
 	formatToolOutput,
+	getExampleThought,
 	isRecord,
 	normalizeNumber,
 	parseConfig,
