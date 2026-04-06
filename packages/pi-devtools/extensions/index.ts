@@ -4,10 +4,11 @@
  * Provides Git workflow tools, PR operations, and release automation.
  */
 
-import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+
+import { execGh, execGit, getDefaultBranch } from "./git.js";
 
 // =============================================================================
 // Types
@@ -19,27 +20,7 @@ interface ToolResult {
 	isError?: boolean;
 }
 
-// =============================================================================
-// Utility Functions
-// =============================================================================
 
-function execGit(command: string): string {
-	try {
-		return execSync(command, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		throw new Error(`Git error: ${message}`);
-	}
-}
-
-function execGh(command: string): string {
-	try {
-		return execSync(command, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		throw new Error(`gh error: ${message}`);
-	}
-}
 
 function parseConventionalCommit(message: string): { type: string; scope?: string; breaking: boolean } {
 	const match = message.match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/);
@@ -70,23 +51,7 @@ function bumpVersion(version: string, type: "major" | "minor" | "patch"): string
 	}
 }
 
-function getDefaultBranch(): string {
-	try {
-		const ref = execGit("git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'");
-		if (ref) return ref;
-	} catch {
-		// Fall through to network call
-	}
 
-	try {
-		const remoteHead = execGit("git remote show origin 2>/dev/null | grep 'HEAD branch' | sed 's/.*: //'");
-		if (remoteHead) return remoteHead.trim();
-	} catch {
-		// Fall through to fallback
-	}
-
-	return "main";
-}
 
 // =============================================================================
 // Tool Parameters
@@ -399,8 +364,6 @@ function checkCiTool(prNumber?: number, branch?: string): ToolResult {
 	}
 }
 
-const getRepoInfo = repoInfoTool;
-
 function repoInfoTool(): ToolResult {
 	try {
 		const branch = execGit("git branch --show-current");
@@ -655,15 +618,16 @@ commitTool,
 createBranchTool,
 createPrTool,
 createReleaseTool,
+getDefaultBranch,
 getLatestTagTool,
-getRepoInfo,
 mergePrTool,
 parseConventionalCommit,
 pushTool,
 repoInfoTool,
 };
 
-export { execGit, execGh };
+export { execGh, execGit };
+export { repoInfoTool as getRepoInfo };
 
 // =============================================================================
 // Extension Entry Point
