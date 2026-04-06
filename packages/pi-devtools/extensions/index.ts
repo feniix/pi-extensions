@@ -148,7 +148,7 @@ const createReleaseParams = Type.Object({
 
 function createBranchTool(branchName: string, switchBranch = true): ToolResult {
 	try {
-		execGit(`git checkout ${switchBranch ? "-c" : "-b"} ${branchName}`);
+		execGit(`git checkout ${switchBranch ? "-b" : "-b"} ${branchName}`);
 		return {
 			content: [{ type: "text", text: `Created and switched to branch: ${branchName}` }],
 			details: { branch: branchName },
