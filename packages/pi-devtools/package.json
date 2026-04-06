@@ -1,52 +1,52 @@
 {
-	"name": "@feniix/pi-devtools",
-	"version": "1.0.5",
-	"description": "Devtools extension for pi — branch and PR workflow, release automation, merge commands",
-	"keywords": [
-		"pi",
-		"pi-package",
-		"pi-extension",
-		"pi-coding-agent",
-		"ai",
-		"devtools",
-		"git",
-		"github",
-		"release",
-		"pr"
-	],
-	"type": "module",
-	"files": [
-		"extensions/",
-		"skills/",
-		"prompts/",
-		"README.md",
-		"LICENSE"
-	],
-	"pi": {
-		"extensions": [
-			"./extensions/index.ts"
-		],
-		"skills": [
-			"./skills"
-		],
-		"prompts": [
-			"./prompts"
-		]
-	},
-	"peerDependencies": {
-		"@mariozechner/pi-ai": "*",
-		"@mariozechner/pi-coding-agent": "*",
-		"@sinclair/typebox": "*"
-	},
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/feniix/pi-packages.git",
-		"directory": "packages/pi-devtools"
-	},
-	"author": "feniix",
-	"license": "MIT",
-	"bugs": {
-		"url": "https://github.com/feniix/pi-packages/issues"
-	},
-	"homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-devtools#readme"
+  "name": "@feniix/pi-devtools",
+  "version": "1.0.6",
+  "description": "Devtools extension for pi — branch and PR workflow, release automation, merge commands",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "ai",
+    "devtools",
+    "git",
+    "github",
+    "release",
+    "pr"
+  ],
+  "type": "module",
+  "files": [
+    "extensions/",
+    "skills/",
+    "prompts/",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/feniix/pi-packages.git",
+    "directory": "packages/pi-devtools"
+  },
+  "author": "feniix",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/feniix/pi-packages/issues"
+  },
+  "homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-devtools#readme"
 }

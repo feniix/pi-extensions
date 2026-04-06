@@ -1,51 +1,51 @@
 {
-	"name": "@feniix/pi-specdocs",
-	"version": "1.0.3",
-	"description": "Structured spec documentation — PRDs, ADRs, and implementation plans with cross-referencing",
-	"keywords": [
-		"pi",
-		"pi-package",
-		"pi-extension",
-		"pi-coding-agent",
-		"ai",
-		"prd",
-		"adr",
-		"architecture",
-		"requirements",
-		"specs"
-	],
-	"type": "module",
-	"files": [
-		"extensions/",
-		"skills/",
-		"prompts/",
-		"README.md",
-		"LICENSE"
-	],
-	"pi": {
-		"extensions": [
-			"./extensions/index.ts"
-		],
-		"skills": [
-			"./skills"
-		],
-		"prompts": [
-			"./prompts"
-		]
-	},
-	"peerDependencies": {
-		"@mariozechner/pi-ai": "*",
-		"@mariozechner/pi-coding-agent": "*"
-	},
-	"repository": {
-		"type": "git",
-		"url": "git+https://github.com/feniix/pi-extensions.git",
-		"directory": "packages/pi-specdocs"
-	},
-	"author": "feniix",
-	"license": "MIT",
-	"bugs": {
-		"url": "https://github.com/feniix/pi-extensions/issues"
-	},
-	"homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-specdocs#readme"
+  "name": "@feniix/pi-specdocs",
+  "version": "1.0.4",
+  "description": "Structured spec documentation — PRDs, ADRs, and implementation plans with cross-referencing",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "ai",
+    "prd",
+    "adr",
+    "architecture",
+    "requirements",
+    "specs"
+  ],
+  "type": "module",
+  "files": [
+    "extensions/",
+    "skills/",
+    "prompts/",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/feniix/pi-extensions.git",
+    "directory": "packages/pi-specdocs"
+  },
+  "author": "feniix",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/feniix/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-specdocs#readme"
 }
