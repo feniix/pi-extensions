@@ -38,7 +38,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.1",
-    "axios": "^1.8.4"
+    "axios": "^1.8.4",
+    "portfinder": "^1.0.38"
   },
   "repository": {
     "type": "git",
@@ -52,7 +53,6 @@
   },
   "homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-notion#readme",
   "devDependencies": {
-    "@types/node": "^22.19.17",
-    "portfinder": "^1.0.38"
+    "@types/node": "^22.19.17"
   }
 }

@@ -1,3 +1,7 @@
+---
+description: Guide the user through setting up OAuth authentication for Notion
+---
+
 # Setup Notion OAuth
 
 Guide the user through setting up OAuth authentication for Notion.
