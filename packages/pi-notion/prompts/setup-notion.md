@@ -1,76 +1,40 @@
 ---
-description: "Interactive setup for Notion OAuth — guides user through creating a public integration and configuring OAuth for pi"
+description: "Interactive setup for Notion MCP connection — guides user through OAuth authorization"
 ---
 
 # /setup-notion
 
-Interactively set up Notion OAuth authentication for pi.
+Interactively set up Notion MCP connection for pi.
 
-**Use when**: User wants to connect pi to Notion via OAuth. This is the recommended method for full workspace access.
+**Use when**: User wants to connect pi to Notion via the official Notion MCP server.
 
-## Step 1: Explain the Requirement
+## Step 1: Explain the Setup
 
 Tell the user:
 
 ```
-To use Notion with pi via OAuth, you need to create a public Notion integration.
-This allows pi to access your Notion workspace with your permission.
+Notion MCP provides full access to your Notion workspace through an official
+connection. No API keys or manual configuration needed!
 
-This takes about 3 minutes.
+Just run /notion and authorize in your browser - it takes about 30 seconds.
 ```
 
-## Step 2: Create a Public Integration
+## Step 2: Connect
 
-Walk the user through creating a Notion OAuth integration:
+The user just needs to run:
 
-1. **Open Notion Integrations**
-   - Go to: https://www.notion.so/profile/integrations
-   - Click "New integration"
-
-2. **Configure the Integration**
-   - **Name**: `pi` (or any name you prefer)
-   - **Associated workspace**: Select your workspace
-   - **Type**: Select **Public** (important - OAuth requires public integrations)
-   - Submit to create
-
-3. **Configure OAuth Settings** (appears after setting Type to Public)
-   - Under **Redirect URIs**, add: `http://localhost:3000/callback`
-   - Add any additional redirect URIs if needed
-
-4. **Copy OAuth Credentials**
-   - In the integration settings, find **OAuth Client ID** and **OAuth Client Secret**
-   - Copy both values
-
-## Step 3: Configure pi
-
-Ask the user for their OAuth credentials, then create the config file.
-
-Create or update `~/.pi/agent/extensions/notion.json`:
-
-```json
-{
-  "oauth": {
-    "clientId": "your-oauth-client-id",
-    "clientSecret": "your-oauth-client-secret",
-    "redirectUri": "http://localhost:3000/callback"
-  }
-}
+```
+/notion
 ```
 
-Alternatively, you can use the `--notion-config` flag to specify a custom path.
+This will:
+1. Open a browser window for Notion authorization
+2. User selects which pages to share with pi
+3. pi automatically connects to Notion MCP
 
-## Step 4: Authorize pi
+## Step 3: Verify
 
-After configuration, the user needs to authorize pi:
-
-1. Run the `/notion` command or use the `notion_mcp_connect` tool
-2. A browser window will open for Notion authorization
-3. Select which pages/databases to share with pi
-4. Click "Allow access"
-
-## Step 5: Verify the Setup
-
-After authorization, test with:
+After connection, test with:
 
 ```
 Use notion_mcp_status to verify the connection works.
@@ -79,35 +43,40 @@ Use notion_mcp_status to verify the connection works.
 If successful, confirm:
 
 ```
-✅ Notion OAuth is connected! You can now use Notion tools like:
-- notion_search — find pages and databases
-- notion_get_page — retrieve page content
-- notion_create_page — create new pages
+✅ Notion is connected! You can now use Notion tools like:
+- Search your Notion workspace
+- Get page content
+- Create and update pages
 ```
+
+## No Manual Setup Required
+
+Unlike traditional API integrations, Notion MCP uses dynamic OAuth:
+
+- **No API keys to copy**
+- **No integration creation needed**
+- **No redirect URI configuration**
+
+The connection handles all of this automatically.
 
 ## Troubleshooting
 
-| Error | Solution |
+| Issue | Solution |
 |-------|----------|
-| "redirect_uri mismatch" | Ensure redirect URI is exactly `http://localhost:3000/callback` in Notion settings |
-| "Invalid client" | Check that clientId and clientSecret are correct |
-| "access_denied" | User cancelled authorization - run /notion again |
-| "No access token" | Complete the OAuth flow by running /notion |
+| Browser didn't open | Check popup blockers, try again |
+| "State mismatch" error | Clear browser cookies and try again |
+| Connection drops | Run /notion to reconnect |
+| Need to reauthorize | Use notion_mcp_disconnect then /notion |
 
-## Important Notes
+## Sharing Pages
 
-- **Public vs Internal**: OAuth requires a **Public** integration type, not Internal
-- **Redirect URI**: Must match exactly what you configured in Notion
-- **Page Access**: Users can select which pages to share during the OAuth flow
-- **Multiple Users**: Each user needs their own OAuth authorization
+During OAuth authorization, users select which pages/databases to share.
+To share more pages later:
 
-## Example: Finding a Page ID
+1. Open Notion
+2. Go to Settings → Connections
+3. Find "pi" and manage page access
 
-Page IDs are in the Notion URL:
-```
-https://notion.so/workspace/Page-Title-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-                                          This is the page ID (32 chars, with hyphens)
-```
+## Token Refresh
 
-Database IDs look the same but start with the database icon.
+Tokens refresh automatically. No user action needed.
