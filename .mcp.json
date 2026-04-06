@@ -1,0 +1,54 @@
+{
+  "mcpServers": {
+    "exa": {
+      "command": "bunx",
+      "args": [
+        "-y",
+        "exa-mcp-server@3.2.0"
+      ],
+      "env": {
+        "EXA_API_KEY": "${EXA_API_KEY}"
+      }
+    },
+    "ref": {
+      "command": "bunx",
+      "args": [
+        "-y",
+        "ref-tools-mcp@3.0.3"
+      ],
+      "env": {
+        "REF_API_KEY": "${REF_API_KEY}"
+      }
+    },
+    "sequential-thinking": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/arben-adm/mcp-sequential-thinking@f3727d858769495befaf56e6b4f2e84509dc6456",
+        "--with",
+        "portalocker",
+        "mcp-sequential-thinking"
+      ]
+    },
+    "code-reasoning": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "github:feniix/code-reasoning#fix-strict-stdio-startup"
+      ]
+    },
+    "serena": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena@66cbe31045107ddcd3851886f8b5854f625e4638",
+        "serena",
+        "start-mcp-server",
+        "--context",
+        "ide-assistant",
+        "--project",
+        "${PROJECT_ROOT}"
+      ]
+    }
+  }
+}
