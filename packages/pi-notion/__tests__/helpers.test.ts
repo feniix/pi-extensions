@@ -141,3 +141,39 @@ describe("pi-notion formatSearch", () => {
 		expect(result).toBe("No results found.");
 	});
 });
+
+describe("pi-notion loadConfig", () => {
+	it("returns null when no config exists", () => {
+		const base = mkdtempSync(join(tmpdir(), "pi-notion-load-"));
+		const configPath = join(base, "nonexistent.json");
+		const result = loadConfig(configPath);
+		expect(result).toBeNull();
+	});
+
+	it("loads valid config file", () => {
+		const base = mkdtempSync(join(tmpdir(), "pi-notion-load-valid-"));
+		const configPath = join(base, "notion.json");
+		const config = { token: "test-token-123", oauth: null };
+		writeFileSync(configPath, JSON.stringify(config), "utf-8");
+
+		const result = loadConfig(configPath);
+		expect(result?.token).toBe("test-token-123");
+	});
+
+	it("handles invalid JSON gracefully", () => {
+		const base = mkdtempSync(join(tmpdir(), "pi-notion-load-invalid-"));
+		const configPath = join(base, "invalid.json");
+		writeFileSync(configPath, "not valid json", "utf-8");
+
+		const result = loadConfig(configPath);
+		expect(result).toBeNull();
+	});
+
+	it("returns default config for empty config path", () => {
+		const result = loadConfig(undefined);
+		// Creates default config file and returns it
+		expect(result).not.toBeNull();
+		expect(result).toHaveProperty("token");
+		expect(result).toHaveProperty("oauth");
+	});
+});

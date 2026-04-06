@@ -173,3 +173,50 @@ describe("pi-exa ensureDefaultConfigFile", () => {
 		expect(firstContent).toBe(secondContent);
 	});
 });
+
+describe("pi-exa loadConfig", () => {
+	it("returns null when no config exists", () => {
+		const base = mkdtempSync(join(tmpdir(), "pi-exa-load-"));
+		const configPath = join(base, "nonexistent.json");
+		const result = loadConfig(configPath);
+		expect(result).toBeNull();
+	});
+
+	it("loads valid config file", () => {
+		const base = mkdtempSync(join(tmpdir(), "pi-exa-load-valid-"));
+		const configPath = join(base, "exa.json");
+		const config = { apiKey: "test-api-key", enabledTools: ["web_search_exa"] };
+		writeFileSync(configPath, JSON.stringify(config), "utf-8");
+
+		const result = loadConfig(configPath);
+		expect(result?.apiKey).toBe("test-api-key");
+		expect(result?.enabledTools).toContain("web_search_exa");
+	});
+
+	it("throws on invalid JSON", () => {
+		const base = mkdtempSync(join(tmpdir(), "pi-exa-load-invalid-"));
+		const configPath = join(base, "invalid.json");
+		writeFileSync(configPath, "not valid json", "utf-8");
+
+		// loadConfig throws on invalid JSON
+		expect(() => loadConfig(configPath)).toThrow();
+	});
+
+	it("loads from environment config path", () => {
+		const base = mkdtempSync(join(tmpdir(), "pi-exa-load-env-"));
+		const configPath = join(base, "env-config.json");
+		const config = { apiKey: "env-api-key" };
+		writeFileSync(configPath, JSON.stringify(config), "utf-8");
+
+		const result = loadConfig(configPath);
+		expect(result?.apiKey).toBe("env-api-key");
+	});
+
+	it("returns default config for empty config path", () => {
+		const result = loadConfig(undefined);
+		// Creates default config and returns it
+		expect(result).not.toBeNull();
+		expect(result).toHaveProperty("enabledTools");
+		expect(result?.enabledTools).toContain("web_search_exa");
+	});
+});
