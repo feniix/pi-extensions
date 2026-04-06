@@ -1,0 +1,44 @@
+{
+	"name": "@feniix/pi-code-reasoning",
+	"version": "1.0.1",
+	"description": "Code Reasoning extension for pi — reflective problem-solving through sequential thinking with branching and revision support",
+	"keywords": [
+		"pi",
+		"pi-package",
+		"pi-extension",
+		"pi-coding-agent",
+		"ai",
+		"code-reasoning",
+		"sequential-thinking",
+		"branching",
+		"revision",
+		"problem-solving"
+	],
+	"type": "module",
+	"files": [
+		"extensions/",
+		"README.md",
+		"LICENSE"
+	],
+	"pi": {
+		"extensions": [
+			"./extensions/index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-ai": "*",
+		"@mariozechner/pi-coding-agent": "*",
+		"@sinclair/typebox": "*"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/feniix/pi-packages.git",
+		"directory": "packages/pi-code-reasoning"
+	},
+	"author": "feniix",
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/feniix/pi-packages/issues"
+	},
+	"homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-code-reasoning#readme"
+}
