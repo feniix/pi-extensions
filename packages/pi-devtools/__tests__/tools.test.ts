@@ -186,6 +186,36 @@ describe("pi-devtools", () => {
 			expect(result.details.prUrl).toContain("github.com");
 		});
 
+		it("creates PR without body", () => {
+			vi.mocked(execGit).mockReturnValue("main");
+			vi.mocked(execGh).mockReturnValue("https://github.com/owner/repo/pull/123");
+
+			const result = createPrTool("Test PR");
+
+			expect(result.content[0].text).toContain("Created PR");
+		});
+
+		it("creates draft PR", () => {
+			vi.mocked(execGit).mockReturnValue("main");
+			vi.mocked(execGh).mockReturnValue("https://github.com/owner/repo/pull/123");
+
+			createPrTool("Draft PR", undefined, undefined, true);
+
+			// Capture the gh command and verify it contains --draft
+			const ghCall = vi.mocked(execGh).mock.calls[0][0] as string;
+			expect(ghCall).toContain("--draft");
+		});
+
+		it("creates PR with assignees", () => {
+			vi.mocked(execGit).mockReturnValue("main");
+			vi.mocked(execGh).mockReturnValue("https://github.com/owner/repo/pull/123");
+
+			createPrTool("Test PR", undefined, undefined, false, ["user1", "user2"]);
+
+			const ghCall = vi.mocked(execGh).mock.calls[0][0] as string;
+			expect(ghCall).toContain("--assignee");
+		});
+
 		it("handles PR creation error", () => {
 			vi.mocked(execGit).mockReturnValue("main");
 			vi.mocked(execGh).mockImplementation(() => {
@@ -222,6 +252,40 @@ describe("pi-devtools", () => {
 			expect(result.details.mergeType).toBe("squash-merged");
 		});
 
+		it("squash merges with commit title", () => {
+			vi.mocked(execGh)
+				.mockReturnValueOnce(JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "OPEN" }))
+				.mockReturnValueOnce("");
+
+			mergePrTool(123, true, true, "Custom Title");
+
+			const mergeCall = vi.mocked(execGh).mock.calls[1][0] as string;
+			expect(mergeCall).toContain("--title");
+		});
+
+		it("squash merges with commit message", () => {
+			vi.mocked(execGh)
+				.mockReturnValueOnce(JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "OPEN" }))
+				.mockReturnValueOnce("");
+
+			mergePrTool(123, true, true, undefined, "Custom Message");
+
+			const mergeCall = vi.mocked(execGh).mock.calls[1][0] as string;
+			expect(mergeCall).toContain("--body");
+		});
+
+		it("merges without deleting branch", () => {
+			vi.mocked(execGh)
+				.mockReturnValueOnce(JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "OPEN" }))
+				.mockReturnValueOnce("");
+
+			mergePrTool(123, false, false);
+
+			// Get the merge command (second call)
+			const mergeCall = vi.mocked(execGh).mock.calls[1][0] as string;
+			expect(mergeCall).not.toContain("--delete-branch");
+		});
+
 		it("handles closed PR", () => {
 			vi.mocked(execGh).mockReturnValue(
 				JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "CLOSED" }),
@@ -231,6 +295,20 @@ describe("pi-devtools", () => {
 
 			expect(result.isError).toBe(true);
 			expect(result.content[0].text).toContain("not open");
+		});
+
+		it("detects PR from current branch", () => {
+			vi.mocked(execGit).mockReturnValue("feature-branch");
+			vi.mocked(execGh)
+				.mockReturnValueOnce(
+					JSON.stringify([{ number: 456, title: "Feature PR" }]),
+				)
+				.mockReturnValueOnce(JSON.stringify({ title: "Feature PR", url: "https://github.com/456", state: "OPEN" }))
+				.mockReturnValueOnce("");
+
+			const result = mergePrTool();
+
+			expect(result.details.prNumber).toBe(456);
 		});
 
 		it("returns error when no PR found", () => {
