@@ -1,0 +1,47 @@
+{
+	"name": "@feniix/pi-exa",
+	"version": "1.0.0",
+	"description": "Exa MCP extension for pi — web search, content fetching, and advanced search via Exa AI",
+	"keywords": [
+		"pi",
+		"pi-package",
+		"pi-extension",
+		"pi-coding-agent",
+		"ai",
+		"exa",
+		"search",
+		"websearch",
+		"mcp"
+	],
+	"type": "module",
+	"files": [
+		"extensions/",
+		"skills/",
+		"README.md",
+		"LICENSE"
+	],
+	"pi": {
+		"extensions": [
+			"./extensions/index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-ai": "*",
+		"@mariozechner/pi-coding-agent": "*",
+		"@sinclair/typebox": "*"
+	},
+	"dependencies": {
+		"exa-js": "^2.8.0"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/feniix/pi-packages.git",
+		"directory": "packages/pi-exa"
+	},
+	"author": "feniix",
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/feniix/pi-packages/issues"
+	},
+	"homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-exa#readme"
+}
