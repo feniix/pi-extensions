@@ -34,8 +34,6 @@ describe("pi-sequential-thinking", () => {
 		const flagNames = mockPi.registerFlag.mock.calls.map(([name]) => name);
 		expect(flagNames).toEqual(
 			expect.arrayContaining([
-				"--seq-think-command",
-				"--seq-think-args",
 				"--seq-think-storage-dir",
 				"--seq-think-config",
 				"--seq-think-max-bytes",
@@ -44,11 +42,12 @@ describe("pi-sequential-thinking", () => {
 		);
 	});
 
-	it("registers session_shutdown handler", () => {
+	it("does not register command/args flags (native implementation)", () => {
 		const mockPi = createMockPi();
 		sequentialThinking(mockPi as unknown as ExtensionAPI);
 
-		const eventNames = mockPi.on.mock.calls.map(([event]) => event);
-		expect(eventNames).toContain("session_shutdown");
+		const flagNames = mockPi.registerFlag.mock.calls.map(([name]) => name);
+		expect(flagNames).not.toContain("--seq-think-command");
+		expect(flagNames).not.toContain("--seq-think-args");
 	});
 });

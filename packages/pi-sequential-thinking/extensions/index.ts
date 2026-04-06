@@ -1,25 +1,20 @@
 /**
- * Sequential Thinking MCP CLI Extension
+ * Sequential Thinking Extension for pi
  *
- * Provides Sequential Thinking MCP tools via stdio: process_thought, generate_summary,
- * clear_history, export_session, and import_session.
- * Structured progressive thinking through defined cognitive stages.
+ * Provides structured progressive thinking through defined cognitive stages.
+ * This is a native TypeScript implementation with no external dependencies.
  *
  * Setup:
  * 1. Install: pi install npm:@feniix/pi-sequential-thinking
- * 2. Requires: uvx (from uv package manager) with mcp-sequential-thinking available
- * 3. Optional config:
+ * 2. Optional config:
  *    - JSON config: ~/.pi/agent/extensions/sequential-thinking.json or .pi/extensions/sequential-thinking.json
  *      (or set SEQ_THINK_CONFIG / --seq-think-config for a custom path)
- *      Keys: command, args, storageDir, maxBytes, maxLines
- *    - SEQ_THINK_COMMAND (default: uvx)
- *    - SEQ_THINK_ARGS (default: --from,git+https://github.com/arben-adm/mcp-sequential-thinking,--with,portalocker,mcp-sequential-thinking)
+ *      Keys: storageDir, maxBytes, maxLines
  *    - MCP_STORAGE_DIR (storage directory for thought sessions)
  *    - SEQ_THINK_MAX_BYTES (default: 51200)
  *    - SEQ_THINK_MAX_LINES (default: 2000)
- * 4. Or pass flags:
- *    --seq-think-command, --seq-think-args, --seq-think-storage-dir,
- *    --seq-think-config, --seq-think-max-bytes, --seq-think-max-lines
+ * 3. Or pass flags:
+ *    --seq-think-storage-dir, --seq-think-config, --seq-think-max-bytes, --seq-think-max-lines
  *
  * Usage:
  *   "Think through this architecture decision step by step"
@@ -34,82 +29,31 @@
  *   - import_session: Import a previously exported thinking session
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { ThoughtAnalyzer } from "./analyzer.js";
+import { ThoughtStorage } from "./storage.js";
+import { generateUuid, parseThoughtStage, type ThoughtData, ThoughtStage } from "./types.js";
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-const DEFAULT_COMMAND = "uvx";
-const DEFAULT_ARGS = [
-	"--from",
-	"git+https://github.com/arben-adm/mcp-sequential-thinking",
-	"--with",
-	"portalocker",
-	"mcp-sequential-thinking",
-];
-const DEFAULT_PROTOCOL_VERSION = "2024-11-05";
 const DEFAULT_CONFIG_FILE: Record<string, unknown> = {
-	command: DEFAULT_COMMAND,
-	args: DEFAULT_ARGS,
 	storageDir: null,
 	maxBytes: DEFAULT_MAX_BYTES,
 	maxLines: DEFAULT_MAX_LINES,
 };
 
-const CLIENT_INFO = {
-	name: "pi-sequential-thinking-extension",
-	version: "1.0.0",
-} as const;
-
 // =============================================================================
 // Types
 // =============================================================================
 
-type JsonRpcId = string;
-
-interface JsonRpcError {
-	code: number;
-	message: string;
-	data?: unknown;
-}
-
-interface JsonRpcResponse {
-	jsonrpc: "2.0";
-	id?: JsonRpcId | number | null;
-	result?: unknown;
-	error?: JsonRpcError;
-}
-
-interface McpToolResult {
-	content?: Array<Record<string, unknown>>;
-	isError?: boolean;
-}
-
-interface McpToolDetails {
-	tool: string;
-	truncated: boolean;
-	truncation?: {
-		truncatedBy: "lines" | "bytes" | null;
-		totalLines: number;
-		totalBytes: number;
-		outputLines: number;
-		outputBytes: number;
-		maxLines: number;
-		maxBytes: number;
-	};
-	tempFile?: string;
-}
-
 interface SeqThinkConfig {
-	command?: string;
-	args?: string[];
 	storageDir?: string;
 	maxBytes?: number;
 	maxLines?: number;
@@ -121,10 +65,6 @@ interface SeqThinkConfig {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isJsonRpcResponse(value: unknown): value is JsonRpcResponse {
-	return isRecord(value) && value.jsonrpc === "2.0";
 }
 
 function toJsonString(value: unknown): string {
@@ -140,21 +80,10 @@ function toJsonString(value: unknown): string {
 
 function formatToolOutput(
 	toolName: string,
-	result: McpToolResult,
-	limits?: { maxBytes?: number; maxLines?: number },
+	result: unknown,
+	limits: { maxBytes?: number; maxLines?: number },
 ): { text: string; details: McpToolDetails } {
-	const contentBlocks = Array.isArray(result.content) ? result.content : [];
-	const renderedBlocks =
-		contentBlocks.length > 0
-			? contentBlocks.map((block) => {
-					if (block.type === "text" && typeof block.text === "string") {
-						return block.text;
-					}
-					return toJsonString(block);
-				})
-			: [toJsonString(result)];
-
-	const rawText = renderedBlocks.join("\n");
+	const rawText = toJsonString(result);
 	const truncation = truncateHead(rawText, {
 		maxLines: limits?.maxLines ?? DEFAULT_MAX_LINES,
 		maxBytes: limits?.maxBytes ?? DEFAULT_MAX_BYTES,
@@ -226,7 +155,7 @@ function normalizeNumber(value: unknown): number | undefined {
 }
 
 function splitParams(params: Record<string, unknown>): {
-	mcpArgs: Record<string, unknown>;
+	toolArgs: Record<string, unknown>;
 	requestedLimits: { maxBytes?: number; maxLines?: number };
 } {
 	const { piMaxBytes, piMaxLines, ...rest } = params as Record<string, unknown> & {
@@ -234,7 +163,7 @@ function splitParams(params: Record<string, unknown>): {
 		piMaxLines?: unknown;
 	};
 	return {
-		mcpArgs: rest,
+		toolArgs: rest,
 		requestedLimits: {
 			maxBytes: normalizeNumber(piMaxBytes),
 			maxLines: normalizeNumber(piMaxLines),
@@ -273,8 +202,6 @@ function parseConfig(raw: unknown, pathHint: string): SeqThinkConfig {
 		throw new Error(`Invalid Sequential Thinking config at ${pathHint}: expected an object.`);
 	}
 	return {
-		command: normalizeString(raw.command),
-		args: Array.isArray(raw.args) ? raw.args.filter((a): a is string => typeof a === "string") : undefined,
 		storageDir: normalizeString(raw.storageDir),
 		maxBytes: normalizeNumber(raw.maxBytes),
 		maxLines: normalizeNumber(raw.maxLines),
@@ -320,214 +247,19 @@ function ensureDefaultConfigFile(projectConfigPath: string, globalConfigPath: st
 	}
 }
 
-// =============================================================================
-// Stdio MCP Client
-// =============================================================================
-
-class StdioMcpClient {
-	private requestCounter = 0;
-	private childProcess: ChildProcess | null = null;
-	private initialized = false;
-	private initializing: Promise<void> | null = null;
-	private pendingRequests = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
-	private buffer = "";
-
-	constructor(
-		private readonly getCommand: () => string,
-		private readonly getArgs: () => string[],
-		private readonly getEnv: () => Record<string, string | undefined>,
-	) {}
-
-	async callTool(toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpToolResult> {
-		await this.ensureInitialized(signal);
-		const result = await this.sendRequest("tools/call", { name: toolName, arguments: args }, signal);
-		if (isRecord(result)) {
-			return result as McpToolResult;
-		}
-		return { content: [{ type: "text", text: toJsonString(result) }] };
-	}
-
-	shutdown(): void {
-		if (this.childProcess) {
-			this.childProcess.kill();
-			this.childProcess = null;
-		}
-		this.initialized = false;
-		this.initializing = null;
-		for (const [, pending] of this.pendingRequests) {
-			pending.reject(new Error("Client shutting down"));
-		}
-		this.pendingRequests.clear();
-		this.buffer = "";
-	}
-
-	private async ensureInitialized(signal?: AbortSignal): Promise<void> {
-		if (this.initialized && this.childProcess && !this.childProcess.killed) {
-			return;
-		}
-
-		// Process died or was never started — reset state
-		if (this.childProcess?.killed || (this.childProcess && this.childProcess.exitCode !== null)) {
-			this.initialized = false;
-			this.initializing = null;
-			this.childProcess = null;
-		}
-
-		if (!this.initializing) {
-			this.initializing = (async () => {
-				this.spawnProcess();
-				await this.initialize(signal);
-				this.initialized = true;
-			})()
-				.catch((error) => {
-					this.initialized = false;
-					this.shutdown();
-					throw error;
-				})
-				.finally(() => {
-					this.initializing = null;
-				});
-		}
-
-		await this.initializing;
-	}
-
-	private spawnProcess(): void {
-		const command = this.getCommand();
-		const args = this.getArgs();
-		const env = { ...process.env, ...this.getEnv() };
-
-		this.childProcess = spawn(command, args, {
-			stdio: ["pipe", "pipe", "ignore"],
-			env,
-		});
-
-		this.childProcess.stdout?.setEncoding("utf-8");
-		this.childProcess.stdout?.on("data", (chunk: string) => {
-			this.buffer += chunk;
-			this.processBuffer();
-		});
-
-		this.childProcess.on("error", (err) => {
-			for (const [, pending] of this.pendingRequests) {
-				pending.reject(new Error(`MCP process error: ${err.message}`));
-			}
-			this.pendingRequests.clear();
-			this.initialized = false;
-		});
-
-		this.childProcess.on("exit", (code) => {
-			for (const [, pending] of this.pendingRequests) {
-				pending.reject(new Error(`MCP process exited with code ${code}`));
-			}
-			this.pendingRequests.clear();
-			this.initialized = false;
-		});
-	}
-
-	private processBuffer(): void {
-		let newlineIndex = this.buffer.indexOf("\n");
-		while (newlineIndex >= 0) {
-			const line = this.buffer.slice(0, newlineIndex).trim();
-			this.buffer = this.buffer.slice(newlineIndex + 1);
-			newlineIndex = this.buffer.indexOf("\n");
-
-			if (!line) {
-				continue;
-			}
-
-			try {
-				const parsed: unknown = JSON.parse(line);
-				if (isJsonRpcResponse(parsed) && parsed.id != null) {
-					const id = String(parsed.id);
-					const pending = this.pendingRequests.get(id);
-					if (pending) {
-						this.pendingRequests.delete(id);
-						if (parsed.error) {
-							pending.reject(new Error(`MCP error ${parsed.error.code}: ${parsed.error.message}`));
-						} else {
-							pending.resolve(parsed.result);
-						}
-					}
-				}
-			} catch {
-				// Ignore non-JSON lines (e.g. stderr leaking to stdout)
-			}
-		}
-	}
-
-	private async initialize(signal?: AbortSignal): Promise<void> {
-		await this.sendRequest(
-			"initialize",
-			{
-				protocolVersion: DEFAULT_PROTOCOL_VERSION,
-				capabilities: {},
-				clientInfo: CLIENT_INFO,
-			},
-			signal,
-		);
-		this.sendNotification("notifications/initialized", {});
-	}
-
-	private sendRequest(method: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
-		const id = this.nextId();
-
-		return new Promise<unknown>((resolve, reject) => {
-			const timeoutId = setTimeout(() => {
-				this.pendingRequests.delete(id);
-				reject(new Error(`MCP request timed out: ${method}`));
-			}, 60000);
-
-			const cleanup = () => {
-				clearTimeout(timeoutId);
-			};
-
-			if (signal?.aborted) {
-				cleanup();
-				reject(new Error("Request aborted"));
-				return;
-			}
-
-			signal?.addEventListener(
-				"abort",
-				() => {
-					cleanup();
-					this.pendingRequests.delete(id);
-					reject(new Error("Request aborted"));
-				},
-				{ once: true },
-			);
-
-			this.pendingRequests.set(id, {
-				resolve: (value) => {
-					cleanup();
-					resolve(value);
-				},
-				reject: (error) => {
-					cleanup();
-					reject(error);
-				},
-			});
-
-			this.writeMessage({ jsonrpc: "2.0", id, method, params });
-		});
-	}
-
-	private sendNotification(method: string, params: Record<string, unknown>): void {
-		this.writeMessage({ jsonrpc: "2.0", method, params });
-	}
-
-	private writeMessage(message: Record<string, unknown>): void {
-		if (!this.childProcess?.stdin?.writable) {
-			throw new Error("MCP process stdin is not writable");
-		}
-		this.childProcess.stdin.write(`${JSON.stringify(message)}\n`);
-	}
-
-	private nextId(): JsonRpcId {
-		this.requestCounter += 1;
-		return `seq-think-${this.requestCounter}`;
-	}
+interface McpToolDetails {
+	tool: string;
+	truncated: boolean;
+	truncation?: {
+		truncatedBy: "lines" | "bytes" | null;
+		totalLines: number;
+		totalBytes: number;
+		outputLines: number;
+		outputBytes: number;
+		maxLines: number;
+		maxBytes: number;
+	};
+	tempFile?: string;
 }
 
 // =============================================================================
@@ -537,7 +269,10 @@ class StdioMcpClient {
 const processThoughtParams = Type.Object(
 	{
 		thought: Type.String({ description: "The content of your thought." }),
-		thought_number: Type.Integer({ minimum: 1, description: "Position in your sequence (e.g., 1 for first thought)." }),
+		thought_number: Type.Integer({
+			minimum: 1,
+			description: "Position in your sequence (e.g., 1 for first thought).",
+		}),
 		total_thoughts: Type.Integer({ minimum: 1, description: "Expected total thoughts in the sequence." }),
 		next_thought_needed: Type.Boolean({ description: "Whether more thoughts are needed after this one." }),
 		stage: Type.Union(
@@ -555,7 +290,9 @@ const processThoughtParams = Type.Object(
 			Type.Array(Type.String(), { description: "Principles or axioms applied in your thought." }),
 		),
 		assumptions_challenged: Type.Optional(
-			Type.Array(Type.String(), { description: "Assumptions your thought questions or challenges." }),
+			Type.Array(Type.String(), {
+				description: "Assumptions your thought questions or challenges.",
+			}),
 		),
 		piMaxBytes: Type.Optional(Type.Integer({ description: "Client-side max bytes override (clamped by config)." })),
 		piMaxLines: Type.Optional(Type.Integer({ description: "Client-side max lines override (clamped by config)." })),
@@ -587,6 +324,18 @@ const importSessionParams = Type.Object(
 	{ additionalProperties: true },
 );
 
+const sequentialThinkParams = Type.Object(
+	{
+		topic: Type.String({ description: "The topic or question to think through." }),
+		num_thoughts: Type.Optional(
+			Type.Integer({ minimum: 3, maximum: 10, description: "Number of thoughts to generate (default: 5)." }),
+		),
+		piMaxBytes: Type.Optional(Type.Integer({ description: "Client-side max bytes override (clamped by config)." })),
+		piMaxLines: Type.Optional(Type.Integer({ description: "Client-side max lines override (clamped by config)." })),
+	},
+	{ additionalProperties: true },
+);
+
 // =============================================================================
 // Extension Entry Point
 // =============================================================================
@@ -595,14 +344,6 @@ export { DEFAULT_CONFIG_FILE, ensureDefaultConfigFile, normalizeNumber, resolveE
 
 export default function sequentialThinking(pi: ExtensionAPI) {
 	// Register CLI flags
-	pi.registerFlag("--seq-think-command", {
-		description: "Command to launch the Sequential Thinking MCP server (default: uvx).",
-		type: "string",
-	});
-	pi.registerFlag("--seq-think-args", {
-		description: "Comma-separated arguments for the MCP server command.",
-		type: "string",
-	});
 	pi.registerFlag("--seq-think-storage-dir", {
 		description: "Storage directory for thought sessions.",
 		type: "string",
@@ -619,6 +360,10 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 		description: "Max lines to keep from tool output (default: 2000).",
 		type: "string",
 	});
+
+	// Create singleton storage and analyzer
+	const storage = new ThoughtStorage();
+	const analyzer = new ThoughtAnalyzer();
 
 	const getMaxLimits = (): { maxBytes: number; maxLines: number } => {
 		const maxBytesFlag = pi.getFlag("--seq-think-max-bytes");
@@ -641,86 +386,122 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 		};
 	};
 
-	const client = new StdioMcpClient(
-		() => {
-			const cmdFlag = pi.getFlag("--seq-think-command");
-			if (typeof cmdFlag === "string" && cmdFlag.trim().length > 0) {
-				return cmdFlag.trim();
-			}
-			const configFlag = pi.getFlag("--seq-think-config");
-			const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-			return process.env.SEQ_THINK_COMMAND ?? config?.command ?? DEFAULT_COMMAND;
-		},
-		() => {
-			const argsFlag = pi.getFlag("--seq-think-args");
-			if (typeof argsFlag === "string" && argsFlag.trim().length > 0) {
-				return argsFlag.split(",").map((a) => a.trim());
-			}
-			const envArgs = process.env.SEQ_THINK_ARGS;
-			if (envArgs) {
-				return envArgs.split(",").map((a) => a.trim());
-			}
-			const configFlag = pi.getFlag("--seq-think-config");
-			const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-			return config?.args ?? DEFAULT_ARGS;
-		},
-		() => {
-			const storageDirFlag = pi.getFlag("--seq-think-storage-dir");
-			const configFlag = pi.getFlag("--seq-think-config");
-			const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-			const storageDir =
-				typeof storageDirFlag === "string"
-					? storageDirFlag
-					: (process.env.MCP_STORAGE_DIR ?? config?.storageDir ?? undefined);
-
-			const env: Record<string, string | undefined> = {};
-			if (storageDir) {
-				env.MCP_STORAGE_DIR = storageDir;
-			}
-			return env;
-		},
-	);
-
-	// Shut down the child process when the session ends
-	pi.on("session_shutdown", () => {
-		client.shutdown();
-	});
-
-	// Helper to execute an MCP tool call
-	const executeMcpTool = async (
+	// Helper to execute a tool
+	const executeTool = (
 		toolName: string,
 		pendingMessage: string,
-		params: Record<string, unknown>,
-		signal: AbortSignal | undefined,
+		executeFn: () => unknown,
 		// biome-ignore lint/suspicious/noExplicitAny: pi's AgentToolUpdateCallback type varies by tool
 		onUpdate: ((partialResult: any) => void) | undefined,
+		params: Record<string, unknown>,
 	) => {
-		if (signal?.aborted) {
-			return { content: [{ type: "text" as const, text: "Cancelled." }], details: { cancelled: true } };
-		}
 		onUpdate?.({
 			content: [{ type: "text" as const, text: pendingMessage }],
 			details: { status: "pending" },
 		});
 
 		try {
-			const { mcpArgs, requestedLimits } = splitParams(params);
+			const { requestedLimits } = splitParams(params);
 			const maxLimits = getMaxLimits();
 			const effectiveLimits = resolveEffectiveLimits(requestedLimits, maxLimits);
-			const result = await client.callTool(toolName, mcpArgs, signal);
+			const result = executeFn();
 			const { text, details } = formatToolOutput(toolName, result, effectiveLimits);
-			return { content: [{ type: "text" as const, text }], details, isError: result.isError === true };
+			return { content: [{ type: "text" as const, text }], details, isError: false };
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			return {
-				content: [{ type: "text" as const, text: `Sequential Thinking MCP error: ${message}` }],
+				content: [{ type: "text" as const, text: `Sequential Thinking error: ${message}` }],
 				isError: true,
 				details: { tool: toolName, error: message },
 			};
 		}
 	};
 
-	// Register tools
+	// =============================================================================
+	// Tool Implementations
+	// =============================================================================
+
+	function processThought(args: Record<string, unknown>): { thoughtAnalysis: unknown } {
+		const thought = args.thought as string;
+		const thoughtNumber = args.thought_number as number;
+		const totalThoughts = args.total_thoughts as number;
+		const nextThoughtNeeded = args.next_thought_needed as boolean;
+		const stageStr = args.stage as string;
+		const tags = (args.tags as string[]) ?? [];
+		const axiomsUsed = (args.axioms_used as string[]) ?? [];
+		const assumptionsChallenged = (args.assumptions_challenged as string[]) ?? [];
+
+		// Parse stage
+		const stage: ThoughtStage = parseThoughtStage(stageStr);
+
+		// Create thought data
+		const thoughtData: ThoughtData = {
+			thought,
+			thought_number: thoughtNumber,
+			total_thoughts: totalThoughts,
+			next_thought_needed: nextThoughtNeeded,
+			stage,
+			tags,
+			axioms_used: axiomsUsed,
+			assumptions_challenged: assumptionsChallenged,
+			timestamp: new Date().toISOString(),
+			id: generateUuid(),
+		};
+
+		// Validate
+		if (!thought.trim()) {
+			throw new Error("Thought content cannot be empty");
+		}
+		if (thoughtNumber < 1) {
+			throw new Error("Thought number must be a positive integer");
+		}
+		if (totalThoughts < thoughtNumber) {
+			throw new Error("Total thoughts must be greater or equal to current thought number");
+		}
+
+		// Store and analyze
+		storage.addThought(thoughtData);
+		const allThoughts = storage.getAllThoughts();
+		const analysis = analyzer.analyzeThought(thoughtData, allThoughts);
+
+		return analysis;
+	}
+
+	function generateSummary(): { summary: unknown } {
+		const thoughts = storage.getAllThoughts();
+		return analyzer.generateSummary(thoughts);
+	}
+
+	function clearHistory(): { status: string; message: string } {
+		storage.clearHistory();
+		return { status: "success", message: "Thought history cleared" };
+	}
+
+	function exportSession(args: Record<string, unknown>): { status: string; message: string } {
+		const filePath = args.file_path as string;
+		if (!filePath) {
+			throw new Error("file_path is required");
+		}
+		storage.exportSession(filePath);
+		return { status: "success", message: `Session exported to ${filePath}` };
+	}
+
+	function importSession(args: Record<string, unknown>): { status: string; message: string } {
+		const filePath = args.file_path as string;
+		if (!filePath) {
+			throw new Error("file_path is required");
+		}
+		if (!existsSync(filePath)) {
+			throw new Error(`File not found: ${filePath}`);
+		}
+		storage.importSession(filePath);
+		return { status: "success", message: `Session imported from ${filePath}` };
+	}
+
+	// =============================================================================
+	// Register Tools
+	// =============================================================================
+
 	pi.registerTool({
 		name: "process_thought",
 		label: "Process Thought",
@@ -729,13 +510,14 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 			"into structured steps through stages: Problem Definition, Research, Analysis, Synthesis, Conclusion. " +
 			"Each thought is tracked with its position in the sequence, stage, tags, and related analysis.",
 		parameters: processThoughtParams,
-		async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-			return executeMcpTool(
+		async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
+			const { toolArgs } = splitParams(params as Record<string, unknown>);
+			return executeTool(
 				"process_thought",
 				"Processing thought...",
-				params as Record<string, unknown>,
-				signal,
+				() => processThought(toolArgs),
 				onUpdate,
+				params as Record<string, unknown>,
 			);
 		},
 	});
@@ -747,13 +529,13 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 			"Generate a summary of the entire sequential thinking process. Returns stage counts, " +
 			"timeline, top tags, and completion status. Use after processing multiple thoughts.",
 		parameters: generateSummaryParams,
-		async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-			return executeMcpTool(
+		async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
+			return executeTool(
 				"generate_summary",
 				"Generating summary...",
-				params as Record<string, unknown>,
-				signal,
+				generateSummary,
 				onUpdate,
+				params as Record<string, unknown>,
 			);
 		},
 	});
@@ -763,13 +545,13 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 		label: "Clear Thought History",
 		description: "Reset the sequential thinking process by clearing all recorded thoughts.",
 		parameters: clearHistoryParams,
-		async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-			return executeMcpTool(
+		async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
+			return executeTool(
 				"clear_history",
 				"Clearing history...",
-				params as Record<string, unknown>,
-				signal,
+				clearHistory,
 				onUpdate,
+				params as Record<string, unknown>,
 			);
 		},
 	});
@@ -781,13 +563,14 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 			"Export the current thinking session to a JSON file for sharing or backup. " +
 			"Parent directories are created automatically.",
 		parameters: exportSessionParams,
-		async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-			return executeMcpTool(
+		async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
+			const { toolArgs } = splitParams(params as Record<string, unknown>);
+			return executeTool(
 				"export_session",
 				"Exporting session...",
-				params as Record<string, unknown>,
-				signal,
+				() => exportSession(toolArgs),
 				onUpdate,
+				params as Record<string, unknown>,
 			);
 		},
 	});
@@ -797,14 +580,94 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 		label: "Import Thinking Session",
 		description: "Import a previously exported thinking session from a JSON file.",
 		parameters: importSessionParams,
-		async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-			return executeMcpTool(
+		async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
+			const { toolArgs } = splitParams(params as Record<string, unknown>);
+			return executeTool(
 				"import_session",
 				"Importing session...",
-				params as Record<string, unknown>,
-				signal,
+				() => importSession(toolArgs),
 				onUpdate,
+				params as Record<string, unknown>,
 			);
+		},
+	});
+
+	pi.registerTool({
+		name: "sequential_think",
+		label: "Sequential Thinking",
+		description:
+			"Think through a topic systematically using structured cognitive stages. " +
+			"Call this when user asks to 'think through', 'analyze', or 'decide' something. " +
+			"Processes through Problem Definition → Research → Analysis → Synthesis → Conclusion. " +
+			"Returns a structured summary with recommendations.",
+		parameters: sequentialThinkParams,
+		async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
+			const { toolArgs, requestedLimits } = splitParams(params as Record<string, unknown>);
+			const maxLimits = getMaxLimits();
+			const effectiveLimits = resolveEffectiveLimits(requestedLimits, maxLimits);
+
+			onUpdate?.({
+				content: [{ type: "text" as const, text: "Starting structured thinking process..." }],
+				details: { status: "pending" },
+			});
+
+			try {
+				const topic = toolArgs.topic as string;
+				const numThoughts = (toolArgs.num_thoughts as number) || 5;
+
+				// Generate thoughts for each stage
+				const stages: ThoughtStage[] = [
+					ThoughtStage.PROBLEM_DEFINITION,
+					ThoughtStage.RESEARCH,
+					ThoughtStage.ANALYSIS,
+					ThoughtStage.SYNTHESIS,
+					ThoughtStage.CONCLUSION,
+				];
+
+				const stagePrompts: Record<ThoughtStage, string> = {
+					[ThoughtStage.PROBLEM_DEFINITION]: `Define the problem: What exactly needs to be decided or solved regarding "${topic}"? What are the constraints and success criteria?`,
+					[ThoughtStage.RESEARCH]: `Research options for "${topic}": What are the available choices? What are their tradeoffs? What does the evidence say?`,
+					[ThoughtStage.ANALYSIS]: `Analyze "${topic}": Examine each option in detail. What are the pros and cons? What are the risks?`,
+					[ThoughtStage.SYNTHESIS]: `Synthesize insights about "${topic}": How do the pieces fit together? What is the overall assessment?`,
+					[ThoughtStage.CONCLUSION]: `Draw a conclusion about "${topic}": What is the recommendation? What is the final verdict?`,
+				};
+
+				// Process thoughts for each stage
+				for (let i = 0; i < Math.min(numThoughts, stages.length); i++) {
+					const stage = stages[i];
+					const thoughtData: ThoughtData = {
+						thought: stagePrompts[stage],
+						thought_number: i + 1,
+						total_thoughts: Math.min(numThoughts, stages.length),
+						next_thought_needed: i < Math.min(numThoughts, stages.length) - 1,
+						stage,
+						tags: [topic.toLowerCase().split(/\s+/)[0]], // First word of topic as tag
+						axioms_used: [],
+						assumptions_challenged: [],
+						timestamp: new Date().toISOString(),
+						id: generateUuid(),
+					};
+
+					storage.addThought(thoughtData);
+				}
+
+				// Generate summary
+				const summary = analyzer.generateSummary(storage.getAllThoughts());
+				const { text, details } = formatToolOutput("sequential_think", summary, effectiveLimits);
+
+				return {
+					content: [{ type: "text" as const, text }],
+					details,
+					isError: false,
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return {
+					content: [{ type: "text" as const, text: `Sequential Thinking error: ${message}` }],
+					isError: true,
+					details: { tool: "sequential_think", error: message },
+				};
+			}
 		},
 	});
 }

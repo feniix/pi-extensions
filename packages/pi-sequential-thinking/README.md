@@ -1,6 +1,6 @@
 # @feniix/pi-sequential-thinking
 
-[Sequential Thinking](https://github.com/arben-adm/mcp-sequential-thinking) MCP extension for [pi](https://pi.dev/) — structured progressive thinking through defined cognitive stages via MCP stdio.
+[Sequential Thinking](https://github.com/arben-adm/mcp-sequential-thinking) extension for [pi](https://pi.dev/) — structured progressive thinking through defined cognitive stages.
 
 ## Features
 
@@ -11,7 +11,7 @@
 - **Import Session** (`import_session`): Load previously exported sessions
 - **Configurable Output Limits**: Client-side byte and line truncation
 - **Flexible Configuration**: JSON config files, environment variables, and CLI flags
-- **Automatic Lifecycle**: Child process spawned on first use, cleaned up on session end
+- **Native TypeScript**: No external dependencies or child processes
 
 ## Install
 
@@ -25,23 +25,18 @@ Ephemeral (one-off) use:
 pi -e npm:@feniix/pi-sequential-thinking
 ```
 
-## Prerequisites
-
-- [uv](https://github.com/astral-sh/uv) package manager (provides `uvx` command)
-- Python 3.10+ (used by the MCP server)
-
 ## Configuration
 
-### Option 1: Zero Config (default)
+### Option 1: Default Configuration
 
-Works out of the box using `uvx` to run the MCP server directly from GitHub. No local install needed.
+Works out of the box. Sessions are stored in `~/.mcp_sequential_thinking/`.
 
 ### Option 2: Environment Variables
 
 ```bash
-export SEQ_THINK_COMMAND="uvx"
-export SEQ_THINK_ARGS="--from,git+https://github.com/arben-adm/mcp-sequential-thinking,--with,portalocker,mcp-sequential-thinking"
 export MCP_STORAGE_DIR="~/.my-thinking-sessions"
+export SEQ_THINK_MAX_BYTES=102400
+export SEQ_THINK_MAX_LINES=5000
 ```
 
 ### Option 3: JSON Config File
@@ -50,14 +45,6 @@ Create `~/.pi/agent/extensions/sequential-thinking.json` (auto-created on first 
 
 ```json
 {
-  "command": "uvx",
-  "args": [
-    "--from",
-    "git+https://github.com/arben-adm/mcp-sequential-thinking",
-    "--with",
-    "portalocker",
-    "mcp-sequential-thinking"
-  ],
   "storageDir": null,
   "maxBytes": 51200,
   "maxLines": 2000
@@ -67,7 +54,7 @@ Create `~/.pi/agent/extensions/sequential-thinking.json` (auto-created on first 
 ### Option 4: CLI Flags
 
 ```bash
-pi --seq-think-command=uvx --seq-think-storage-dir=/tmp/thoughts
+pi --seq-think-storage-dir=/tmp/thoughts --seq-think-max-bytes=102400
 ```
 
 ### Config Resolution Order
@@ -122,8 +109,6 @@ Import a previously exported thinking session from a JSON file.
 
 | Flag | Env Variable | Default | Description |
 |------|-------------|---------|-------------|
-| `--seq-think-command` | `SEQ_THINK_COMMAND` | `uvx` | Command to launch the MCP server |
-| `--seq-think-args` | `SEQ_THINK_ARGS` | *(see config)* | Comma-separated args for the command |
 | `--seq-think-storage-dir` | `MCP_STORAGE_DIR` | — | Storage directory for sessions |
 | `--seq-think-config` | `SEQ_THINK_CONFIG` | — | Custom config file path |
 | `--seq-think-max-bytes` | `SEQ_THINK_MAX_BYTES` | `51200` | Max output bytes |
@@ -142,8 +127,6 @@ The Sequential Thinking framework organizes thoughts through five cognitive stag
 ## Requirements
 
 - pi v0.51.0 or later
-- uv package manager (`uvx` command available in PATH)
-- Python 3.10+
 
 ## Uninstall
 

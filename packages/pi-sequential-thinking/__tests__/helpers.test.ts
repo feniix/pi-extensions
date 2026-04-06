@@ -12,7 +12,7 @@ import {
 
 describe("pi-sequential-thinking helpers", () => {
 	it("splits params and clamps limits", () => {
-		const { mcpArgs, requestedLimits } = splitParams({
+		const { toolArgs, requestedLimits } = splitParams({
 			piMaxBytes: "100",
 			piMaxLines: 5,
 			thought: "hello",
@@ -21,7 +21,7 @@ describe("pi-sequential-thinking helpers", () => {
 			next_thought_needed: true,
 			stage: "Analysis",
 		});
-		expect(mcpArgs).toEqual({
+		expect(toolArgs).toEqual({
 			thought: "hello",
 			thought_number: 1,
 			total_thoughts: 3,
