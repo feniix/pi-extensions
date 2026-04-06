@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-notion",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Notion API extension for pi — read, search, and manage Notion pages, databases, and content",
   "keywords": [
     "pi",
@@ -21,7 +21,8 @@
   ],
   "pi": {
     "extensions": [
-      "./extensions/index.ts"
+      "./extensions/index.ts",
+      "./extensions/mcp-client.ts"
     ],
     "skills": [
       "./skills"
@@ -36,6 +37,7 @@
     "@sinclair/typebox": "*"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.1",
     "axios": "^1.8.4"
   },
   "repository": {
@@ -48,5 +50,9 @@
   "bugs": {
     "url": "https://github.com/feniix/pi-packages/issues"
   },
-  "homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-notion#readme"
+  "homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-notion#readme",
+  "devDependencies": {
+    "@types/node": "^22.19.17",
+    "portfinder": "^1.0.38"
+  }
 }
