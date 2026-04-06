@@ -26,7 +26,8 @@
 	"pi": {
 		"extensions": [
 			"./packages/pi-ref-tools/extensions/index.ts",
-			"./packages/pi-sequential-thinking/extensions/index.ts"
+			"./packages/pi-sequential-thinking/extensions/index.ts",
+			"./packages/pi-specdocs/extensions/index.ts"
 		]
 	},
 	"devDependencies": {
