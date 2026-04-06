@@ -29,32 +29,32 @@ describe("pi-exa", () => {
 	describe("skills", () => {
 		it("should have code-search skill", () => {
 			const skill = readFileSync(join(__dirname, "../skills/code-search/SKILL.md"), "utf-8");
-			expect(skill).toContain("code-search-exa");
+			expect(skill).toContain("web_search_exa");
 		});
 
 		it("should have company-research skill", () => {
 			const skill = readFileSync(join(__dirname, "../skills/company-research/SKILL.md"), "utf-8");
-			expect(skill).toContain("company-research-exa");
+			expect(skill).toContain("web_search_exa");
 		});
 
 		it("should have people-research skill", () => {
 			const skill = readFileSync(join(__dirname, "../skills/people-research/SKILL.md"), "utf-8");
-			expect(skill).toContain("people-research-exa");
+			expect(skill).toContain("web_search_exa");
 		});
 
 		it("should have research-paper-search skill", () => {
 			const skill = readFileSync(join(__dirname, "../skills/research-paper-search/SKILL.md"), "utf-8");
-			expect(skill).toContain("research-paper-search-exa");
+			expect(skill).toContain("web_search_exa");
 		});
 
 		it("should have financial-report-search skill", () => {
 			const skill = readFileSync(join(__dirname, "../skills/financial-report-search/SKILL.md"), "utf-8");
-			expect(skill).toContain("financial-report-search-exa");
+			expect(skill).toContain("web_search_exa");
 		});
 
 		it("should have personal-site-search skill", () => {
 			const skill = readFileSync(join(__dirname, "../skills/personal-site-search/SKILL.md"), "utf-8");
-			expect(skill).toContain("personal-site-search-exa");
+			expect(skill).toContain("web_search_exa");
 		});
 	});
 });

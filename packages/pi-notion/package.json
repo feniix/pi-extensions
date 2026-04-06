@@ -1,23 +1,21 @@
 {
-	"name": "@feniix/pi-devtools",
-	"version": "1.0.2",
-	"description": "Devtools extension for pi — branch and PR workflow, release automation, merge commands",
+	"name": "@feniix/pi-notion",
+	"version": "1.0.1",
+	"description": "Notion API extension for pi — read, search, and manage Notion pages, databases, and content",
 	"keywords": [
 		"pi",
 		"pi-package",
 		"pi-extension",
 		"pi-coding-agent",
 		"ai",
-		"devtools",
-		"git",
-		"github",
-		"release",
-		"pr"
+		"notion",
+		"productivity"
 	],
 	"type": "module",
 	"files": [
 		"extensions/",
 		"skills/",
+		"prompts/",
 		"README.md",
 		"LICENSE"
 	],
@@ -27,6 +25,9 @@
 		],
 		"skills": [
 			"./skills"
+		],
+		"prompts": [
+			"./prompts"
 		]
 	},
 	"peerDependencies": {
@@ -34,15 +35,18 @@
 		"@mariozechner/pi-coding-agent": "*",
 		"@sinclair/typebox": "*"
 	},
+	"dependencies": {
+		"axios": "^1.8.4"
+	},
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/feniix/pi-packages.git",
-		"directory": "packages/pi-devtools"
+		"directory": "packages/pi-notion"
 	},
 	"author": "feniix",
 	"license": "MIT",
 	"bugs": {
 		"url": "https://github.com/feniix/pi-packages/issues"
 	},
-	"homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-devtools#readme"
+	"homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-notion#readme"
 }
