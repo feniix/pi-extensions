@@ -38,6 +38,18 @@ describe("pi-ref-tools helpers", () => {
 		expect(effective).toEqual({ maxBytes: 51200, maxLines: 2000 });
 	});
 
+	it("resolves effective limits with only bytes requested", () => {
+		const effective = resolveEffectiveLimits({ maxBytes: 100 }, { maxBytes: 51200, maxLines: 2000 });
+		expect(effective.maxBytes).toBe(100);
+		expect(effective.maxLines).toBe(2000);
+	});
+
+	it("resolves effective limits with only lines requested", () => {
+		const effective = resolveEffectiveLimits({ maxLines: 500 }, { maxBytes: 51200, maxLines: 2000 });
+		expect(effective.maxBytes).toBe(51200);
+		expect(effective.maxLines).toBe(500);
+	});
+
 	it("parses timeout values", () => {
 		expect(parseTimeoutMs("250", 10)).toBe(250);
 		expect(parseTimeoutMs("0", 10)).toBe(10);
@@ -242,6 +254,56 @@ describe("pi-ref-tools formatToolOutput", () => {
 		);
 		expect(result.text).toContain("Block 1");
 		expect(result.text).toContain("Block 2");
+	});
+
+	it("handles non-text content blocks", () => {
+		const result = formatToolOutput(
+			"test_tool",
+			"https://api.example.com",
+			{
+				content: [
+					{ type: "image", url: "https://example.com/img.png" },
+					{ type: "text", text: "Description" },
+				],
+			},
+		);
+		expect(result.text).toContain("Description");
+	});
+
+	it("truncates when exceeding maxLines", () => {
+		const lines = Array.from({ length: 100 }, (_, i) => `Line ${i + 1}`).join("\n");
+		const result = formatToolOutput(
+			"test_tool",
+			"https://api.example.com",
+			{ content: [{ type: "text", text: lines }] },
+			{ maxBytes: 100000, maxLines: 10 },
+		);
+		expect(result.details.truncated).toBe(true);
+		expect(result.details.truncation?.truncatedBy).toBe("lines");
+	});
+
+	it("truncates when exceeding maxBytes", () => {
+		const longText = "a".repeat(10000);
+		const result = formatToolOutput(
+			"test_tool",
+			"https://api.example.com",
+			{ content: [{ type: "text", text: longText }] },
+			{ maxBytes: 1000, maxLines: 5000 },
+		);
+		expect(result.details.truncated).toBe(true);
+		expect(result.details.truncation?.truncatedBy).toBe("bytes");
+	});
+
+	it("includes temp file path when truncated", () => {
+		const longText = "x".repeat(10000);
+		const result = formatToolOutput(
+			"test_tool",
+			"https://api.example.com",
+			{ content: [{ type: "text", text: longText }] },
+			{ maxBytes: 100, maxLines: 10 },
+		);
+		expect(result.details.tempFile).toBeDefined();
+		expect(result.text).toContain("Full output saved to:");
 	});
 });
 

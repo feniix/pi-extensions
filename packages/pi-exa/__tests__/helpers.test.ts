@@ -97,6 +97,34 @@ describe("pi-exa formatSearchResults", () => {
 		const result = formatSearchResults([]);
 		expect(result).toContain("No search results found");
 	});
+
+	it("handles results with author", () => {
+		const results = [
+			{
+				url: "https://example.com",
+				author: "John Doe",
+			},
+		];
+		const result = formatSearchResults(results);
+		expect(result).toContain("John Doe");
+	});
+
+	it("shows N/A for missing title", () => {
+		const results = [{ url: "https://example.com" }];
+		const result = formatSearchResults(results);
+		expect(result).toContain("N/A");
+	});
+
+	it("uses text when no highlights", () => {
+		const results = [
+			{
+				url: "https://example.com",
+				text: "Fallback text content",
+			},
+		];
+		const result = formatSearchResults(results);
+		expect(result).toContain("Fallback text content");
+	});
 });
 
 describe("pi-exa formatCrawlResults", () => {

@@ -121,6 +121,36 @@ describe("pi-notion formatBlocks", () => {
 		});
 		expect(result).toContain("unknown_type");
 	});
+
+	it("handles blocks with empty content", () => {
+		const result = formatBlocks({
+			results: [
+				{ type: "paragraph", id: "1", paragraph: {} },
+				{ type: "code", id: "2", code: { text: [] } },
+			],
+		});
+		expect(result).toContain("paragraph");
+		expect(result).toContain("code");
+	});
+
+	it("handles null results", () => {
+		const result = formatBlocks({ results: null as unknown as [] });
+		expect(result).toBe("No blocks found.");
+	});
+
+	it("handles blocks with multiple text items", () => {
+		const result = formatBlocks({
+			results: [
+				{
+					type: "paragraph",
+					id: "1",
+					paragraph: { text: [{ plain_text: "Part 1" }, { plain_text: "Part 2" }] },
+				},
+			],
+		});
+		expect(result).toContain("Part 1");
+		expect(result).toContain("Part 2");
+	});
 });
 
 describe("pi-notion formatSearch", () => {
