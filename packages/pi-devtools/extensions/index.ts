@@ -399,6 +399,8 @@ function checkCiTool(prNumber?: number, branch?: string): ToolResult {
 	}
 }
 
+const getRepoInfo = repoInfoTool;
+
 function repoInfoTool(): ToolResult {
 	try {
 		const branch = execGit("git branch --show-current");
@@ -639,6 +641,29 @@ function createReleaseTool(tag: string, title: string, body?: string, draft = fa
 		};
 	}
 }
+
+// =============================================================================
+// Exports
+// =============================================================================
+
+export {
+analyzeCommitsTool,
+bumpVersion,
+bumpVersionTool,
+checkCiTool,
+commitTool,
+createBranchTool,
+createPrTool,
+createReleaseTool,
+getLatestTagTool,
+getRepoInfo,
+mergePrTool,
+parseConventionalCommit,
+pushTool,
+repoInfoTool,
+};
+
+export { execGit, execGh };
 
 // =============================================================================
 // Extension Entry Point
