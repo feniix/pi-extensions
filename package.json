@@ -35,9 +35,13 @@
 		"@mariozechner/pi-ai": "^0.64.0",
 		"@mariozechner/pi-coding-agent": "^0.64.0",
 		"@sinclair/typebox": "^0.34.0",
-		"@types/node": "^22.0.0",
+		"@types/node": "^22.19.17",
+		"@vitest/coverage-v8": "^4.1.2",
 		"typescript": "^5.5.0",
 		"vitest": "^4.0.18"
 	},
-	"license": "MIT"
+	"license": "MIT",
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.29.0"
+	}
 }
