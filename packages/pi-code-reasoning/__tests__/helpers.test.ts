@@ -4,11 +4,9 @@ import { join, resolve } from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
 import {
 	DEFAULT_CONFIG_FILE,
-	ensureDefaultConfigFile,
 	formatToolOutput,
 	isRecord,
 	normalizeNumber,
-	normalizeString,
 	parseConfig,
 	resolveConfigPath,
 	resolveEffectiveLimits,
@@ -17,7 +15,7 @@ import {
 	writeTempFile,
 } from "../extensions/index.js";
 
-describe("pi-sequential-thinking helpers", () => {
+describe("pi-code-reasoning helpers", () => {
 	it("splits params and clamps limits", () => {
 		const { toolArgs, requestedLimits } = splitParams({
 			piMaxBytes: "100",
@@ -26,14 +24,12 @@ describe("pi-sequential-thinking helpers", () => {
 			thought_number: 1,
 			total_thoughts: 3,
 			next_thought_needed: true,
-			stage: "Analysis",
 		});
 		expect(toolArgs).toEqual({
 			thought: "hello",
 			thought_number: 1,
 			total_thoughts: 3,
 			next_thought_needed: true,
-			stage: "Analysis",
 		});
 		expect(requestedLimits).toEqual({ maxBytes: 100, maxLines: 5 });
 
@@ -55,34 +51,13 @@ describe("pi-sequential-thinking helpers", () => {
 		expect(normalizeNumber(Number.POSITIVE_INFINITY)).toBeUndefined();
 	});
 
-	it("writes default config when none exists", () => {
-		const base = mkdtempSync(join(tmpdir(), "pi-seq-think-config-"));
-		const projectConfigPath = join(base, "project", ".pi", "extensions", "sequential-thinking.json");
-		const globalConfigPath = join(base, "global", "extensions", "sequential-thinking.json");
-
-		ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-
-		expect(existsSync(globalConfigPath)).toBe(true);
-		const raw = readFileSync(globalConfigPath, "utf-8");
-		expect(JSON.parse(raw)).toEqual(DEFAULT_CONFIG_FILE);
-	});
-
-	it("does not overwrite existing config", () => {
-		const base = mkdtempSync(join(tmpdir(), "pi-seq-think-config-exists-"));
-		const projectConfigPath = join(base, "project", ".pi", "extensions", "sequential-thinking.json");
-		const globalConfigPath = join(base, "global", "extensions", "sequential-thinking.json");
-
-		ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-		const firstContent = readFileSync(globalConfigPath, "utf-8");
-
-		ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-		const secondContent = readFileSync(globalConfigPath, "utf-8");
-
-		expect(firstContent).toBe(secondContent);
+	it("returns DEFAULT_CONFIG_FILE", () => {
+		expect(DEFAULT_CONFIG_FILE).toHaveProperty("maxBytes");
+		expect(DEFAULT_CONFIG_FILE).toHaveProperty("maxLines");
 	});
 });
 
-describe("pi-sequential-thinking type guards", () => {
+describe("pi-code-reasoning type guards", () => {
 	it("isRecord returns true for plain objects", () => {
 		expect(isRecord({})).toBe(true);
 		expect(isRecord({ a: 1 })).toBe(true);
@@ -97,7 +72,7 @@ describe("pi-sequential-thinking type guards", () => {
 	});
 });
 
-describe("pi-sequential-thinking toJsonString", () => {
+describe("pi-code-reasoning toJsonString", () => {
 	it("returns strings as-is", () => {
 		expect(toJsonString("hello")).toBe("hello");
 		expect(toJsonString("")).toBe("");
@@ -115,25 +90,7 @@ describe("pi-sequential-thinking toJsonString", () => {
 	});
 });
 
-describe("pi-sequential-thinking normalizeString", () => {
-	it("returns trimmed strings", () => {
-		expect(normalizeString("  hello  ")).toBe("hello");
-		expect(normalizeString("test")).toBe("test");
-	});
-
-	it("returns undefined for empty/whitespace strings", () => {
-		expect(normalizeString("")).toBeUndefined();
-		expect(normalizeString("   ")).toBeUndefined();
-	});
-
-	it("returns undefined for non-strings", () => {
-		expect(normalizeString(123)).toBeUndefined();
-		expect(normalizeString(null)).toBeUndefined();
-		expect(normalizeString(undefined)).toBeUndefined();
-	});
-});
-
-describe("pi-sequential-thinking resolveConfigPath", () => {
+describe("pi-code-reasoning resolveConfigPath", () => {
 	it("resolves paths starting with ~/", () => {
 		const result = resolveConfigPath("~/.pi/config.json");
 		expect(result).toContain(homedir());
@@ -156,43 +113,34 @@ describe("pi-sequential-thinking resolveConfigPath", () => {
 	});
 });
 
-describe("pi-sequential-thinking parseConfig", () => {
+describe("pi-code-reasoning parseConfig", () => {
 	it("parses valid config", () => {
 		const raw = {
-			storageDir: "/custom/storage",
 			maxBytes: 1024,
 			maxLines: 500,
 		};
 		const result = parseConfig(raw, "/path/to/config.json");
 		expect(result).toEqual({
-			storageDir: "/custom/storage",
 			maxBytes: 1024,
 			maxLines: 500,
 		});
 	});
 
-	it("normalizes string values", () => {
-		const raw = { storageDir: "  /custom/storage  " };
-		const result = parseConfig(raw, "/path");
-		expect(result.storageDir).toBe("/custom/storage");
-	});
-
 	it("ignores null/undefined values", () => {
-		const raw = { storageDir: null, maxBytes: undefined, maxLines: NaN };
+		const raw = { maxBytes: undefined, maxLines: NaN };
 		const result = parseConfig(raw, "/path");
-		expect(result.storageDir).toBeUndefined();
 		expect(result.maxBytes).toBeUndefined();
 		expect(result.maxLines).toBeUndefined();
 	});
 
 	it("throws for non-object config", () => {
-		expect(() => parseConfig(null, "/path")).toThrow("Invalid Sequential Thinking config");
-		expect(() => parseConfig("string", "/path")).toThrow("Invalid Sequential Thinking config");
-		expect(() => parseConfig(123, "/path")).toThrow("Invalid Sequential Thinking config");
+		expect(() => parseConfig(null, "/path")).toThrow("Invalid Code Reasoning config");
+		expect(() => parseConfig("string", "/path")).toThrow("Invalid Code Reasoning config");
+		expect(() => parseConfig(123, "/path")).toThrow("Invalid Code Reasoning config");
 	});
 });
 
-describe("pi-sequential-thinking formatToolOutput", () => {
+describe("pi-code-reasoning formatToolOutput", () => {
 	it("formats simple result", () => {
 		const result = formatToolOutput("test_tool", { message: "Hello" }, { maxBytes: 50000, maxLines: 2000 });
 		expect(result.text).toContain("Hello");
@@ -206,7 +154,7 @@ describe("pi-sequential-thinking formatToolOutput", () => {
 	});
 });
 
-describe("pi-sequential-thinking writeTempFile", () => {
+describe("pi-code-reasoning writeTempFile", () => {
 	const tempFiles: string[] = [];
 
 	afterEach(() => {
@@ -224,7 +172,7 @@ describe("pi-sequential-thinking writeTempFile", () => {
 	it("writes temp file and returns path", () => {
 		const path = writeTempFile("test_tool", "content here");
 		tempFiles.push(path);
-		expect(path).toContain("pi-seq-think-test_tool");
+		expect(path).toContain("pi-code-reasoning-test_tool");
 		expect(path).toContain(".txt");
 		expect(existsSync(path)).toBe(true);
 	});

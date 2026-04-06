@@ -420,6 +420,19 @@ const codeReasoningParams = Type.Object(
 // Extension Entry Point
 // =============================================================================
 
+export {
+	DEFAULT_CONFIG_FILE,
+	formatToolOutput,
+	isRecord,
+	normalizeNumber,
+	parseConfig,
+	resolveConfigPath,
+	resolveEffectiveLimits,
+	splitParams,
+	toJsonString,
+	writeTempFile,
+};
+
 export default function codeReasoning(pi: ExtensionAPI) {
 	// Register CLI flags
 	pi.registerFlag("--code-reasoning-config", {

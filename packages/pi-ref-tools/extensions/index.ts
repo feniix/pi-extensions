@@ -655,11 +655,19 @@ const readUrlParams = Type.Object(
 export {
 	DEFAULT_CONFIG_FILE,
 	ensureDefaultConfigFile,
+	formatToolOutput,
+	isJsonRpcResponse,
+	isRecord,
 	normalizeNumber,
+	normalizeString,
+	parseConfig,
 	parseTimeoutMs,
 	redactApiKey,
+	resolveConfigPath,
 	resolveEffectiveLimits,
 	splitParams,
+	toJsonString,
+	writeTempFile,
 };
 
 export default function refTools(pi: ExtensionAPI) {

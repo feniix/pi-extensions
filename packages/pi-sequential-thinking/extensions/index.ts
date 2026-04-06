@@ -340,7 +340,20 @@ const sequentialThinkParams = Type.Object(
 // Extension Entry Point
 // =============================================================================
 
-export { DEFAULT_CONFIG_FILE, ensureDefaultConfigFile, normalizeNumber, resolveEffectiveLimits, splitParams };
+export {
+	DEFAULT_CONFIG_FILE,
+	ensureDefaultConfigFile,
+	formatToolOutput,
+	isRecord,
+	normalizeNumber,
+	normalizeString,
+	parseConfig,
+	resolveConfigPath,
+	resolveEffectiveLimits,
+	splitParams,
+	toJsonString,
+	writeTempFile,
+};
 
 export default function sequentialThinking(pi: ExtensionAPI) {
 	// Register CLI flags

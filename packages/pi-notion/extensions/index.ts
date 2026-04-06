@@ -208,6 +208,16 @@ function formatSearch(result: { results: unknown[] }) {
 		.join("\n");
 }
 
+export {
+	formatBlocks,
+	formatDatabase,
+	formatPage,
+	formatSearch,
+	getTitleFromProperties,
+	loadConfig,
+	resolveConfigPath,
+};
+
 export default function notionExtension(pi: ExtensionAPI) {
 	pi.registerFlag("--notion-token", { description: "Notion integration token", type: "string" });
 	pi.registerFlag("--notion-config", { description: "Path to JSON config file", type: "string" });

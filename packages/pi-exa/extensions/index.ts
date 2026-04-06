@@ -360,6 +360,17 @@ async function performAdvancedSearch(
 	return formatSearchResults(response.results);
 }
 
+export {
+	DEFAULT_MAX_CHARACTERS,
+	DEFAULT_NUM_RESULTS,
+	ensureDefaultConfigFile,
+	formatCrawlResults,
+	formatSearchResults,
+	loadConfig,
+	parseConfig,
+	resolveConfigPath,
+};
+
 // =============================================================================
 // Extension Entry Point
 // =============================================================================
