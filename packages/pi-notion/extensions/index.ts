@@ -1,19 +1,26 @@
 /**
  * Notion API Extension for pi
+ *
+ * Supports two authentication methods:
+ * 1. Integration Token (Internal): Set NOTION_TOKEN or use --notion-token flag
+ * 2. OAuth (Public Integration): Configure in notion.json for user-based auth
  */
 
+import { exec as execCallback } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import axios, { type AxiosInstance } from "axios";
+import { executeOAuthFlow, FileTokenStorage, getValidAccessToken, type OAuthConfig } from "./oauth.js";
 
 const NOTION_API_BASE = "https://api.notion.com/v1";
 const NOTION_VERSION = "2025-09-03";
 
 interface NotionConfig {
 	token?: string;
+	oauth?: OAuthConfig;
 }
 
 interface NotionToolDetails {
@@ -133,7 +140,7 @@ function loadConfig(configPath?: string): NotionConfig | null {
 		if (!existsSync(globalConfigPath)) {
 			try {
 				mkdirSync(dirname(globalConfigPath), { recursive: true });
-				writeFileSync(globalConfigPath, `${JSON.stringify({ token: null }, null, 2)}\n`, "utf-8");
+				writeFileSync(globalConfigPath, `${JSON.stringify({ token: null, oauth: null }, null, 2)}\n`, "utf-8");
 			} catch {}
 		}
 		candidates.push(projectConfigPath, globalConfigPath);
@@ -216,11 +223,261 @@ export default function notionExtension(pi: ExtensionAPI) {
 		return "";
 	};
 
-	const getClient = (): NotionClient => {
+	const getOAuthConfig = (): OAuthConfig | null => {
+		const configFlag = pi.getFlag("--notion-config");
+		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
+		if (config?.oauth?.clientId && config?.oauth?.clientSecret && config?.oauth?.redirectUri) {
+			return config.oauth;
+		}
+		return null;
+	};
+
+	const getConfigPath = (): string => {
+		const configFlag = pi.getFlag("--notion-config");
+		if (typeof configFlag === "string" && configFlag) {
+			return resolveConfigPath(configFlag);
+		}
+		const projectConfigPath = join(process.cwd(), ".pi", "extensions", "notion.json");
+		const globalConfigPath = join(homedir(), ".pi", "agent", "extensions", "notion.json");
+		if (existsSync(projectConfigPath)) return projectConfigPath;
+		return globalConfigPath;
+	};
+
+	const getClient = async (): Promise<NotionClient> => {
+		const oauthConfig = getOAuthConfig();
+
+		if (oauthConfig) {
+			// Try OAuth first
+			const configPath = getConfigPath();
+			const storage = new FileTokenStorage(configPath);
+
+			try {
+				const accessToken = await getValidAccessToken(oauthConfig, storage);
+				if (accessToken) {
+					return new NotionClient(accessToken);
+				}
+			} catch {
+				// OAuth failed, fall through to token auth
+			}
+		}
+
+		// Fall back to token auth
 		const token = getToken();
-		if (!token) throw new Error("Notion token not configured. Set NOTION_TOKEN or use --notion-token flag.");
+		if (!token) {
+			throw new Error(
+				"Notion token not configured. Set NOTION_TOKEN, use --notion-token flag, or configure OAuth in notion.json.\n" +
+					"Run /notion-oauth-setup to configure OAuth authentication.",
+			);
+		}
 		return new NotionClient(token);
 	};
+
+	const openBrowser = (url: string): void => {
+		const platform = process.platform;
+		const cmd = platform === "darwin" ? "open" : platform === "win32" ? "start" : "xdg-open";
+		execCallback(`${cmd} "${url}"`);
+	};
+
+	// OAuth Setup Tool
+	pi.registerTool({
+		name: "notion_oauth_setup",
+		label: "Notion OAuth Setup",
+		description:
+			"Configure OAuth authentication for Notion. Requires a public Notion integration with client_id, client_secret, and redirect_uri configured in notion.json.",
+		parameters: Type.Object({}),
+		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+			try {
+				const configFlag = pi.getFlag("--notion-config");
+				const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
+
+				if (!config?.oauth?.clientId || !config?.oauth?.clientSecret || !config?.oauth?.redirectUri) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `OAuth not configured. Please add oauth configuration to your notion.json:
+
+{
+  "oauth": {
+    "clientId": "your-client-id",
+    "clientSecret": "your-client-secret",
+    "redirectUri": "http://localhost:3000/callback"
+  }
+}
+
+To create a public Notion integration:
+1. Go to https://www.notion.so/profile/integrations
+2. Click "New integration" and select "Public"
+3. Configure OAuth settings with redirect URI: http://localhost:3000/callback
+4. Copy the Client ID and Client Secret`,
+							},
+						],
+						isError: true,
+						details: { tool: "notion_oauth_setup", error: "oauth_not_configured" },
+					};
+				}
+
+				const configPath = getConfigPath();
+				const storage = new FileTokenStorage(configPath);
+				const result = await executeOAuthFlow(config.oauth, storage, openBrowser, (msg, _type) => {
+					ctx.ui.notify(msg, "info");
+				});
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `OAuth authorization successful!
+
+Connected to workspace: ${result.userInfo.workspaceName}
+Workspace ID: ${result.userInfo.workspaceId}
+Owner: ${result.userInfo.ownerName || "Unknown"} (${result.userInfo.ownerEmail || "N/A"})
+
+You can now use Notion tools without needing a manual token.`,
+						},
+					],
+					details: { tool: "notion_oauth_setup", userInfo: result.userInfo },
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return {
+					content: [{ type: "text", text: `OAuth setup failed: ${message}` }],
+					isError: true,
+					details: { tool: "notion_oauth_setup", error: message },
+				};
+			}
+		},
+	});
+
+	// OAuth Status Tool
+	pi.registerTool({
+		name: "notion_oauth_status",
+		label: "Notion OAuth Status",
+		description: "Check the current OAuth authentication status",
+		parameters: Type.Object({}),
+		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
+			try {
+				const configFlag = pi.getFlag("--notion-config");
+				const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
+				const oauthConfigured = !!(
+					config?.oauth?.clientId &&
+					config?.oauth?.clientSecret &&
+					config?.oauth?.redirectUri
+				);
+
+				if (!oauthConfigured) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `OAuth Status: Not Configured
+
+To enable OAuth authentication, add to your notion.json:
+
+{
+  "oauth": {
+    "clientId": "your-client-id",
+    "clientSecret": "your-client-secret",
+    "redirectUri": "http://localhost:3000/callback"
+  }
+}`,
+							},
+						],
+						details: { tool: "notion_oauth_status", configured: false },
+					};
+				}
+
+				const configPath = getConfigPath();
+				const storage = new FileTokenStorage(configPath);
+				const tokens = await storage.load();
+				const userInfo = await storage.getUserInfo();
+
+				if (!tokens) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `OAuth Status: Configured but not authorized
+
+Run notion_oauth_setup to complete the authorization flow.`,
+							},
+						],
+						details: { tool: "notion_oauth_status", configured: true, authorized: false },
+					};
+				}
+
+				const isExpired = Date.now() > tokens.expiresAt;
+				const tokenAge = Math.round((Date.now() - (tokens.expiresAt - 3600000)) / 1000 / 60);
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `OAuth Status: Active
+
+Workspace: ${userInfo?.workspaceName || "Unknown"}
+Workspace ID: ${userInfo?.workspaceId || "Unknown"}
+Owner: ${userInfo?.ownerName || "Unknown"} (${userInfo?.ownerEmail || "N/A"})
+Token Age: ${tokenAge} minutes
+Token Expired: ${isExpired ? "Yes" : "No"}
+
+Use notion_oauth_setup to re-authorize if needed.`,
+						},
+					],
+					details: {
+						tool: "notion_oauth_status",
+						configured: true,
+						authorized: true,
+						userInfo,
+						isExpired,
+					},
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return {
+					content: [{ type: "text", text: `OAuth status check failed: ${message}` }],
+					isError: true,
+					details: { tool: "notion_oauth_status", error: message },
+				};
+			}
+		},
+	});
+
+	// OAuth Logout Tool
+	pi.registerTool({
+		name: "notion_oauth_logout",
+		label: "Notion OAuth Logout",
+		description: "Clear OAuth tokens and log out from Notion",
+		parameters: Type.Object({}),
+		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
+			try {
+				const configPath = getConfigPath();
+				const storage = new FileTokenStorage(configPath);
+				await storage.clear();
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `OAuth tokens cleared. You have been logged out from Notion.
+
+To use Notion again, either:
+- Run notion_oauth_setup to re-authorize with OAuth
+- Set NOTION_TOKEN environment variable with an integration token`,
+						},
+					],
+					details: { tool: "notion_oauth_logout" },
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return {
+					content: [{ type: "text", text: `OAuth logout failed: ${message}` }],
+					isError: true,
+					details: { tool: "notion_oauth_logout", error: message },
+				};
+			}
+		},
+	});
 
 	pi.registerTool({
 		name: "notion_get_page",
@@ -229,7 +486,7 @@ export default function notionExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({ pageId: Type.String() }),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			try {
-				const client = getClient();
+				const client = await getClient();
 				const page = await client.getPage((params as { pageId: string }).pageId);
 				return {
 					content: [{ type: "text", text: formatPage(page) }],
@@ -259,7 +516,7 @@ export default function notionExtension(pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			try {
-				const client = getClient();
+				const client = await getClient();
 				const p = params as {
 					parentId: string;
 					parentType?: "page_id" | "database_id";
@@ -297,7 +554,7 @@ export default function notionExtension(pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			try {
-				const client = getClient();
+				const client = await getClient();
 				const p = params as {
 					pageId: string;
 					title?: string;
@@ -329,7 +586,7 @@ export default function notionExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({ pageId: Type.String() }),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			try {
-				const client = getClient();
+				const client = await getClient();
 				const { pageId } = params as { pageId: string };
 				await client.updatePage(pageId, {}, true);
 				return {
@@ -354,7 +611,7 @@ export default function notionExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({ databaseId: Type.String() }),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			try {
-				const client = getClient();
+				const client = await getClient();
 				const database = await client.getDatabase((params as { databaseId: string }).databaseId);
 				return {
 					content: [{ type: "text", text: formatDatabase(database) }],
@@ -384,7 +641,7 @@ export default function notionExtension(pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			try {
-				const client = getClient();
+				const client = await getClient();
 				const p = params as {
 					databaseId: string;
 					filter?: unknown;
@@ -419,7 +676,7 @@ export default function notionExtension(pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			try {
-				const client = getClient();
+				const client = await getClient();
 				const p = params as { parentPageId: string; title: string; properties?: Record<string, unknown> };
 				const database = await client.createDatabase(p.parentPageId, p.title, p.properties || { Name: { title: {} } });
 				return {
@@ -444,7 +701,7 @@ export default function notionExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({ blockId: Type.String(), startCursor: Type.Optional(Type.String()) }),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			try {
-				const client = getClient();
+				const client = await getClient();
 				const p = params as { blockId: string; startCursor?: string };
 				const result = await client.getBlockChildren(p.blockId, p.startCursor);
 				return {
@@ -471,7 +728,7 @@ export default function notionExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({ blockId: Type.String(), blocks: Type.Array(Type.Unknown()) }),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			try {
-				const client = getClient();
+				const client = await getClient();
 				const p = params as { blockId: string; blocks: unknown[] };
 				const result = await client.appendBlockChildren(p.blockId, p.blocks);
 				return {
@@ -500,7 +757,7 @@ export default function notionExtension(pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			try {
-				const client = getClient();
+				const client = await getClient();
 				const p = params as { query: string; type?: "page" | "database"; startCursor?: string };
 				const filter = p.type ? { value: p.type, property: "object" } : undefined;
 				const result = await client.search(p.query, filter, p.startCursor);
@@ -526,7 +783,7 @@ export default function notionExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({ userId: Type.String() }),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			try {
-				const client = getClient();
+				const client = await getClient();
 				const user = await client.getUser((params as { userId: string }).userId);
 				const email = user.person?.email ? `\nEmail: ${user.person.email}` : "";
 				return {
@@ -553,7 +810,7 @@ export default function notionExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
 			try {
-				const client = getClient();
+				const client = await getClient();
 				const user = await client.getMe();
 				const email = user.person?.email ? `\nEmail: ${user.person.email}` : "";
 				return {

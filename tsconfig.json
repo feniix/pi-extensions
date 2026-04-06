@@ -4,7 +4,7 @@
 		"module": "Node16",
 		"moduleResolution": "Node16",
 		"lib": ["ES2022", "DOM"],
-		"types": ["node"],
+		"types": ["node", "portfinder"],
 		"strict": true,
 		"noEmit": true,
 		"skipLibCheck": true
