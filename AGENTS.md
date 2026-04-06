@@ -79,6 +79,73 @@ ref_read_url({ url: "https://docs.rs/tokio/latest/tokio/task/fn.spawn.html" })
 
 Both tools support optional `piMaxBytes` and `piMaxLines` integer parameters to override client-side output truncation (clamped by configured maximums).
 
+### Sequential Thinking — Structured Problem Solving
+
+This workspace includes the `pi-sequential-thinking` extension which provides tools for breaking down complex problems into structured, sequential thoughts through five cognitive stages. **Use these tools when facing complex decisions, architecture planning, or multi-faceted analysis** where step-by-step reasoning produces better outcomes.
+
+#### `process_thought`
+
+Record and analyze a sequential thought with metadata. Each thought progresses through stages and is analyzed in context of the full sequence.
+
+```
+process_thought({
+  thought: "The authentication system needs to support both JWT and session-based auth for backward compatibility.",
+  thought_number: 1,
+  total_thoughts: 5,
+  next_thought_needed: true,
+  stage: "Problem Definition",
+  tags: ["auth", "backward-compat"],
+  axioms_used: ["Maintain backward compatibility during migrations"],
+  assumptions_challenged: ["All clients can support JWT"]
+})
+```
+
+- `thought` (string, required): The content of your thought.
+- `thought_number` (integer, required): Position in the sequence (starting at 1).
+- `total_thoughts` (integer, required): Expected total number of thoughts.
+- `next_thought_needed` (boolean, required): Whether more thoughts follow this one.
+- `stage` (string, required): One of `"Problem Definition"`, `"Research"`, `"Analysis"`, `"Synthesis"`, `"Conclusion"`.
+- `tags` (string[], optional): Keywords or categories.
+- `axioms_used` (string[], optional): Principles or axioms applied.
+- `assumptions_challenged` (string[], optional): Assumptions questioned.
+- Returns: Analysis including related thoughts, progress percentage, and stage context.
+
+#### `generate_summary`
+
+Generate a summary of the entire thinking process after recording multiple thoughts.
+
+```
+generate_summary()
+```
+
+- Returns: Stage counts, timeline, top tags, and completion status.
+
+#### `clear_history`
+
+Reset the thinking session by clearing all recorded thoughts.
+
+```
+clear_history()
+```
+
+#### `export_session` / `import_session`
+
+Save or load thinking sessions for reuse.
+
+```
+export_session({ file_path: "/tmp/my-analysis.json" })
+import_session({ file_path: "/tmp/my-analysis.json" })
+```
+
+#### Typical workflow
+
+1. **Define the problem**: `process_thought({ ..., stage: "Problem Definition", thought_number: 1, ... })`
+2. **Research**: `process_thought({ ..., stage: "Research", thought_number: 2, ... })`
+3. **Analyze**: `process_thought({ ..., stage: "Analysis", thought_number: 3, ... })`
+4. **Synthesize**: `process_thought({ ..., stage: "Synthesis", thought_number: 4, ... })`
+5. **Conclude**: `process_thought({ ..., stage: "Conclusion", thought_number: 5, next_thought_needed: false, ... })`
+6. **Review**: `generate_summary()`
+
 ## Security & Configuration Tips
 - Do not commit API keys. Use environment variables or the config file locations documented in each package README (e.g., under `~/.pi/agent/extensions/`).
 - If you change defaults or CLI flags, update the package README accordingly.
