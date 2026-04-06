@@ -118,6 +118,11 @@ describe("pi-ref-tools type guards", () => {
 		expect(isRecord([1, 2, 3])).toBe(false);
 	});
 
+	it("isRecord returns true for objects with special keys", () => {
+		expect(isRecord({ __proto__: { admin: true } })).toBe(true);
+		expect(isRecord({ constructor: function () {} })).toBe(true);
+	});
+
 	it("isJsonRpcResponse returns true for valid responses", () => {
 		expect(isJsonRpcResponse({ jsonrpc: "2.0", result: {} })).toBe(true);
 		expect(isJsonRpcResponse({ jsonrpc: "2.0", id: 1, result: "test" })).toBe(true);
@@ -132,6 +137,11 @@ describe("pi-ref-tools type guards", () => {
 		expect(isJsonRpcResponse({ jsonrpc: "2.0", id: 1 })).toBe(true); // passes isRecord and has jsonrpc 2.0
 		expect(isJsonRpcResponse(null)).toBe(false);
 		expect(isJsonRpcResponse("string")).toBe(false);
+	});
+
+	it("isJsonRpcResponse handles edge cases", () => {
+		expect(isJsonRpcResponse({ jsonrpc: "2.0", error: { code: -32600 } })).toBe(true);
+		expect(isJsonRpcResponse({ jsonrpc: "2.0", result: null })).toBe(true);
 	});
 });
 
@@ -221,6 +231,24 @@ describe("pi-ref-tools parseConfig", () => {
 		expect(() => parseConfig(null, "/path")).toThrow("Invalid Ref MCP config");
 		expect(() => parseConfig("string", "/path")).toThrow("Invalid Ref MCP config");
 		expect(() => parseConfig(123, "/path")).toThrow("Invalid Ref MCP config");
+	});
+
+	it("handles negative timeout", () => {
+		const raw = { timeoutMs: -100 };
+		const result = parseConfig(raw, "/path");
+		expect(result.timeoutMs).toBe(-100); // negative numbers are finite
+	});
+
+	it("handles zero timeout", () => {
+		const raw = { timeoutMs: 0 };
+		const result = parseConfig(raw, "/path");
+		expect(result.timeoutMs).toBe(0); // 0 is finite
+	});
+
+	it("normalizes whitespace in protocol version", () => {
+		const raw = { protocolVersion: "  2025-01-01  " };
+		const result = parseConfig(raw, "/path");
+		expect(result.protocolVersion).toBe("2025-01-01");
 	});
 });
 

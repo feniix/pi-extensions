@@ -158,6 +158,61 @@ describe("pi-exa formatCrawlResults", () => {
 		expect(result).toContain("John Doe");
 		expect(result).toContain("2025-01-15");
 	});
+
+	it("handles results with title", () => {
+		const results = [
+			{
+				url: "https://example.com",
+				text: "Content",
+				title: "Page Title",
+			},
+		];
+		const result = formatCrawlResults(results);
+		expect(result).toContain("Page Title");
+	});
+
+	it("handles results without title", () => {
+		const results = [
+			{
+				url: "https://example.com",
+				text: "Content",
+			},
+		];
+		const result = formatCrawlResults(results);
+		expect(result).toContain("(no title)");
+	});
+
+	it("handles results with full datetime in publishedDate", () => {
+		const results = [
+			{
+				url: "https://example.com",
+				text: "Content",
+				publishedDate: "2025-01-15T10:30:00Z",
+			},
+		];
+		const result = formatCrawlResults(results);
+		expect(result).toContain("2025-01-15");
+	});
+
+	it("handles results without text", () => {
+		const results = [
+			{
+				url: "https://example.com",
+			},
+		];
+		const result = formatCrawlResults(results);
+		expect(result).toContain("https://example.com");
+	});
+
+	it("handles multiple results", () => {
+		const results = [
+			{ url: "https://example.com/1", text: "First page" },
+			{ url: "https://example.com/2", text: "Second page" },
+		];
+		const result = formatCrawlResults(results);
+		expect(result).toContain("First page");
+		expect(result).toContain("Second page");
+	});
 });
 
 describe("pi-exa constants", () => {

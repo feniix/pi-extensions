@@ -33,6 +33,16 @@ describe("pi-notion resolveConfigPath", () => {
 		const result = resolveConfigPath("relative/path.json");
 		expect(result).toBe(resolve(process.cwd(), "relative/path.json"));
 	});
+
+	it("handles whitespace in paths", () => {
+		const result = resolveConfigPath("  ~/.pi/config.json  ");
+		expect(result).toContain(".pi/config.json");
+	});
+
+	it("handles path with only tilde", () => {
+		const result = resolveConfigPath("~");
+		expect(result).toBe(homedir());
+	});
 });
 
 describe("pi-notion getTitleFromProperties", () => {
@@ -54,6 +64,25 @@ describe("pi-notion getTitleFromProperties", () => {
 	it("handles empty title array", () => {
 		expect(getTitleFromProperties({ Name: { type: "title", title: [] } })).toBe("Untitled");
 	});
+
+	it("handles multiple text parts", () => {
+		const props = {
+			Name: {
+				type: "title",
+				title: [{ plain_text: "Part 1 " }, { plain_text: "Part 2" }],
+			},
+		};
+		expect(getTitleFromProperties(props)).toBe("Part 1 Part 2");
+	});
+
+	it("finds title in nested properties", () => {
+		const props = {
+			Status: { type: "status" },
+			Name: { type: "title", title: [{ plain_text: "Nested Title" }] },
+			Description: { type: "rich_text" },
+		};
+		expect(getTitleFromProperties(props)).toBe("Nested Title");
+	});
 });
 
 describe("pi-notion formatPage", () => {
@@ -72,6 +101,31 @@ describe("pi-notion formatPage", () => {
 		const page = { id: "abc123", url: "https://notion.so/abc123", properties: {} };
 		const result = formatPage(page);
 		expect(result).toContain("Untitled");
+	});
+
+	it("formats page with title property", () => {
+		const page = {
+			id: "xyz789",
+			url: "https://notion.so/xyz789",
+			properties: { title: { title: [{ plain_text: "Title Property" }] } },
+		};
+		const result = formatPage(page);
+		expect(result).toContain("Title Property");
+	});
+
+	it("formats page with multiple properties", () => {
+		const page = {
+			id: "multi",
+			url: "https://notion.so/multi",
+			properties: {
+				Name: { title: [{ plain_text: "Multi Page" }] },
+				Status: { status: { name: "Active" } },
+				Date: { date: { start: "2025-01-01" } },
+			},
+		};
+		const result = formatPage(page);
+		expect(result).toContain("Multi Page");
+		expect(result).toContain("## Properties");
 	});
 });
 
@@ -92,6 +146,28 @@ describe("pi-notion formatDatabase", () => {
 		const result = formatDatabase(db);
 		expect(result).toContain("Untitled");
 		expect(result).toContain("def456");
+	});
+
+	it("formats database with multiple properties", () => {
+		const db = {
+			id: "db123",
+			title: [{ plain_text: "Multi Property DB" }],
+			properties: {
+				Name: { type: "title" },
+				Status: { type: "status" },
+				Count: { type: "number" },
+			},
+		};
+		const result = formatDatabase(db);
+		expect(result).toContain("Multi Property DB");
+		expect(result).toContain("Name");
+		expect(result).toContain("Status");
+	});
+
+	it("handles undefined title", () => {
+		const db = { id: "no-title", title: undefined, properties: {} };
+		const result = formatDatabase(db);
+		expect(result).toContain("Untitled");
 	});
 });
 
