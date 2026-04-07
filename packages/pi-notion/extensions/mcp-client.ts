@@ -488,13 +488,11 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 			// Skip if already registered
 			if (pi.getAllTools().find((t) => t.name === tool.name)) continue;
 
-			const schema = Type.Object({}, { additionalProperties: true });
-
 			pi.registerTool({
 				name: tool.name,
 				label: `Notion: ${tool.name.replace(/_/g, " ")}`,
 				description: tool.description || `Notion MCP tool: ${tool.name}`,
-				parameters: schema,
+				parameters: tool.inputSchema as ReturnType<typeof Type.Object>,
 				async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 					if (!mcpClient?.state.connected) {
 						return {

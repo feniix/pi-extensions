@@ -1,5 +1,5 @@
 /**
- * Tests for NotionClient class and extension functionality
+ * Tests for index.ts utility functions and file structure
  */
 
 import { describe, expect, it } from "vitest";
@@ -9,65 +9,11 @@ import { describe, expect, it } from "vitest";
 // =============================================================================
 
 describe("pi-notion Extension File Structure", () => {
-	it("index.ts exports all page tools", async () => {
+	it("index.ts contains NotionConfig interface", async () => {
 		const fs = await import("node:fs");
 		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
-		expect(content).toContain("notion_get_page");
-		expect(content).toContain("notion_create_page");
-		expect(content).toContain("notion_update_page");
-		expect(content).toContain("notion_archive_page");
-	});
-
-	it("index.ts exports all database tools", async () => {
-		const fs = await import("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("notion_get_database");
-		expect(content).toContain("notion_query_database");
-		expect(content).toContain("notion_create_database");
-	});
-
-	it("index.ts exports block tools", async () => {
-		const fs = await import("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("notion_get_block_children");
-		expect(content).toContain("notion_append_blocks");
-	});
-
-	it("index.ts exports search and user tools", async () => {
-		const fs = await import("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("notion_search");
-		expect(content).toContain("notion_get_user");
-		expect(content).toContain("notion_get_me");
-	});
-
-	it("index.ts uses MCP token for authentication", async () => {
-		const fs = await import("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("notion-mcp.json");
-		expect(content).toContain("accessToken");
-	});
-
-	it("index.ts contains NotionClient class", async () => {
-		const fs = await import("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("class NotionClient");
-		expect(content).toContain("axios.create");
-	});
-
-	it("index.ts contains API constants", async () => {
-		const fs = await import("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("NOTION_API_BASE");
-		expect(content).toContain("NOTION_VERSION");
-		expect(content).toContain("api.notion.com");
+		expect(content).toContain("NotionConfig");
 	});
 
 	it("index.ts contains config loading functions", async () => {
@@ -91,30 +37,22 @@ describe("pi-notion Extension File Structure", () => {
 		expect(content).toContain("getTitleFromProperties");
 	});
 
-	it("index.ts reads MCP config for auth", async () => {
+	it("index.ts exports utility functions", async () => {
 		const fs = await import("node:fs");
 		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
-		expect(content).toContain("getClient");
-		expect(content).toContain("notion-mcp.json");
-		expect(content).toContain("NotionClient");
+		expect(content).toContain("export {");
+		expect(content).toContain("formatBlocks");
+		expect(content).toContain("loadConfig");
+		expect(content).toContain("resolveConfigPath");
 	});
 
-	it("index.ts contains error handling", async () => {
+	it("index.ts has no-op extension (tools registered by mcp-client)", async () => {
 		const fs = await import("node:fs");
 		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
-		expect(content).toContain("Notion error:");
-		expect(content).toContain("isError: true");
-	});
-
-	it("index.ts uses MCP OAuth token via getClient", async () => {
-		const fs = await import("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("getClient");
-		expect(content).toContain("existsSync");
-		expect(content).toContain("Run /notion to connect via OAuth");
+		expect(content).toContain("export default function notionExtension");
+		expect(content).toContain("mcp-client.ts");
 	});
 
 	it("mcp-client.ts exists and has correct exports", async () => {
@@ -137,153 +75,48 @@ describe("pi-notion Extension File Structure", () => {
 });
 
 // =============================================================================
-// NotionClient Implementation Details
+// Formatting Function Details
 // =============================================================================
 
-describe("pi-notion NotionClient Implementation", () => {
-	it("has getPage method", () => {
+describe("pi-notion Formatting Functions", () => {
+	it("formatPage formats page with title and properties", () => {
 		const fs = require("node:fs");
 		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
-		expect(content).toContain("async getPage");
-		expect(content).toContain("/pages/");
+		expect(content).toContain("function formatPage");
+		expect(content).toContain("getTitleFromProperties");
+		expect(content).toContain("JSON.stringify");
 	});
 
-	it("has createPage method", () => {
+	it("formatDatabase formats database with title", () => {
 		const fs = require("node:fs");
 		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
-		expect(content).toContain("async createPage");
-		expect(content).toContain("parent: { [parentType]: parentId }");
+		expect(content).toContain("function formatDatabase");
+		expect(content).toContain("plain_text");
 	});
 
-	it("has updatePage method", () => {
+	it("formatBlocks handles empty results", () => {
 		const fs = require("node:fs");
 		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
-		expect(content).toContain("async updatePage");
-		expect(content).toContain("this.client.patch");
+		expect(content).toContain("function formatBlocks");
+		expect(content).toContain("No blocks found");
 	});
 
-	it("has getDatabase method", () => {
+	it("formatSearch handles empty results", () => {
 		const fs = require("node:fs");
 		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
-		expect(content).toContain("async getDatabase");
-		expect(content).toContain("/databases/");
+		expect(content).toContain("function formatSearch");
+		expect(content).toContain("No results found");
 	});
 
-	it("has queryDatabase method", () => {
+	it("getTitleFromProperties extracts title from properties", () => {
 		const fs = require("node:fs");
 		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
-		expect(content).toContain("async queryDatabase");
-		expect(content).toContain("/query");
-		expect(content).toContain("filter");
-		expect(content).toContain("sorts");
-	});
-
-	it("has createDatabase method", () => {
-		const fs = require("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("async createDatabase");
-		expect(content).toContain("parent: { page_id:");
-	});
-
-	it("has getBlockChildren method", () => {
-		const fs = require("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("async getBlockChildren");
-		expect(content).toContain("/blocks/");
-		expect(content).toContain("/children");
-	});
-
-	it("has appendBlockChildren method", () => {
-		const fs = require("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("async appendBlockChildren");
-	});
-
-	it("has search method", () => {
-		const fs = require("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("async search(");
-		expect(content).toContain("query: string");
-	});
-
-	it("has getUser method", () => {
-		const fs = require("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("async getUser");
-		expect(content).toContain("/users/");
-	});
-
-	it("has getMe method", () => {
-		const fs = require("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("async getMe");
-		expect(content).toContain("/users/me");
-	});
-
-	it("has Authorization header setup", () => {
-		const fs = require("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("Authorization");
-		expect(content).toContain("Bearer");
-		expect(content).toContain("Notion-Version");
-	});
-
-	it("has proper Notion API version header", () => {
-		const fs = require("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("NOTION_VERSION");
-		expect(content).toContain("2025-09-03");
-	});
-});
-
-// =============================================================================
-// Extension Tool Registration Details
-// =============================================================================
-
-describe("pi-notion Tool Registration Details", () => {
-	it("has correct tool parameters schemas", () => {
-		const fs = require("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("Type.Object");
-		expect(content).toContain("Type.String");
-		expect(content).toContain("Type.Optional");
-	});
-
-	it("returns content array in tool responses", () => {
-		const fs = require("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("content: [{");
-		expect(content).toContain('type: "text"');
-	});
-
-	it("includes details in tool responses", () => {
-		const fs = require("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("details: {");
-		expect(content).toContain("tool:");
-	});
-
-	it("has execute function for each tool", () => {
-		const fs = require("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		const toolCount = (content.match(/async execute\(/g) || []).length;
-		expect(toolCount).toBeGreaterThan(10);
+		expect(content).toContain("function getTitleFromProperties");
+		expect(content).toContain("Untitled");
 	});
 });

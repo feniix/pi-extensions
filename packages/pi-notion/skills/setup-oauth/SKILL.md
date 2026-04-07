@@ -19,7 +19,7 @@ Use this skill when the user:
 
 The `/notion` command handles the full OAuth flow automatically:
 
-1. Starts a local callback server on port 3000
+1. Starts a local callback server on an available port
 2. Opens Notion's authorization page in your browser
 3. You approve access in the browser
 4. Receives the authorization code via callback
@@ -58,28 +58,19 @@ Once connected, use the **workspace-explorer** skill to learn how to:
 
 | Issue | Solution |
 |-------|----------|
-| "Port 3000 in use" | Stop the other process using that port, then try again |
 | Connection failed | Try again - OAuth may have timed out |
 | Token expired | Run `/notion` to re-authenticate |
 | Need to switch workspace | Disconnect first, then reconnect |
 
 ## Available Tools
 
-### MCP Tools (via `/notion`)
-These are discovered automatically after connecting via `/notion`:
-- `notion-search`, `notion-fetch`, `notion-create-pages`, `notion-update-page`
-- `notion-get-database`, `notion-query-database-view`, `notion-query-meeting-notes`
-- `notion-get-block-children`, `notion-append-blocks`
-- `notion-get-teams`, `notion-get-users`
-- `notion-mcp-connect`, `notion-mcp-disconnect`, `notion-mcp-status`
+### Local tools (always available)
+- `notion_mcp_connect` — Connect to Notion via OAuth
+- `notion_mcp_disconnect` — Disconnect and clear saved credentials
+- `notion_mcp_status` — Check connection status
 
-### Direct API Tools (via `notion_oauth_setup`)
-These are available when using direct OAuth instead of MCP:
-- `notion_oauth_setup`, `notion_oauth_status`, `notion_oauth_logout`
-- `notion_search`, `notion_get_page`, `notion_create_page`, `notion_update_page`, `notion_archive_page`
-- `notion_get_database`, `notion_query_database`, `notion_create_database`
-- `notion_get_block_children`, `notion_append_blocks`
-- `notion_get_user`, `notion_get_me`
+### MCP tools (auto-discovered after connecting)
+These are registered dynamically from Notion's MCP server. Run `notion_mcp_status` to see available tools after connecting.
 
 ## Disconnect
 

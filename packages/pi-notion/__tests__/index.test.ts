@@ -31,33 +31,30 @@ describe("pi-notion", () => {
 		});
 	});
 
-	describe("tools", () => {
-		it("should register page tools", () => {
+	describe("index.ts", () => {
+		it("should export utility functions", () => {
 			const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
-			expect(extension).toContain("notion_get_page");
-			expect(extension).toContain("notion_create_page");
-			expect(extension).toContain("notion_update_page");
-			expect(extension).toContain("notion_archive_page");
+			expect(extension).toContain("formatPage");
+			expect(extension).toContain("formatDatabase");
+			expect(extension).toContain("formatBlocks");
+			expect(extension).toContain("formatSearch");
+			expect(extension).toContain("getTitleFromProperties");
+			expect(extension).toContain("loadConfig");
+			expect(extension).toContain("resolveConfigPath");
 		});
 
-		it("should register database tools", () => {
+		it("should have no-op extension (tools in mcp-client.ts)", () => {
 			const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
-			expect(extension).toContain("notion_get_database");
-			expect(extension).toContain("notion_query_database");
-			expect(extension).toContain("notion_create_database");
+			expect(extension).toContain("export default function notionExtension");
+			expect(extension).not.toContain("registerTool");
 		});
 
-		it("should register search and user tools", () => {
-			const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
-			expect(extension).toContain("notion_search");
-			expect(extension).toContain("notion_get_user");
-			expect(extension).toContain("notion_get_me");
-		});
-
-		it("should register block tools", () => {
-			const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
-			expect(extension).toContain("notion_get_block_children");
-			expect(extension).toContain("notion_append_blocks");
+		it("should register tools in mcp-client.ts", () => {
+			const mcpClient = readFileSync(join(__dirname, "../extensions/mcp-client.ts"), "utf-8");
+			expect(mcpClient).toContain("registerTool");
+			expect(mcpClient).toContain("notion_mcp_connect");
+			expect(mcpClient).toContain("notion_mcp_disconnect");
+			expect(mcpClient).toContain("notion_mcp_status");
 		});
 	});
 });
