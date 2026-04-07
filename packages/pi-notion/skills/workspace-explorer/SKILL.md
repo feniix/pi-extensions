@@ -16,23 +16,49 @@ notion_mcp_status
 ```
 If not connected, use the **setup-oauth** skill first.
 
-## Common Workflows
+## Finding Content
 
-### 1. Find and Read a Page
+### 1. Search for Pages
 
 ```
 notion-search: { "query": "quarterly report" }
-# Note the page URL or ID from results
+```
 
+Search returns pages and calendar events. Note page URLs from results.
+
+### 2. Explore a Page
+
+```
 notion-fetch: { "id": "https://notion.so/Page-Title-abc123" }
 ```
 
-### 2. Query a Database
+Pages often contain:
+- Child pages (sub-pages)
+- **Databases** (with `collection://` data source URLs)
+- Content blocks (text, headings, callouts, etc.)
+
+## Working with Databases
+
+Databases are discovered inside pages, not searchable directly.
+
+### 1. Get Database Schema
 
 ```
-notion-get-database: { "databaseId": "xyz789..." }
-notion-query-database-view: { "view_url": "https://www.notion.so/workspace/xyz789?v=viewId" }
+notion-fetch: { "id": "https://www.notion.so/database-page-url" }
 ```
+
+The response includes:
+- `data-source-url="collection://..."` for the data source ID
+- `view url="view://..."` for available views
+- SQLite table definition showing schema
+
+### 2. Query a Database View
+
+```
+notion-query-database-view: { "view_url": "view://abc123..." }
+```
+
+Use the `view://` URL from the database fetch response.
 
 ### 3. Get Meeting Notes
 
@@ -40,22 +66,54 @@ notion-query-database-view: { "view_url": "https://www.notion.so/workspace/xyz78
 notion-query-meeting-notes: {}
 ```
 
-### 4. List Teamspaces and Users
+## Finding Teamspaces
+
+### List Teams
 
 ```
 notion-get-teams: {}
+```
+
+Returns teams you're a member of and other workspace teams.
+
+### Get Users
+
+```
 notion-get-users: {}
+```
+
+## Workflow Examples
+
+### Find PRDs in a Project
+
+```
+# Search for the project page
+notion-search: { "query": "project name" }
+
+# Fetch the page to discover the PRD database
+notion-fetch: { "id": "https://notion.so/project-page-url" }
+
+# Note the view:// URL from the database section
+# Then query it
+notion-query-database-view: { "view_url": "view://..." }
+```
+
+### Browse a Teamspace
+
+```
+# Get team ID from notion-get-teams
+notion-get-teams: {}
+
+# Search within a teamspace
+notion-search: { "query": "topic", "teamspace_id": "team-id" }
+
+# Explore team pages to find databases
+notion-fetch: { "id": "https://notion.so/team-homepage-url" }
 ```
 
 ## Tips
 
 - Pass page URLs directly to `notion-fetch` - no need to extract IDs
-- Use `notion-search` for quick discovery across all content
-- Add date filters to narrow meeting notes by timeframe
-- For database views, use the full view URL from the database page
-
-## Alternative: Direct API Tools
-
-If connected via direct API instead of MCP, use underscore-named tools:
-- `notion_search`, `notion_get_page`, `notion_get_database`, `notion_query_database`
-- Same workflows apply, just different tool names
+- Databases are inside pages, not standalone searchable items
+- Use `view://` URLs (not page URLs) for `notion-query-database-view`
+- Add date filters to `notion-query-meeting-notes` for timeframe filtering
