@@ -15,7 +15,6 @@
   "files": [
     "extensions/",
     "skills/",
-    "prompts/",
     "README.md",
     "LICENSE"
   ],
@@ -27,9 +26,7 @@
     "skills": [
       "./skills"
     ],
-    "prompts": [
-      "./prompts"
-    ]
+
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
