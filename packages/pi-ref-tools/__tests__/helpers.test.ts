@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, it, afterEach } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
 	DEFAULT_CONFIG_FILE,
 	ensureDefaultConfigFile,
@@ -120,15 +120,13 @@ describe("pi-ref-tools type guards", () => {
 
 	it("isRecord returns true for objects with special keys", () => {
 		expect(isRecord({ __proto__: { admin: true } })).toBe(true);
-		expect(isRecord({ constructor: function () {} })).toBe(true);
+		expect(isRecord({ constructor: () => {} })).toBe(true);
 	});
 
 	it("isJsonRpcResponse returns true for valid responses", () => {
 		expect(isJsonRpcResponse({ jsonrpc: "2.0", result: {} })).toBe(true);
 		expect(isJsonRpcResponse({ jsonrpc: "2.0", id: 1, result: "test" })).toBe(true);
-		expect(
-			isJsonRpcResponse({ jsonrpc: "2.0", id: "abc", error: { code: -32600, message: "Invalid" } }),
-		).toBe(true);
+		expect(isJsonRpcResponse({ jsonrpc: "2.0", id: "abc", error: { code: -32600, message: "Invalid" } })).toBe(true);
 	});
 
 	it("isJsonRpcResponse returns false for invalid responses", () => {
@@ -265,36 +263,29 @@ describe("pi-ref-tools formatToolOutput", () => {
 	});
 
 	it("formats result without content array", () => {
-		const result = formatToolOutput("test_tool", "https://api.example.com", { result: "data" });
+		// biome-ignore lint/suspicious/noExplicitAny: testing edge case with non-standard result format
+		const result = formatToolOutput("test_tool", "https://api.example.com", { result: "data" } as any);
 		expect(result.text).toContain("data");
 	});
 
 	it("handles multiple content blocks", () => {
-		const result = formatToolOutput(
-			"test_tool",
-			"https://api.example.com",
-			{
-				content: [
-					{ type: "text", text: "Block 1" },
-					{ type: "text", text: "Block 2" },
-				],
-			},
-		);
+		const result = formatToolOutput("test_tool", "https://api.example.com", {
+			content: [
+				{ type: "text", text: "Block 1" },
+				{ type: "text", text: "Block 2" },
+			],
+		});
 		expect(result.text).toContain("Block 1");
 		expect(result.text).toContain("Block 2");
 	});
 
 	it("handles non-text content blocks", () => {
-		const result = formatToolOutput(
-			"test_tool",
-			"https://api.example.com",
-			{
-				content: [
-					{ type: "image", url: "https://example.com/img.png" },
-					{ type: "text", text: "Description" },
-				],
-			},
-		);
+		const result = formatToolOutput("test_tool", "https://api.example.com", {
+			content: [
+				{ type: "image", url: "https://example.com/img.png" },
+				{ type: "text", text: "Description" },
+			],
+		});
 		expect(result.text).toContain("Description");
 	});
 

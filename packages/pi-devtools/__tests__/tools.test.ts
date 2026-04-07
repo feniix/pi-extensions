@@ -1,9 +1,7 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	analyzeCommitsTool,
 	bumpVersion,
-	bumpVersionTool,
 	checkCiTool,
 	commitTool,
 	createBranchTool,
@@ -22,7 +20,7 @@ vi.mock("../extensions/git.js", () => ({
 	getDefaultBranch: vi.fn().mockReturnValue("main"),
 }));
 
-import { execGit, execGh } from "../extensions/git.js";
+import { execGh, execGit } from "../extensions/git.js";
 
 describe("pi-devtools", () => {
 	beforeEach(() => {
@@ -112,10 +110,7 @@ describe("pi-devtools", () => {
 		});
 
 		it("handles no staged files", () => {
-			vi.mocked(execGit)
-				.mockReturnValueOnce("feature-branch")
-				.mockReturnValueOnce("")
-				.mockReturnValueOnce("");
+			vi.mocked(execGit).mockReturnValueOnce("feature-branch").mockReturnValueOnce("").mockReturnValueOnce("");
 
 			const result = commitTool("feat: test");
 
@@ -152,9 +147,7 @@ describe("pi-devtools", () => {
 
 	describe("pushTool", () => {
 		it("pushes branch successfully", () => {
-			vi.mocked(execGit)
-				.mockReturnValueOnce("feature-branch")
-				.mockReturnValueOnce("");
+			vi.mocked(execGit).mockReturnValueOnce("feature-branch").mockReturnValueOnce("");
 
 			const result = pushTool();
 
@@ -300,9 +293,7 @@ describe("pi-devtools", () => {
 		it("detects PR from current branch", () => {
 			vi.mocked(execGit).mockReturnValue("feature-branch");
 			vi.mocked(execGh)
-				.mockReturnValueOnce(
-					JSON.stringify([{ number: 456, title: "Feature PR" }]),
-				)
+				.mockReturnValueOnce(JSON.stringify([{ number: 456, title: "Feature PR" }]))
 				.mockReturnValueOnce(JSON.stringify({ title: "Feature PR", url: "https://github.com/456", state: "OPEN" }))
 				.mockReturnValueOnce("");
 
@@ -378,10 +369,7 @@ describe("pi-devtools", () => {
 
 	describe("repoInfoTool", () => {
 		it("returns repo info successfully", () => {
-			vi.mocked(execGit)
-				.mockReturnValueOnce("feature-branch")
-				.mockReturnValueOnce("")
-				.mockReturnValueOnce("");
+			vi.mocked(execGit).mockReturnValueOnce("feature-branch").mockReturnValueOnce("").mockReturnValueOnce("");
 
 			const result = repoInfoTool();
 
@@ -405,9 +393,7 @@ describe("pi-devtools", () => {
 
 		it("parses staged files", () => {
 			// Call sequence: git branch --show-current, git status --porcelain
-			vi.mocked(execGit)
-				.mockReturnValueOnce("feature-branch")
-				.mockReturnValueOnce("A  file1.js\nMM file2.ts");
+			vi.mocked(execGit).mockReturnValueOnce("feature-branch").mockReturnValueOnce("A  file1.js\nMM file2.ts");
 
 			const result = repoInfoTool();
 
@@ -416,9 +402,7 @@ describe("pi-devtools", () => {
 		});
 
 		it("parses untracked files", () => {
-			vi.mocked(execGit)
-				.mockReturnValueOnce("feature-branch")
-				.mockReturnValueOnce("?? untracked.txt");
+			vi.mocked(execGit).mockReturnValueOnce("feature-branch").mockReturnValueOnce("?? untracked.txt");
 
 			const result = repoInfoTool();
 
@@ -426,10 +410,7 @@ describe("pi-devtools", () => {
 		});
 
 		it("reports hasChanges correctly", () => {
-			vi.mocked(execGit)
-				.mockReturnValueOnce("feature-branch")
-				.mockReturnValueOnce("")
-				.mockReturnValueOnce("");
+			vi.mocked(execGit).mockReturnValueOnce("feature-branch").mockReturnValueOnce("").mockReturnValueOnce("");
 
 			const result = repoInfoTool();
 
@@ -439,9 +420,7 @@ describe("pi-devtools", () => {
 
 	describe("getLatestTagTool", () => {
 		it("returns latest tag", () => {
-			vi.mocked(execGit)
-				.mockReturnValueOnce("v1.2.3")
-				.mockReturnValueOnce("10");
+			vi.mocked(execGit).mockReturnValueOnce("v1.2.3").mockReturnValueOnce("10");
 
 			const result = getLatestTagTool();
 
@@ -473,9 +452,7 @@ describe("pi-devtools", () => {
 
 	describe("analyzeCommitsTool", () => {
 		it("analyzes commits and returns minor bump for feat", () => {
-			vi.mocked(execGit)
-				.mockReturnValueOnce("v1.0.0")
-				.mockReturnValueOnce("feat: add new feature");
+			vi.mocked(execGit).mockReturnValueOnce("v1.0.0").mockReturnValueOnce("feat: add new feature");
 
 			const result = analyzeCommitsTool();
 
@@ -485,9 +462,7 @@ describe("pi-devtools", () => {
 		});
 
 		it("returns patch bump for fix", () => {
-			vi.mocked(execGit)
-				.mockReturnValueOnce("v1.0.0")
-				.mockReturnValueOnce("fix: fix bug");
+			vi.mocked(execGit).mockReturnValueOnce("v1.0.0").mockReturnValueOnce("fix: fix bug");
 
 			const result = analyzeCommitsTool();
 
@@ -496,9 +471,7 @@ describe("pi-devtools", () => {
 		});
 
 		it("returns major bump for breaking change", () => {
-			vi.mocked(execGit)
-				.mockReturnValueOnce("v1.0.0")
-				.mockReturnValueOnce("feat!: breaking change");
+			vi.mocked(execGit).mockReturnValueOnce("v1.0.0").mockReturnValueOnce("feat!: breaking change");
 
 			const result = analyzeCommitsTool();
 
@@ -507,9 +480,7 @@ describe("pi-devtools", () => {
 		});
 
 		it("handles no commits", () => {
-			vi.mocked(execGit)
-				.mockReturnValueOnce("")
-				.mockReturnValueOnce("");
+			vi.mocked(execGit).mockReturnValueOnce("").mockReturnValueOnce("");
 
 			const result = analyzeCommitsTool();
 

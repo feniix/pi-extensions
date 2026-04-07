@@ -55,7 +55,7 @@ describe("pi-exa extension", () => {
 		expect(toolNames).not.toContain("web_search_advanced_exa");
 	});
 
-// Skipped: requires mocking config loading which has file system dependencies
+	// Skipped: requires mocking config loading which has file system dependencies
 	it.skip("registers web_search_advanced_exa when advanced enabled", () => {
 		// This test is skipped because the config loading has file system dependencies
 		// that are hard to mock properly in unit tests
@@ -124,7 +124,7 @@ describe("pi-exa extension", () => {
 		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
 		const searchTool = tools.find((t) => t.name === "web_search_exa");
 
-		const result = await searchTool!.execute("call-123", { query: "test" }, undefined, undefined, undefined);
+		const result = await searchTool?.execute("call-123", { query: "test" }, undefined, undefined, undefined);
 
 		// Without API key, should return error
 		expect(result.isError).toBe(true);
@@ -144,7 +144,7 @@ describe("pi-exa extension", () => {
 		const searchTool = tools.find((t) => t.name === "web_search_exa");
 
 		const abortedSignal = { aborted: true } as AbortSignal;
-		const result = await searchTool!.execute("call-123", { query: "test" }, abortedSignal, undefined, undefined);
+		const result = await searchTool?.execute("call-123", { query: "test" }, abortedSignal, undefined, undefined);
 
 		expect(result.details.cancelled).toBe(true);
 	});
@@ -158,7 +158,7 @@ describe("pi-exa extension", () => {
 		const searchTool = tools.find((t) => t.name === "web_search_exa");
 
 		const onUpdate = vi.fn();
-		const result = await searchTool!.execute(
+		const _result = await searchTool?.execute(
 			"call-123",
 			{ query: "test" },
 			{ aborted: false } as AbortSignal,
@@ -181,8 +181,6 @@ describe("pi-exa extension", () => {
 		expect(mockPi2.registerTool).toHaveBeenCalled();
 	});
 
-
-
 	it("web_fetch_exa handles missing API key", async () => {
 		// Clear environment variable
 		const originalEnv = process.env.EXA_API_KEY;
@@ -195,7 +193,13 @@ describe("pi-exa extension", () => {
 		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
 		const fetchTool = tools.find((t) => t.name === "web_fetch_exa");
 
-		const result = await fetchTool!.execute("call-123", { urls: ["https://example.com"] }, undefined, undefined, undefined);
+		const result = await fetchTool?.execute(
+			"call-123",
+			{ urls: ["https://example.com"] },
+			undefined,
+			undefined,
+			undefined,
+		);
 
 		// Without API key, should return error
 		expect(result.isError).toBe(true);

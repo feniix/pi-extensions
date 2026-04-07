@@ -1,12 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { describe, expect, it, afterEach } from "vitest";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
-	DEFAULT_CONFIG_FILE,
 	buildError,
 	buildSuccess,
 	createThoughtTracker,
+	DEFAULT_CONFIG_FILE,
 	formatToolOutput,
 	getExampleThought,
 	isRecord,
@@ -398,7 +398,7 @@ describe("pi-code-reasoning buildSuccess", () => {
 			},
 			tracker,
 		);
-		expect((result.branches as string[])).toContain("my-branch");
+		expect(result.branches as string[]).toContain("my-branch");
 	});
 });
 

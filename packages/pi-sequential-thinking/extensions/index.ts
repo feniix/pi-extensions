@@ -672,7 +672,6 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 	});
 }
 
-
 // Export utilities for testing
 export {
 	DEFAULT_CONFIG_FILE,

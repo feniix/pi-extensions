@@ -45,13 +45,12 @@ describe("pi-notion Extension File Structure", () => {
 		expect(content).toContain("notion_get_me");
 	});
 
-	it("index.ts exports OAuth tools", async () => {
+	it("index.ts uses MCP token for authentication", async () => {
 		const fs = await import("node:fs");
 		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
-		expect(content).toContain("notion_oauth_setup");
-		expect(content).toContain("notion_oauth_status");
-		expect(content).toContain("notion_oauth_logout");
+		expect(content).toContain("notion-mcp.json");
+		expect(content).toContain("accessToken");
 	});
 
 	it("index.ts contains NotionClient class", async () => {
@@ -92,22 +91,13 @@ describe("pi-notion Extension File Structure", () => {
 		expect(content).toContain("getTitleFromProperties");
 	});
 
-	it("index.ts contains OAuth integration", async () => {
+	it("index.ts reads MCP config for auth", async () => {
 		const fs = await import("node:fs");
 		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
-		expect(content).toContain("executeOAuthFlow");
-		expect(content).toContain("FileTokenStorage");
-		expect(content).toContain("getValidAccessToken");
-	});
-
-	it("index.ts registers flags", async () => {
-		const fs = await import("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("registerFlag");
-		expect(content).toContain("--notion-token");
-		expect(content).toContain("--notion-config");
+		expect(content).toContain("getClient");
+		expect(content).toContain("notion-mcp.json");
+		expect(content).toContain("NotionClient");
 	});
 
 	it("index.ts contains error handling", async () => {
@@ -118,23 +108,13 @@ describe("pi-notion Extension File Structure", () => {
 		expect(content).toContain("isError: true");
 	});
 
-	it("index.ts contains token retrieval logic", async () => {
+	it("index.ts uses MCP OAuth token via getClient", async () => {
 		const fs = await import("node:fs");
 		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
-		expect(content).toContain("getToken");
-		expect(content).toContain("getOAuthConfig");
 		expect(content).toContain("getClient");
-	});
-
-	it("index.ts handles multiple auth methods", async () => {
-		const fs = await import("node:fs");
-		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
-
-		expect(content).toContain("getFlag");
 		expect(content).toContain("existsSync");
-		expect(content).toContain("NOTION_TOKEN");
-		expect(content).toContain("oauthConfig");
+		expect(content).toContain("Run /notion to connect via OAuth");
 	});
 
 	it("mcp-client.ts exists and has correct exports", async () => {

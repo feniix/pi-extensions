@@ -114,7 +114,9 @@ describe("validateThoughtData", () => {
 			thought_number: 1,
 			total_thoughts: 3,
 			next_thought_needed: true,
-			is_revision: "yes",
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			// biome-ignore lint/suspicious/noExplicitAny: testing invalid type
+			is_revision: "yes" as any,
 		};
 		expect(validateThoughtData(data)).toContainEqual({
 			field: "is_revision",
@@ -184,7 +186,9 @@ describe("validateThoughtData", () => {
 			thought_number: 1,
 			total_thoughts: 3,
 			next_thought_needed: true,
-			branch_id: 123,
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			// biome-ignore lint/suspicious/noExplicitAny: testing invalid type
+			branch_id: 123 as any,
 		};
 		expect(validateThoughtData(data)).toContainEqual({
 			field: "branch_id",
@@ -197,7 +201,9 @@ describe("validateThoughtData", () => {
 			thought: "",
 			thought_number: -1,
 			total_thoughts: 0,
-			next_thought_needed: "yes",
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			// biome-ignore lint/suspicious/noExplicitAny: testing invalid type
+			next_thought_needed: "yes" as any,
 		};
 		const errors = validateThoughtData(data);
 		expect(errors.length).toBeGreaterThanOrEqual(4);

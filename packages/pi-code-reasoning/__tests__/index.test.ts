@@ -117,7 +117,7 @@ describe("pi-code-reasoning", () => {
 		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
 		const mainTool = tools.find((t) => t.name === "code_reasoning");
 
-		const result = await mainTool!.execute(
+		const result = await mainTool?.execute(
 			"call-123",
 			{
 				thought: "First thought about the problem",
@@ -142,7 +142,7 @@ describe("pi-code-reasoning", () => {
 		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
 		const statusTool = tools.find((t) => t.name === "code_reasoning_status");
 
-		const result = await statusTool!.execute("call-123", {}, undefined, undefined, undefined);
+		const result = await statusTool?.execute("call-123", {}, undefined, undefined, undefined);
 
 		expect(result).toBeDefined();
 		expect(result.content).toBeDefined();
@@ -155,7 +155,7 @@ describe("pi-code-reasoning", () => {
 		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
 		const resetTool = tools.find((t) => t.name === "code_reasoning_reset");
 
-		const result = await resetTool!.execute("call-123", {}, undefined, undefined, undefined);
+		const result = await resetTool?.execute("call-123", {}, undefined, undefined, undefined);
 
 		expect(result).toBeDefined();
 		expect(result.content[0].text).toContain("reset");
@@ -169,7 +169,7 @@ describe("pi-code-reasoning", () => {
 		const mainTool = tools.find((t) => t.name === "code_reasoning");
 
 		// Missing required parameter should fail
-		const result = await mainTool!.execute("call-123", { thought: "" }, undefined, undefined, undefined);
+		const result = await mainTool?.execute("call-123", { thought: "" }, undefined, undefined, undefined);
 
 		expect(result).toBeDefined();
 	});
@@ -182,7 +182,7 @@ describe("pi-code-reasoning", () => {
 		const mainTool = tools.find((t) => t.name === "code_reasoning");
 
 		// Add first thought
-		await mainTool!.execute(
+		await mainTool?.execute(
 			"call-1",
 			{
 				thought: "First thought",
@@ -196,7 +196,7 @@ describe("pi-code-reasoning", () => {
 		);
 
 		// Add second thought
-		const result2 = await mainTool!.execute(
+		const result2 = await mainTool?.execute(
 			"call-2",
 			{
 				thought: "Second thought",

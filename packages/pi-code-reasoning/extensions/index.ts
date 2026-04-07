@@ -421,10 +421,10 @@ const codeReasoningParams = Type.Object(
 // =============================================================================
 
 export {
-	DEFAULT_CONFIG_FILE,
 	buildError,
 	buildSuccess,
 	createThoughtTracker,
+	DEFAULT_CONFIG_FILE,
 	formatToolOutput,
 	getExampleThought,
 	isRecord,

@@ -180,13 +180,7 @@ describe("pi-ref-tools", () => {
 		const searchTool = tools.find((t) => t.name === "ref_search_documentation");
 
 		const abortedSignal = { aborted: true } as AbortSignal;
-		const result = await searchTool!.execute(
-			"call-123",
-			{ query: "test" },
-			abortedSignal,
-			undefined,
-			undefined,
-		);
+		const result = await searchTool?.execute("call-123", { query: "test" }, abortedSignal, undefined, undefined);
 
 		expect(result.content[0].text).toContain("Cancelled");
 		expect(result.details.cancelled).toBe(true);
@@ -200,7 +194,7 @@ describe("pi-ref-tools", () => {
 		const readTool = tools.find((t) => t.name === "ref_read_url");
 
 		const abortedSignal = { aborted: true } as AbortSignal;
-		const result = await readTool!.execute(
+		const result = await readTool?.execute(
 			"call-123",
 			{ url: "https://example.com" },
 			abortedSignal,
@@ -223,7 +217,7 @@ describe("pi-ref-tools", () => {
 		const pendingSignal = { aborted: false } as AbortSignal;
 
 		try {
-			await searchTool!.execute("call-123", { query: "test" }, pendingSignal, onUpdate, undefined);
+			await searchTool?.execute("call-123", { query: "test" }, pendingSignal, onUpdate, undefined);
 		} catch {
 			// Expected to fail without real MCP server
 		}

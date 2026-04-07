@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ThoughtStorage } from "../extensions/index.js";
 import type { ThoughtData } from "../extensions/types.js";
+import { ThoughtStage } from "../extensions/types.js";
 
 const createThought = (overrides: Partial<ThoughtData> = {}): ThoughtData => ({
 	id: "test-id-1",
@@ -11,7 +12,7 @@ const createThought = (overrides: Partial<ThoughtData> = {}): ThoughtData => ({
 	thought_number: 1,
 	total_thoughts: 3,
 	next_thought_needed: true,
-	stage: "Analysis",
+	stage: ThoughtStage.ANALYSIS,
 	timestamp: new Date().toISOString(),
 	tags: [],
 	axioms_used: [],
@@ -37,7 +38,7 @@ describe("ThoughtStorage", () => {
 
 	describe("constructor", () => {
 		it("creates storage with custom directory", () => {
-			const storage = new ThoughtStorage(tempDir);
+			const _storage = new ThoughtStorage(tempDir);
 			expect(existsSync(tempDir)).toBe(true);
 		});
 

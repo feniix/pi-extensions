@@ -20,8 +20,6 @@ interface ToolResult {
 	isError?: boolean;
 }
 
-
-
 function parseConventionalCommit(message: string): { type: string; scope?: string; breaking: boolean } {
 	const match = message.match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/);
 	if (!match) {
@@ -50,8 +48,6 @@ function bumpVersion(version: string, type: "major" | "minor" | "patch"): string
 			return `${major}.${minor}.${patch + 1}`;
 	}
 }
-
-
 
 // =============================================================================
 // Tool Parameters
@@ -610,24 +606,24 @@ function createReleaseTool(tag: string, title: string, body?: string, draft = fa
 // =============================================================================
 
 export {
-analyzeCommitsTool,
-bumpVersion,
-bumpVersionTool,
-checkCiTool,
-commitTool,
-createBranchTool,
-createPrTool,
-createReleaseTool,
-getDefaultBranch,
-getLatestTagTool,
-mergePrTool,
-parseConventionalCommit,
-pushTool,
-repoInfoTool,
+	analyzeCommitsTool,
+	bumpVersion,
+	bumpVersionTool,
+	checkCiTool,
+	commitTool,
+	createBranchTool,
+	createPrTool,
+	createReleaseTool,
+	execGh,
+	execGit,
+	getDefaultBranch,
+	getLatestTagTool,
+	mergePrTool,
+	parseConventionalCommit,
+	pushTool,
+	repoInfoTool,
+	repoInfoTool as getRepoInfo,
 };
-
-export { execGh, execGit };
-export { repoInfoTool as getRepoInfo };
 
 // =============================================================================
 // Extension Entry Point
