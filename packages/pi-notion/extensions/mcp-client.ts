@@ -161,13 +161,14 @@ async function exchangeCodeForToken(
 	redirectUri: string,
 	codeVerifier: string,
 ): Promise<{ accessToken: string }> {
-	const response = await fetch("https://api.notion.com/v1/oauth/token", {
+	const response = await fetch("https://mcp.notion.com/token", {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
 		},
 		body: JSON.stringify({
 			grant_type: "authorization_code",
+			client_id: "mcp-client",
 			code,
 			redirect_uri: redirectUri,
 			code_verifier: codeVerifier,
