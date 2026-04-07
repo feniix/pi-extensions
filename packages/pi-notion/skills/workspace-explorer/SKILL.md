@@ -6,7 +6,7 @@ context: fork
 
 # Notion Workspace Explorer
 
-Explore and navigate Notion workspaces using Notion MCP tools.
+Explore and navigate Notion workspaces after connecting with the setup-oauth skill.
 
 ## Prerequisites
 
@@ -14,74 +14,42 @@ Ensure Notion MCP is connected:
 ```
 notion_mcp_status
 ```
-If not connected, run `/notion` to start the OAuth flow.
+If not connected, use the **setup-oauth** skill first.
 
-## Tool Usage
+## Common Workflows
 
-### 1. Search for Content
+### 1. Find and Read a Page
 
-Use `notion-search` to find pages/databases:
-- `notion-search { "query": "project planning" }` - Search by keyword
-- `notion-search { "query": "tasks", "type": "page" }` - Search only pages
-
-### 2. Get Page Content
-
-Use `notion-fetch` to retrieve page details:
 ```
-notion-fetch { "id": "https://notion.so/Page-Title-abc123" }
+notion-search: { "query": "quarterly report" }
+# Note the page URL or ID from results
+
+notion-fetch: { "id": "https://notion.so/Page-Title-abc123" }
 ```
 
-### 3. Explore Database
+### 2. Query a Database
 
-Use `notion-get-database` to get schema:
 ```
-notion-get-database { "databaseId": "abc123..." }
-```
-
-Use `notion-query-database` to query rows:
-```
-notion-query-database { "databaseId": "abc123...", "pageSize": 10 }
+notion-get-database: { "databaseId": "xyz789..." }
+notion-query-database: { "databaseId": "xyz789..." }
 ```
 
-### 4. Get Page Blocks
+### 3. Get Meeting Notes
 
-Use `notion-get-block-children`:
 ```
-notion-get-block-children { "blockId": "abc123..." }
-```
-
-### 5. Get Current User
-
-Use `notion-get-users` or `notion-get-teams`:
-```
-notion-get-users
-notion-get-teams
+notion-query-meeting-notes: {}
 ```
 
-## Examples
+### 4. List Teamspaces and Users
 
-### Find and read a page
 ```
-notion-search { "query": "quarterly report" }
-notion-fetch { "id": "abc123..." }
-notion-get-block-children { "blockId": "abc123..." }
-```
-
-### Explore a database
-```
-notion-search { "query": "tasks", "data_source_url": "collection://xyz789" }
-notion-get-database { "databaseId": "xyz789" }
-notion-query-database { "databaseId": "xyz789" }
-```
-
-### Get meeting notes
-```
-notion-query-meeting-notes {}
+notion-get-teams: {}
+notion-get-users: {}
 ```
 
 ## Tips
 
-- Use `notion-search` for quick search across all content
-- Pass page URLs directly to `notion-fetch`
-- Add filters to `notion-query-database` for specific results
-- Use `notion-get-teams` to find available teamspaces
+- Pass page URLs directly to `notion-fetch` - no need to extract IDs
+- Use `notion-search` for quick discovery across all content
+- Add date filters to narrow meeting notes by timeframe
+- Check the workspace-explorer skill for more advanced queries
