@@ -161,18 +161,19 @@ async function exchangeCodeForToken(
 	redirectUri: string,
 	codeVerifier: string,
 ): Promise<{ accessToken: string }> {
+	const body = new URLSearchParams({
+		grant_type: "authorization_code",
+		client_id: "mcp-client",
+		code,
+		redirect_uri: redirectUri,
+		code_verifier: codeVerifier,
+	});
 	const response = await fetch("https://mcp.notion.com/token", {
 		method: "POST",
 		headers: {
-			"Content-Type": "application/json",
+			"Content-Type": "application/x-www-form-urlencoded",
 		},
-		body: JSON.stringify({
-			grant_type: "authorization_code",
-			client_id: "mcp-client",
-			code,
-			redirect_uri: redirectUri,
-			code_verifier: codeVerifier,
-		}),
+		body: body.toString(),
 	});
 
 	if (!response.ok) {
