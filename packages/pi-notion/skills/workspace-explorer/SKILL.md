@@ -31,7 +31,7 @@ notion-fetch: { "id": "https://notion.so/Page-Title-abc123" }
 
 ```
 notion-get-database: { "databaseId": "xyz789..." }
-notion-query-database: { "databaseId": "xyz789..." }
+notion-query-database-view: { "view_url": "https://www.notion.so/workspace/xyz789?v=viewId" }
 ```
 
 ### 3. Get Meeting Notes
@@ -52,4 +52,10 @@ notion-get-users: {}
 - Pass page URLs directly to `notion-fetch` - no need to extract IDs
 - Use `notion-search` for quick discovery across all content
 - Add date filters to narrow meeting notes by timeframe
-- Check the workspace-explorer skill for more advanced queries
+- For database views, use the full view URL from the database page
+
+## Alternative: Direct API Tools
+
+If connected via direct API instead of MCP, use underscore-named tools:
+- `notion_search`, `notion_get_page`, `notion_get_database`, `notion_query_database`
+- Same workflows apply, just different tool names
