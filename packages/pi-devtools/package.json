@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-devtools",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Devtools extension for pi — branch and PR workflow, release automation, merge commands",
   "keywords": [
     "pi",
