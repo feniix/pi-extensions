@@ -53,18 +53,29 @@ interface OAuthMetadata {
 	authorization_endpoint: string;
 	token_endpoint: string;
 	registration_endpoint?: string;
+	client_id: string;
+	client_secret?: string;
 }
 
 /**
  * Get Notion OAuth metadata.
- * Uses the standard Notion OAuth endpoints since MCP discovery requires auth.
+ * If config exists with client credentials, use those. Otherwise try MCP server auth.
  */
-async function getOAuthMetadata(): Promise<OAuthMetadata> {
-	// Notion's OAuth endpoints (public)
+async function getOAuthMetadata(config?: { clientId: string; clientSecret: string }): Promise<OAuthMetadata> {
+	if (config?.clientId && config?.clientSecret) {
+		return {
+			authorization_endpoint: "https://api.notion.com/v1/oauth/authorize",
+			token_endpoint: "https://api.notion.com/v1/oauth/token",
+			registration_endpoint: "https://api.notion.com/v1/oauth/register",
+			client_id: config.clientId,
+			client_secret: config.clientSecret,
+		};
+	}
+	// Use MCP server's authorize endpoint which handles OAuth internally
 	return {
-		authorization_endpoint: "https://api.notion.com/v1/oauth/authorize",
+		authorization_endpoint: "https://mcp.notion.com/authorize",
 		token_endpoint: "https://api.notion.com/v1/oauth/token",
-		registration_endpoint: "https://api.notion.com/v1/oauth/register",
+		client_id: "mcp-client",
 	};
 }
 
@@ -612,14 +623,31 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 					const state = generateState();
 					const callbackUrl = `http://localhost:${CALLBACK_PORT}/callback`;
 
-					// Register client dynamically
-					notify("Registering with Notion...");
-					const credentials = await registerClient(oauthMetadata, callbackUrl);
+					// Get client credentials (from config or use MCP client placeholder)
+					let clientId = oauthMetadata.client_id;
+					let clientSecret = oauthMetadata.client_secret;
+
+					// If using MCP authorize endpoint - no registration needed
+					if (clientId === "mcp-client") {
+						notify("Using MCP server authorization...");
+					} else {
+						// Try dynamic registration for standard OAuth
+						try {
+							notify("Registering with Notion...");
+							const credentials = await registerClient(oauthMetadata, callbackUrl);
+							clientId = credentials.client_id;
+							clientSecret = credentials.client_secret;
+						} catch {
+							// Fall back to MCP authorize endpoint
+							oauthMetadata.authorization_endpoint = "https://mcp.notion.com/authorize";
+							clientId = "mcp-client";
+						}
+					}
 
 					// Build authorization URL
 					const authUrl = new URL(oauthMetadata.authorization_endpoint);
 					authUrl.searchParams.set("response_type", "code");
-					authUrl.searchParams.set("client_id", credentials.client_id);
+					authUrl.searchParams.set("client_id", clientId);
 					authUrl.searchParams.set("redirect_uri", callbackUrl);
 					authUrl.searchParams.set("code_challenge", codeChallenge);
 					authUrl.searchParams.set("code_challenge_method", "S256");
@@ -646,16 +674,16 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 						result.code,
 						codeVerifier,
 						oauthMetadata,
-						credentials.client_id,
-						credentials.client_secret,
+						clientId,
+						clientSecret,
 						callbackUrl,
 					);
 
 					// Store tokens
 					const storage = new FileTokenStorage();
 					await storage.save({
-						clientId: credentials.client_id,
-						clientSecret: credentials.client_secret,
+						clientId: clientId,
+						clientSecret: clientSecret,
 						accessToken: tokens.access_token,
 						refreshToken: tokens.refresh_token || "",
 						expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000,
@@ -731,13 +759,31 @@ Tools: ${tools.length} available`;
 				const state = generateState();
 				const callbackUrl = `http://localhost:${CALLBACK_PORT}/callback`;
 
-				// Register client dynamically
-				const credentials = await registerClient(oauthMetadata, callbackUrl);
+				// Get client credentials (from config or use MCP client placeholder)
+				let clientId = oauthMetadata.client_id;
+				let clientSecret = oauthMetadata.client_secret;
+
+				// If using MCP authorize endpoint - no registration needed
+				if (clientId === "mcp-client") {
+					notify("Using MCP server authorization...");
+				} else {
+					// Try dynamic registration for standard OAuth
+					try {
+						notify("Registering with Notion...");
+						const credentials = await registerClient(oauthMetadata, callbackUrl);
+						clientId = credentials.client_id;
+						clientSecret = credentials.client_secret;
+					} catch {
+						// Fall back to MCP authorize endpoint
+						oauthMetadata.authorization_endpoint = "https://mcp.notion.com/authorize";
+						clientId = "mcp-client";
+					}
+				}
 
 				// Build authorization URL
 				const authUrl = new URL(oauthMetadata.authorization_endpoint);
 				authUrl.searchParams.set("response_type", "code");
-				authUrl.searchParams.set("client_id", credentials.client_id);
+				authUrl.searchParams.set("client_id", clientId);
 				authUrl.searchParams.set("redirect_uri", callbackUrl);
 				authUrl.searchParams.set("code_challenge", codeChallenge);
 				authUrl.searchParams.set("code_challenge_method", "S256");
@@ -767,16 +813,16 @@ Tools: ${tools.length} available`;
 					result.code,
 					codeVerifier,
 					oauthMetadata,
-					credentials.client_id,
-					credentials.client_secret,
+					clientId,
+					clientSecret,
 					callbackUrl,
 				);
 
 				// Store tokens
 				const storage = new FileTokenStorage();
 				await storage.save({
-					clientId: credentials.client_id,
-					clientSecret: credentials.client_secret,
+					clientId: clientId,
+					clientSecret: clientSecret,
 					accessToken: tokens.access_token,
 					refreshToken: tokens.refresh_token || "",
 					expiresAt: Date.now() + (tokens.expires_in || 3600) * 1000,
