@@ -247,15 +247,18 @@ class NotionMCPClient {
 		this.state.mcpUrl = mcpUrl;
 		this.state.authenticated = true;
 
-		// Initialize MCP connection
+		// Initialize MCP connection (session ID captured from response header in sendRequest)
 		await this.sendRequest(mcpUrl, "initialize", {
 			protocolVersion: "2024-11-05",
 			capabilities: {},
 			clientInfo: { name: "pi-notion", version: "1.0.0" },
 		});
 
-		this.sessionId = randomBytes(16).toString("hex");
-		this.state.sessionId = this.sessionId;
+		// If server didn't return a session ID, generate one locally
+		if (!this.sessionId) {
+			this.sessionId = randomBytes(16).toString("hex");
+			this.state.sessionId = this.sessionId;
+		}
 		this.state.connected = true;
 
 		// Discover tools
@@ -320,11 +323,40 @@ class NotionMCPClient {
 			throw new Error(`HTTP ${response.status}: ${errorText}`);
 		}
 
-		const data = await response.json();
+		// Capture session ID from response headers
+		const sessionHeader = response.headers.get("mcp-session-id");
+		if (sessionHeader) {
+			this.sessionId = sessionHeader;
+			this.state.sessionId = sessionHeader;
+		}
+
+		const contentType = response.headers.get("content-type") || "";
+		let data: { result?: unknown; error?: { message: string } };
+
+		if (contentType.includes("text/event-stream")) {
+			data = await this.parseSSEResponse(response);
+		} else {
+			data = await response.json();
+		}
+
 		if (data.error) {
 			throw new Error(`MCP Error: ${data.error.message}`);
 		}
 		return data.result;
+	}
+
+	private async parseSSEResponse(response: Response): Promise<{ result?: unknown; error?: { message: string } }> {
+		const text = await response.text();
+		const lines = text.split("\n");
+		for (const line of lines) {
+			if (line.startsWith("data: ")) {
+				const jsonStr = line.slice(6).trim();
+				if (jsonStr) {
+					return JSON.parse(jsonStr);
+				}
+			}
+		}
+		throw new Error("No data found in SSE response");
 	}
 
 	private async sendNotification(mcpUrl: string, method: string, params: Record<string, unknown>): Promise<void> {
