@@ -6,61 +6,82 @@ context: fork
 
 # Notion Workspace Explorer
 
-Explore and navigate Notion workspaces using native tools.
+Explore and navigate Notion workspaces using Notion MCP tools.
 
-## Tool Restrictions (Critical)
+## Prerequisites
 
-Use ONLY these tools:
-- `notion_search` - Search pages and databases
-- `notion_get_page` - Retrieve page details
-- `notion_get_database` - Get database schema
-- `notion_query_database` - Query database contents
-- `notion_get_block_children` - Get page content
-- `notion_get_me` - Get current user info
+Ensure Notion MCP is connected:
+```
+notion_mcp_status
+```
+If not connected, run `/notion` to start the OAuth flow.
 
-## Workflow
+## Tool Usage
 
-### 1. Identify User and Workspace
+### 1. Search for Content
 
-Call `notion_get_me` first to confirm authentication.
+Use `notion-search` to find pages/databases:
+- `notion-search { "query": "project planning" }` - Search by keyword
+- `notion-search { "query": "tasks", "type": "page" }` - Search only pages
 
-### 2. Search for Content
+### 2. Get Page Content
 
-Use `notion_search` with a query to find pages/databases:
-- `notion_search { query: "project planning" }` - Search by keyword
-- `notion_search { query: "meetings", type: "database" }` - Search only databases
+Use `notion-fetch` to retrieve page details:
+```
+notion-fetch { "id": "https://notion.so/Page-Title-abc123" }
+```
 
-### 3. Explore Page Structure
+### 3. Explore Database
 
-For a found page:
-1. `notion_get_page { pageId: "xxx" }` - Get page metadata
-2. `notion_get_block_children { blockId: "xxx" }` - Get page content
+Use `notion-get-database` to get schema:
+```
+notion-get-database { "databaseId": "abc123..." }
+```
 
-### 4. Explore Database
+Use `notion-query-database` to query rows:
+```
+notion-query-database { "databaseId": "abc123...", "pageSize": 10 }
+```
 
-For a database:
-1. `notion_get_database { databaseId: "xxx" }` - Get schema
-2. `notion_query_database { databaseId: "xxx" }` - Query rows
+### 4. Get Page Blocks
+
+Use `notion-get-block-children`:
+```
+notion-get-block-children { "blockId": "abc123..." }
+```
+
+### 5. Get Current User
+
+Use `notion-get-users` or `notion-get-teams`:
+```
+notion-get-users
+notion-get-teams
+```
 
 ## Examples
 
-### Find a page and read it
+### Find and read a page
 ```
-notion_get_me
-notion_search { query: "quarterly report" }
-notion_get_page { pageId: "abc123" }
-notion_get_block_children { blockId: "abc123" }
+notion-search { "query": "quarterly report" }
+notion-fetch { "id": "abc123..." }
+notion-get-block-children { "blockId": "abc123..." }
 ```
 
 ### Explore a database
 ```
-notion_search { query: "tasks", type: "database" }
-notion_get_database { databaseId: "xyz789" }
-notion_query_database { databaseId: "xyz789", pageSize: 10 }
+notion-search { "query": "tasks", "data_source_url": "collection://xyz789" }
+notion-get-database { "databaseId": "xyz789" }
+notion-query-database { "databaseId": "xyz789" }
+```
+
+### Get meeting notes
+```
+notion-query-meeting-notes {}
 ```
 
 ## Tips
 
-- Use `notion_search` without type filter to search everything
-- Add `pageSize` to `query_database` for pagination control
-- Block children include paragraphs, headings, lists, etc.
+- Use `notion-search` for quick search across all content
+- Pass page URLs directly to `notion-fetch`
+- Add filters to `notion-query-database` for specific results
+- Use `notion-get-teams` to find available teamspaces
