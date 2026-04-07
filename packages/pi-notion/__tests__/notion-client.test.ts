@@ -11,10 +11,7 @@ import { describe, expect, it } from "vitest";
 describe("pi-notion Extension File Structure", () => {
 	it("index.ts exports all page tools", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("notion_get_page");
 		expect(content).toContain("notion_create_page");
@@ -24,10 +21,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts exports all database tools", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("notion_get_database");
 		expect(content).toContain("notion_query_database");
@@ -36,10 +30,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts exports block tools", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("notion_get_block_children");
 		expect(content).toContain("notion_append_blocks");
@@ -47,10 +38,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts exports search and user tools", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("notion_search");
 		expect(content).toContain("notion_get_user");
@@ -59,10 +47,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts exports OAuth tools", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("notion_oauth_setup");
 		expect(content).toContain("notion_oauth_status");
@@ -71,10 +56,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts contains NotionClient class", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("class NotionClient");
 		expect(content).toContain("axios.create");
@@ -82,10 +64,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts contains API constants", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("NOTION_API_BASE");
 		expect(content).toContain("NOTION_VERSION");
@@ -94,10 +73,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts contains config loading functions", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("resolveConfigPath");
 		expect(content).toContain("loadConfig");
@@ -107,10 +83,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts contains formatting functions", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("formatPage");
 		expect(content).toContain("formatDatabase");
@@ -121,10 +94,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts contains OAuth integration", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("executeOAuthFlow");
 		expect(content).toContain("FileTokenStorage");
@@ -133,10 +103,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts registers flags", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("registerFlag");
 		expect(content).toContain("--notion-token");
@@ -145,10 +112,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts contains error handling", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("Notion error:");
 		expect(content).toContain("isError: true");
@@ -156,10 +120,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts contains token retrieval logic", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("getToken");
 		expect(content).toContain("getOAuthConfig");
@@ -168,10 +129,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("index.ts handles multiple auth methods", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("getFlag");
 		expect(content).toContain("existsSync");
@@ -191,10 +149,7 @@ describe("pi-notion Extension File Structure", () => {
 
 	it("oauth.ts exists and has correct exports", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/oauth.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/oauth.ts", "utf-8");
 
 		expect(content).toContain("export function generateCodeVerifier");
 		expect(content).toContain("export class FileTokenStorage");
@@ -208,10 +163,7 @@ describe("pi-notion Extension File Structure", () => {
 describe("pi-notion NotionClient Implementation", () => {
 	it("has getPage method", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("async getPage");
 		expect(content).toContain("/pages/");
@@ -219,21 +171,15 @@ describe("pi-notion NotionClient Implementation", () => {
 
 	it("has createPage method", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("async createPage");
-		expect(content).toContain('parent: { [parentType]: parentId }');
+		expect(content).toContain("parent: { [parentType]: parentId }");
 	});
 
 	it("has updatePage method", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("async updatePage");
 		expect(content).toContain("this.client.patch");
@@ -241,10 +187,7 @@ describe("pi-notion NotionClient Implementation", () => {
 
 	it("has getDatabase method", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("async getDatabase");
 		expect(content).toContain("/databases/");
@@ -252,10 +195,7 @@ describe("pi-notion NotionClient Implementation", () => {
 
 	it("has queryDatabase method", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("async queryDatabase");
 		expect(content).toContain("/query");
@@ -265,21 +205,15 @@ describe("pi-notion NotionClient Implementation", () => {
 
 	it("has createDatabase method", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("async createDatabase");
-		expect(content).toContain('parent: { page_id:');
+		expect(content).toContain("parent: { page_id:");
 	});
 
 	it("has getBlockChildren method", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("async getBlockChildren");
 		expect(content).toContain("/blocks/");
@@ -288,31 +222,22 @@ describe("pi-notion NotionClient Implementation", () => {
 
 	it("has appendBlockChildren method", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("async appendBlockChildren");
 	});
 
 	it("has search method", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("async search(");
-		expect(content).toContain('query: string');
+		expect(content).toContain("query: string");
 	});
 
 	it("has getUser method", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("async getUser");
 		expect(content).toContain("/users/");
@@ -320,10 +245,7 @@ describe("pi-notion NotionClient Implementation", () => {
 
 	it("has getMe method", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("async getMe");
 		expect(content).toContain("/users/me");
@@ -331,10 +253,7 @@ describe("pi-notion NotionClient Implementation", () => {
 
 	it("has Authorization header setup", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("Authorization");
 		expect(content).toContain("Bearer");
@@ -343,10 +262,7 @@ describe("pi-notion NotionClient Implementation", () => {
 
 	it("has proper Notion API version header", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("NOTION_VERSION");
 		expect(content).toContain("2025-09-03");
@@ -360,10 +276,7 @@ describe("pi-notion NotionClient Implementation", () => {
 describe("pi-notion Tool Registration Details", () => {
 	it("has correct tool parameters schemas", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("Type.Object");
 		expect(content).toContain("Type.String");
@@ -372,10 +285,7 @@ describe("pi-notion Tool Registration Details", () => {
 
 	it("returns content array in tool responses", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("content: [{");
 		expect(content).toContain('type: "text"');
@@ -383,10 +293,7 @@ describe("pi-notion Tool Registration Details", () => {
 
 	it("includes details in tool responses", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		expect(content).toContain("details: {");
 		expect(content).toContain("tool:");
@@ -394,10 +301,7 @@ describe("pi-notion Tool Registration Details", () => {
 
 	it("has execute function for each tool", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/index.ts", "utf-8");
 
 		const toolCount = (content.match(/async execute\(/g) || []).length;
 		expect(toolCount).toBeGreaterThan(10);

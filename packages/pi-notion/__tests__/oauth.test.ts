@@ -5,7 +5,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
 	buildAuthorizationUrl,
 	FileTokenStorage,
@@ -254,10 +254,7 @@ describe("pi-notion FileTokenStorage", () => {
 describe("pi-notion OAuth File Structure", () => {
 	it("oauth.ts contains PKCE functions", async () => {
 		const fs = await import("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/oauth.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/oauth.ts", "utf-8");
 
 		expect(content).toContain("generateCodeVerifier");
 		expect(content).toContain("generateCodeChallenge");
@@ -266,10 +263,7 @@ describe("pi-notion OAuth File Structure", () => {
 
 	it("oauth.ts contains token exchange functions", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/oauth.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/oauth.ts", "utf-8");
 
 		expect(content).toContain("exchangeCodeForTokens");
 		expect(content).toContain("refreshTokens");
@@ -277,10 +271,7 @@ describe("pi-notion OAuth File Structure", () => {
 
 	it("oauth.ts contains storage class", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/oauth.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/oauth.ts", "utf-8");
 
 		expect(content).toContain("FileTokenStorage");
 		expect(content).toContain("TokenStorage");
@@ -288,10 +279,7 @@ describe("pi-notion OAuth File Structure", () => {
 
 	it("oauth.ts contains OAuth flow functions", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/oauth.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/oauth.ts", "utf-8");
 
 		expect(content).toContain("executeOAuthFlow");
 		expect(content).toContain("getValidAccessToken");
@@ -300,10 +288,7 @@ describe("pi-notion OAuth File Structure", () => {
 
 	it("oauth.ts contains type definitions", () => {
 		const fs = require("node:fs");
-		const content = fs.readFileSync(
-			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/oauth.ts",
-			"utf-8",
-		);
+		const content = fs.readFileSync("/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/oauth.ts", "utf-8");
 
 		expect(content).toContain("OAuthConfig");
 		expect(content).toContain("OAuthTokens");

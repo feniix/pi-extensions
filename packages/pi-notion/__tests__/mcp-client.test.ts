@@ -1,7 +1,7 @@
 /**
  * Tests for Notion MCP Client
  *
- * Note: The SimpleMCPClient and other functions are internal to the module.
+ * Note: The NotionMCPClient and other functions are internal to the module.
  * These tests verify the file structure and functionality through static analysis.
  */
 
@@ -12,15 +12,15 @@ import { describe, expect, it } from "vitest";
 // =============================================================================
 
 describe("pi-notion MCP Client File Structure", () => {
-	it("mcp-client.ts contains SimpleMCPClient class", () => {
+	it("mcp-client.ts contains NotionMCPClient class", () => {
 		const fs = require("node:fs");
 		const content = fs.readFileSync(
 			"/Users/feniix/src/personal/pidev/packages/pi-notion/extensions/mcp-client.ts",
 			"utf-8",
 		);
 
-		expect(content).toContain("SimpleMCPClient");
-		expect(content).toContain("class SimpleMCPClient");
+		expect(content).toContain("NotionMCPClient");
+		expect(content).toContain("class NotionMCPClient");
 	});
 
 	it("mcp-client.ts contains OAuth callback handling", () => {
@@ -30,7 +30,7 @@ describe("pi-notion MCP Client File Structure", () => {
 			"utf-8",
 		);
 
-		expect(content).toContain("waitForOAuthCallback");
+		expect(content).toContain("startOAuthCallbackServer");
 		expect(content).toContain("openBrowser");
 	});
 
@@ -266,7 +266,7 @@ describe("pi-notion MCP Client Implementation Details", () => {
 
 		expect(content).toContain("response.ok");
 		expect(content).toContain("HTTP");
-		expect(content).toContain("statusText");
+		expect(content).toContain("response.status");
 	});
 
 	it("tests JSON-RPC error handling", () => {
@@ -309,7 +309,7 @@ describe("pi-notion MCP Client Implementation Details", () => {
 			"utf-8",
 		);
 
-		expect(content).toContain("generateSessionId");
+		expect(content).toContain("randomBytes(16)");
 		expect(content).toContain("toString");
 		expect(content).toContain('"hex"');
 	});

@@ -156,7 +156,11 @@ async function startOAuthCallbackServer(port: number, state: string, timeoutMs =
 // Token Exchange
 // =============================================================================
 
-async function exchangeCodeForToken(code: string, redirectUri: string): Promise<{ accessToken: string }> {
+async function exchangeCodeForToken(
+	code: string,
+	redirectUri: string,
+	codeVerifier: string,
+): Promise<{ accessToken: string }> {
 	const response = await fetch("https://api.notion.com/v1/oauth/token", {
 		method: "POST",
 		headers: {
@@ -166,6 +170,7 @@ async function exchangeCodeForToken(code: string, redirectUri: string): Promise<
 			grant_type: "authorization_code",
 			code,
 			redirect_uri: redirectUri,
+			code_verifier: codeVerifier,
 		}),
 	});
 
@@ -520,7 +525,7 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 						// Exchange code for token
 						ctx.ui.notify("Exchanging authorization code for token...", "info");
 						try {
-							const tokenResult = await exchangeCodeForToken(result.code, callbackUrl);
+							const tokenResult = await exchangeCodeForToken(result.code, callbackUrl, codeVerifier);
 							accessToken = tokenResult.accessToken;
 						} catch (error) {
 							const message = error instanceof Error ? error.message : String(error);
@@ -660,7 +665,7 @@ Tools: ${tools.length} available`;
 					accessToken = result.accessToken;
 				} else if (result.code) {
 					notify("Exchanging authorization code for token...");
-					const tokenResult = await exchangeCodeForToken(result.code, callbackUrl);
+					const tokenResult = await exchangeCodeForToken(result.code, callbackUrl, codeVerifier);
 					accessToken = tokenResult.accessToken;
 				} else {
 					return {

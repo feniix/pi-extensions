@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -191,9 +191,7 @@ describe("pi-notion formatBlocks", () => {
 
 	it("handles unknown block types", () => {
 		const result = formatBlocks({
-			results: [
-				{ type: "unknown_type", id: "1" },
-			],
+			results: [{ type: "unknown_type", id: "1" }],
 		});
 		expect(result).toContain("unknown_type");
 	});
