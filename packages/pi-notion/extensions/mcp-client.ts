@@ -385,8 +385,43 @@ class NotionMCPClient {
 		}
 	}
 
+	/**
+	 * Coerce numeric string values in "properties" objects back to numbers.
+	 *
+	 * The Notion API requires NUMBER properties to be actual JSON numbers, but
+	 * pi's framework may deliver them as strings (e.g. "1" instead of 1) when
+	 * the tool schema uses Type.Unsafe(). This walks the arguments and converts
+	 * any numeric string inside a "properties" object back to a number.
+	 */
+	private coerceNumericProperties(obj: unknown): unknown {
+		if (obj === null || obj === undefined) return obj;
+		if (Array.isArray(obj)) return obj.map((item) => this.coerceNumericProperties(item));
+		if (typeof obj === "object") {
+			const result: Record<string, unknown> = {};
+			for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+				if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
+					// Coerce numeric strings inside properties
+					const props: Record<string, unknown> = {};
+					for (const [propName, propValue] of Object.entries(value as Record<string, unknown>)) {
+						if (typeof propValue === "string" && propValue.trim() !== "" && !Number.isNaN(Number(propValue))) {
+							props[propName] = Number(propValue);
+						} else {
+							props[propName] = this.coerceNumericProperties(propValue);
+						}
+					}
+					result[key] = props;
+				} else {
+					result[key] = this.coerceNumericProperties(value);
+				}
+			}
+			return result;
+		}
+		return obj;
+	}
+
 	async callTool(mcpUrl: string, name: string, args: Record<string, unknown>): Promise<string> {
-		const result = await this.sendRequest(mcpUrl, "tools/call", { name, arguments: args });
+		const coerced = this.coerceNumericProperties(args);
+		const result = await this.sendRequest(mcpUrl, "tools/call", { name, arguments: coerced });
 
 		// Format result
 		const content = (result as { content?: Array<{ type: string; text?: string }> })?.content;
