@@ -53,8 +53,19 @@ interface OAuthCallbackResult {
 	errorDescription?: string;
 }
 
-async function startOAuthCallbackServer(port: number, state: string, timeoutMs = 300000): Promise<OAuthCallbackResult> {
-	return new Promise((resolve, reject) => {
+interface OAuthCallbackServerResult {
+	port: number;
+	result: Promise<OAuthCallbackResult>;
+}
+
+async function startOAuthCallbackServer(
+	preferredPort: number,
+	state: string,
+	timeoutMs = 300000,
+): Promise<OAuthCallbackServerResult> {
+	const port = await lookupPort({ port: preferredPort });
+
+	const resultPromise = new Promise<OAuthCallbackResult>((resolve, reject) => {
 		const timeout = setTimeout(() => {
 			server.close();
 			reject(new Error("OAuth callback timed out (5 minutes)"));
@@ -134,22 +145,14 @@ async function startOAuthCallbackServer(port: number, state: string, timeoutMs =
 		});
 
 		server.on("error", (err: NodeJS.ErrnoException) => {
-			if (err.code === "EADDRINUSE") {
-				lookupPort({ port: port + 1 })
-					.then((newPort) => {
-						server.close();
-						reject(new Error(`Port ${newPort} already in use`));
-					})
-					.catch(reject);
-			}
+			clearTimeout(timeout);
+			reject(new Error(`Callback server error: ${err.message}`));
 		});
 
-		lookupPort({ port })
-			.then((availablePort) => {
-				server.listen(availablePort, "127.0.0.1", () => {});
-			})
-			.catch(reject);
+		server.listen(port, "127.0.0.1", () => {});
 	});
+
+	return { port, result: resultPromise };
 }
 
 // =============================================================================
@@ -554,9 +557,11 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 				}
 
 				// Start OAuth flow
-				const CALLBACK_PORT = 3000;
 				const state = randomBytes(16).toString("hex");
-				const callbackUrl = `http://localhost:${CALLBACK_PORT}/callback`;
+
+				// Start callback server on an available port
+				const callbackServer = await startOAuthCallbackServer(3000, state);
+				const callbackUrl = `http://localhost:${callbackServer.port}/callback`;
 
 				// Dynamic client registration
 				ctx.ui.notify("Registering OAuth client...", "info");
@@ -584,9 +589,6 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 
 				ctx.ui.notify("Opening Notion authorization page...", "info");
 
-				// Start callback server
-				const callbackPromise = startOAuthCallbackServer(CALLBACK_PORT, state);
-
 				// Open browser
 				await openBrowser(authUrl.toString());
 
@@ -594,7 +596,7 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 
 				// Wait for callback
 				try {
-					const result = await callbackPromise;
+					const result = await callbackServer.result;
 
 					if (result.error) {
 						ctx.ui.notify(`Authorization failed: ${result.error}`, "error");
@@ -720,9 +722,11 @@ Tools: ${tools.length} available`;
 			// Start OAuth flow
 			notify("Starting OAuth flow...");
 
-			const CALLBACK_PORT = 3000;
 			const state = randomBytes(16).toString("hex");
-			const callbackUrl = `http://localhost:${CALLBACK_PORT}/callback`;
+
+			// Start callback server on an available port
+			const callbackServer = await startOAuthCallbackServer(3000, state);
+			const callbackUrl = `http://localhost:${callbackServer.port}/callback`;
 
 			// Dynamic client registration
 			notify("Registering OAuth client...");
@@ -751,15 +755,13 @@ Tools: ${tools.length} available`;
 			authUrl.searchParams.set("state", state);
 			authUrl.searchParams.set("prompt", "consent");
 
-			const callbackPromise = startOAuthCallbackServer(CALLBACK_PORT, state);
-
 			notify("Opening Notion authorization page...");
 			await openBrowser(authUrl.toString());
 
 			notify("Waiting for authorization...");
 
 			try {
-				const result = await callbackPromise;
+				const result = await callbackServer.result;
 
 				if (result.error) {
 					return {

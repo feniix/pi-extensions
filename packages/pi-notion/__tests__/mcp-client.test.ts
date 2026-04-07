@@ -80,7 +80,7 @@ describe("pi-notion MCP Client File Structure", () => {
 
 		expect(content).toContain("NOTION_MCP_URL");
 		expect(content).toContain("https://mcp.notion.com/mcp");
-		expect(content).toContain("CALLBACK_PORT");
+		expect(content).toContain("preferredPort");
 		expect(content).toContain("3000");
 	});
 
@@ -333,7 +333,7 @@ describe("pi-notion MCP Client Implementation Details", () => {
 		);
 
 		expect(content).toContain("getPort");
-		expect(content).toContain("EADDRINUSE");
+		expect(content).toContain("lookupPort");
 	});
 
 	it("tests OAuth URL building exists", () => {
