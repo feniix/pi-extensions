@@ -153,6 +153,38 @@ async function startOAuthCallbackServer(port: number, state: string, timeoutMs =
 }
 
 // =============================================================================
+// Dynamic Client Registration (RFC 7591)
+// =============================================================================
+
+interface ClientRegistration {
+	client_id: string;
+	client_secret?: string;
+}
+
+async function registerClient(redirectUri: string): Promise<ClientRegistration> {
+	const response = await fetch("https://mcp.notion.com/register", {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify({
+			redirect_uris: [redirectUri],
+			token_endpoint_auth_method: "client_secret_post",
+			grant_types: ["authorization_code", "refresh_token"],
+			response_types: ["code"],
+			client_name: "pi-notion",
+		}),
+	});
+
+	if (!response.ok) {
+		const error = await response.text();
+		throw new Error(`Client registration failed: ${response.status} - ${error}`);
+	}
+
+	return (await response.json()) as ClientRegistration;
+}
+
+// =============================================================================
 // Token Exchange
 // =============================================================================
 
@@ -160,14 +192,20 @@ async function exchangeCodeForToken(
 	code: string,
 	redirectUri: string,
 	codeVerifier: string,
+	clientId: string,
+	clientSecret?: string,
 ): Promise<{ accessToken: string }> {
-	const body = new URLSearchParams({
+	const params: Record<string, string> = {
 		grant_type: "authorization_code",
-		client_id: "mcp-client",
+		client_id: clientId,
 		code,
 		redirect_uri: redirectUri,
 		code_verifier: codeVerifier,
-	});
+	};
+	if (clientSecret) {
+		params.client_secret = clientSecret;
+	}
+	const body = new URLSearchParams(params);
 	const response = await fetch("https://mcp.notion.com/token", {
 		method: "POST",
 		headers: {
@@ -335,6 +373,8 @@ class NotionMCPClient {
 interface StoredConfig {
 	mcpUrl: string;
 	accessToken: string;
+	clientId?: string;
+	clientSecret?: string;
 }
 
 class FileTokenStorage {
@@ -486,13 +526,24 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 				const state = randomBytes(16).toString("hex");
 				const callbackUrl = `http://localhost:${CALLBACK_PORT}/callback`;
 
+				// Dynamic client registration
+				ctx.ui.notify("Registering OAuth client...", "info");
+				let registration: ClientRegistration;
+				try {
+					registration = await registerClient(callbackUrl);
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
+					ctx.ui.notify(`Client registration failed: ${message}`, "error");
+					return;
+				}
+
 				// Build authorization URL with PKCE
 				const codeVerifier = randomBytes(32).toString("base64url");
 				const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
 
 				const authUrl = new URL("https://mcp.notion.com/authorize");
 				authUrl.searchParams.set("response_type", "code");
-				authUrl.searchParams.set("client_id", "mcp-client");
+				authUrl.searchParams.set("client_id", registration.client_id);
 				authUrl.searchParams.set("redirect_uri", callbackUrl);
 				authUrl.searchParams.set("code_challenge", codeChallenge);
 				authUrl.searchParams.set("code_challenge_method", "S256");
@@ -527,7 +578,13 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 						// Exchange code for token
 						ctx.ui.notify("Exchanging authorization code for token...", "info");
 						try {
-							const tokenResult = await exchangeCodeForToken(result.code, callbackUrl, codeVerifier);
+							const tokenResult = await exchangeCodeForToken(
+								result.code,
+								callbackUrl,
+								codeVerifier,
+								registration.client_id,
+								registration.client_secret,
+							);
 							accessToken = tokenResult.accessToken;
 						} catch (error) {
 							const message = error instanceof Error ? error.message : String(error);
@@ -544,7 +601,12 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 					await mcpClient.connect(NOTION_MCP_URL, accessToken);
 
 					// Save config
-					await storage.save({ mcpUrl: NOTION_MCP_URL, accessToken });
+					await storage.save({
+						mcpUrl: NOTION_MCP_URL,
+						accessToken,
+						clientId: registration.client_id,
+						clientSecret: registration.client_secret,
+					});
 
 					// Register tools
 					registerMCPTools();
@@ -630,13 +692,27 @@ Tools: ${tools.length} available`;
 			const state = randomBytes(16).toString("hex");
 			const callbackUrl = `http://localhost:${CALLBACK_PORT}/callback`;
 
+			// Dynamic client registration
+			notify("Registering OAuth client...");
+			let registration: ClientRegistration;
+			try {
+				registration = await registerClient(callbackUrl);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return {
+					content: [{ type: "text", text: `Client registration failed: ${message}` }],
+					isError: true,
+					details: { tool: "notion_mcp_connect" },
+				};
+			}
+
 			// Build authorization URL
 			const codeVerifier = randomBytes(32).toString("base64url");
 			const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
 
 			const authUrl = new URL("https://mcp.notion.com/authorize");
 			authUrl.searchParams.set("response_type", "code");
-			authUrl.searchParams.set("client_id", "mcp-client");
+			authUrl.searchParams.set("client_id", registration.client_id);
 			authUrl.searchParams.set("redirect_uri", callbackUrl);
 			authUrl.searchParams.set("code_challenge", codeChallenge);
 			authUrl.searchParams.set("code_challenge_method", "S256");
@@ -667,7 +743,13 @@ Tools: ${tools.length} available`;
 					accessToken = result.accessToken;
 				} else if (result.code) {
 					notify("Exchanging authorization code for token...");
-					const tokenResult = await exchangeCodeForToken(result.code, callbackUrl, codeVerifier);
+					const tokenResult = await exchangeCodeForToken(
+						result.code,
+						callbackUrl,
+						codeVerifier,
+						registration.client_id,
+						registration.client_secret,
+					);
 					accessToken = tokenResult.accessToken;
 				} else {
 					return {
@@ -679,7 +761,12 @@ Tools: ${tools.length} available`;
 
 				notify("Connecting to MCP server...");
 				await mcpClient.connect(NOTION_MCP_URL, accessToken);
-				await storage.save({ mcpUrl: NOTION_MCP_URL, accessToken });
+				await storage.save({
+					mcpUrl: NOTION_MCP_URL,
+					accessToken,
+					clientId: registration.client_id,
+					clientSecret: registration.client_secret,
+				});
 				registerMCPTools();
 
 				const tools = mcpClient.getTools();
