@@ -492,7 +492,7 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 				name: tool.name,
 				label: `Notion: ${tool.name.replace(/_/g, " ")}`,
 				description: tool.description || `Notion MCP tool: ${tool.name}`,
-				parameters: tool.inputSchema as ReturnType<typeof Type.Object>,
+				parameters: Type.Unsafe(tool.inputSchema),
 				async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 					if (!mcpClient?.state.connected) {
 						return {
@@ -864,6 +864,7 @@ Tools: ${tools.length} available`;
 
 			const { connected, sessionId, mcpUrl } = mcpClient.state;
 			const tools = mcpClient.getTools();
+			const toolList = tools.length > 0 ? `\n\nAvailable tools:\n${tools.map((t) => `- ${t.name}`).join("\n")}` : "";
 
 			return {
 				content: [
@@ -873,7 +874,7 @@ Tools: ${tools.length} available`;
 - Connected: ${connected ? "Yes" : "No"}
 - URL: ${mcpUrl || "None"}
 - Session: ${sessionId ? `${sessionId.slice(0, 8)}...` : "None"}
-- Tools: ${tools.length} available
+- Tools: ${tools.length} available${toolList}
 ${!connected ? "\nRun /notion to connect." : ""}`,
 					},
 				],
