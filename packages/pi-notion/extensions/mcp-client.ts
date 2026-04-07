@@ -46,49 +46,26 @@ interface MCPClientState {
 }
 
 // =============================================================================
-// OAuth Discovery (RFC 9470 + RFC 8414)
+// Notion OAuth Configuration
 // =============================================================================
 
 interface OAuthMetadata {
-	issuer: string;
 	authorization_endpoint: string;
 	token_endpoint: string;
 	registration_endpoint?: string;
-	code_challenge_methods_supported?: string[];
 }
 
-async function discoverOAuthMetadata(): Promise<OAuthMetadata> {
-	// Step 1: RFC 9470 - Get Protected Resource Metadata
-	const protectedResourceUrl = `${NOTION_MCP_URL}/.well-known/oauth-protected-resource`;
-	const protectedResourceResponse = await fetch(protectedResourceUrl);
-
-	if (!protectedResourceResponse.ok) {
-		throw new Error(`Failed to fetch protected resource metadata: ${protectedResourceResponse.status}`);
-	}
-
-	const protectedResource = (await protectedResourceResponse.json()) as { authorization_servers: string[] };
-	const authServers = protectedResource.authorization_servers;
-
-	if (!Array.isArray(authServers) || authServers.length === 0) {
-		throw new Error("No authorization servers found in protected resource metadata");
-	}
-
-	// Step 2: RFC 8414 - Get Authorization Server Metadata
-	const authServerUrl = authServers[0];
-	const metadataUrl = `${authServerUrl}/.well-known/oauth-authorization-server`;
-	const metadataResponse = await fetch(metadataUrl);
-
-	if (!metadataResponse.ok) {
-		throw new Error(`Failed to fetch authorization server metadata: ${metadataResponse.status}`);
-	}
-
-	const metadata = (await metadataResponse.json()) as OAuthMetadata;
-
-	if (!metadata.authorization_endpoint || !metadata.token_endpoint) {
-		throw new Error("Missing required OAuth endpoints in metadata");
-	}
-
-	return metadata;
+/**
+ * Get Notion OAuth metadata.
+ * Uses the standard Notion OAuth endpoints since MCP discovery requires auth.
+ */
+async function getOAuthMetadata(): Promise<OAuthMetadata> {
+	// Notion's OAuth endpoints (public)
+	return {
+		authorization_endpoint: "https://api.notion.com/v1/oauth/authorize",
+		token_endpoint: "https://api.notion.com/v1/oauth/token",
+		registration_endpoint: "https://api.notion.com/v1/oauth/register",
+	};
 }
 
 // =============================================================================
@@ -404,8 +381,8 @@ class NotionMCPClient {
 	private _tools: MCPTool[] = [];
 
 	async initialize(): Promise<void> {
-		// Discover OAuth metadata (stored globally for use in OAuth flow)
-		oauthMetadata = await discoverOAuthMetadata();
+		// Get OAuth metadata (stored globally for use in OAuth flow)
+		oauthMetadata = await getOAuthMetadata();
 	}
 
 	async connect(): Promise<void> {
@@ -626,7 +603,7 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 				try {
 					// Initialize OAuth discovery
 					notify("Discovering OAuth configuration...");
-					oauthMetadata = await discoverOAuthMetadata();
+					oauthMetadata = await getOAuthMetadata();
 
 					// Set up callback server
 					const CALLBACK_PORT = 3000;
@@ -745,7 +722,7 @@ Tools: ${tools.length} available`;
 				notify("Initializing connection to Notion MCP...");
 
 				// Initialize OAuth discovery
-				oauthMetadata = await discoverOAuthMetadata();
+				oauthMetadata = await getOAuthMetadata();
 
 				// Set up callback server
 				const CALLBACK_PORT = 3000;
