@@ -1,28 +1,46 @@
 ---
 name: prd
-description: "(specdocs plugin) Drafts structured Product Requirements Documents with Gherkin acceptance criteria, design decisions, and concrete file breakdowns. Triggers when the user asks to write a PRD, scope a feature, write requirements, break down a GitHub issue, or spec out work. Posts the result as a GitHub issue comment."
+description: "(specdocs plugin) Drafts structured Product Requirements Documents with Gherkin acceptance criteria, design decisions, and concrete file breakdowns. Triggers when the user asks to write a PRD, scope a feature, write requirements, break down an issue (GitHub or Linear), or spec out work. Posts the result to the configured issue tracker and optionally syncs to Notion."
 
 ---
 
 # PRD Creation
 
-Draft structured Product Requirements Documents for any project using the canonical 14-section template with an optional Verification appendix. PRDs are stored locally as numbered files and optionally posted to GitHub issues.
+Draft structured Product Requirements Documents for any project using the canonical 14-section template with an optional Verification appendix. PRDs are stored locally as numbered files and posted to the configured issue tracker, with optional Notion sync.
 
 ## When to trigger
 
-This skill activates for any of: write/create/draft a PRD, plan a feature, scope this work, write requirements, feature spec, requirements document, break down a GitHub issue into implementable requirements, "I need a spec for this", "scope out #N", "what would it take to build X", "requirements for this feature", "write up what we're building", "formalize this into a PRD", "product requirements for X", "spec this out", "what do we need to build for #N", "turn this issue into a plan". Also triggers when the user shares a GitHub issue link and asks to plan, spec, or scope the work.
+This skill activates for any of: write/create/draft a PRD, plan a feature, scope this work, write requirements, feature spec, requirements document, break down an issue into implementable requirements, "I need a spec for this", "scope out #N" or "scope out ENG-N", "what would it take to build X", "requirements for this feature", "write up what we're building", "formalize this into a PRD", "product requirements for X", "spec this out", "what do we need to build for #N", "turn this issue into a plan". Also triggers when the user shares an issue link (GitHub or Linear) and asks to plan, spec, or scope the work.
 
 ## Input
 
 - `$ARGUMENTS` — Optional. Determines the starting context:
-  - **GitHub issue number** (e.g., `#42` or `42`) — fetch with `gh issue view <number> --comments` and treat as the **source issue**. The issue title becomes the feature title, the issue body seeds the problem statement. Skip the must-ask questions that the issue already answers, but still ask follow-ups for anything it doesn't cover.
+  - **Issue identifier** (e.g., `#42` for GitHub or `ENG-42` for Linear) — fetch the issue from the active tracker and treat as the **source issue**. The issue title becomes the feature title, the issue body seeds the problem statement. Skip the must-ask questions that the issue already answers, but still ask follow-ups for anything it doesn't cover. See the tracker reference for fetch instructions.
   - **Free-text description** (e.g., `add a caching layer for API responses`) — treat as the feature description. Use it to seed the problem statement and feature title. Still ask clarifying questions for scope, constraints, and source issue.
   - **No arguments** — proceed with the full interactive must-ask flow.
   - **Conversation context** — if no arguments are provided but the conversation already contains relevant context (e.g., from `/architect` or prior discussion), use that context and only ask about what's still unclear.
 
 ## Tool Requirements — MANDATORY
 
-> **IMPORTANT:** This skill prioritizes MCP tools over built-in alternatives. For codebase exploration, PREFER **serena** tools (`find_symbol`, `get_symbols_overview`, `find_referencing_symbols`, `search_for_pattern`, `list_dir`) over built-in Read, Grep, and Glob; if serena is not connected, fall back to built-in tools. For external research, PREFER **exa** (`web_search_exa`) and/or **ref** (`ref_search_documentation`, `ref_read_url`); if these are not connected, fall back to WebSearch/WebFetch. Built-in file I/O tools (Read, Write, Bash) are always used for operations MCP tools do not cover (e.g., writing the final PRD file, running `gh` commands).
+> **IMPORTANT:** This skill prioritizes MCP tools over built-in alternatives. For codebase exploration, PREFER **serena** tools (`find_symbol`, `get_symbols_overview`, `find_referencing_symbols`, `search_for_pattern`, `list_dir`) over built-in Read, Grep, and Glob; if serena is not connected, fall back to built-in tools. For external research, PREFER **exa** (`web_search_exa`) and/or **ref** (`ref_search_documentation`, `ref_read_url`); if these are not connected, fall back to WebSearch/WebFetch. Built-in file I/O tools (Read, Write, Bash) are always used for operations MCP tools do not cover (e.g., writing the final PRD file).
+
+## Tracker Configuration
+
+Check the session context for the active tracker (printed by the SessionStart hook). Load the appropriate tracker reference:
+- **GitHub** (default): `../../references/tracker-github.md`
+- **Linear**: `../../references/tracker-linear.md`
+
+If the session context shows "No config found", run the inline first-run setup before proceeding:
+
+1. Tell the user: "No tracker config found. I'll create `.claude/tracker.md`."
+2. Ask: "Which issue tracker does this project use? **GitHub** (default) or **Linear**?"
+3. If GitHub (or user confirms default): write `.claude/tracker.md` with `tracker: github`.
+4. If Linear: ask for the team key (e.g., `SPA`, `ENG`), then write `.claude/tracker.md` with `tracker: linear` and `linear-team: <KEY>`.
+5. Continue with the PRD workflow.
+
+Detection uses direct file read (Read tool on `.claude/tracker.md`) — not the session context — so it works even if the config was created mid-session.
+
+If the session context doesn't indicate a tracker and there's no "No config found" message, default to GitHub.
 
 ## Tools
 
@@ -30,7 +48,8 @@ This skill activates for any of: write/create/draft a PRD, plan a feature, scope
 |-------|------|---------|
 | Explore Codebase | **serena** (`list_dir`, `find_file`, `search_for_pattern`, `find_symbol`, `get_symbols_overview`, `find_referencing_symbols`, `read_file`) | Identify affected files, understand current behavior and module relationships |
 | External Research | **exa** (`web_search_exa`, `get_code_context_exa`), **ref** (`ref_search_documentation`, `ref_read_url`) | Research comparable tools, prior art, relevant docs and standards |
-| GitHub | **gh CLI** | Fetch issue details, post PRD as comment |
+| Tracker | **See active tracker reference** | Fetch issue details, post PRD as comment, create issues |
+| Notion Sync | **Notion MCP** (optional, if enabled) | Sync PRD to Notion database |
 
 ## PRD Numbering and Storage
 
@@ -51,16 +70,16 @@ Collect from the user before drafting. Start with the must-ask questions; follow
 **Must-ask:**
 - Feature title
 - Problem statement — what problem and why now
-- **Source issue** — is this PRD being written *for* an existing GitHub issue? (If yes, the PRD will be posted as a comment on that issue.) This is different from merely referencing an issue — the user might mention related issues for context without any of them being the source. Ask explicitly: "Is this PRD for issue #N, or is it an original PRD that just references it?"
+- **Source issue** — is this PRD being written *for* an existing issue? (If yes, the PRD will be posted as a comment on that issue.) This is different from merely referencing an issue — the user might mention related issues for context without any of them being the source. Ask explicitly: "Is this PRD for issue X, or is it an original PRD that just references it?"
 
 **Ask if unclear:**
 - Target users and use cases
 - Known constraints or design preferences
 - Scope boundaries — anything explicitly out of scope
-- Related GitHub issues (for cross-referencing in Section 13, distinct from the source issue)
+- Related issues (for cross-referencing in Section 13, distinct from the source issue)
 
 **Fetch issue context:**
-Once you know which issues are involved (source or related), fetch their content using `gh issue view <number>` (include `--comments` for the source issue to capture discussion). This is essential context for drafting — the issue body, labels, comments, and linked PRs inform the problem statement, scope, and design decisions. Don't skip this even if the user summarized the issue verbally; the actual issue often contains details the user didn't mention.
+Once you know which issues are involved (source or related), fetch their content using the active tracker's fetch operation (see tracker reference). Always include comments for the source issue to capture discussion. This is essential context for drafting — the issue body, labels, comments, and linked PRs inform the problem statement, scope, and design decisions. Don't skip this even if the user summarized the issue verbally; the actual issue often contains details the user didn't mention.
 
 **Derive from codebase exploration (Step 2):**
 - Affected files and modules
@@ -154,14 +173,18 @@ The Open Questions table has a specific format that must be followed exactly:
 2. Write the PRD to `docs/prd/PRD-NNN-slug.md`
 3. Tell the user the file path
 
-**Then publish to GitHub based on the PRD's origin:**
+**Then publish to the active tracker based on the PRD's origin:**
 
 | Origin | Action |
 |--------|--------|
-| **Source issue exists** — the PRD was written *for* a specific issue | Post the PRD as a comment on that issue using `gh issue comment <number> --body-file docs/prd/PRD-NNN-slug.md` |
-| **Original PRD** — no source issue, this is new work | Create a new GitHub issue with the PRD as the body using `gh issue create --title "PRD: <title>" --body-file docs/prd/PRD-NNN-slug.md` |
+| **Source issue exists** — the PRD was written *for* a specific issue | Post the PRD as a comment on that issue (see tracker reference for the operation) |
+| **Original PRD** — no source issue, this is new work | Create a new issue with the PRD as the body (see tracker reference for the operation) |
 
-The distinction matters: a user might say "spec out a caching layer, see #42 for background" — that references #42 for context but the PRD is original work, so it gets a new issue. Versus "write a PRD for #42" — the PRD is *for* that issue, so it's posted as a comment. When in doubt, ask.
+The distinction matters: a user might say "spec out a caching layer, see issue X for background" — that references the issue for context but the PRD is original work, so it gets a new issue. Versus "write a PRD for issue X" — the PRD is *for* that issue, so it's posted as a comment. When in doubt, ask.
+
+**Optional: Sync to Notion**
+
+If the session context indicates Notion sync is enabled, follow the instructions in `../../references/notion-sync.md` to sync the PRD to the configured Notion PRD database. This is the final step — a sync failure should not block the local save or tracker publication.
 
 **After publishing**, mention that the user can run `/plan-prd` to generate an implementation plan from the PRD, and that design decisions identified during drafting may warrant standalone ADRs via `/adr`.
 

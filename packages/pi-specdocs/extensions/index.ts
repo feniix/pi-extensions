@@ -14,6 +14,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 // Constants
 // =============================================================================
 
+const CONFIG_PATH = ".claude/tracker.md";
 const PRD_DIR = "docs/prd";
 const ADR_DIR = "docs/adr";
 const PLAN_DIR = "docs/architecture";
@@ -21,6 +22,91 @@ const PLAN_DIR = "docs/architecture";
 const PRD_PATTERN = /^PRD-\d{3}-.*\.md$/;
 const ADR_PATTERN = /^ADR-\d{4}-.*\.md$/;
 const PLAN_PATTERN = /^plan-.*\.md$/;
+
+// =============================================================================
+// Config Functions
+// =============================================================================
+
+interface TrackerConfig {
+	[key: string]: string;
+}
+
+function readConfig(cwd: string): TrackerConfig {
+	const configPath = join(cwd, CONFIG_PATH);
+	if (!existsSync(configPath)) {
+		return {};
+	}
+	try {
+		const content = readFileSync(configPath, "utf-8");
+		const lines = content.split("\n");
+
+		if (lines.length === 0 || lines[0].trim() !== "---") {
+			return {};
+		}
+
+		const config: TrackerConfig = {};
+		for (let i = 1; i < lines.length; i++) {
+			if (lines[i].trim() === "---") {
+				break;
+			}
+			if (lines[i].includes(":")) {
+				const colonIdx = lines[i].indexOf(":");
+				const key = lines[i].slice(0, colonIdx).trim();
+				const value = lines[i]
+					.slice(colonIdx + 1)
+					.trim()
+					.replace(/^["']|["']$/g, "");
+				config[key] = value;
+			}
+		}
+		return config;
+	} catch {
+		return {};
+	}
+}
+
+function formatConfig(config: TrackerConfig): string {
+	const lines: string[] = [];
+
+	let tracker = config.tracker || "github";
+	if (tracker !== "github" && tracker !== "linear") {
+		lines.push(`[specdocs] WARNING: unknown tracker '${tracker}' in ${CONFIG_PATH} — defaulting to github`);
+		tracker = "github";
+	}
+
+	let trackerInfo = `Tracker: ${tracker}`;
+	if (tracker === "linear") {
+		const team = config["linear-team"] || "";
+		if (team) {
+			trackerInfo += ` (team: ${team})`;
+		} else {
+			lines.push(`[specdocs] WARNING: tracker=linear but linear-team is not set in ${CONFIG_PATH}`);
+		}
+	} else if (tracker === "github" && Object.keys(config).length === 0) {
+		trackerInfo += " (default)";
+	}
+
+	const notionSync = (config["notion-sync"] || "false").toLowerCase() === "true";
+	const notionInfo = notionSync ? "Notion sync: enabled" : "Notion sync: disabled";
+
+	if (notionSync) {
+		if (!config["notion-prd-database"]) {
+			lines.push(`[specdocs] WARNING: notion-sync=true but notion-prd-database is not set in ${CONFIG_PATH}`);
+		}
+		if (!config["notion-adr-database"]) {
+			lines.push(`[specdocs] WARNING: notion-sync=true but notion-adr-database is not set in ${CONFIG_PATH}`);
+		}
+	}
+
+	if (Object.keys(config).length === 0) {
+		lines.push(`[specdocs] ${trackerInfo} | ${notionInfo}`);
+		lines.push("[specdocs] No config found. Any tracker-aware skill or command will prompt for setup on first use.");
+	} else {
+		lines.push(`[specdocs] ${trackerInfo} | ${notionInfo}`);
+	}
+
+	return lines.join("\n");
+}
 
 // =============================================================================
 // Scanner Functions
@@ -136,7 +222,7 @@ function formatSummary(result: ScanResult): string | null {
 // Exports (for testing)
 // =============================================================================
 
-export { extractFrontmatterField, formatSummary, listMatchingFiles, scanWorkspace };
+export { extractFrontmatterField, formatConfig, formatSummary, listMatchingFiles, readConfig, scanWorkspace };
 
 // =============================================================================
 // Extension Entry Point
@@ -145,6 +231,10 @@ export { extractFrontmatterField, formatSummary, listMatchingFiles, scanWorkspac
 export default function specdocs(pi: ExtensionAPI) {
 	pi.on("session_start", async () => {
 		const cwd = process.cwd();
+
+		const config = readConfig(cwd);
+		console.log(formatConfig(config));
+
 		const result = scanWorkspace(cwd);
 		const summary = formatSummary(result);
 		if (summary) {

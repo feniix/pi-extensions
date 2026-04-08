@@ -22,7 +22,25 @@ This skill activates for any of: create an ADR, document/record a technical deci
 
 ## Tool Requirements — MANDATORY
 
-> **IMPORTANT:** This skill prioritizes MCP tools over built-in alternatives. For codebase exploration, PREFER **serena** tools (`find_symbol`, `get_symbols_overview`, `find_referencing_symbols`, `search_for_pattern`, `list_dir`) over built-in Read, Grep, and Glob; if serena is not connected, fall back to built-in tools. For external research, PREFER **exa** (`web_search_exa`) and/or **ref** (`ref_search_documentation`, `ref_read_url`); if these are not connected, fall back to WebSearch/WebFetch. Built-in file I/O tools (Read, Write, Bash) are always used for operations MCP tools do not cover (e.g., writing the final ADR file, running `gh` commands).
+> **IMPORTANT:** This skill prioritizes MCP tools over built-in alternatives. For codebase exploration, PREFER **serena** tools (`find_symbol`, `get_symbols_overview`, `find_referencing_symbols`, `search_for_pattern`, `list_dir`) over built-in Read, Grep, and Glob; if serena is not connected, fall back to built-in tools. For external research, PREFER **exa** (`web_search_exa`) and/or **ref** (`ref_search_documentation`, `ref_read_url`); if these are not connected, fall back to WebSearch/WebFetch. Built-in file I/O tools (Read, Write, Bash) are always used for operations MCP tools do not cover (e.g., writing the final ADR file).
+
+## Tracker Configuration
+
+Check the session context for the active tracker (printed by the SessionStart hook). Load the appropriate tracker reference when linking to issues:
+- **GitHub** (default): `../../references/tracker-github.md`
+- **Linear**: `../../references/tracker-linear.md`
+
+If the session context shows "No config found", run the inline first-run setup before proceeding:
+
+1. Tell the user: "No tracker config found. I'll create `.claude/tracker.md`."
+2. Ask: "Which issue tracker does this project use? **GitHub** (default) or **Linear**?"
+3. If GitHub (or user confirms default): write `.claude/tracker.md` with `tracker: github`.
+4. If Linear: ask for the team key (e.g., `SPA`, `ENG`), then write `.claude/tracker.md` with `tracker: linear` and `linear-team: <KEY>`.
+5. Continue with the ADR workflow.
+
+Detection uses direct file read (Read tool on `.claude/tracker.md`) — not the session context — so it works even if the config was created mid-session.
+
+If the session context doesn't indicate a tracker and there's no "No config found" message, default to GitHub.
 
 ## Tools
 
@@ -30,7 +48,8 @@ This skill activates for any of: create an ADR, document/record a technical deci
 |-------|------|---------|
 | Explore Codebase | **serena** (`list_dir`, `find_file`, `search_for_pattern`, `find_symbol`, `get_symbols_overview`, `find_referencing_symbols`, `read_file`) | Understand current architecture and what the decision affects |
 | External Research | **exa** (`web_search_exa`, `get_code_context_exa`), **ref** (`ref_search_documentation`, `ref_read_url`) | Research options, compare technologies, find benchmarks and prior art |
-| GitHub | **gh CLI** | Link to related issues and PRs |
+| Tracker | **See active tracker reference** | Link to related issues and PRs |
+| Notion Sync | **Notion MCP** (optional, if enabled) | Sync ADR to Notion database |
 
 ## The 4-Point Test
 
@@ -99,6 +118,7 @@ Load the template at `references/adr-template.md` for the full MADR 4.0 structur
 2. If a PRD exists, note the ADR in the PRD's Design Decisions section or Related Issues section
 3. If an implementation plan exists, add the ADR to the plan's ADR Index table
 4. Tell the user the file path and summarize the recommendation
+5. If Notion sync is enabled (check session context), follow `../../references/notion-sync.md` to sync the ADR to the configured Notion ADR database
 
 ## ADR Statuses
 

@@ -30,7 +30,7 @@ describe("pi-devtools", () => {
 		it("should have brpr skill", () => {
 			const skill = readFileSync(join(__dirname, "../skills/brpr/SKILL.md"), "utf-8");
 			expect(skill).toContain("brpr");
-			expect(skill).toContain("Branch, commit, push, and open a PR");
+			expect(skill).toContain("Branch, Push, and PR Workflow");
 		});
 
 		it("should have release skill", () => {
