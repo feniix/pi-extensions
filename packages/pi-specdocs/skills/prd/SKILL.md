@@ -27,8 +27,8 @@ This skill activates for any of: write/create/draft a PRD, plan a feature, scope
 ## Tracker Configuration
 
 Check the session context for the active tracker (printed by the SessionStart hook). Load the appropriate tracker reference:
-- **GitHub** (default): `../../references/tracker-github.md`
-- **Linear**: `../../references/tracker-linear.md`
+- **GitHub** (default): `references/tracker-github.md`
+- **Linear**: `references/tracker-linear.md`
 
 If the session context shows "No config found", run the inline first-run setup before proceeding:
 
@@ -184,7 +184,7 @@ The distinction matters: a user might say "spec out a caching layer, see issue X
 
 **Optional: Sync to Notion**
 
-If the session context indicates Notion sync is enabled, follow the instructions in `../../references/notion-sync.md` to sync the PRD to the configured Notion PRD database. This is the final step — a sync failure should not block the local save or tracker publication.
+If the session context indicates Notion sync is enabled, follow the instructions in `references/notion-sync.md` to sync the PRD to the configured Notion PRD database. This is the final step — a sync failure should not block the local save or tracker publication.
 
 **After publishing**, mention that the user can run `/plan-prd` to generate an implementation plan from the PRD, and that design decisions identified during drafting may warrant standalone ADRs via `/adr`.
 

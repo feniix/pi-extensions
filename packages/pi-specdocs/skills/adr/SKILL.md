@@ -27,8 +27,8 @@ This skill activates for any of: create an ADR, document/record a technical deci
 ## Tracker Configuration
 
 Check the session context for the active tracker (printed by the SessionStart hook). Load the appropriate tracker reference when linking to issues:
-- **GitHub** (default): `../../references/tracker-github.md`
-- **Linear**: `../../references/tracker-linear.md`
+- **GitHub** (default): `references/tracker-github.md`
+- **Linear**: `references/tracker-linear.md`
 
 If the session context shows "No config found", run the inline first-run setup before proceeding:
 
@@ -118,7 +118,7 @@ Load the template at `references/adr-template.md` for the full MADR 4.0 structur
 2. If a PRD exists, note the ADR in the PRD's Design Decisions section or Related Issues section
 3. If an implementation plan exists, add the ADR to the plan's ADR Index table
 4. Tell the user the file path and summarize the recommendation
-5. If Notion sync is enabled (check session context), follow `../../references/notion-sync.md` to sync the ADR to the configured Notion ADR database
+5. If Notion sync is enabled (check session context), follow `references/notion-sync.md` to sync the ADR to the configured Notion ADR database
 
 ## ADR Statuses
 
