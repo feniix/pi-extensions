@@ -1,0 +1,25 @@
+name: SonarQube Analysis
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: sonar-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sonar:
+    uses: Spantree/github-actions/.github/workflows/sonar.yml@main
+    with:
+      sonar-host-url: https://sonarqube.span.land
+      project-key: PROJECT_KEY
+      sources: src
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

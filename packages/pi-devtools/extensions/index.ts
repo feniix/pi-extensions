@@ -8,7 +8,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
-import { execGh, execGit, getDefaultBranch } from "./git.js";
+import { execGh, execGit, getDefaultBranch, getGitContext } from "./git.js";
 
 // =============================================================================
 // Types
@@ -630,6 +630,14 @@ export {
 // =============================================================================
 
 export default function devtoolsExtension(pi: ExtensionAPI) {
+	// SessionStart: print git context
+	pi.on("session_start", async () => {
+		const context = getGitContext();
+		if (context) {
+			console.log(context);
+		}
+	});
+
 	// Register devtools_create_branch
 	pi.registerTool({
 		name: "devtools_create_branch",

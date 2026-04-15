@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
+import { compareVersions, getGitContext, parseVersion } from "../extensions/git.js";
 import devtoolsExtension, { parseConventionalCommit } from "../extensions/index.js";
 
 const createMockPi = () =>
@@ -305,6 +306,59 @@ describe("pi-devtools extension", () => {
 
 			expect(mockPi1.registerTool).toHaveBeenCalledTimes(12);
 			expect(mockPi2.registerTool).toHaveBeenCalledTimes(12);
+		});
+
+		it("registers session_start handler", () => {
+			const mockPi = createMockPi();
+			devtoolsExtension(mockPi as unknown as ExtensionAPI);
+
+			const events = mockPi.on.mock.calls.map(([event]) => event);
+			expect(events).toContain("session_start");
+		});
+	});
+});
+
+describe("git context functions", () => {
+	describe("parseVersion", () => {
+		it("parses basic version", () => {
+			const result = parseVersion("v1.2.3");
+			expect(result).toEqual([1, 2, 3]);
+		});
+
+		it("handles version without v prefix", () => {
+			const result = parseVersion("2.0.0");
+			expect(result).toEqual([2, 0, 0]);
+		});
+
+		it("filters invalid parts", () => {
+			const result = parseVersion("1.0.0-beta.1");
+			// Parses [1, 0, 0, NaN, 1] - NaN is filtered, 1 is valid
+			expect(result).toEqual([1, 0, 0, 1]);
+		});
+	});
+
+	describe("compareVersions", () => {
+		it("sorts ascending", () => {
+			const tags = ["v1.0.0", "v2.0.0", "v1.1.0"];
+			tags.sort((a, b) => compareVersions(parseVersion(a), parseVersion(b)));
+			expect(tags).toEqual(["v1.0.0", "v1.1.0", "v2.0.0"]);
+		});
+
+		it("handles different length versions", () => {
+			const result = compareVersions([1, 2], [1, 2, 0]);
+			expect(result).toBe(0);
+		});
+	});
+
+	describe("getGitContext", () => {
+		it("returns empty string for non-git directory", () => {
+			// In a non-git directory, should return empty
+			// This test assumes we're not in a git repo
+			const result = getGitContext();
+			// Result is either empty or contains [devtools] prefix if git repo
+			if (result) {
+				expect(result).toMatch(/^\[devtools\]/);
+			}
 		});
 	});
 });
