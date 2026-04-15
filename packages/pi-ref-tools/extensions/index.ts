@@ -310,9 +310,14 @@ function loadConfig(configPath: string | undefined): RefMcpConfig | null {
 		if (!existsSync(candidate)) {
 			continue;
 		}
-		const raw = readFileSync(candidate, "utf-8");
-		const parsed = JSON.parse(raw);
-		return parseConfig(parsed, candidate);
+		try {
+			const raw = readFileSync(candidate, "utf-8");
+			const parsed = JSON.parse(raw);
+			return parseConfig(parsed, candidate);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.warn(`[pi-ref-tools] Failed to parse config ${candidate}: ${message}`);
+		}
 	}
 
 	return null;
@@ -736,17 +741,21 @@ export default function refTools(pi: ExtensionAPI) {
 		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
 
 		const urlFlag = pi.getFlag("--ref-mcp-url");
-		return typeof urlFlag === "string" ? urlFlag : (process.env.REF_MCP_URL ?? config?.url ?? DEFAULT_ENDPOINT);
+		const fromFlag = typeof urlFlag === "string" ? normalizeString(urlFlag) : undefined;
+		const fromEnv = normalizeString(process.env.REF_MCP_URL);
+		const fromConfig = normalizeString(config?.url);
+		return fromFlag ?? fromEnv ?? fromConfig ?? DEFAULT_ENDPOINT;
 	};
 
 	const getApiKey = (): string | undefined => {
 		const apiKeyFlag = pi.getFlag("--ref-mcp-api-key");
-		if (typeof apiKeyFlag === "string" && apiKeyFlag.trim().length > 0) {
-			return apiKeyFlag.trim();
+		const fromFlag = typeof apiKeyFlag === "string" ? normalizeString(apiKeyFlag) : undefined;
+		if (fromFlag) {
+			return fromFlag;
 		}
 		const configFlag = pi.getFlag("--ref-mcp-config");
 		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-		return process.env.REF_API_KEY ?? config?.apiKey ?? undefined;
+		return normalizeString(process.env.REF_API_KEY) ?? normalizeString(config?.apiKey);
 	};
 
 	const getMaxLimits = (): { maxBytes: number; maxLines: number } => {

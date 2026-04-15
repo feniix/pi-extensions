@@ -58,8 +58,8 @@ describe("pi-exa parseConfig", () => {
 		expect(parseConfig(123)).toEqual({});
 	});
 
-	it("filters out non-string tools", () => {
-		const raw = { enabledTools: ["web_search_exa", 123, "web_fetch_exa", null] };
+	it("filters out non-string/empty tools", () => {
+		const raw = { enabledTools: ["web_search_exa", 123, "web_fetch_exa", null, "  "] };
 		const result = parseConfig(raw);
 		expect(result.enabledTools).toEqual(["web_search_exa", "web_fetch_exa"]);
 	});
@@ -67,6 +67,11 @@ describe("pi-exa parseConfig", () => {
 	it("defaults advancedEnabled to false", () => {
 		const result = parseConfig({ advancedEnabled: "not-a-boolean" });
 		expect(result.advancedEnabled).toBe(false);
+	});
+
+	it("trims api key", () => {
+		const result = parseConfig({ apiKey: "  test-key  " });
+		expect(result.apiKey).toBe("test-key");
 	});
 });
 
@@ -276,13 +281,12 @@ describe("pi-exa loadConfig", () => {
 		expect(result?.enabledTools).toContain("web_search_exa");
 	});
 
-	it("throws on invalid JSON", () => {
+	it("returns null on invalid JSON", () => {
 		const base = mkdtempSync(join(tmpdir(), "pi-exa-load-invalid-"));
 		const configPath = join(base, "invalid.json");
 		writeFileSync(configPath, "not valid json", "utf-8");
 
-		// loadConfig throws on invalid JSON
-		expect(() => loadConfig(configPath)).toThrow();
+		expect(loadConfig(configPath)).toBeNull();
 	});
 
 	it("loads from environment config path", () => {

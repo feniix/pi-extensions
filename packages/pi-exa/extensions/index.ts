@@ -47,6 +47,14 @@ interface ExaConfig {
 	advancedEnabled?: boolean;
 }
 
+function normalizeString(value: unknown): string | undefined {
+	if (typeof value !== "string") {
+		return undefined;
+	}
+	const trimmed = value.trim();
+	return trimmed.length > 0 ? trimmed : undefined;
+}
+
 interface SearchResult {
 	title?: string;
 	url: string;
@@ -85,8 +93,13 @@ function parseConfig(raw: unknown): ExaConfig {
 	}
 	const obj = raw as Record<string, unknown>;
 	return {
-		apiKey: typeof obj.apiKey === "string" ? obj.apiKey : undefined,
-		enabledTools: Array.isArray(obj.enabledTools) ? obj.enabledTools.filter((t) => typeof t === "string") : undefined,
+		apiKey: normalizeString(obj.apiKey),
+		enabledTools: Array.isArray(obj.enabledTools)
+			? obj.enabledTools
+					.filter((t): t is string => typeof t === "string")
+					.map((t) => t.trim())
+					.filter((t) => t.length > 0)
+			: undefined,
 		advancedEnabled: typeof obj.advancedEnabled === "boolean" ? obj.advancedEnabled : false,
 	};
 }
@@ -109,9 +122,14 @@ function loadConfig(configPath?: string): ExaConfig | null {
 		if (!existsSync(candidate)) {
 			continue;
 		}
-		const raw = readFileSync(candidate, "utf-8");
-		const parsed = JSON.parse(raw);
-		return parseConfig(parsed);
+		try {
+			const raw = readFileSync(candidate, "utf-8");
+			const parsed = JSON.parse(raw);
+			return parseConfig(parsed);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.warn(`[pi-exa] Failed to parse config ${candidate}: ${message}`);
+		}
 	}
 
 	return null;
