@@ -376,6 +376,22 @@ export {
 // =============================================================================
 
 export default function exaExtension(pi: ExtensionAPI) {
+	// SessionStart: check auth and print status
+	pi.on("session_start", async () => {
+		const apiKeyFlag = pi.getFlag("--exa-api-key");
+		const hasFlag = typeof apiKeyFlag === "string" && apiKeyFlag.trim().length > 0;
+		const hasEnv = typeof process.env.EXA_API_KEY === "string" && process.env.EXA_API_KEY.trim().length > 0;
+		const configFlag = pi.getFlag("--exa-config");
+		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
+		const hasConfig = config?.apiKey && config.apiKey.trim().length > 0;
+
+		if (hasFlag || hasEnv || hasConfig) {
+			console.log(`[exa] Authenticated via ${hasFlag ? "CLI flag" : hasEnv ? "EXA_API_KEY env var" : "config file"}`);
+		} else {
+			console.log("[exa] Not authenticated. Set EXA_API_KEY or use --exa-api-key flag.");
+		}
+	});
+
 	// Register CLI flags
 	pi.registerFlag("--exa-api-key", {
 		description: "Exa AI API key for search operations",

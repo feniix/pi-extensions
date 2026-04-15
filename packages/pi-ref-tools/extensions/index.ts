@@ -671,6 +671,36 @@ export {
 };
 
 export default function refTools(pi: ExtensionAPI) {
+	// SessionStart: check config and print status
+	pi.on("session_start", async () => {
+		const urlFlag = pi.getFlag("--ref-mcp-url");
+		const hasUrlFlag = typeof urlFlag === "string" && urlFlag.trim().length > 0;
+		const hasEnvUrl = typeof process.env.REF_MCP_URL === "string" && process.env.REF_MCP_URL.trim().length > 0;
+		const configFlag = pi.getFlag("--ref-mcp-config");
+		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
+		const hasConfigUrl = config?.url && config.url.trim().length > 0;
+
+		const endpoint = hasUrlFlag
+			? String(urlFlag)
+			: hasEnvUrl
+				? (process.env.REF_MCP_URL ?? "https://api.ref.tools/mcp")
+				: hasConfigUrl
+					? (config?.url ?? "https://api.ref.tools/mcp")
+					: "https://api.ref.tools/mcp";
+
+		const apiKeyFlag = pi.getFlag("--ref-mcp-api-key");
+		const hasApiKey = typeof apiKeyFlag === "string" && apiKeyFlag.trim().length > 0;
+		const hasEnvKey = typeof process.env.REF_API_KEY === "string" && process.env.REF_API_KEY.trim().length > 0;
+		const hasConfigKey = config?.apiKey != null && config.apiKey.trim().length > 0;
+
+		if (hasApiKey || hasEnvKey || hasConfigKey) {
+			const source = hasApiKey ? "CLI flag" : hasEnvKey ? "REF_API_KEY env var" : "config file";
+			console.log(`[ref-tools] Connected to ${endpoint} (API key: ${source})`);
+		} else {
+			console.log(`[ref-tools] No API key configured for ${endpoint}. Set REF_API_KEY or use --ref-mcp-api-key.`);
+		}
+	});
+
 	// Register CLI flags
 	pi.registerFlag("--ref-mcp-url", {
 		description: "Override the Ref MCP endpoint.",
