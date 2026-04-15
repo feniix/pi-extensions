@@ -1,17 +1,135 @@
 /**
  * Specdocs Extension for pi
  *
- * SessionStart hook: scans docs/prd, docs/adr, and docs/architecture directories
- * and displays a summary of existing spec documents so the model has immediate
- * awareness of what exists.
+ * Features:
+ * - SessionStart: scans docs/prd, docs/adr, and docs/architecture directories
+ *   and displays a summary of existing spec documents so the model has immediate
+ *   awareness of what exists.
+ * - ToolResult: validates PRD/ADR frontmatter after Write/Edit operations
+ *   and notifies the user of any issues.
+ * - /specdocs-validate command: validates all spec documents for completeness.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { basename, join } from "node:path";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 // =============================================================================
-// Constants
+// Validation Constants
+// =============================================================================
+
+const PRD_REQUIRED_FIELDS = ["title", "prd", "status", "owner", "date", "issue", "version"] as const;
+const ADR_REQUIRED_FIELDS = ["title", "adr", "status", "date", "prd"] as const;
+
+const PRD_VALID_STATUSES = ["Draft", "Implemented", "Superseded", "Archived"] as const;
+const ADR_VALID_STATUSES = ["Proposed", "Accepted", "Deprecated", "Superseded"] as const;
+
+const PRD_FILENAME_PATTERN = /^PRD-\d{3}-.*\.md$/;
+const ADR_FILENAME_PATTERN = /^ADR-\d{4}-.*\.md$/;
+
+// =============================================================================
+// Validation Functions
+// =============================================================================
+
+function parseFrontmatter(filepath: string): Record<string, string> | null {
+	if (!existsSync(filepath)) return null;
+
+	let content: string;
+	try {
+		content = readFileSync(filepath, "utf-8");
+	} catch {
+		return null;
+	}
+
+	const lines = content.split("\n");
+	if (!lines.length || lines[0].trim() !== "---") return null;
+
+	const fields: Record<string, string> = {};
+	for (let i = 1; i < lines.length; i++) {
+		if (lines[i].trim() === "---") break;
+		const colonIdx = lines[i].indexOf(":");
+		if (colonIdx === -1) continue;
+		const key = lines[i].slice(0, colonIdx).trim();
+		const value = lines[i]
+			.slice(colonIdx + 1)
+			.trim()
+			.replace(/^["']|["']$/g, "");
+		fields[key] = value;
+	}
+
+	return Object.keys(fields).length ? fields : null;
+}
+
+function isPrd(path: string): boolean {
+	return path.includes("docs/prd/PRD-");
+}
+
+function isAdr(path: string): boolean {
+	return path.includes("docs/adr/ADR-");
+}
+
+function validateFrontmatter(filepath: string): string[] {
+	const warnings: string[] = [];
+	const filename = basename(filepath);
+
+	let docType: string;
+	let requiredFields: readonly string[];
+	let validStatuses: readonly string[];
+	let numberPattern: RegExp;
+	let numberField: string;
+
+	if (isPrd(filepath)) {
+		docType = "PRD";
+		requiredFields = PRD_REQUIRED_FIELDS;
+		validStatuses = PRD_VALID_STATUSES;
+		numberPattern = /^PRD-\d{3}$/;
+		numberField = "prd";
+	} else if (isAdr(filepath)) {
+		docType = "ADR";
+		requiredFields = ADR_REQUIRED_FIELDS;
+		validStatuses = ADR_VALID_STATUSES;
+		numberPattern = /^ADR-\d{4}$/;
+		numberField = "adr";
+	} else {
+		return warnings;
+	}
+
+	const fields = parseFrontmatter(filepath);
+	if (fields === null) {
+		warnings.push(`⚠ ${docType}: No YAML frontmatter found.`);
+		return warnings;
+	}
+
+	// Check required fields
+	for (const field of requiredFields) {
+		if (!fields[field]) {
+			warnings.push(`⚠ ${docType}: Missing required frontmatter field: ${field}`);
+		}
+	}
+
+	// Check number format
+	const numberValue = fields[numberField] ?? "";
+	if (numberValue && !numberPattern.test(numberValue)) {
+		const expected = docType === "PRD" ? "PRD-NNN (3-digit zero-padded)" : "ADR-NNNN (4-digit zero-padded)";
+		warnings.push(`⚠ ${docType}: Number '${numberValue}' doesn't match expected format ${expected}.`);
+	}
+
+	// Check filename/number match
+	if (numberValue && !filename.startsWith(numberValue)) {
+		warnings.push(`⚠ ${docType}: Frontmatter says '${numberValue}' but filename is '${filename}'.`);
+	}
+
+	// Check status
+	const status = fields.status ?? "";
+	if (status && !validStatuses.includes(status)) {
+		warnings.push(`⚠ ${docType}: Unknown status '${status}'. Expected: ${validStatuses.join(", ")}.`);
+	}
+
+	return warnings;
+}
+
+// =============================================================================
+// Scanner Constants
 // =============================================================================
 
 const CONFIG_PATH = ".claude/tracker.md";
@@ -19,12 +137,12 @@ const PRD_DIR = "docs/prd";
 const ADR_DIR = "docs/adr";
 const PLAN_DIR = "docs/architecture";
 
-const PRD_PATTERN = /^PRD-\d{3}-.*\.md$/;
-const ADR_PATTERN = /^ADR-\d{4}-.*\.md$/;
-const PLAN_PATTERN = /^plan-.*\.md$/;
+const SCAN_PRD_PATTERN = /^PRD-\d{3}-.*\.md$/;
+const SCAN_ADR_PATTERN = /^ADR-\d{4}-.*\.md$/;
+const SCAN_PLAN_PATTERN = /^plan-.*\.md$/;
 
 // =============================================================================
-// Config Functions
+// Scanner Functions
 // =============================================================================
 
 interface TrackerConfig {
@@ -108,10 +226,6 @@ function formatConfig(config: TrackerConfig): string {
 	return lines.join("\n");
 }
 
-// =============================================================================
-// Scanner Functions
-// =============================================================================
-
 function listMatchingFiles(directory: string, pattern: RegExp): string[] {
 	if (!existsSync(directory)) {
 		return [];
@@ -164,9 +278,9 @@ function scanWorkspace(cwd: string): ScanResult {
 	const adrDir = join(cwd, ADR_DIR);
 	const planDir = join(cwd, PLAN_DIR);
 
-	const prdFiles = listMatchingFiles(prdDir, PRD_PATTERN);
-	const adrFiles = listMatchingFiles(adrDir, ADR_PATTERN);
-	const planFiles = listMatchingFiles(planDir, PLAN_PATTERN);
+	const prdFiles = listMatchingFiles(prdDir, SCAN_PRD_PATTERN);
+	const adrFiles = listMatchingFiles(adrDir, SCAN_ADR_PATTERN);
+	const planFiles = listMatchingFiles(planDir, SCAN_PLAN_PATTERN);
 
 	const proposedAdrs: string[] = [];
 	for (const filename of adrFiles) {
@@ -219,10 +333,165 @@ function formatSummary(result: ScanResult): string | null {
 }
 
 // =============================================================================
+// Tool Result Handler - Document Linter
+// =============================================================================
+
+function extractFilePath(input: Record<string, unknown> | undefined): string {
+	if (!input) return "";
+	return (input.file_path as string) || (input.path as string) || "";
+}
+
+async function handleDocLint(event: { toolName: string; input?: Record<string, unknown> }, ctx: ExtensionContext) {
+	if (event.toolName !== "write" && event.toolName !== "edit") {
+		return;
+	}
+
+	const filePath = extractFilePath(event.input);
+	if (!filePath) return;
+
+	if (!isPrd(filePath) && !isAdr(filePath)) {
+		return;
+	}
+
+	if (!existsSync(filePath)) {
+		return;
+	}
+
+	const warnings = validateFrontmatter(filePath);
+	if (warnings.length > 0) {
+		const message = `[specdocs] Frontmatter warnings:\n${warnings.join("\n")}`;
+		ctx.ui.notify(message, "warning");
+	}
+}
+
+// =============================================================================
+// Validation Runner
+// =============================================================================
+
+interface ValidationIssue {
+	type: "error" | "warning";
+	message: string;
+}
+
+async function runValidation(ctx: { cwd: string } & ExtensionContext) {
+	const issues: ValidationIssue[] = [];
+
+	const prdDir = join(ctx.cwd, PRD_DIR);
+	const adrDir = join(ctx.cwd, ADR_DIR);
+	const planDir = join(ctx.cwd, PLAN_DIR);
+
+	const prdFiles = listMatchingFiles(prdDir, PRD_FILENAME_PATTERN);
+	const adrFiles = listMatchingFiles(adrDir, ADR_FILENAME_PATTERN);
+	listMatchingFiles(planDir, SCAN_PLAN_PATTERN);
+
+	// Validate frontmatter
+	for (const filename of prdFiles) {
+		const filepath = join(prdDir, filename);
+		for (const warning of validateFrontmatter(filepath)) {
+			issues.push({ type: "warning", message: warning });
+		}
+	}
+
+	for (const filename of adrFiles) {
+		const filepath = join(adrDir, filename);
+		for (const warning of validateFrontmatter(filepath)) {
+			issues.push({ type: "warning", message: warning });
+		}
+	}
+
+	// Check filename conventions
+	const { readdirSync: readDir } = await import("node:fs");
+	if (existsSync(prdDir)) {
+		for (const f of readDir(prdDir)) {
+			if (f.endsWith(".md") && !PRD_FILENAME_PATTERN.test(f)) {
+				issues.push({ type: "error", message: `✗ ${PRD_DIR}/${f}: filename doesn't match PRD-NNN-*.md pattern` });
+			}
+		}
+	}
+
+	if (existsSync(adrDir)) {
+		for (const f of readDir(adrDir)) {
+			if (f.endsWith(".md") && !ADR_FILENAME_PATTERN.test(f)) {
+				issues.push({ type: "error", message: `✗ ${ADR_DIR}/${f}: filename doesn't match ADR-NNNN-*.md pattern` });
+			}
+		}
+	}
+
+	// Check numbering gaps
+	const prdNumbers = prdFiles
+		.map((f) => {
+			const m = f.match(/^PRD-(\d{3})-.*\.md$/);
+			return m ? parseInt(m[1], 10) : null;
+		})
+		.filter((n): n is number => n !== null)
+		.sort((a, b) => a - b);
+
+	for (let i = 0; i < prdNumbers.length - 1; i++) {
+		if (prdNumbers[i + 1] - prdNumbers[i] > 1) {
+			for (let gap = prdNumbers[i] + 1; gap < prdNumbers[i + 1]; gap++) {
+				const padded = String(gap).padStart(3, "0");
+				issues.push({ type: "warning", message: `⚠ Numbering gap: PRD-${padded} is missing` });
+			}
+		}
+	}
+
+	const adrNumbers = adrFiles
+		.map((f) => {
+			const m = f.match(/^ADR-(\d{4})-.*\.md$/);
+			return m ? parseInt(m[1], 10) : null;
+		})
+		.filter((n): n is number => n !== null)
+		.sort((a, b) => a - b);
+
+	for (let i = 0; i < adrNumbers.length - 1; i++) {
+		if (adrNumbers[i + 1] - adrNumbers[i] > 1) {
+			for (let gap = adrNumbers[i] + 1; gap < adrNumbers[i + 1]; gap++) {
+				const padded = String(gap).padStart(4, "0");
+				issues.push({ type: "warning", message: `⚠ Numbering gap: ADR-${padded} is missing` });
+			}
+		}
+	}
+
+	// Report results
+	const errors = issues.filter((i) => i.type === "error");
+	const warnings = issues.filter((i) => i.type === "warning");
+
+	if (issues.length === 0) {
+		ctx.ui.notify("[specdocs] Validation passed: no issues found.", "info");
+	} else {
+		const lines: string[] = [];
+		if (errors.length > 0) {
+			lines.push(`Errors (${errors.length}):`);
+			for (const e of errors) {
+				lines.push(`  ${e.message}`);
+			}
+		}
+		if (warnings.length > 0) {
+			lines.push(`Warnings (${warnings.length}):`);
+			for (const w of warnings) {
+				lines.push(`  ${w.message}`);
+			}
+		}
+		ctx.ui.notify(`[specdocs] Validation:\n${lines.join("\n")}`, errors.length > 0 ? "error" : "warning");
+	}
+}
+
+// =============================================================================
 // Exports (for testing)
 // =============================================================================
 
-export { extractFrontmatterField, formatConfig, formatSummary, listMatchingFiles, readConfig, scanWorkspace };
+export {
+	extractFrontmatterField,
+	formatConfig,
+	formatSummary,
+	isAdr,
+	isPrd,
+	listMatchingFiles,
+	parseFrontmatter,
+	readConfig,
+	scanWorkspace,
+	validateFrontmatter,
+};
 
 // =============================================================================
 // Extension Entry Point
@@ -240,5 +509,17 @@ export default function specdocs(pi: ExtensionAPI) {
 		if (summary) {
 			console.log(summary);
 		}
+	});
+
+	pi.on("tool_result", async (event, ctx) => {
+		await handleDocLint(event, ctx);
+	});
+
+	pi.registerCommand("specdocs-validate", {
+		description:
+			"(specdocs plugin) Validate all spec documents for frontmatter completeness, naming conventions, and cross-references",
+		handler: async (_args, ctx) => {
+			await runValidation(ctx);
+		},
 	});
 }

@@ -12,7 +12,7 @@ title: "[Title]"
 prd: PRD-NNN
 status: Draft
 owner: "[Name]"
-issue: "[#N](link) or N/A"
+issue: "[issue-ref or N/A]"  # use #N for GitHub or TEAM-N for Linear
 date: YYYY-MM-DD
 version: "1.0"
 ---
@@ -176,7 +176,7 @@ Every file should trace to at least one FR. Every FR should have at least one fi
 
 | Issue | Relationship |
 |-------|-------------|
-| [#N — Title] | [How it relates — blocks, blocked-by, depends-on, enables, completed] |
+| [Issue ref — Title] | [How it relates — blocks, blocked-by, depends-on, enables, completed] |
 
 ---
 
