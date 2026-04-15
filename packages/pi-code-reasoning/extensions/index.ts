@@ -27,6 +27,7 @@ import {
 	MAX_THOUGHT_LENGTH,
 	type ThoughtData,
 	type ValidatedThoughtData,
+	validateThoughtData,
 } from "./types.js";
 
 // =============================================================================
@@ -54,6 +55,7 @@ interface ThoughtTracker {
 	add: (thought: ValidatedThoughtData) => void;
 	reset: () => void;
 	ensureBranchIsValid: (branchFromThought?: number) => void;
+	ensureRevisionIsValid: (revisesThought?: number) => void;
 	branches: () => string[];
 	count: () => number;
 }
@@ -272,6 +274,11 @@ function createThoughtTracker(): ThoughtTracker {
 		ensureBranchIsValid: (branchFromThought) => {
 			if (branchFromThought && branchFromThought > thoughtHistory.length) {
 				throw new Error(`Invalid branch_from_thought ${branchFromThought}.`);
+			}
+		},
+		ensureRevisionIsValid: (revisesThought) => {
+			if (revisesThought && revisesThought > thoughtHistory.length) {
+				throw new Error(`Invalid revises_thought ${revisesThought}.`);
 			}
 		},
 		branches: () => Array.from(branches.keys()),
@@ -499,9 +506,17 @@ export default function codeReasoning(pi: ExtensionAPI) {
 			needs_more_thoughts,
 		};
 
-		// Validate thought_number limit
-		if (data.thought_number > MAX_THOUGHT_COUNT) {
+		const fieldErrors = validateThoughtData(data);
+		if (fieldErrors.length > 0) {
+			throw new Error(fieldErrors[0].message);
+		}
+
+		// Validate thought limits and ordering
+		if (data.thought_number > MAX_THOUGHT_COUNT || data.total_thoughts > MAX_THOUGHT_COUNT) {
 			throw new Error(`Max thought_number exceeded (${MAX_THOUGHT_COUNT}).`);
+		}
+		if (data.thought_number > data.total_thoughts) {
+			throw new Error("thought_number cannot exceed total_thoughts.");
 		}
 
 		// Cross-field validation
@@ -510,8 +525,9 @@ export default function codeReasoning(pi: ExtensionAPI) {
 			throw new Error(crossErrors[0].message);
 		}
 
-		// Validate branch
+		// Validate branch/revision references
 		tracker.ensureBranchIsValid(data.branch_from_thought);
+		tracker.ensureRevisionIsValid(data.revises_thought);
 
 		// Add defaults
 		const validated: ValidatedThoughtData = {

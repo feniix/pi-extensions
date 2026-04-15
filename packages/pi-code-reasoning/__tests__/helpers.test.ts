@@ -287,6 +287,22 @@ describe("pi-code-reasoning createThoughtTracker", () => {
 		expect(() => tracker.ensureBranchIsValid(100)).toThrow("Invalid branch_from_thought");
 	});
 
+	it("validates revises_thought", () => {
+		const tracker = createThoughtTracker();
+		tracker.add({
+			thought: "First",
+			thought_number: 1,
+			total_thoughts: 5,
+			next_thought_needed: true,
+			is_revision: false,
+			branch_from_thought: undefined,
+			branch_id: undefined,
+			needs_more_thoughts: false,
+		});
+		expect(() => tracker.ensureRevisionIsValid(1)).not.toThrow();
+		expect(() => tracker.ensureRevisionIsValid(100)).toThrow("Invalid revises_thought");
+	});
+
 	it("handles multiple branches", () => {
 		const tracker = createThoughtTracker();
 		tracker.add({

@@ -172,6 +172,8 @@ describe("pi-code-reasoning", () => {
 		const result = await mainTool?.execute("call-123", { thought: "" }, undefined, undefined, undefined);
 
 		expect(result).toBeDefined();
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("Thought cannot be empty");
 	});
 
 	it("tracks multiple thoughts", async () => {
@@ -210,5 +212,29 @@ describe("pi-code-reasoning", () => {
 		);
 
 		expect(result2.content[0].text).toContain("2");
+	});
+
+	it("rejects thought_number greater than total_thoughts", async () => {
+		const mockPi = createMockPi();
+		codeReasoning(mockPi as unknown as ExtensionAPI);
+
+		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
+		const mainTool = tools.find((t) => t.name === "code_reasoning");
+
+		const result = await mainTool?.execute(
+			"call-123",
+			{
+				thought: "Invalid ordering",
+				thought_number: 4,
+				total_thoughts: 3,
+				next_thought_needed: true,
+			},
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("thought_number cannot exceed total_thoughts");
 	});
 });
