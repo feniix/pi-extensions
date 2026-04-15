@@ -61,7 +61,7 @@ export function getTagInfo(): string {
 	if (tags.length === 0) return "No version tags found";
 
 	tags.sort((a, b) => compareVersions(parseVersion(a), parseVersion(b)));
-	const latest = tags[0];
+	const latest = tags.at(-1) ?? tags[0];
 
 	try {
 		const count = execGit(`rev-list ${latest}..HEAD --count`);
