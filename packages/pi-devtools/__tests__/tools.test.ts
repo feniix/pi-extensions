@@ -328,16 +328,18 @@ describe("pi-devtools", () => {
 
 	describe("checkCiTool", () => {
 		it("checks CI by PR number", () => {
-			vi.mocked(execGh).mockReturnValue("Build / test (ubuntu-latest)    success");
+			vi.mocked(execGh).mockReturnValue(
+				JSON.stringify([{ workflowName: "Build", status: "completed", conclusion: "success", url: "https://ci" }]),
+			);
 
 			const result = checkCiTool(123);
 
 			expect(result.content[0].text).toContain("CI Status");
-			expect(result.details.rawOutput).toBeDefined();
+			expect(result.details.checks).toBeDefined();
 		});
 
 		it("checks CI by branch", () => {
-			vi.mocked(execGh).mockReturnValue("Build / test (ubuntu-latest)    success");
+			vi.mocked(execGh).mockReturnValue(JSON.stringify([{ workflowName: "Build", status: "in_progress" }]));
 
 			const result = checkCiTool(undefined, "feature-branch");
 

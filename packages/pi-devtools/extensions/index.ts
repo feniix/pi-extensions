@@ -20,6 +20,10 @@ interface ToolResult {
 	isError?: boolean;
 }
 
+function shellQuote(value: string): string {
+	return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 function parseConventionalCommit(message: string): { type: string; scope?: string; breaking: boolean } {
 	const match = message.match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/);
 	if (!match) {
@@ -110,14 +114,14 @@ const createReleaseParams = Type.Object({
 function createBranchTool(branchName: string, switchBranch = true): ToolResult {
 	try {
 		if (switchBranch) {
-			execGit(`git checkout -b ${branchName}`);
+			execGit(`git checkout -b ${shellQuote(branchName)}`);
 			return {
 				content: [{ type: "text", text: `Created and switched to branch: ${branchName}` }],
 				details: { branch: branchName, switched: true },
 			};
 		}
 
-		execGit(`git branch ${branchName}`);
+		execGit(`git branch ${shellQuote(branchName)}`);
 		return {
 			content: [{ type: "text", text: `Created branch: ${branchName}` }],
 			details: { branch: branchName, switched: false },
@@ -147,7 +151,7 @@ function commitTool(message: string, files?: string[], noVerify = false): ToolRe
 		// Stage files
 		if (files && files.length > 0) {
 			for (const file of files) {
-				execGit(`git add ${file}`);
+				execGit(`git add -- ${shellQuote(file)}`);
 			}
 		} else {
 			execGit("git add -A");
@@ -166,8 +170,7 @@ function commitTool(message: string, files?: string[], noVerify = false): ToolRe
 
 		// Commit
 		const verifyFlag = noVerify ? "--no-verify" : "";
-		const escapedMessage = message.replace(/"/g, '\\"');
-		execGit(`git commit ${verifyFlag} -m "${escapedMessage}"`);
+		execGit(`git commit ${verifyFlag} -m ${shellQuote(message)}`);
 
 		return {
 			content: [{ type: "text", text: `Committed: ${message}\n\nFiles staged: ${stagedAfter.length}` }],
@@ -188,7 +191,7 @@ function pushTool(branch?: string, setUpstream = true): ToolResult {
 		const currentBranch = branch || execGit("git branch --show-current");
 		const upstreamFlag = setUpstream ? "-u" : "";
 
-		execGit(`git push ${upstreamFlag} origin ${currentBranch}`);
+		execGit(`git push ${upstreamFlag} origin ${shellQuote(currentBranch)}`);
 
 		return {
 			content: [{ type: "text", text: `Pushed ${currentBranch} to origin` }],
@@ -210,10 +213,10 @@ function createPrTool(title: string, body?: string, base?: string, draft = false
 		const targetBase = base || defaultBranch;
 		const headBranch = execGit("git branch --show-current");
 
-		let command = `gh pr create --title "${title.replace(/"/g, '\\"')}" --base ${targetBase}`;
+		let command = `gh pr create --title ${shellQuote(title)} --base ${shellQuote(targetBase)}`;
 
 		if (body) {
-			command += ` --body "${body.replace(/"/g, '\\"')}"`;
+			command += ` --body ${shellQuote(body)}`;
 		}
 
 		if (draft) {
@@ -221,7 +224,7 @@ function createPrTool(title: string, body?: string, base?: string, draft = false
 		}
 
 		if (assignees && assignees.length > 0) {
-			command += ` --assignee "${assignees.join(",")}"`;
+			command += ` --assignee ${shellQuote(assignees.join(","))}`;
 		}
 
 		const prUrl = execGh(command);
@@ -253,11 +256,11 @@ function mergePrTool(
 		let num = prNumber;
 		if (!num) {
 			const branch = execGit("git branch --show-current");
-			const prs = execGh(`gh pr list --head ${branch} --state open --json number,title -q '.[]'`);
+			const prs = execGh(`gh pr list --head ${shellQuote(branch)} --state open --json number,title`);
 			if (prs) {
-				const prData = JSON.parse(prs);
-				if (prData.length > 0) {
-					num = prData[0].number;
+				const parsed = JSON.parse(prs) as Array<{ number?: number }>;
+				if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0].number === "number") {
+					num = parsed[0].number;
 				}
 			}
 		}
@@ -287,10 +290,10 @@ function mergePrTool(
 		if (squash) {
 			command += " --squash";
 			if (commitTitle) {
-				command += ` --title "${commitTitle.replace(/"/g, '\\"')}"`;
+				command += ` --title ${shellQuote(commitTitle)}`;
 			}
 			if (commitMessage) {
-				command += ` --body "${commitMessage.replace(/"/g, '\\"')}"`;
+				command += ` --body ${shellQuote(commitMessage)}`;
 			}
 		} else {
 			command += " --merge";
@@ -327,12 +330,12 @@ function checkCiTool(prNumber?: number, branch?: string): ToolResult {
 		let checkCommand: string;
 
 		if (prNumber) {
-			checkCommand = `gh run list --pr ${prNumber} --limit 5`;
+			checkCommand = `gh run list --pr ${prNumber} --limit 5 --json workflowName,status,conclusion,url`;
 		} else if (branch) {
-			checkCommand = `gh run list --branch ${branch} --limit 5`;
+			checkCommand = `gh run list --branch ${shellQuote(branch)} --limit 5 --json workflowName,status,conclusion,url`;
 		} else {
 			const currentBranch = execGit("git branch --show-current");
-			checkCommand = `gh run list --branch ${currentBranch} --limit 5`;
+			checkCommand = `gh run list --branch ${shellQuote(currentBranch)} --limit 5 --json workflowName,status,conclusion,url`;
 		}
 
 		const runs = execGh(checkCommand);
@@ -344,19 +347,32 @@ function checkCiTool(prNumber?: number, branch?: string): ToolResult {
 			};
 		}
 
-		const lines = runs.split("\n").filter(Boolean);
-		const checkSummary = lines
-			.map((line) => {
-				const parts = line.split(/\s+/);
-				const status = parts[parts.length - 1];
-				const name = parts.slice(0, -1).join(" ");
-				return `- ${name}: ${status}`;
+		const parsedRuns = JSON.parse(runs) as Array<{
+			workflowName?: string;
+			status?: string;
+			conclusion?: string;
+			url?: string;
+		}>;
+
+		if (!Array.isArray(parsedRuns) || parsedRuns.length === 0) {
+			return {
+				content: [{ type: "text", text: "No CI runs found for this PR/branch." }],
+				details: { checks: [] },
+			};
+		}
+
+		const checkSummary = parsedRuns
+			.map((run) => {
+				const status = run.conclusion ?? run.status ?? "unknown";
+				const name = run.workflowName ?? "Unknown workflow";
+				const link = run.url ? ` (${run.url})` : "";
+				return `- ${name}: ${status}${link}`;
 			})
 			.join("\n");
 
 		return {
 			content: [{ type: "text", text: `CI Status:\n${checkSummary}` }],
-			details: { rawOutput: runs },
+			details: { checks: parsedRuns },
 		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -579,10 +595,10 @@ function bumpVersionTool(newVersion: string, file = "package.json"): ToolResult 
 
 function createReleaseTool(tag: string, title: string, body?: string, draft = false, prerelease = false): ToolResult {
 	try {
-		let command = `gh release create ${tag} --title "${title.replace(/"/g, '\\"')}"`;
+		let command = `gh release create ${shellQuote(tag)} --title ${shellQuote(title)}`;
 
 		if (body) {
-			command += ` --notes "${body.replace(/"/g, '\\"')}"`;
+			command += ` --notes ${shellQuote(body)}`;
 		}
 
 		if (draft) {
@@ -631,6 +647,7 @@ export {
 	pushTool,
 	repoInfoTool,
 	repoInfoTool as getRepoInfo,
+	shellQuote,
 };
 
 // =============================================================================
