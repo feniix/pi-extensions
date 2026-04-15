@@ -45,11 +45,13 @@ interface NotionUserInfo {
 
 function checkNotionAuth(): { authenticated: boolean; workspaceName?: string; message: string } {
 	// Check API key env var
-	const apiKey = process.env.NOTION_API_KEY;
+	const apiKey = process.env.NOTION_API_KEY ?? process.env.NOTION_TOKEN;
 	if (apiKey) {
 		return {
 			authenticated: true,
-			message: "[notion] Authenticated via NOTION_API_KEY",
+			message: process.env.NOTION_API_KEY
+				? "[notion] Authenticated via NOTION_API_KEY"
+				: "[notion] Authenticated via NOTION_TOKEN (legacy)",
 		};
 	}
 
