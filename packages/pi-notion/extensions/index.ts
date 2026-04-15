@@ -1,14 +1,224 @@
 /**
- * Notion utility functions for pi
+ * Notion Extension for pi
  *
- * Shared formatting and config utilities used by other extensions and tests.
- * All Notion tools are provided by the MCP client (mcp-client.ts).
+ * Features:
+ * - SessionStart: checks Notion authentication and prints status
+ * - Tool call guardrails: advisory warnings for common Notion mistakes
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { join, resolve } from "node:path";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+
+// =============================================================================
+// Config Paths
+// =============================================================================
+
+const CONFIG_DIR = join(homedir(), ".pi", "agent", "extensions");
+const TOKEN_FILE = join(CONFIG_DIR, "notion-tokens.json");
+const LEGACY_TOKEN_FILE = join(process.cwd(), ".pi", "extensions", "notion.json");
+
+// =============================================================================
+// Token Types
+// =============================================================================
+
+interface OAuthTokens {
+	accessToken: string;
+	refreshToken: string;
+	tokenType: string;
+	expiresAt: number;
+}
+
+interface NotionUserInfo {
+	workspaceId: string;
+	workspaceName: string;
+	workspaceIcon?: string;
+	botId: string;
+	ownerEmail?: string;
+	ownerName?: string;
+}
+
+// =============================================================================
+// Authentication Check
+// =============================================================================
+
+function checkNotionAuth(): { authenticated: boolean; workspaceName?: string; message: string } {
+	// Check API key env var
+	const apiKey = process.env.NOTION_API_KEY;
+	if (apiKey) {
+		return {
+			authenticated: true,
+			message: "[notion] Authenticated via NOTION_API_KEY",
+		};
+	}
+
+	// Check OAuth tokens file
+	if (existsSync(TOKEN_FILE)) {
+		try {
+			const tokens: OAuthTokens = JSON.parse(readFileSync(TOKEN_FILE, "utf-8"));
+			if (tokens.accessToken && tokens.expiresAt > Date.now()) {
+				const userInfoPath = TOKEN_FILE.replace("-tokens.json", "-user.json");
+				if (existsSync(userInfoPath)) {
+					const userInfo: NotionUserInfo = JSON.parse(readFileSync(userInfoPath, "utf-8"));
+					return {
+						authenticated: true,
+						workspaceName: userInfo.workspaceName,
+						message: `[notion] Authenticated as ${userInfo.workspaceName || "Unknown workspace"}`,
+					};
+				}
+				return {
+					authenticated: true,
+					message: "[notion] Authenticated (OAuth tokens valid)",
+				};
+			}
+		} catch {
+			// Malformed token file
+		}
+	}
+
+	// Check legacy config
+	if (existsSync(LEGACY_TOKEN_FILE)) {
+		try {
+			const config = JSON.parse(readFileSync(LEGACY_TOKEN_FILE, "utf-8"));
+			if (config.token) {
+				return {
+					authenticated: true,
+					message: "[notion] Authenticated via legacy config",
+				};
+			}
+		} catch {
+			// Malformed config
+		}
+	}
+
+	// Not authenticated
+	return {
+		authenticated: false,
+		message: "[notion] Not authenticated. Use /notion to connect your Notion workspace.",
+	};
+}
+
+// =============================================================================
+// Tool Call Guardrails
+// =============================================================================
+
+type CheckFn = (input: Record<string, unknown>) => string[];
+
+function checkNotionSearch(input: Record<string, unknown>): string[] {
+	const warnings: string[] = [];
+
+	if (input.content_search_mode !== "workspace_search") {
+		warnings.push(
+			"⚠ notion-search: content_search_mode is not 'workspace_search'. Default 'ai_search' returns calendar events. Use 'workspace_search' for workspace content.",
+		);
+	}
+
+	if (!("filters" in input)) {
+		warnings.push("⚠ notion-search: 'filters' key is missing. Add at minimum 'filters': {}.");
+	}
+
+	return warnings;
+}
+
+function checkNotionFetch(input: Record<string, unknown>): string[] {
+	const warnings: string[] = [];
+	const id = String(input.id ?? "");
+
+	if (!id) return warnings;
+
+	if (id.startsWith("view://")) {
+		warnings.push("⚠ notion-fetch: 'view://' URLs can't be fetched — use notion-query-database-view instead.");
+	} else if (!id.startsWith("https://") && !id.startsWith("collection://")) {
+		warnings.push("⚠ notion-fetch: Using raw ID. Prefer the 'url' field from search results for reliability.");
+	}
+
+	return warnings;
+}
+
+function checkMeetingNotes(input: Record<string, unknown>): string[] {
+	const warnings: string[] = [];
+
+	if (!("filter" in input)) {
+		warnings.push(
+			'⚠ notion-query-meeting-notes: \'filter\' is required. Use {"filter": {"operator": "and", "filters": []}} at minimum.',
+		);
+	} else {
+		const filter = input.filter as Record<string, unknown> | null;
+		if (filter && typeof filter === "object" && !("operator" in filter)) {
+			warnings.push(
+				'⚠ notion-query-meeting-notes: Empty filter {} will fail. Use {"filter": {"operator": "and", "filters": []}}.',
+			);
+		}
+	}
+
+	return warnings;
+}
+
+const toolChecks: Record<string, CheckFn> = {
+	"notion-search": checkNotionSearch,
+	"notion-fetch": checkNotionFetch,
+	"notion-query-meeting-notes": checkMeetingNotes,
+};
+
+function extractShortName(toolName: string): string {
+	const parts = toolName.split("__");
+	return parts.at(-1) ?? toolName;
+}
+
+async function handleToolGuardrails(
+	event: { toolName: string; input?: Record<string, unknown> },
+	ctx: ExtensionContext,
+) {
+	// Only check Notion MCP tools
+	if (!event.toolName.includes("notion")) return;
+
+	const shortName = extractShortName(event.toolName);
+	const checkFn = toolChecks[shortName];
+	if (!checkFn) return;
+
+	const warnings = checkFn(event.input ?? {});
+	if (warnings.length > 0) {
+		ctx.ui.notify(`[notion]\n${warnings.join("\n")}`, "warning");
+	}
+}
+
+// =============================================================================
+// Exports
+// =============================================================================
+
+export { checkNotionAuth, extractShortName, toolChecks };
+
+// =============================================================================
+// Extension Entry Point
+// =============================================================================
+
+export default function notion(pi: ExtensionAPI) {
+	// SessionStart: check auth and print status
+	pi.on("session_start", async () => {
+		// Ensure config directory exists
+		if (!existsSync(CONFIG_DIR)) {
+			try {
+				mkdirSync(CONFIG_DIR, { recursive: true });
+				writeFileSync(join(CONFIG_DIR, "notion-tokens.json"), JSON.stringify({}), "utf-8");
+			} catch {
+				// Ignore if can't create
+			}
+		}
+
+		const auth = checkNotionAuth();
+		console.log(auth.message);
+	});
+
+	// Tool call: advisory guardrails for Notion tools
+	pi.on("tool_call", async (event, ctx) => {
+		await handleToolGuardrails(event, ctx);
+	});
+}
+
+// =============================================================================
+// Utility Functions (kept for other extensions/tests)
+// =============================================================================
 
 interface NotionConfig {
 	token?: string;
@@ -28,12 +238,6 @@ function loadConfig(configPath?: string): NotionConfig | null {
 	else {
 		const projectConfigPath = join(process.cwd(), ".pi", "extensions", "notion.json");
 		const globalConfigPath = join(homedir(), ".pi", "agent", "extensions", "notion.json");
-		if (!existsSync(globalConfigPath)) {
-			try {
-				mkdirSync(dirname(globalConfigPath), { recursive: true });
-				writeFileSync(globalConfigPath, `${JSON.stringify({ token: null }, null, 2)}\n`, "utf-8");
-			} catch {}
-		}
 		candidates.push(projectConfigPath, globalConfigPath);
 	}
 	for (const candidate of candidates) {
@@ -99,6 +303,7 @@ function formatSearch(result: { results: unknown[] }) {
 		.join("\n");
 }
 
+// Re-export utilities
 export {
 	formatBlocks,
 	formatDatabase,
@@ -108,6 +313,3 @@ export {
 	loadConfig,
 	resolveConfigPath,
 };
-
-// No-op extension — all tools are registered by mcp-client.ts
-export default function notionExtension(_pi: ExtensionAPI) {}

@@ -43,10 +43,17 @@ describe("pi-notion", () => {
 			expect(extension).toContain("resolveConfigPath");
 		});
 
-		it("should have no-op extension (tools in mcp-client.ts)", () => {
+		it("should have session_start handler", () => {
 			const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
-			expect(extension).toContain("export default function notionExtension");
-			expect(extension).not.toContain("registerTool");
+			expect(extension).toContain('pi.on("session_start"');
+			expect(extension).toContain("checkNotionAuth");
+		});
+
+		it("should have tool_call guardrails handler", () => {
+			const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
+			expect(extension).toContain('pi.on("tool_call"');
+			expect(extension).toContain("checkNotionSearch");
+			expect(extension).toContain("checkNotionFetch");
 		});
 
 		it("should register tools in mcp-client.ts", () => {

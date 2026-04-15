@@ -278,6 +278,101 @@ describe("pi-notion loadConfig", () => {
 		// Creates default config file and returns it
 		expect(result).not.toBeNull();
 		expect(result).toHaveProperty("token");
-		expect(result).toHaveProperty("oauth");
+	});
+});
+
+describe("pi-notion checkNotionAuth", () => {
+	it("returns not authenticated when no config exists", async () => {
+		// Clear env var for this test
+		const originalApiKey = process.env.NOTION_API_KEY;
+		delete process.env.NOTION_API_KEY;
+
+		const { checkNotionAuth } = await import("../extensions/index.js");
+		const result = checkNotionAuth();
+		expect(result.authenticated).toBe(false);
+		expect(result.message).toContain("Not authenticated");
+
+		// Restore
+		if (originalApiKey) process.env.NOTION_API_KEY = originalApiKey;
+	});
+
+	it("returns authenticated via NOTION_API_KEY env var", async () => {
+		const originalApiKey = process.env.NOTION_API_KEY;
+		process.env.NOTION_API_KEY = "test-key";
+
+		const { checkNotionAuth } = await import("../extensions/index.js");
+		const result = checkNotionAuth();
+		expect(result.authenticated).toBe(true);
+		expect(result.message).toContain("NOTION_API_KEY");
+
+		// Restore
+		if (originalApiKey) process.env.NOTION_API_KEY = originalApiKey;
+		else delete process.env.NOTION_API_KEY;
+	});
+});
+
+describe("pi-notion tool guardrails", async () => {
+	const { toolChecks } = await import("../extensions/index.js");
+
+	describe("checkNotionSearch", () => {
+		it("warns when content_search_mode is not workspace_search", () => {
+			const warnings = toolChecks["notion-search"]({ query: "test", filters: {} });
+			expect(warnings.some((w: string) => w.includes("content_search_mode"))).toBe(true);
+		});
+
+		it("warns when filters key is missing", () => {
+			const warnings = toolChecks["notion-search"]({ query: "test", content_search_mode: "workspace_search" });
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain("filters");
+		});
+
+		it("returns no warnings when correctly configured", () => {
+			const warnings = toolChecks["notion-search"]({
+				query: "test",
+				content_search_mode: "workspace_search",
+				filters: {},
+			});
+			expect(warnings).toHaveLength(0);
+		});
+	});
+
+	describe("checkNotionFetch", () => {
+		it("warns when using view:// URLs", () => {
+			const warnings = toolChecks["notion-fetch"]({ id: "view://abc123" });
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain("view://");
+		});
+
+		it("warns when using raw ID instead of URL", () => {
+			const warnings = toolChecks["notion-fetch"]({ id: "abc123def456" });
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain("raw ID");
+		});
+
+		it("returns no warnings for https URLs", () => {
+			const warnings = toolChecks["notion-fetch"]({ id: "https://notion.so/page123" });
+			expect(warnings).toHaveLength(0);
+		});
+	});
+
+	describe("checkMeetingNotes", () => {
+		it("warns when filter is missing", () => {
+			const warnings = toolChecks["notion-query-meeting-notes"]({});
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain("filter");
+		});
+
+		it("warns when filter is empty object", () => {
+			const warnings = toolChecks["notion-query-meeting-notes"]({ filter: {} });
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain("operator");
+		});
+
+		it("returns no warnings when filter has operator", () => {
+			const warnings = toolChecks["notion-query-meeting-notes"]({
+				filter: { operator: "and", filters: [] },
+			});
+			expect(warnings).toHaveLength(0);
+		});
 	});
 });
