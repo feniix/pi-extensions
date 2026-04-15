@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-notion",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Notion API extension for pi — read, search, and manage Notion pages, databases, and content",
   "keywords": [
     "pi",
