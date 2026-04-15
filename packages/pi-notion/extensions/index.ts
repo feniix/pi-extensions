@@ -16,6 +16,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 // =============================================================================
 
 const CONFIG_DIR = join(homedir(), ".pi", "agent", "extensions");
+const MCP_CONFIG_FILE = join(CONFIG_DIR, "notion-mcp.json");
 const TOKEN_FILE = join(CONFIG_DIR, "notion-tokens.json");
 const LEGACY_TOKEN_FILE = join(process.cwd(), ".pi", "extensions", "notion.json");
 
@@ -44,18 +45,22 @@ interface NotionUserInfo {
 // =============================================================================
 
 function checkNotionAuth(): { authenticated: boolean; workspaceName?: string; message: string } {
-	// Check API key env var
-	const apiKey = process.env.NOTION_API_KEY ?? process.env.NOTION_TOKEN;
-	if (apiKey) {
-		return {
-			authenticated: true,
-			message: process.env.NOTION_API_KEY
-				? "[notion] Authenticated via NOTION_API_KEY"
-				: "[notion] Authenticated via NOTION_TOKEN (legacy)",
-		};
+	// Check MCP config from the OAuth-based MCP client
+	if (existsSync(MCP_CONFIG_FILE)) {
+		try {
+			const config = JSON.parse(readFileSync(MCP_CONFIG_FILE, "utf-8")) as { accessToken?: string; mcpUrl?: string };
+			if (typeof config.accessToken === "string" && config.accessToken.trim().length > 0) {
+				return {
+					authenticated: true,
+					message: `[notion] MCP config found (${config.mcpUrl ?? "https://mcp.notion.com/mcp"})`,
+				};
+			}
+		} catch {
+			// ignore malformed MCP config
+		}
 	}
 
-	// Check OAuth tokens file
+	// Check OAuth tokens file (legacy helper storage)
 	if (existsSync(TOKEN_FILE)) {
 		try {
 			const tokens: OAuthTokens = JSON.parse(readFileSync(TOKEN_FILE, "utf-8"));
@@ -79,14 +84,25 @@ function checkNotionAuth(): { authenticated: boolean; workspaceName?: string; me
 		}
 	}
 
+	// Legacy direct API token env vars are detected but do not establish MCP connectivity.
+	const apiKey = process.env.NOTION_API_KEY ?? process.env.NOTION_TOKEN;
+	if (apiKey) {
+		return {
+			authenticated: false,
+			message: process.env.NOTION_API_KEY
+				? "[notion] NOTION_API_KEY detected (legacy direct API token). MCP OAuth is still required: run /notion."
+				: "[notion] NOTION_TOKEN detected (legacy). MCP OAuth is still required: run /notion.",
+		};
+	}
+
 	// Check legacy config
 	if (existsSync(LEGACY_TOKEN_FILE)) {
 		try {
 			const config = JSON.parse(readFileSync(LEGACY_TOKEN_FILE, "utf-8"));
 			if (config.token) {
 				return {
-					authenticated: true,
-					message: "[notion] Authenticated via legacy config",
+					authenticated: false,
+					message: "[notion] Legacy notion.json token detected. MCP OAuth is still required: run /notion.",
 				};
 			}
 		} catch {
@@ -202,7 +218,7 @@ export default function notion(pi: ExtensionAPI) {
 		if (!existsSync(CONFIG_DIR)) {
 			try {
 				mkdirSync(CONFIG_DIR, { recursive: true });
-				writeFileSync(join(CONFIG_DIR, "notion-tokens.json"), JSON.stringify({}), "utf-8");
+				writeFileSync(join(CONFIG_DIR, "notion-mcp.json"), JSON.stringify({}), "utf-8");
 			} catch {
 				// Ignore if can't create
 			}

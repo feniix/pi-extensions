@@ -66,12 +66,13 @@ Use `notion_mcp_status` to list currently available tools.
 
 ## Authentication Notes
 
-For session-start auth detection, the extension checks:
+This package requires MCP OAuth (`/notion` or `notion_mcp_connect`) for tool connectivity.
 
-1. `NOTION_API_KEY` (preferred env var)
-2. `NOTION_TOKEN` (legacy env var alias)
-3. OAuth token files under `~/.pi/agent/extensions/`
-4. Legacy project config `.pi/extensions/notion.json`
+Session-start status checks for:
+
+1. MCP OAuth config (`~/.pi/agent/extensions/notion-mcp.json`)
+2. Legacy OAuth token files under `~/.pi/agent/extensions/`
+3. Legacy direct API token hints (`NOTION_API_KEY`, `NOTION_TOKEN`, `.pi/extensions/notion.json`) and warns that MCP OAuth is still required.
 
 ## Requirements
 

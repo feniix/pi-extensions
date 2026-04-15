@@ -296,14 +296,15 @@ describe("pi-notion checkNotionAuth", () => {
 		if (originalApiKey) process.env.NOTION_API_KEY = originalApiKey;
 	});
 
-	it("returns authenticated via NOTION_API_KEY env var", async () => {
+	it("detects NOTION_API_KEY but still requires MCP auth", async () => {
 		const originalApiKey = process.env.NOTION_API_KEY;
 		process.env.NOTION_API_KEY = "test-key";
 
 		const { checkNotionAuth } = await import("../extensions/index.js");
 		const result = checkNotionAuth();
-		expect(result.authenticated).toBe(true);
+		expect(result.authenticated).toBe(false);
 		expect(result.message).toContain("NOTION_API_KEY");
+		expect(result.message).toContain("MCP OAuth is still required");
 
 		// Restore
 		if (originalApiKey) process.env.NOTION_API_KEY = originalApiKey;
