@@ -361,8 +361,26 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 		type: "string",
 	});
 
+	const getStorageDir = (): string | undefined => {
+		const storageDirFlag = pi.getFlag("--seq-think-storage-dir");
+		if (typeof storageDirFlag === "string" && storageDirFlag.trim().length > 0) {
+			return resolveConfigPath(storageDirFlag);
+		}
+
+		const configFlag = pi.getFlag("--seq-think-config");
+		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
+		const envStorageDir = normalizeString(process.env.MCP_STORAGE_DIR);
+		if (envStorageDir) {
+			return resolveConfigPath(envStorageDir);
+		}
+		if (config?.storageDir) {
+			return resolveConfigPath(config.storageDir);
+		}
+		return undefined;
+	};
+
 	// Create singleton storage and analyzer
-	const storage = new ThoughtStorage();
+	const storage = new ThoughtStorage(getStorageDir());
 	const analyzer = new ThoughtAnalyzer();
 
 	const getMaxLimits = (): { maxBytes: number; maxLines: number } => {
