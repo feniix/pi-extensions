@@ -277,7 +277,10 @@ async function performWebSearch(apiKey: string, query: string, numResults: numbe
 		},
 	};
 
-	const response = await exa.request<ExaSearchResponse>("https://api.exa.ai/search", "POST", searchRequest);
+	// Exa SDK already prefixes requests with its configured baseURL.
+	// Pass a relative endpoint here, not a full URL, or the SDK will build
+	// an invalid URL like "https://api.exa.aihttps://api.exa.ai/search".
+	const response = await exa.request<ExaSearchResponse>("/search", "POST", searchRequest);
 
 	if (!response?.results || response.results.length === 0) {
 		return "No search results found. Please try a different query.";
@@ -306,7 +309,7 @@ async function performWebFetch(apiKey: string, urls: string[], maxCharacters: nu
 			author?: string;
 			text?: string;
 		}>;
-	}>("https://api.exa.ai/contents", "POST", crawlRequest);
+	}>("/contents", "POST", crawlRequest);
 
 	if (!response?.results || response.results.length === 0) {
 		return "No content found for the requested URLs.";
@@ -369,7 +372,7 @@ async function performAdvancedSearch(
 		};
 	}
 
-	const response = await exa.request<ExaSearchResponse>("https://api.exa.ai/search", "POST", searchRequest);
+	const response = await exa.request<ExaSearchResponse>("/search", "POST", searchRequest);
 
 	if (!response?.results || response.results.length === 0) {
 		return "No search results found. Please try a different query.";
