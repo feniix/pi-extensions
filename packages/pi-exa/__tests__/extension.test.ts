@@ -1,16 +1,51 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mockRequest = vi.fn();
+
+vi.mock("exa-js", () => ({
+	Exa: class {
+		request = mockRequest;
+	},
+}));
+
 import exaExtension from "../extensions/index.js";
 
-const createMockPi = () =>
+const createMockPi = (flags: Record<string, unknown> = {}) =>
 	({
 		registerFlag: vi.fn(),
-		getFlag: vi.fn(() => undefined),
+		getFlag: vi.fn((name: string) => flags[name]),
 		registerTool: vi.fn(),
 		on: vi.fn(),
 	}) satisfies Partial<ExtensionAPI>;
 
+const getRegisteredTool = (mockPi: ReturnType<typeof createMockPi>, name: string) => {
+	const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
+	return tools.find((tool) => tool.name === name);
+};
+
+const writeTempConfig = (config: Record<string, unknown>) => {
+	const base = mkdtempSync(join(tmpdir(), "pi-exa-extension-"));
+	const configPath = join(base, "exa.json");
+	writeFileSync(configPath, `${JSON.stringify(config)}\n`, "utf-8");
+	return configPath;
+};
+
 describe("pi-exa extension", () => {
+	const originalApiKey = process.env.EXA_API_KEY;
+
+	beforeEach(() => {
+		mockRequest.mockReset();
+		if (originalApiKey === undefined) {
+			delete process.env.EXA_API_KEY;
+		} else {
+			process.env.EXA_API_KEY = originalApiKey;
+		}
+	});
+
 	it("registers flags", () => {
 		const mockPi = createMockPi();
 		exaExtension(mockPi as unknown as ExtensionAPI);
@@ -33,8 +68,7 @@ describe("pi-exa extension", () => {
 		const mockPi = createMockPi();
 		exaExtension(mockPi as unknown as ExtensionAPI);
 
-		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-		const searchTool = tools.find((t) => t.name === "web_search_exa");
+		const searchTool = getRegisteredTool(mockPi, "web_search_exa");
 		expect(searchTool).toBeDefined();
 	});
 
@@ -42,8 +76,7 @@ describe("pi-exa extension", () => {
 		const mockPi = createMockPi();
 		exaExtension(mockPi as unknown as ExtensionAPI);
 
-		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-		const fetchTool = tools.find((t) => t.name === "web_fetch_exa");
+		const fetchTool = getRegisteredTool(mockPi, "web_fetch_exa");
 		expect(fetchTool).toBeDefined();
 	});
 
@@ -55,10 +88,16 @@ describe("pi-exa extension", () => {
 		expect(toolNames).not.toContain("web_search_advanced_exa");
 	});
 
-	// Skipped: requires mocking config loading which has file system dependencies
-	it.skip("registers web_search_advanced_exa when advanced enabled", () => {
-		// This test is skipped because the config loading has file system dependencies
-		// that are hard to mock properly in unit tests
+	it("registers web_search_advanced_exa when config enables it", () => {
+		const configPath = writeTempConfig({
+			apiKey: "config-api-key",
+			enabledTools: ["web_search_exa", "web_fetch_exa", "web_search_advanced_exa"],
+		});
+		const mockPi = createMockPi({ "--exa-config": configPath });
+		exaExtension(mockPi as unknown as ExtensionAPI);
+
+		const advancedTool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+		expect(advancedTool).toBeDefined();
 	});
 
 	it("registers tools with execute functions", () => {
@@ -77,8 +116,7 @@ describe("pi-exa extension", () => {
 		const mockPi = createMockPi();
 		exaExtension(mockPi as unknown as ExtensionAPI);
 
-		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-		const searchTool = tools.find((t) => t.name === "web_search_exa");
+		const searchTool = getRegisteredTool(mockPi, "web_search_exa");
 		expect(searchTool?.label).toBe("Exa Web Search");
 	});
 
@@ -113,52 +151,40 @@ describe("pi-exa extension", () => {
 	});
 
 	it("handles missing API key gracefully", async () => {
-		// Clear environment variable
-		const originalEnv = process.env.EXA_API_KEY;
 		delete process.env.EXA_API_KEY;
 
 		const mockPi = createMockPi();
-		mockPi.getFlag = vi.fn(() => undefined);
 		exaExtension(mockPi as unknown as ExtensionAPI);
 
-		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-		const searchTool = tools.find((t) => t.name === "web_search_exa");
-
+		const searchTool = getRegisteredTool(mockPi, "web_search_exa");
 		const result = await searchTool?.execute("call-123", { query: "test" }, undefined, undefined, undefined);
 
-		// Without API key, should return error
 		expect(result.isError).toBe(true);
 		expect(result.content[0].text).toContain("API key not configured");
-
-		// Restore environment
-		if (originalEnv !== undefined) {
-			process.env.EXA_API_KEY = originalEnv;
-		}
 	});
 
-	it("handles aborted signal", async () => {
-		const mockPi = createMockPi();
+	it("handles aborted signal for web_search_exa", async () => {
+		const mockPi = createMockPi({ "--exa-api-key": "flag-api-key" });
 		exaExtension(mockPi as unknown as ExtensionAPI);
 
-		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-		const searchTool = tools.find((t) => t.name === "web_search_exa");
-
+		const searchTool = getRegisteredTool(mockPi, "web_search_exa");
 		const abortedSignal = { aborted: true } as AbortSignal;
 		const result = await searchTool?.execute("call-123", { query: "test" }, abortedSignal, undefined, undefined);
 
 		expect(result.details.cancelled).toBe(true);
 	});
 
-	it("calls onUpdate callback", async () => {
-		const mockPi = createMockPi();
-		// No API key set, so it will short-circuit before HTTP call
+	it("calls onUpdate callback for web_search_exa before executing", async () => {
+		mockRequest.mockResolvedValue({
+			results: [{ title: "Result", url: "https://example.com", text: "Search content" }],
+		});
+
+		const mockPi = createMockPi({ "--exa-api-key": "flag-api-key" });
 		exaExtension(mockPi as unknown as ExtensionAPI);
 
-		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-		const searchTool = tools.find((t) => t.name === "web_search_exa");
-
+		const searchTool = getRegisteredTool(mockPi, "web_search_exa");
 		const onUpdate = vi.fn();
-		const _result = await searchTool?.execute(
+		const result = await searchTool?.execute(
 			"call-123",
 			{ query: "test" },
 			{ aborted: false } as AbortSignal,
@@ -166,8 +192,11 @@ describe("pi-exa extension", () => {
 			undefined,
 		);
 
-		// Without API key, onUpdate should still be called with pending status
-		expect(onUpdate).toHaveBeenCalled();
+		expect(onUpdate).toHaveBeenCalledWith({
+			content: [{ type: "text", text: "Searching the web via Exa..." }],
+			details: { status: "pending" },
+		});
+		expect(result.content[0].text).toContain("https://example.com");
 	});
 
 	it("handles multiple extension instances", () => {
@@ -182,17 +211,12 @@ describe("pi-exa extension", () => {
 	});
 
 	it("web_fetch_exa handles missing API key", async () => {
-		// Clear environment variable
-		const originalEnv = process.env.EXA_API_KEY;
 		delete process.env.EXA_API_KEY;
 
 		const mockPi = createMockPi();
-		mockPi.getFlag = vi.fn(() => undefined);
 		exaExtension(mockPi as unknown as ExtensionAPI);
 
-		const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-		const fetchTool = tools.find((t) => t.name === "web_fetch_exa");
-
+		const fetchTool = getRegisteredTool(mockPi, "web_fetch_exa");
 		const result = await fetchTool?.execute(
 			"call-123",
 			{ urls: ["https://example.com"] },
@@ -201,13 +225,203 @@ describe("pi-exa extension", () => {
 			undefined,
 		);
 
-		// Without API key, should return error
 		expect(result.isError).toBe(true);
 		expect(result.content[0].text).toContain("API key not configured");
+	});
 
-		// Restore environment
-		if (originalEnv !== undefined) {
-			process.env.EXA_API_KEY = originalEnv;
-		}
+	it("web_fetch_exa handles aborted signal", async () => {
+		const mockPi = createMockPi({ "--exa-api-key": "flag-api-key" });
+		exaExtension(mockPi as unknown as ExtensionAPI);
+
+		const fetchTool = getRegisteredTool(mockPi, "web_fetch_exa");
+		const result = await fetchTool?.execute(
+			"call-123",
+			{ urls: ["https://example.com"] },
+			{ aborted: true } as AbortSignal,
+			undefined,
+			undefined,
+		);
+
+		expect(result.details.cancelled).toBe(true);
+	});
+
+	it("web_fetch_exa returns formatted content and uses the relative contents endpoint", async () => {
+		mockRequest.mockResolvedValue({
+			results: [
+				{
+					title: "Fetched Page",
+					url: "https://example.com",
+					text: "Fetched content",
+					publishedDate: "2025-01-15T10:30:00Z",
+					author: "Jane Doe",
+				},
+			],
+		});
+
+		const mockPi = createMockPi({ "--exa-api-key": "flag-api-key" });
+		exaExtension(mockPi as unknown as ExtensionAPI);
+
+		const fetchTool = getRegisteredTool(mockPi, "web_fetch_exa");
+		const onUpdate = vi.fn();
+		const result = await fetchTool?.execute(
+			"call-123",
+			{ urls: ["https://example.com"], maxCharacters: 1234 },
+			{ aborted: false } as AbortSignal,
+			onUpdate,
+			undefined,
+		);
+
+		expect(onUpdate).toHaveBeenCalledWith({
+			content: [{ type: "text", text: "Fetching content via Exa..." }],
+			details: { status: "pending" },
+		});
+		expect(mockRequest).toHaveBeenCalledWith(
+			"/contents",
+			"POST",
+			expect.objectContaining({
+				ids: ["https://example.com"],
+				contents: { text: { maxCharacters: 1234 } },
+			}),
+		);
+		expect(result.details.tool).toBe("web_fetch_exa");
+		expect(result.content[0].text).toContain("Fetched Page");
+		expect(result.content[0].text).toContain("Fetched content");
+	});
+
+	it("web_fetch_exa returns an error result when the Exa request fails", async () => {
+		mockRequest.mockRejectedValue(new Error("fetch exploded"));
+
+		const mockPi = createMockPi({ "--exa-api-key": "flag-api-key" });
+		exaExtension(mockPi as unknown as ExtensionAPI);
+
+		const fetchTool = getRegisteredTool(mockPi, "web_fetch_exa");
+		const result = await fetchTool?.execute(
+			"call-123",
+			{ urls: ["https://example.com"] },
+			{ aborted: false } as AbortSignal,
+			undefined,
+			undefined,
+		);
+
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("Exa fetch error: fetch exploded");
+		expect(result.details).toEqual({ tool: "web_fetch_exa", error: "fetch exploded" });
+	});
+
+	it("web_search_advanced_exa handles missing API key", async () => {
+		delete process.env.EXA_API_KEY;
+		const configPath = writeTempConfig({
+			enabledTools: ["web_search_exa", "web_fetch_exa", "web_search_advanced_exa"],
+		});
+		const mockPi = createMockPi({ "--exa-config": configPath });
+		exaExtension(mockPi as unknown as ExtensionAPI);
+
+		const advancedTool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+		const result = await advancedTool?.execute("call-123", { query: "test" }, undefined, undefined, undefined);
+
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("API key not configured");
+	});
+
+	it("web_search_advanced_exa handles aborted signal", async () => {
+		const configPath = writeTempConfig({
+			apiKey: "config-api-key",
+			enabledTools: ["web_search_exa", "web_fetch_exa", "web_search_advanced_exa"],
+		});
+		const mockPi = createMockPi({ "--exa-config": configPath });
+		exaExtension(mockPi as unknown as ExtensionAPI);
+
+		const advancedTool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+		const result = await advancedTool?.execute(
+			"call-123",
+			{ query: "test" },
+			{ aborted: true } as AbortSignal,
+			undefined,
+			undefined,
+		);
+
+		expect(result.details.cancelled).toBe(true);
+	});
+
+	it("web_search_advanced_exa forwards advanced options to Exa and formats the response", async () => {
+		mockRequest.mockResolvedValue({
+			results: [{ title: "Advanced Result", url: "https://example.com/advanced", text: "Advanced content" }],
+		});
+		const configPath = writeTempConfig({
+			apiKey: "config-api-key",
+			enabledTools: ["web_search_exa", "web_fetch_exa", "web_search_advanced_exa"],
+		});
+		const mockPi = createMockPi({ "--exa-config": configPath });
+		exaExtension(mockPi as unknown as ExtensionAPI);
+
+		const advancedTool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+		const onUpdate = vi.fn();
+		const result = await advancedTool?.execute(
+			"call-123",
+			{
+				query: "latest ai tools",
+				numResults: 7,
+				category: "news",
+				type: "deep",
+				startPublishedDate: "2025-01-01",
+				endPublishedDate: "2025-02-01",
+				includeDomains: ["example.com"],
+				excludeDomains: ["spam.com"],
+				textMaxCharacters: 1200,
+				enableHighlights: true,
+				highlightsNumSentences: 5,
+			},
+			{ aborted: false } as AbortSignal,
+			onUpdate,
+			undefined,
+		);
+
+		expect(onUpdate).toHaveBeenCalledWith({
+			content: [{ type: "text", text: "Performing advanced search via Exa..." }],
+			details: { status: "pending" },
+		});
+		expect(mockRequest).toHaveBeenCalledWith(
+			"/search",
+			"POST",
+			expect.objectContaining({
+				query: "latest ai tools",
+				numResults: 7,
+				category: "news",
+				type: "deep",
+				startPublishedDate: "2025-01-01",
+				endPublishedDate: "2025-02-01",
+				includeDomains: ["example.com"],
+				excludeDomains: ["spam.com"],
+				contents: {
+					text: { maxCharacters: 1200 },
+					highlights: { highlightsPerUrl: 5 },
+				},
+			}),
+		);
+		expect(result.details.tool).toBe("web_search_advanced_exa");
+		expect(result.content[0].text).toContain("Advanced Result");
+	});
+
+	it("web_search_advanced_exa returns an error result when the Exa request fails", async () => {
+		mockRequest.mockRejectedValue(new Error("advanced exploded"));
+		const configPath = writeTempConfig({
+			apiKey: "config-api-key",
+			enabledTools: ["web_search_exa", "web_fetch_exa", "web_search_advanced_exa"],
+		});
+		const mockPi = createMockPi({ "--exa-config": configPath });
+		exaExtension(mockPi as unknown as ExtensionAPI);
+
+		const advancedTool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+		const result = await advancedTool?.execute(
+			"call-123",
+			{ query: "test" },
+			{ aborted: false } as AbortSignal,
+			undefined,
+			undefined,
+		);
+
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("Exa advanced search error: advanced exploded");
+		expect(result.details).toEqual({ tool: "web_search_advanced_exa", error: "advanced exploded" });
 	});
 });
