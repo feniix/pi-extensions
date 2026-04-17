@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-sequential-thinking",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Sequential Thinking MCP extension for pi — structured progressive thinking through defined stages",
   "keywords": [
     "pi",
@@ -31,13 +31,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/feniix/pi-packages.git",
+    "url": "git+https://github.com/feniix/pi-extensions.git",
     "directory": "packages/pi-sequential-thinking"
   },
   "author": "feniix",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/feniix/pi-packages/issues"
+    "url": "https://github.com/feniix/pi-extensions/issues"
   },
-  "homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-sequential-thinking#readme"
+  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-sequential-thinking#readme"
 }
