@@ -70,7 +70,9 @@ describe("pi-devtools git unit helpers", () => {
 			.mockReturnValueOnce("v1.0.0\n")
 			.mockReturnValueOnce("2\n");
 
-		expect(getGitContext()).toBe("[devtools] Branch: feature/coverage | Status: 1 modified | Tag: v1.0.0 (2 unreleased commits)");
+		expect(getGitContext()).toBe(
+			"[devtools] Branch: feature/coverage | Status: 1 modified | Tag: v1.0.0 (2 unreleased commits)",
+		);
 	});
 
 	it("wraps git and gh command failures with clearer messages", () => {
