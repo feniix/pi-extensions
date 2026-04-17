@@ -12,7 +12,7 @@ export function formatCompactNumber(value: number): string {
 }
 
 export function formatTokenPair(input: number, output: number): string {
-	return `↑${formatCompactNumber(input)} ↓${formatCompactNumber(output)}`;
+	return `↑${formatCompactNumber(input)}/↓${formatCompactNumber(output)}`;
 }
 
 export function formatContextWindow(contextWindow?: number): string | null {

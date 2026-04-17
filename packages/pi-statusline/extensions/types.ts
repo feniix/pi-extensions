@@ -5,7 +5,8 @@ export interface TokenTotals {
 
 export interface GitSnapshot {
 	repoName: string | null;
-	dirtyCount: number | null;
+	branch: string | null;
+	dirtyCount: number;
 	worktreeLabel: string;
 }
 
@@ -14,7 +15,6 @@ export interface StatuslineState {
 	thinkingLabel: string;
 	contextLabel: string;
 	tokenLabel: string;
-	cwdLabel: string;
 	gitSnapshot: GitSnapshot;
 	lastSkill: string | null;
 }

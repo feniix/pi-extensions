@@ -59,7 +59,7 @@ export function getWorktreeLabelForPath(
 	gitDir: string,
 ): string {
 	if (!isLinkedWorktreeGitDir(gitDir)) {
-		return "none";
+		return "main";
 	}
 
 	const normalizedTopLevel = normalize(currentTopLevel);
@@ -97,23 +97,26 @@ export async function getGitSnapshot(pi: ExtensionAPI, cwd: string): Promise<Git
 	if (insideWorkTree !== "true") {
 		return {
 			repoName: null,
-			dirtyCount: null,
-			worktreeLabel: "none",
+			branch: null,
+			dirtyCount: 0,
+			worktreeLabel: "no git",
 		};
 	}
 
 	const topLevel = await runGit(pi, cwd, ["rev-parse", "--show-toplevel"]);
 	const gitDir = await runGit(pi, cwd, ["rev-parse", "--git-dir"]);
+	const branch = await runGit(pi, cwd, ["branch", "--show-current"]);
 	const dirtyOutput = await runGit(pi, cwd, ["--no-optional-locks", "status", "--porcelain"]);
 	const worktreeOutput = await runGit(pi, cwd, ["worktree", "list", "--porcelain"]);
 
 	const repoName = topLevel ? basename(topLevel) : null;
-	const dirtyCount = dirtyOutput === null ? null : parseDirtyCountFromPorcelain(dirtyOutput);
+	const dirtyCount = dirtyOutput === null ? 0 : parseDirtyCountFromPorcelain(dirtyOutput);
 	const worktreeEntries = worktreeOutput ? parseWorktreeListPorcelain(worktreeOutput) : [];
-	const worktreeLabel = topLevel && gitDir ? getWorktreeLabelForPath(worktreeEntries, topLevel, gitDir) : "none";
+	const worktreeLabel = topLevel && gitDir ? getWorktreeLabelForPath(worktreeEntries, topLevel, gitDir) : "no git";
 
 	return {
 		repoName,
+		branch: branch || null,
 		dirtyCount,
 		worktreeLabel,
 	};
