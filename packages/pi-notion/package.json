@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-notion",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Notion API extension for pi — read, search, and manage Notion pages, databases, and content",
   "keywords": [
     "pi",
@@ -39,15 +39,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/feniix/pi-packages.git",
+    "url": "git+https://github.com/feniix/pi-extensions.git",
     "directory": "packages/pi-notion"
   },
   "author": "feniix",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/feniix/pi-packages/issues"
+    "url": "https://github.com/feniix/pi-extensions/issues"
   },
-  "homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-notion#readme",
+  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-notion#readme",
   "devDependencies": {
     "@types/node": "^22.19.17"
   }
