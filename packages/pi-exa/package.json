@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-exa",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Exa MCP extension for pi — web search, content fetching, and advanced search via Exa AI",
   "keywords": [
     "pi",
@@ -38,13 +38,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/feniix/pi-packages.git",
+    "url": "git+https://github.com/feniix/pi-extensions.git",
     "directory": "packages/pi-exa"
   },
   "author": "feniix",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/feniix/pi-packages/issues"
+    "url": "https://github.com/feniix/pi-extensions/issues"
   },
-  "homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-exa#readme"
+  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-exa#readme"
 }
