@@ -1,0 +1,33 @@
+{
+	"name": "@feniix/pi-statusline",
+	"version": "0.1.0",
+	"description": "pi extension that renders a two-line status line with model, thinking effort, context %, git info, token consumption, and skill info",
+	"type": "module",
+	"exports": {
+		".": "./src/index.ts",
+		"./extension": "./extensions/index.ts"
+	},
+	"files": [
+		"extensions/",
+		"src/"
+	],
+	"scripts": {
+		"lint": "cd ../.. && biome check packages/pi-statusline/src packages/pi-statusline/extensions packages/pi-statusline/__tests__",
+		"lint:fix": "biome check --write .",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"check": "npm run lint && npm run typecheck"
+	},
+	"dependencies": {
+		"chalk": "^5.5.1"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.0",
+		"@types/node": "^22.0.0",
+		"typescript": "^5.9.2",
+		"vitest": "^4.1.4"
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-coding-agent": "*"
+	}
+}
