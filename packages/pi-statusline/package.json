@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-statusline",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Fixed two-line status footer for pi with model, thinking, context, git, token, worktree, and skill indicators",
   "keywords": [
     "pi",
@@ -28,13 +28,13 @@
     "@sinclair/typebox": "*"
   },
   "repository": {
-    "url": "git+https://github.com/feniix/pi-packages.git",
+    "url": "git+https://github.com/feniix/pi-extensions.git",
     "directory": "packages/pi-statusline"
   },
   "author": "feniix",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/feniix/pi-packages/issues"
+    "url": "https://github.com/feniix/pi-extensions/issues"
   },
-  "homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-statusline#readme"
+  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-statusline#readme"
 }
