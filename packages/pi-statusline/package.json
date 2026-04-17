@@ -1,0 +1,41 @@
+{
+  "name": "@feniix/pi-statusline",
+  "version": "0.1.0",
+  "description": "Fixed two-line status footer for pi with model, thinking, context, git, token, worktree, and skill indicators",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "statusline",
+    "footer",
+    "git"
+  ],
+  "type": "module",
+  "files": [
+    "extensions/",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/feniix/pi-packages.git",
+    "directory": "packages/pi-statusline"
+  },
+  "author": "feniix",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/feniix/pi-packages/issues"
+  },
+  "homepage": "https://github.com/feniix/pi-packages/tree/main/packages/pi-statusline#readme"
+}
