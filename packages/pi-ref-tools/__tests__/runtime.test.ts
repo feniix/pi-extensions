@@ -5,10 +5,10 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import refTools from "../extensions/index.js";
 
-const createMockPi = (flags: Record<string, unknown> = {}) =>
+const createMockPi = (flags: Record<string, string | boolean | undefined> = {}) =>
 	({
 		registerFlag: vi.fn(),
-		getFlag: vi.fn((name: string) => flags[name]),
+		getFlag: vi.fn<(name: string) => string | boolean | undefined>((name: string) => flags[name]),
 		registerTool: vi.fn(),
 		on: vi.fn(),
 	}) satisfies Partial<ExtensionAPI>;
