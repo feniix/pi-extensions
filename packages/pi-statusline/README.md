@@ -1,17 +1,15 @@
 # @feniix/pi-statusline
 
-A fixed two-line status footer for pi.
+A fixed two-line status display for pi.
 
-It is intentionally UI-only:
-- rendered via `ctx.ui.setFooter()`
-- not injected into model context
-- not sent as messages
-- not exposed through tools
+By default it renders in the footer in interactive/RPC mode and logs to stdout in non-UI modes (`-p`, JSON mode).
+It is not injected into model context and is not sent as messages.
+It also exposes a `/statusline` tool for explicit retrieval.
 
 ## Display
 
 ```text
-Model: ... | Thinking: ... | Ctx: ... | ⎇ ... | dirty: +... | ↑... ↓...
+Model: ... | Thinking: ... | Ctx: ... | ⎇ ... | dirty: +... | ↑.../↓...
 <repo> | cwd: ... | 𖠰 ... | Skill: ...
 ```
 
@@ -37,8 +35,9 @@ Examples:
 
 ## Worktree behavior
 
-- linked worktree -> `𖠰 <label>`
-- main worktree / no linked worktree -> `𖠰 none`
+- linked worktree -> branch-derived label for that worktree
+- main worktree -> `𖠰 main`
+- non-git repo -> `𖠰 no git`
 
 ## Development
 
