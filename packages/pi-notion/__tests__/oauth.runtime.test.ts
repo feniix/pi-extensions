@@ -13,9 +13,9 @@ vi.mock("axios", () => ({
 import {
 	exchangeCodeForTokens,
 	getValidAccessToken,
-	refreshTokens,
 	type OAuthConfig,
 	type OAuthTokens,
+	refreshTokens,
 	type TokenStorage,
 } from "../extensions/oauth.js";
 
@@ -88,12 +88,15 @@ describe("pi-notion oauth runtime", () => {
 	it("returns an existing token when it is still valid", async () => {
 		const storage: TokenStorage = {
 			save: vi.fn(),
-			load: vi.fn(async () => ({
-				accessToken: "still-valid",
-				refreshToken: "refresh",
-				tokenType: "bearer",
-				expiresAt: Date.now() + 60 * 60 * 1000,
-			} satisfies OAuthTokens)),
+			load: vi.fn(
+				async () =>
+					({
+						accessToken: "still-valid",
+						refreshToken: "refresh",
+						tokenType: "bearer",
+						expiresAt: Date.now() + 60 * 60 * 1000,
+					}) satisfies OAuthTokens,
+			),
 			clear: vi.fn(),
 			getUserInfo: vi.fn(async () => null),
 		};
@@ -115,12 +118,15 @@ describe("pi-notion oauth runtime", () => {
 		const save = vi.fn();
 		const storage: TokenStorage = {
 			save,
-			load: vi.fn(async () => ({
-				accessToken: "old-access",
-				refreshToken: "old-refresh",
-				tokenType: "bearer",
-				expiresAt: Date.now() + 60 * 1000,
-			} satisfies OAuthTokens)),
+			load: vi.fn(
+				async () =>
+					({
+						accessToken: "old-access",
+						refreshToken: "old-refresh",
+						tokenType: "bearer",
+						expiresAt: Date.now() + 60 * 1000,
+					}) satisfies OAuthTokens,
+			),
 			clear: vi.fn(),
 			getUserInfo: vi.fn(async () => ({ workspaceId: "ws", workspaceName: "WS", botId: "bot" })),
 		};
@@ -138,12 +144,15 @@ describe("pi-notion oauth runtime", () => {
 		const clear = vi.fn();
 		const storage: TokenStorage = {
 			save: vi.fn(),
-			load: vi.fn(async () => ({
-				accessToken: "old-access",
-				refreshToken: "old-refresh",
-				tokenType: "bearer",
-				expiresAt: Date.now() - 1000,
-			} satisfies OAuthTokens)),
+			load: vi.fn(
+				async () =>
+					({
+						accessToken: "old-access",
+						refreshToken: "old-refresh",
+						tokenType: "bearer",
+						expiresAt: Date.now() - 1000,
+					}) satisfies OAuthTokens,
+			),
 			clear,
 			getUserInfo: vi.fn(async () => null),
 		};

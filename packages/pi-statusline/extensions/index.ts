@@ -206,7 +206,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text", text }],
 				details: {},
-			};
+		};
 		},
 	});
 }

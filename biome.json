@@ -12,6 +12,11 @@
 		"lineWidth": 120
 	},
 	"files": {
-		"includes": ["packages/*/extensions/**/*.ts", "packages/*/__tests__/**/*.ts", "vitest.config.ts"]
+		"includes": [
+			"packages/*/extensions/**/*.ts",
+			"packages/*/__tests__/**/*.ts",
+			"packages/*/src/**/*.ts",
+			"vitest.config.ts"
+		]
 	}
 }

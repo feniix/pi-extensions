@@ -28,7 +28,6 @@
     "@sinclair/typebox": "*"
   },
   "repository": {
-    "type": "git",
     "url": "git+https://github.com/feniix/pi-packages.git",
     "directory": "packages/pi-statusline"
   },

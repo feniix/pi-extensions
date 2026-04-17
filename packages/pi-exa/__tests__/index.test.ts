@@ -29,7 +29,9 @@ describe("pi-exa", () => {
 			const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
 			expect(extension).toContain('exa.request<ExaSearchResponse>("/search", "POST", searchRequest)');
 			expect(extension).toContain('}>("/contents", "POST", crawlRequest)');
-			expect(extension).not.toContain('exa.request<ExaSearchResponse>("https://api.exa.ai/search", "POST", searchRequest)');
+			expect(extension).not.toContain(
+				'exa.request<ExaSearchResponse>("https://api.exa.ai/search", "POST", searchRequest)',
+			);
 			expect(extension).not.toContain('}>("https://api.exa.ai/contents", "POST", crawlRequest)');
 		});
 	});
