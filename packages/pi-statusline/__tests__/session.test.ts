@@ -16,7 +16,7 @@ describe("pi-statusline session helpers", () => {
 		const label = getTokenLabel([
 			{ type: "message", message: { role: "assistant", usage: { input: 18000, output: 4200 } } },
 		]);
-		expect(label).toBe("↑18.0k ↓4.2k");
+		expect(label).toBe("↑18.0k/↓4.2k");
 	});
 
 	it("formats context label from explicit percent", () => {

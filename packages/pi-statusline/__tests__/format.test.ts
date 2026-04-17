@@ -9,7 +9,7 @@ describe("pi-statusline format helpers", () => {
 	});
 
 	it("formats token pairs", () => {
-		expect(formatTokenPair(18_200, 14_200)).toBe("↑18.2k ↓14.2k");
+		expect(formatTokenPair(18_200, 14_200)).toBe("↑18.2k/↓14.2k");
 	});
 
 	it("formats model labels with context window", () => {
@@ -23,7 +23,7 @@ describe("pi-statusline format helpers", () => {
 			contextLabel: "Ctx: 11.0%",
 			branchLabel: "⎇ main",
 			dirtyLabel: "dirty: +0",
-			tokenLabel: "↑18.2k ↓14.2k",
+			tokenLabel: "↑18.2k/↓14.2k",
 			repoLabel: "evie-platform",
 			cwdLabel: "cwd: /tmp/repo",
 			worktreeLabel: "𖠰 none",

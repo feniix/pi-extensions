@@ -49,8 +49,8 @@ describe("pi-statusline git helpers", () => {
 		expect(label).toBe("test");
 	});
 
-	it("returns none for the main worktree", () => {
+	it('returns "main" for the main worktree', () => {
 		const label = getWorktreeLabelForPath([{ path: "/repo", branch: "refs/heads/main" }], "/repo", ".git");
-		expect(label).toBe("none");
+		expect(label).toBe("main");
 	});
 });

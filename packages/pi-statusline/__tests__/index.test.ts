@@ -7,6 +7,7 @@ const createMockPi = () => ({
 	getThinkingLevel: vi.fn(() => "medium"),
 	exec: vi.fn(async () => ({ code: 1, stdout: "", stderr: "", killed: false })),
 	getCommands: vi.fn(() => [{ name: "release", source: "skill" }]),
+	registerTool: vi.fn(),
 });
 
 describe("pi-statusline extension", () => {
@@ -15,7 +16,22 @@ describe("pi-statusline extension", () => {
 		statuslineExtension(mockPi as unknown as ExtensionAPI);
 
 		const eventNames = mockPi.on.mock.calls.map(([name]) => name);
-		expect(eventNames).toEqual(expect.arrayContaining(["session_start", "model_select", "turn_end", "input"]));
+		expect(eventNames).toEqual(
+			expect.arrayContaining(["session_start", "model_select", "agent_end", "input", "tool_execution_start"]),
+		);
+	});
+
+	it("registers /statusline tool", () => {
+		const mockPi = createMockPi();
+		statuslineExtension(mockPi as unknown as ExtensionAPI);
+
+		expect(mockPi.registerTool).toHaveBeenCalledTimes(1);
+		expect(mockPi.registerTool).toHaveBeenCalledWith(
+			expect.objectContaining({
+				name: "statusline",
+				parameters: expect.any(Object),
+			}),
+		);
 	});
 
 	it("extracts skill names from explicit skill commands", () => {
