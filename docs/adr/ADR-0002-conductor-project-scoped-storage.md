@@ -1,7 +1,7 @@
 ---
 title: "Conductor-managed project-scoped storage for pi-conductor"
 adr: ADR-0002
-status: Proposed
+status: Accepted
 date: 2026-04-18
 prd: "PRD-001-pi-conductor-mvp"
 decision: "Use conductor-managed project-scoped storage under ~/.pi/agent/conductor/projects/<project-key>/"
@@ -11,7 +11,7 @@ decision: "Use conductor-managed project-scoped storage under ~/.pi/agent/conduc
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 

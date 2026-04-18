@@ -1,7 +1,7 @@
 ---
 title: "SDK-first worker runtime for pi-conductor"
 adr: ADR-0001
-status: Proposed
+status: Accepted
 date: 2026-04-18
 prd: "PRD-001-pi-conductor-mvp"
 decision: "Use an SDK-first worker runtime, with room for a future process-backed backend"
@@ -11,7 +11,7 @@ decision: "Use an SDK-first worker runtime, with room for a future process-backe
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 

@@ -1,14 +1,17 @@
 ---
 title: "pi-conductor — long-lived multi-session worker orchestration for Pi"
 prd: PRD-001
-status: Draft
+status: Implemented
 owner: "feniix"
 issue: "N/A"
 date: 2026-04-18
 version: "1.2"
+supersededBy: "PRD-002"
 ---
 
 # PRD: pi-conductor — long-lived multi-session worker orchestration for Pi
+
+> Superseded by `docs/prd/PRD-002-pi-conductor-persistent-resumable-workers.md`.
 
 ---
 
@@ -656,6 +659,7 @@ This is the expected initial decomposition, not a promise that implementation mu
 | 2026-04-18 | Initial draft | feniix |
 | 2026-04-18 | Refined storage boundary, PR dependency strategy, branch/worktree lifecycle, worker identity, status semantics, and cleanup scope | feniix |
 | 2026-04-18 | Refined lifecycle transitions, session-reference lifecycle, command/tool contract, repo-root detection, and project-key test coverage | feniix |
+| 2026-04-18 | Marked PRD status as Completed after full implementation of the MVP scope and linked ADR decisions | feniix |
 
 ---
 

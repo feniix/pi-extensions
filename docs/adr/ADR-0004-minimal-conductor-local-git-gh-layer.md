@@ -1,7 +1,7 @@
 ---
 title: "Minimal conductor-local git/gh layer for worker-aware PR flows"
 adr: ADR-0004
-status: Proposed
+status: Accepted
 date: 2026-04-18
 prd: "PRD-001-pi-conductor-mvp"
 decision: "Implement a minimal conductor-local git/gh layer for worker-aware primitives instead of depending on pi-devtools internals"
@@ -11,7 +11,7 @@ decision: "Implement a minimal conductor-local git/gh layer for worker-aware pri
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 

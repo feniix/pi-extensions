@@ -1,7 +1,7 @@
 ---
 title: "Continuity-based worktree reuse for pi-conductor workers"
 adr: ADR-0003
-status: Proposed
+status: Accepted
 date: 2026-04-18
 prd: "PRD-001-pi-conductor-mvp"
 decision: "Reuse worker worktrees only when continuing the same thread of work"
@@ -11,7 +11,7 @@ decision: "Reuse worker worktrees only when continuing the same thread of work"
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
