@@ -245,6 +245,62 @@ function createPrTool(title: string, body?: string, base?: string, draft = false
 	}
 }
 
+type PullRequestInfo = {
+	title?: string;
+	url?: string;
+	state?: string;
+};
+
+function detectCurrentPrNumber(): number | undefined {
+	const branch = execGit("git branch --show-current");
+	const prs = execGh(`gh pr list --head ${shellQuote(branch)} --state open --json number,title`);
+	if (!prs) {
+		return undefined;
+	}
+
+	const parsed = JSON.parse(prs) as Array<{ number?: number }>;
+	const prNumber = parsed[0]?.number;
+	return typeof prNumber === "number" ? prNumber : undefined;
+}
+
+function getPullRequestInfo(prNumber: number): PullRequestInfo {
+	return JSON.parse(execGh(`gh pr view ${prNumber} --json title,url,state`)) as PullRequestInfo;
+}
+
+function buildMergeCommand(
+	prNumber: number,
+	squash: boolean,
+	deleteBranch: boolean,
+	commitTitle?: string,
+	commitMessage?: string,
+): string {
+	const commandParts = [`gh pr merge ${prNumber}`, squash ? "--squash" : "--merge"];
+
+	if (squash && commitTitle) {
+		commandParts.push(`--title ${shellQuote(commitTitle)}`);
+	}
+	if (squash && commitMessage) {
+		commandParts.push(`--body ${shellQuote(commitMessage)}`);
+	}
+	if (deleteBranch) {
+		commandParts.push("--delete-branch");
+	}
+
+	return commandParts.join(" ");
+}
+
+function formatMergeResult(prNumber: number, squash: boolean, deleteBranch: boolean, prData: PullRequestInfo): ToolResult {
+	const mergeType = squash ? "squash-merged" : "merged";
+	const mergeLabel = `${mergeType.charAt(0).toUpperCase() + mergeType.slice(1)} PR #${prNumber}`;
+	const titleSuffix = prData.title ? `: ${prData.title}` : "";
+	const urlSuffix = prData.url ? `\n${prData.url}` : "";
+
+	return {
+		content: [{ type: "text", text: `${mergeLabel}${titleSuffix}${urlSuffix}` }],
+		details: { prNumber, mergeType, deletedBranch: deleteBranch },
+	};
+}
+
 function mergePrTool(
 	prNumber?: number,
 	squash = false,
@@ -253,18 +309,7 @@ function mergePrTool(
 	commitMessage?: string,
 ): ToolResult {
 	try {
-		let num = prNumber;
-		if (!num) {
-			const branch = execGit("git branch --show-current");
-			const prs = execGh(`gh pr list --head ${shellQuote(branch)} --state open --json number,title`);
-			if (prs) {
-				const parsed = JSON.parse(prs) as Array<{ number?: number }>;
-				if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0].number === "number") {
-					num = parsed[0].number;
-				}
-			}
-		}
-
+		const num = prNumber ?? detectCurrentPrNumber();
 		if (!num) {
 			return {
 				content: [{ type: "text", text: "No PR number provided and could not detect current PR." }],
@@ -273,10 +318,7 @@ function mergePrTool(
 			};
 		}
 
-		// Get PR info before merging
-		const prInfo = execGh(`gh pr view ${num} --json title,url,state`);
-		const prData = JSON.parse(prInfo);
-
+		const prData = getPullRequestInfo(num);
 		if (prData.state !== "OPEN") {
 			return {
 				content: [{ type: "text", text: `PR #${num} is not open (state: ${prData.state})` }],
@@ -285,36 +327,8 @@ function mergePrTool(
 			};
 		}
 
-		// Build merge command
-		let command = `gh pr merge ${num}`;
-		if (squash) {
-			command += " --squash";
-			if (commitTitle) {
-				command += ` --title ${shellQuote(commitTitle)}`;
-			}
-			if (commitMessage) {
-				command += ` --body ${shellQuote(commitMessage)}`;
-			}
-		} else {
-			command += " --merge";
-		}
-
-		if (deleteBranch) {
-			command += " --delete-branch";
-		}
-
-		execGh(command);
-
-		const mergeType = squash ? "squash-merged" : "merged";
-		return {
-			content: [
-				{
-					type: "text",
-					text: `${mergeType.charAt(0).toUpperCase() + mergeType.slice(1)} PR #${num}: ${prData.title}\n${prData.url}`,
-				},
-			],
-			details: { prNumber: num, mergeType, deletedBranch: deleteBranch },
-		};
+		execGh(buildMergeCommand(num, squash, deleteBranch, commitTitle, commitMessage));
+		return formatMergeResult(num, squash, deleteBranch, prData);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		return {
@@ -385,6 +399,47 @@ function checkCiTool(prNumber?: number, branch?: string): ToolResult {
 	}
 }
 
+type RepoStatus = {
+	staged: string[];
+	modified: string[];
+	untracked: string[];
+};
+
+function parseRepoStatus(statusOutput: string): RepoStatus {
+	return statusOutput
+		.split("\n")
+		.filter(Boolean)
+		.reduce<RepoStatus>(
+			(status, line) => {
+				const indexStatus = line[0];
+				const workTreeStatus = line[1];
+				const file = line.slice(3);
+
+				if (indexStatus === "?" && workTreeStatus === "?") {
+					status.untracked.push(file);
+					return status;
+				}
+
+				if (indexStatus !== " " && indexStatus !== "?") {
+					status.staged.push(file);
+				}
+				if (workTreeStatus !== " " && workTreeStatus !== "?") {
+					status.modified.push(file);
+				}
+				return status;
+			},
+			{ staged: [], modified: [], untracked: [] },
+		);
+}
+
+function hasRepoChanges(status: RepoStatus): boolean {
+	return status.staged.length > 0 || status.modified.length > 0 || status.untracked.length > 0;
+}
+
+function formatRepoInfo(branch: string, defaultBranch: string, status: RepoStatus): string {
+	return `Repository Info:\n- Current branch: ${branch}\n- Default branch: ${defaultBranch}\n- Has changes: ${hasRepoChanges(status)}\n- Staged: ${status.staged.length}\n- Modified: ${status.modified.length}\n- Untracked: ${status.untracked.length}`;
+}
+
 function repoInfoTool(): ToolResult {
 	try {
 		const branch = execGit("git branch --show-current");
@@ -397,42 +452,16 @@ function repoInfoTool(): ToolResult {
 		}
 
 		const defaultBranch = getDefaultBranch();
-		const statusOutput = execGit("git status --porcelain");
-		const lines = statusOutput.split("\n").filter(Boolean);
-
-		const staged: string[] = [];
-		const modified: string[] = [];
-		const untracked: string[] = [];
-
-		for (const line of lines) {
-			const indexStatus = line[0];
-			const workTreeStatus = line[1];
-			const file = line.slice(3);
-
-			if (indexStatus === "?" && workTreeStatus === "?") {
-				untracked.push(file);
-			} else if (indexStatus !== " " && indexStatus !== "?") {
-				staged.push(file);
-			}
-			if (workTreeStatus !== " " && workTreeStatus !== "?") {
-				modified.push(file);
-			}
-		}
-
+		const status = parseRepoStatus(execGit("git status --porcelain"));
 		return {
-			content: [
-				{
-					type: "text",
-					text: `Repository Info:\n- Current branch: ${branch}\n- Default branch: ${defaultBranch}\n- Has changes: ${staged.length > 0 || modified.length > 0 || untracked.length > 0}\n- Staged: ${staged.length}\n- Modified: ${modified.length}\n- Untracked: ${untracked.length}`,
-				},
-			],
+			content: [{ type: "text", text: formatRepoInfo(branch, defaultBranch, status) }],
 			details: {
 				branch,
 				defaultBranch,
-				hasChanges: staged.length > 0 || modified.length > 0 || untracked.length > 0,
-				staged,
-				modified,
-				untracked,
+				hasChanges: hasRepoChanges(status),
+				staged: status.staged,
+				modified: status.modified,
+				untracked: status.untracked,
 			},
 		};
 	} catch (error) {
