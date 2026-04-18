@@ -565,10 +565,7 @@ function parseMatchingSseMessage(data: string, requestId: unknown): unknown {
 	return undefined;
 }
 
-function extractMatchingSseResponse(
-	buffer: string,
-	requestId: unknown,
-): { remainingBuffer: string; matched: unknown } {
+function extractMatchingSseResponse(buffer: string, requestId: unknown): { remainingBuffer: string; matched: unknown } {
 	let remainingBuffer = buffer;
 	let newlineIndex = remainingBuffer.indexOf("\n");
 
@@ -728,11 +725,14 @@ function resolveRuntimeSettings(pi: ExtensionAPI): RefRuntimeSettings {
 
 	const maxBytesFlag = normalizeNumber(pi.getFlag("--ref-mcp-max-bytes"));
 	const maxLinesFlag = normalizeNumber(pi.getFlag("--ref-mcp-max-lines"));
-	const maxBytes = maxBytesFlag ?? normalizeNumber(process.env.REF_MCP_MAX_BYTES ?? config?.maxBytes) ?? DEFAULT_MAX_BYTES;
-	const maxLines = maxLinesFlag ?? normalizeNumber(process.env.REF_MCP_MAX_LINES ?? config?.maxLines) ?? DEFAULT_MAX_LINES;
+	const maxBytes =
+		maxBytesFlag ?? normalizeNumber(process.env.REF_MCP_MAX_BYTES ?? config?.maxBytes) ?? DEFAULT_MAX_BYTES;
+	const maxLines =
+		maxLinesFlag ?? normalizeNumber(process.env.REF_MCP_MAX_LINES ?? config?.maxLines) ?? DEFAULT_MAX_LINES;
 
 	const timeoutFlag = pi.getFlag("--ref-mcp-timeout-ms");
-	const timeoutValue = typeof timeoutFlag === "string" ? timeoutFlag : (process.env.REF_MCP_TIMEOUT_MS ?? config?.timeoutMs);
+	const timeoutValue =
+		typeof timeoutFlag === "string" ? timeoutFlag : (process.env.REF_MCP_TIMEOUT_MS ?? config?.timeoutMs);
 	const timeoutMs = parseTimeoutMs(timeoutValue, DEFAULT_TIMEOUT_MS);
 
 	const protocolFlag = normalizeString(pi.getFlag("--ref-mcp-protocol"));

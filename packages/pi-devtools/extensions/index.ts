@@ -289,7 +289,12 @@ function buildMergeCommand(
 	return commandParts.join(" ");
 }
 
-function formatMergeResult(prNumber: number, squash: boolean, deleteBranch: boolean, prData: PullRequestInfo): ToolResult {
+function formatMergeResult(
+	prNumber: number,
+	squash: boolean,
+	deleteBranch: boolean,
+	prData: PullRequestInfo,
+): ToolResult {
 	const mergeType = squash ? "squash-merged" : "merged";
 	const mergeLabel = `${mergeType.charAt(0).toUpperCase() + mergeType.slice(1)} PR #${prNumber}`;
 	const titleSuffix = prData.title ? `: ${prData.title}` : "";

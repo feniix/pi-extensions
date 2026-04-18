@@ -10,7 +10,9 @@ import type { ThoughtData } from "./types.js";
 
 export class ThoughtAnalyzer {
 	private getSameStageThoughts(currentThought: ThoughtData, allThoughts: ThoughtData[]): ThoughtData[] {
-		return allThoughts.filter((thought) => this.isDifferentThought(thought, currentThought) && thought.stage === currentThought.stage);
+		return allThoughts.filter(
+			(thought) => this.isDifferentThought(thought, currentThought) && thought.stage === currentThought.stage,
+		);
 	}
 
 	private getTagRelatedThoughts(currentThought: ThoughtData, allThoughts: ThoughtData[]): ThoughtData[] {
