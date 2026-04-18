@@ -1,0 +1,33 @@
+import { describe, expect, it } from "vitest";
+import { formatRunStatus } from "../extensions/status.js";
+import { createEmptyRun, createWorkerRecord } from "../extensions/storage.js";
+
+describe("formatRunStatus", () => {
+	it("formats an empty run", () => {
+		const run = createEmptyRun("abc", "/tmp/repo");
+		const text = formatRunStatus(run);
+		expect(text).toContain("projectKey: abc");
+		expect(text).toContain("workers: 0");
+	});
+
+	it("includes task, session, pr, and summary staleness details", () => {
+		const run = createEmptyRun("abc", "/tmp/repo");
+		const worker = createWorkerRecord({
+			workerId: "worker-1",
+			name: "backend",
+			branch: "conductor/backend",
+			worktreePath: "/tmp/repo/.worktrees/backend",
+			sessionFile: "/tmp/session.jsonl",
+		});
+		worker.currentTask = "implement status command";
+		worker.summary.text = "Half done";
+		worker.summary.stale = true;
+		worker.pr.url = "https://github.com/example/repo/pull/123";
+
+		const text = formatRunStatus({ ...run, workers: [worker] });
+		expect(text).toContain("task=implement status command");
+		expect(text).toContain("session=/tmp/session.jsonl");
+		expect(text).toContain("pr=https://github.com/example/repo/pull/123");
+		expect(text).toContain("summary=stale: Half done");
+	});
+});
