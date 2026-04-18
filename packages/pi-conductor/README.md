@@ -19,13 +19,17 @@ MVP implementation for the `pi-extensions` workspace, based on:
 - one worker record per named workstream
 - worker git worktree creation and recovery
 - real persisted Pi session linkage
+- explicit worker resume against persisted worktree/session metadata
 - task updates and session-derived summaries
+- lifecycle controls for `idle`, `running`, `blocked`, `ready_for_pr`, and `done`
+- health-aware status output distinguishing healthy, stale, and broken workers
 - broken-state detection and targeted recovery
 - targeted worker cleanup
 - minimal PR preparation flow:
   - commit
   - push
   - create PR
+  - explicit preflight checks for remote and `gh`
   - persist partial success/failure state
 
 ## Command surface
@@ -36,6 +40,8 @@ Primary operator UX is the `/conductor` command group:
 /conductor status
 /conductor start <worker-name>
 /conductor task <worker-name> <task>
+/conductor resume <worker-name>
+/conductor state <worker-name> <lifecycle>
 /conductor summarize <worker-name>
 /conductor recover <worker-name>
 /conductor cleanup <worker-name>
@@ -55,6 +61,8 @@ Registered tools:
 - `conductor_recover`
 - `conductor_summary_refresh`
 - `conductor_cleanup`
+- `conductor_resume`
+- `conductor_lifecycle_update`
 - `conductor_commit`
 - `conductor_push`
 - `conductor_pr_create`
