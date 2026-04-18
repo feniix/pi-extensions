@@ -1,0 +1,3 @@
+live smoke validation
+branch=conductor/live-smoke-check-1776495561886
+base=feat/pi-conductor-foundation
