@@ -170,6 +170,9 @@ interface CallbackResult {
 	error?: string;
 }
 
+const CALLBACK_REQUEST_PREFIX = "GET /callback?";
+const HTTP_REQUEST_COMPLETE_MARKER = "\r\n\r\n";
+
 function parseQueryParams(url: string): Record<string, string> {
 	const urlObj = new URL(url);
 	const params: Record<string, string> = {};
@@ -179,101 +182,147 @@ function parseQueryParams(url: string): Record<string, string> {
 	return params;
 }
 
+function writeHtmlResponse(socket: NodeJS.WritableStream, statusLine: string, html: string): void {
+	socket.write(`${statusLine}\r\n`);
+	socket.write(`Content-Length: ${html.length}\r\n`);
+	socket.write("Content-Type: text/html\r\n\r\n");
+	socket.write(html);
+}
+
+function extractCallbackParams(buffer: string): Record<string, string> | null {
+	if (!buffer.includes(HTTP_REQUEST_COMPLETE_MARKER)) return null;
+
+	const requestLine = buffer.split("\r\n", 1)[0] ?? "";
+	if (!requestLine.startsWith(CALLBACK_REQUEST_PREFIX)) return null;
+
+	const queryString = requestLine.slice(CALLBACK_REQUEST_PREFIX.length).split(" ", 1)[0] ?? "";
+	return parseQueryParams(`/?${queryString}`);
+}
+
+function getStateMismatchHtml(): string {
+	return `<html><body><h1>State mismatch error</h1><p>The OAuth state does not match. Please try again.</p></body></html>`;
+}
+
+function getAuthorizationErrorHtml(params: Record<string, string>): string {
+	return `<html><body><h1>Authorization failed</h1><p>Error: ${params.error}</p><p>${params.error_description || ""}</p></body></html>`;
+}
+
+function getAuthorizationSuccessHtml(): string {
+	return `<html><body><h1>Authorization successful!</h1><p>You can close this window and return to the terminal.</p><script>window.close();</script></body></html>`;
+}
+
+type CallbackOutcome =
+	| { type: "ignore" }
+	| { type: "reject"; html: string; error: Error }
+	| { type: "resolve"; html: string; result: CallbackResult };
+
+function handleCallbackParams(params: Record<string, string>, expectedState: string): CallbackOutcome {
+	if (params.state !== expectedState) {
+		return {
+			type: "reject",
+			html: getStateMismatchHtml(),
+			error: new Error("State mismatch - possible CSRF attack"),
+		};
+	}
+
+	if (params.error) {
+		return {
+			type: "resolve",
+			html: getAuthorizationErrorHtml(params),
+			result: { code: "", state: expectedState, error: params.error },
+		};
+	}
+
+	if (!params.code) {
+		return { type: "ignore" };
+	}
+
+	return {
+		type: "resolve",
+		html: getAuthorizationSuccessHtml(),
+		result: { code: params.code, state: params.state },
+	};
+}
+
+function writeOutcomeResponse(
+	clientSocket: NodeJS.Socket,
+	outcome: Exclude<CallbackOutcome, { type: "ignore" }>,
+): void {
+	writeHtmlResponse(
+		clientSocket,
+		outcome.type === "resolve" && !outcome.result.error ? "HTTP/1.1 200 OK" : "HTTP/1.1 400 Bad Request",
+		outcome.html,
+	);
+	clientSocket.end();
+}
+
+function processCallbackChunk(
+	buffer: string,
+	chunk: Buffer,
+	expectedState: string,
+): { buffer: string; outcome: CallbackOutcome } {
+	const nextBuffer = buffer + chunk.toString();
+	const params = extractCallbackParams(nextBuffer);
+	return {
+		buffer: nextBuffer,
+		outcome: params ? handleCallbackParams(params, expectedState) : { type: "ignore" },
+	};
+}
+
 /**
  * Start a local callback server and wait for the OAuth redirect
  */
 export async function startCallbackServer(expectedState: string, timeoutMs = 120000): Promise<CallbackResult> {
+	const port = await lookupPort({ port: 3000 });
+
 	return new Promise((resolve, reject) => {
-		const server = createServer();
+		const callbackServer = createServer();
 		const timeout = setTimeout(() => {
-			server.close();
+			callbackServer.close();
 			reject(new Error("OAuth callback timed out"));
 		}, timeoutMs);
+		const cleanup = () => {
+			clearTimeout(timeout);
+			callbackServer.close();
+		};
 
-		server.on("connection", async (socket) => {
-			// Find an available port
-			const port = await lookupPort({ port: 3000 });
-			socket.destroy();
-			server.close();
+		callbackServer.on("connection", (clientSocket) => {
+			let buffer = "";
 
-			// Restart server on the found port
-			const callbackServer = createServer();
+			clientSocket.on("data", (chunk) => {
+				const processed = processCallbackChunk(buffer, chunk, expectedState);
+				buffer = processed.buffer;
+				if (processed.outcome.type === "ignore") return;
 
-			callbackServer.on("connection", (clientSocket) => {
-				let buffer = "";
+				writeOutcomeResponse(clientSocket, processed.outcome);
+				cleanup();
 
-				clientSocket.on("data", (chunk) => {
-					buffer += chunk.toString();
-
-					// Check if we have the full HTTP request
-					if (buffer.includes("\r\n\r\n")) {
-						const requestMatch = buffer.match(/GET \/callback\?([^ ]+)/);
-						if (requestMatch) {
-							const queryString = requestMatch[1];
-							const params = parseQueryParams(`/?${queryString}`);
-
-							// Validate state
-							if (params.state !== expectedState) {
-								const html = `<html><body><h1>State mismatch error</h1><p>The OAuth state does not match. Please try again.</p></body></html>`;
-								clientSocket.write("HTTP/1.1 400 Bad Request\r\n");
-								clientSocket.write(`Content-Length: ${html.length}\r\n`);
-								clientSocket.write("Content-Type: text/html\r\n\r\n");
-								clientSocket.write(html);
-								clientSocket.end();
-								clearTimeout(timeout);
-								callbackServer.close();
-								reject(new Error("State mismatch - possible CSRF attack"));
-								return;
-							}
-
-							if (params.error) {
-								const html = `<html><body><h1>Authorization failed</h1><p>Error: ${params.error}</p><p>${params.error_description || ""}</p></body></html>`;
-								clientSocket.write("HTTP/1.1 400 Bad Request\r\n");
-								clientSocket.write(`Content-Length: ${html.length}\r\n`);
-								clientSocket.write("Content-Type: text/html\r\n\r\n");
-								clientSocket.write(html);
-								clientSocket.end();
-								clearTimeout(timeout);
-								callbackServer.close();
-								resolve({ code: "", state: expectedState, error: params.error });
-								return;
-							}
-
-							if (params.code) {
-								const html = `<html><body><h1>Authorization successful!</h1><p>You can close this window and return to the terminal.</p><script>window.close();</script></body></html>`;
-								clientSocket.write("HTTP/1.1 200 OK\r\n");
-								clientSocket.write(`Content-Length: ${html.length}\r\n`);
-								clientSocket.write("Content-Type: text/html\r\n\r\n");
-								clientSocket.write(html);
-								clientSocket.end();
-								clearTimeout(timeout);
-								callbackServer.close();
-								resolve({ code: params.code, state: params.state });
-								return;
-							}
-						}
-					}
-				});
-
-				clientSocket.on("error", () => {
-					// Ignore connection errors
-				});
-			});
-
-			callbackServer.on("error", (err: NodeJS.ErrnoException) => {
-				if (err.code === "EADDRINUSE") {
-					// Port in use, try next
-					lookupPort({ port: 3001 }).then((newPort: number) => {
-						callbackServer.close();
-						// Could retry with new port, but for simplicity just reject
-						reject(new Error(`Port ${newPort} already in use`));
-					});
+				if (processed.outcome.type === "reject") {
+					reject(processed.outcome.error);
+					return;
 				}
+
+				resolve(processed.outcome.result);
 			});
 
-			callbackServer.listen(port, "127.0.0.1", () => {
-				// Server started, will handle callback
+			clientSocket.on("error", () => {
+				// Ignore connection errors
 			});
+		});
+
+		callbackServer.on("error", (err: NodeJS.ErrnoException) => {
+			cleanup();
+			if (err.code === "EADDRINUSE") {
+				lookupPort({ port: 3001 }).then((newPort: number) => {
+					reject(new Error(`Port ${newPort} already in use`));
+				});
+				return;
+			}
+			reject(err);
+		});
+
+		callbackServer.listen(port, "127.0.0.1", () => {
+			// Server started, will handle callback
 		});
 	});
 }
