@@ -13,6 +13,8 @@ import {
 	reconcileWorkerHealth,
 	recoverWorkerForRepo,
 	refreshWorkerSummaryForRepo,
+	resumeWorkerForRepo,
+	updateWorkerLifecycleForRepo,
 	updateWorkerTaskForRepo,
 } from "./conductor.js";
 import { deriveProjectKey } from "./project-key.js";
@@ -164,6 +166,45 @@ export default function conductorExtension(pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text", text: `removed worker ${worker.name} [${worker.workerId}]` }],
 				details: { workerId: worker.workerId },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "conductor_resume",
+		label: "Conductor Resume",
+		description: "Resume a healthy pi-conductor worker using its persisted worktree and session linkage",
+		parameters: Type.Object({
+			name: Type.String({ description: "Worker name" }),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const worker = resumeWorkerForRepo(ctx.cwd, params.name);
+			return {
+				content: [{ type: "text", text: `resumed worker ${worker.name}: session=${worker.sessionFile}` }],
+				details: { workerId: worker.workerId, sessionFile: worker.sessionFile, worktreePath: worker.worktreePath },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "conductor_lifecycle_update",
+		label: "Conductor Lifecycle Update",
+		description: "Update a named pi-conductor worker lifecycle state",
+		parameters: Type.Object({
+			name: Type.String({ description: "Worker name" }),
+			lifecycle: Type.Union([
+				Type.Literal("idle"),
+				Type.Literal("running"),
+				Type.Literal("blocked"),
+				Type.Literal("ready_for_pr"),
+				Type.Literal("done"),
+			]),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const worker = updateWorkerLifecycleForRepo(ctx.cwd, params.name, params.lifecycle);
+			return {
+				content: [{ type: "text", text: `updated worker ${worker.name} state to ${worker.lifecycle}` }],
+				details: { workerId: worker.workerId, lifecycle: worker.lifecycle },
 			};
 		},
 	});

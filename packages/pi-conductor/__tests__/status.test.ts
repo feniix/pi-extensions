@@ -29,6 +29,7 @@ describe("formatRunStatus", () => {
 		worker.pr.prCreationAttempted = true;
 
 		const text = formatRunStatus({ ...run, workers: [worker] });
+		expect(text).toContain("health=stale");
 		expect(text).toContain("task=implement status command");
 		expect(text).toContain("session=/tmp/session.jsonl");
 		expect(text).toContain("pr=https://github.com/example/repo/pull/123");

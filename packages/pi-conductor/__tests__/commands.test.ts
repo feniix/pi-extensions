@@ -65,6 +65,21 @@ describe("runConductorCommand", () => {
 		expect(status).toContain("summary=fresh:");
 	});
 
+	it("resumes a healthy worker through the resume subcommand", async () => {
+		await runConductorCommand(repoDir, "start backend");
+		const text = await runConductorCommand(repoDir, "resume backend");
+		expect(text).toContain("resumed worker backend");
+	});
+
+	it("updates a worker lifecycle through the state subcommand", async () => {
+		await runConductorCommand(repoDir, "start backend");
+		const text = await runConductorCommand(repoDir, "state backend ready_for_pr");
+		expect(text).toContain("updated worker backend state to ready_for_pr");
+
+		const status = await runConductorCommand(repoDir, "status");
+		expect(status).toContain("state=ready_for_pr");
+	});
+
 	it("cleans up a worker through the cleanup subcommand", async () => {
 		await runConductorCommand(repoDir, "start backend");
 		const text = await runConductorCommand(repoDir, "cleanup backend");

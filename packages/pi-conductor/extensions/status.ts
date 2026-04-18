@@ -1,5 +1,15 @@
 import { getConductorProjectDir } from "./storage.js";
-import type { RunRecord } from "./types.js";
+import type { RunRecord, WorkerRecord } from "./types.js";
+
+function getWorkerHealth(worker: WorkerRecord): "healthy" | "stale" | "broken" {
+	if (worker.lifecycle === "broken") {
+		return "broken";
+	}
+	if (worker.summary.stale || worker.lifecycle === "done") {
+		return "stale";
+	}
+	return "healthy";
+}
 
 export function formatRunStatus(run: RunRecord): string {
 	const lines = [
@@ -15,6 +25,7 @@ export function formatRunStatus(run: RunRecord): string {
 			: "none";
 		lines.push(
 			`- ${worker.name} [${worker.workerId}] ` +
+				`health=${getWorkerHealth(worker)} ` +
 				`state=${worker.lifecycle} ` +
 				`recoverable=${worker.recoverable} ` +
 				`task=${worker.currentTask ?? "none"} ` +

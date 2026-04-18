@@ -8,12 +8,13 @@ import {
 	createWorkerRecord,
 	readRun,
 	removeWorker,
+	setWorkerLifecycle,
 	setWorkerPrState,
 	setWorkerSummary,
 	setWorkerTask,
 	writeRun,
 } from "./storage.js";
-import type { RunRecord, WorkerRecord } from "./types.js";
+import type { RunRecord, WorkerLifecycleState, WorkerRecord } from "./types.js";
 import { createManagedWorktree, recreateManagedWorktree, removeManagedBranch, removeManagedWorktree } from "./worktrees.js";
 import { createWorkerSessionLink } from "./sessions.js";
 import { generateWorkerSummaryFromSession } from "./summaries.js";
@@ -57,11 +58,45 @@ export function updateWorkerTaskForRepo(repoRoot: string, workerName: string, ta
 	if (!worker) {
 		throw new Error(`Worker named ${workerName} not found`);
 	}
-	const updatedRun = setWorkerTask(run, worker.workerId, task);
+	const updatedRun = setWorkerLifecycle(setWorkerTask(run, worker.workerId, task), worker.workerId, "idle");
 	writeRun(updatedRun);
 	const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
 	if (!updatedWorker) {
 		throw new Error(`Worker named ${workerName} disappeared during task update`);
+	}
+	return updatedWorker;
+}
+
+export function resumeWorkerForRepo(repoRoot: string, workerName: string): WorkerRecord {
+	const run = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
+	const worker = run.workers.find((entry) => entry.name === workerName);
+	if (!worker) {
+		throw new Error(`Worker named ${workerName} not found`);
+	}
+	if (worker.lifecycle === "broken") {
+		throw new Error(`Worker named ${workerName} is broken and must be recovered before resume`);
+	}
+	return worker;
+}
+
+export function updateWorkerLifecycleForRepo(
+	repoRoot: string,
+	workerName: string,
+	lifecycle: WorkerLifecycleState,
+): WorkerRecord {
+	if (lifecycle === "broken") {
+		throw new Error("Broken lifecycle is reserved for detected health failures");
+	}
+	const run = getOrCreateRunForRepo(repoRoot);
+	const worker = run.workers.find((entry) => entry.name === workerName);
+	if (!worker) {
+		throw new Error(`Worker named ${workerName} not found`);
+	}
+	const updatedRun = setWorkerLifecycle(run, worker.workerId, lifecycle);
+	writeRun(updatedRun);
+	const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
+	if (!updatedWorker) {
+		throw new Error(`Worker named ${workerName} disappeared during lifecycle update`);
 	}
 	return updatedWorker;
 }

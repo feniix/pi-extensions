@@ -16,6 +16,8 @@ describe("pi-conductor extension", () => {
 		expect(extension).toContain('name: "conductor_recover"');
 		expect(extension).toContain('name: "conductor_summary_refresh"');
 		expect(extension).toContain('name: "conductor_cleanup"');
+		expect(extension).toContain('name: "conductor_resume"');
+		expect(extension).toContain('name: "conductor_lifecycle_update"');
 		expect(extension).toContain('name: "conductor_commit"');
 		expect(extension).toContain('name: "conductor_push"');
 		expect(extension).toContain('name: "conductor_pr_create"');
