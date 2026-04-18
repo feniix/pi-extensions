@@ -9,69 +9,64 @@ import type { ThoughtData } from "./types.js";
 // =============================================================================
 
 export class ThoughtAnalyzer {
-	/**
-	 * Find thoughts related to the current thought.
-	 * Related thoughts are those in the same stage or sharing similar tags.
-	 */
-	findRelatedThoughts(currentThought: ThoughtData, allThoughts: ThoughtData[], maxResults = 3): ThoughtData[] {
-		// First, find thoughts in the same stage
-		const sameStage = allThoughts.filter((t) => t.stage === currentThought.stage && t.id !== currentThought.id);
+	private getSameStageThoughts(currentThought: ThoughtData, allThoughts: ThoughtData[]): ThoughtData[] {
+		return allThoughts.filter((thought) => this.isDifferentThought(thought, currentThought) && thought.stage === currentThought.stage);
+	}
 
-		// Then, find thoughts with similar tags
-		let tagRelated: ThoughtData[] = [];
-		if (currentThought.tags.length > 0) {
-			const tagMatches: Array<{ thought: ThoughtData; matchCount: number }> = [];
-
-			for (const thought of allThoughts) {
-				if (thought.id === currentThought.id) {
-					continue;
-				}
-
-				const matchingTags = [...currentThought.tags].filter((t) => thought.tags.includes(t));
-				if (matchingTags.length > 0) {
-					tagMatches.push({
-						thought,
-						matchCount: matchingTags.length,
-					});
-				}
-			}
-
-			// Sort by number of matching tags (descending)
-			tagMatches.sort((a, b) => b.matchCount - a.matchCount);
-			tagRelated = tagMatches.map((m) => m.thought);
+	private getTagRelatedThoughts(currentThought: ThoughtData, allThoughts: ThoughtData[]): ThoughtData[] {
+		if (currentThought.tags.length === 0) {
+			return [];
 		}
 
-		// Combine and deduplicate results
+		return allThoughts
+			.map((thought) => ({
+				thought,
+				matchCount: this.countMatchingTags(currentThought, thought),
+			}))
+			.filter(({ thought, matchCount }) => this.isDifferentThought(thought, currentThought) && matchCount > 0)
+			.sort((a, b) => b.matchCount - a.matchCount)
+			.map(({ thought }) => thought);
+	}
+
+	private countMatchingTags(currentThought: ThoughtData, candidateThought: ThoughtData): number {
+		return currentThought.tags.filter((tag) => candidateThought.tags.includes(tag)).length;
+	}
+
+	private isDifferentThought(thought: ThoughtData, currentThought: ThoughtData): boolean {
+		return thought.id !== currentThought.id;
+	}
+
+	private mergeThoughtsWithLimit(thoughtGroups: ThoughtData[][], maxResults: number): ThoughtData[] {
 		const combined: ThoughtData[] = [];
 		const seenIds = new Set<string>();
 
-		// First add same stage thoughts
-		for (const thought of sameStage) {
-			if (!seenIds.has(thought.id)) {
+		for (const thoughts of thoughtGroups) {
+			for (const thought of thoughts) {
+				if (seenIds.has(thought.id)) {
+					continue;
+				}
+
 				combined.push(thought);
 				seenIds.add(thought.id);
 
 				if (combined.length >= maxResults) {
-					break;
-				}
-			}
-		}
-
-		// Then add tag-related thoughts
-		if (combined.length < maxResults) {
-			for (const thought of tagRelated) {
-				if (!seenIds.has(thought.id)) {
-					combined.push(thought);
-					seenIds.add(thought.id);
-
-					if (combined.length >= maxResults) {
-						break;
-					}
+					return combined;
 				}
 			}
 		}
 
 		return combined;
+	}
+
+	/**
+	 * Find thoughts related to the current thought.
+	 * Related thoughts are those in the same stage or sharing similar tags.
+	 */
+	findRelatedThoughts(currentThought: ThoughtData, allThoughts: ThoughtData[], maxResults = 3): ThoughtData[] {
+		const sameStageThoughts = this.getSameStageThoughts(currentThought, allThoughts);
+		const tagRelatedThoughts = this.getTagRelatedThoughts(currentThought, allThoughts);
+
+		return this.mergeThoughtsWithLimit([sameStageThoughts, tagRelatedThoughts], maxResults);
 	}
 
 	/**
