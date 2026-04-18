@@ -14,7 +14,7 @@ import {
 	writeRun,
 } from "./storage.js";
 import type { RunRecord, WorkerRecord } from "./types.js";
-import { createManagedWorktree, recreateManagedWorktree, removeManagedWorktree } from "./worktrees.js";
+import { createManagedWorktree, recreateManagedWorktree, removeManagedBranch, removeManagedWorktree } from "./worktrees.js";
 import { createWorkerSessionLink } from "./sessions.js";
 import { generateWorkerSummaryFromSession } from "./summaries.js";
 import { createWorkerId } from "./workers.js";
@@ -117,6 +117,9 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
 	}
 	if (worker.sessionFile && existsSync(worker.sessionFile)) {
 		rmSync(worker.sessionFile, { force: true });
+	}
+	if (worker.branch) {
+		removeManagedBranch(run.repoRoot, worker.branch);
 	}
 	const updatedRun = removeWorker(run, worker.workerId);
 	writeRun(updatedRun);

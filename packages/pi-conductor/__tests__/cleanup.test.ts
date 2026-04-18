@@ -46,4 +46,14 @@ describe("cleanup flows", () => {
 		removeWorkerForRepo(repoDir, "backend");
 		expect(existsSync(worker.sessionFile!)).toBe(false);
 	});
+
+	it("removes the worker branch so the same worker name can be recreated", async () => {
+		const worker = await createWorkerForRepo(repoDir, "backend");
+		expect(execSync(`git branch --list ${worker.branch}`, { cwd: repoDir, encoding: "utf-8" }).trim()).toContain(worker.branch!);
+		removeWorkerForRepo(repoDir, "backend");
+		expect(execSync(`git branch --list ${worker.branch}`, { cwd: repoDir, encoding: "utf-8" }).trim()).toBe("");
+
+		const recreated = await createWorkerForRepo(repoDir, "backend");
+		expect(recreated.branch).toBe(worker.branch);
+	});
 });

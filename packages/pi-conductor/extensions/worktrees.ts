@@ -58,6 +58,14 @@ export function removeManagedWorktree(repoRoot: string, worktreePath: string): v
 	}
 }
 
+export function removeManagedBranch(repoRoot: string, branch: string): void {
+	try {
+		execGit(repoRoot, `git branch -D ${shellQuote(branch)}`);
+	} catch {
+		// Ignore missing or already-removed branches during cleanup.
+	}
+}
+
 function shellQuote(value: string): string {
 	return `'${value.replace(/'/g, `'\\''`)}'`;
 }
