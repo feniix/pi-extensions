@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execGh, execGit, getDefaultBranch } from "../extensions/git.js";
@@ -12,7 +13,7 @@ describe("pi-devtools git integration", () => {
 		tempDir = execSync("mktemp -d", { encoding: "utf-8" }).trim();
 
 		// Initialize git repo
-		execSync("git init", { cwd: tempDir, stdio: "pipe" });
+		execSync("git init -b main", { cwd: tempDir, stdio: "pipe" });
 		execSync("git config user.email 'test@test.com'", { cwd: tempDir, stdio: "pipe" });
 		execSync("git config user.name 'Test User'", { cwd: tempDir, stdio: "pipe" });
 
@@ -197,9 +198,23 @@ describe("pi-devtools git integration", () => {
 });
 
 describe("execGh", () => {
-	it("executes gh command successfully when authenticated", () => {
-		const result = execGh("gh auth status");
-		expect(result).toBeDefined();
+	it("executes gh command successfully when a fake authenticated gh is on PATH", () => {
+		const originalPath = process.env.PATH;
+		const fakeBinDir = mkdtempSync(join(tmpdir(), "pi-devtools-gh-bin-"));
+		const ghPath = join(fakeBinDir, "gh");
+		writeFileSync(ghPath, '#!/bin/sh\nif [ "$1 $2" = "auth status" ]; then echo \'logged in\'; exit 0; fi\nexit 1\n', {
+			encoding: "utf-8",
+			mode: 0o755,
+		});
+		process.env.PATH = `${fakeBinDir}:${originalPath ?? ""}`;
+
+		try {
+			const result = execGh("gh auth status");
+			expect(result).toContain("logged in");
+		} finally {
+			process.env.PATH = originalPath;
+			rmSync(fakeBinDir, { recursive: true, force: true });
+		}
 	});
 
 	it("throws error for invalid gh command", () => {

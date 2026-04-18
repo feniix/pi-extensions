@@ -273,11 +273,27 @@ describe("pi-notion loadConfig", () => {
 		expect(result).toBeNull();
 	});
 
-	it("returns default config for empty config path", () => {
-		const result = loadConfig(undefined);
-		// Creates default config file and returns it
-		expect(result).not.toBeNull();
-		expect(result).toHaveProperty("token");
+	it("returns default config when a default config file exists in an isolated environment", () => {
+		const originalHome = process.env.HOME;
+		const originalCwd = process.cwd();
+		const tempHome = mkdtempSync(join(tmpdir(), "pi-notion-load-default-home-"));
+		const tempProject = mkdtempSync(join(tmpdir(), "pi-notion-load-default-project-"));
+		const configDir = join(tempHome, ".pi", "agent", "extensions");
+		const configPath = join(configDir, "notion.json");
+
+		mkdirSync(configDir, { recursive: true });
+		writeFileSync(configPath, JSON.stringify({ token: null }), "utf-8");
+		process.env.HOME = tempHome;
+		process.chdir(tempProject);
+
+		try {
+			const result = loadConfig(undefined);
+			expect(result).toEqual({ token: null });
+		} finally {
+			process.chdir(originalCwd);
+			if (originalHome) process.env.HOME = originalHome;
+			else delete process.env.HOME;
+		}
 	});
 });
 
