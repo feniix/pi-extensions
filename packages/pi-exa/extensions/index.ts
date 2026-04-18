@@ -47,6 +47,11 @@ interface ExaConfig {
 	advancedEnabled?: boolean;
 }
 
+interface AuthResolution {
+	apiKey: string;
+	source?: "CLI flag" | "EXA_API_KEY env var" | "config file";
+}
+
 function normalizeString(value: unknown): string | undefined {
 	if (typeof value !== "string") {
 		return undefined;
@@ -153,6 +158,64 @@ function ensureDefaultConfigFile(projectConfigPath: string, globalConfigPath: st
 		const message = error instanceof Error ? error.message : String(error);
 		console.warn(`[pi-exa] Failed to write ${globalConfigPath}: ${message}`);
 	}
+}
+
+function getConfigOverrideFlag(pi: ExtensionAPI): string | undefined {
+	return normalizeString(pi.getFlag("--exa-config"));
+}
+
+function getResolvedConfig(pi: ExtensionAPI): ExaConfig | null {
+	return loadConfig(getConfigOverrideFlag(pi));
+}
+
+function resolveAuth(pi: ExtensionAPI): AuthResolution {
+	const apiKeyFlag = normalizeString(pi.getFlag("--exa-api-key"));
+	if (apiKeyFlag) {
+		return { apiKey: apiKeyFlag, source: "CLI flag" };
+	}
+
+	const configApiKey = normalizeString(getResolvedConfig(pi)?.apiKey);
+	if (configApiKey) {
+		return { apiKey: configApiKey, source: "config file" };
+	}
+
+	const envApiKey = normalizeString(process.env.EXA_API_KEY);
+	if (envApiKey) {
+		return { apiKey: envApiKey, source: "EXA_API_KEY env var" };
+	}
+
+	return { apiKey: "" };
+}
+
+function getAuthStatusMessage(pi: ExtensionAPI): string {
+	const auth = resolveAuth(pi);
+	return auth.source
+		? `[exa] Authenticated via ${auth.source}`
+		: "[exa] Not authenticated. Set EXA_API_KEY or use --exa-api-key flag.";
+}
+
+function isAdvancedToolEnabled(pi: ExtensionAPI, config: ExaConfig | null): boolean {
+	const advancedFlag = pi.getFlag("--exa-enable-advanced");
+	if (typeof advancedFlag === "boolean") {
+		return advancedFlag;
+	}
+	return config?.advancedEnabled ?? false;
+}
+
+function isToolEnabledForConfig(pi: ExtensionAPI, config: ExaConfig | null, toolName: string): boolean {
+	if (config?.enabledTools && Array.isArray(config.enabledTools)) {
+		return config.enabledTools.includes(toolName);
+	}
+
+	if (toolName === "web_search_exa" || toolName === "web_fetch_exa") {
+		return true;
+	}
+
+	if (toolName === "web_search_advanced_exa") {
+		return isAdvancedToolEnabled(pi, config);
+	}
+
+	return false;
 }
 
 // =============================================================================
@@ -387,8 +450,11 @@ export {
 	ensureDefaultConfigFile,
 	formatCrawlResults,
 	formatSearchResults,
+	getAuthStatusMessage,
+	isToolEnabledForConfig,
 	loadConfig,
 	parseConfig,
+	resolveAuth,
 	resolveConfigPath,
 };
 
@@ -399,18 +465,7 @@ export {
 export default function exaExtension(pi: ExtensionAPI) {
 	// SessionStart: check auth and print status
 	pi.on("session_start", async () => {
-		const apiKeyFlag = pi.getFlag("--exa-api-key");
-		const hasFlag = typeof apiKeyFlag === "string" && apiKeyFlag.trim().length > 0;
-		const hasEnv = typeof process.env.EXA_API_KEY === "string" && process.env.EXA_API_KEY.trim().length > 0;
-		const configFlag = pi.getFlag("--exa-config");
-		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-		const hasConfig = config?.apiKey && config.apiKey.trim().length > 0;
-
-		if (hasFlag || hasEnv || hasConfig) {
-			console.log(`[exa] Authenticated via ${hasFlag ? "CLI flag" : hasEnv ? "EXA_API_KEY env var" : "config file"}`);
-		} else {
-			console.log("[exa] Not authenticated. Set EXA_API_KEY or use --exa-api-key flag.");
-		}
+		console.log(getAuthStatusMessage(pi));
 	});
 
 	// Register CLI flags
@@ -427,52 +482,9 @@ export default function exaExtension(pi: ExtensionAPI) {
 		type: "string",
 	});
 
-	const getApiKey = (): string => {
-		// Priority: CLI flag > config file > environment variable
-		const apiKeyFlag = pi.getFlag("--exa-api-key");
-		if (typeof apiKeyFlag === "string" && apiKeyFlag.trim().length > 0) {
-			return apiKeyFlag.trim();
-		}
+	const getApiKey = (): string => resolveAuth(pi).apiKey;
 
-		const configFlag = pi.getFlag("--exa-config");
-		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-		if (config?.apiKey) {
-			return config.apiKey;
-		}
-
-		const envApiKey = process.env.EXA_API_KEY;
-		if (envApiKey && envApiKey.trim().length > 0) {
-			return envApiKey.trim();
-		}
-
-		return "";
-	};
-
-	const isToolEnabled = (toolName: string): boolean => {
-		const configFlag = pi.getFlag("--exa-config");
-		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-
-		// Check if tool is in enabledTools list
-		if (config?.enabledTools && Array.isArray(config.enabledTools)) {
-			return config.enabledTools.includes(toolName);
-		}
-
-		// Default enabled tools
-		if (toolName === "web_search_exa" || toolName === "web_fetch_exa") {
-			return true;
-		}
-
-		// web_search_advanced_exa requires explicit enable
-		if (toolName === "web_search_advanced_exa") {
-			const advancedFlag = pi.getFlag("--exa-enable-advanced");
-			if (typeof advancedFlag === "boolean") {
-				return advancedFlag;
-			}
-			return config?.advancedEnabled ?? false;
-		}
-
-		return false;
-	};
+	const isToolEnabled = (toolName: string): boolean => isToolEnabledForConfig(pi, getResolvedConfig(pi), toolName);
 
 	// Register web_search_exa tool
 	if (isToolEnabled("web_search_exa")) {
