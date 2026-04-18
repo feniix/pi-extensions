@@ -37,78 +37,90 @@ export interface ValidationError {
 	message: string;
 }
 
+function createError(field: string, message: string): ValidationError {
+	return { field, message };
+}
+
+function isPositiveInteger(value: unknown): value is number {
+	return typeof value === "number" && Number.isInteger(value) && value >= 1;
+}
+
+function validateThoughtField(thought: Partial<ThoughtData>["thought"]): ValidationError[] {
+	if (!thought?.trim()) {
+		return [createError("thought", "Thought cannot be empty.")];
+	}
+
+	if (thought.length > MAX_THOUGHT_LENGTH) {
+		return [createError("thought", `Thought exceeds ${MAX_THOUGHT_LENGTH} characters.`)];
+	}
+
+	return [];
+}
+
+function validateRequiredPositiveInteger(
+	field: "thought_number" | "total_thoughts",
+	value: Partial<ThoughtData>[typeof field],
+): ValidationError[] {
+	if (isPositiveInteger(value)) {
+		return [];
+	}
+
+	return [createError(field, `${field} must be a positive integer.`)];
+}
+
+function validateOptionalPositiveInteger(
+	field: "revises_thought" | "branch_from_thought",
+	value: Partial<ThoughtData>[typeof field],
+): ValidationError[] {
+	if (value === undefined || isPositiveInteger(value)) {
+		return [];
+	}
+
+	return [createError(field, `${field} must be a positive integer.`)];
+}
+
+function validateOptionalBoolean(field: "is_revision", value: Partial<ThoughtData>[typeof field]): ValidationError[] {
+	if (value === undefined || typeof value === "boolean") {
+		return [];
+	}
+
+	return [createError(field, `${field} must be a boolean.`)];
+}
+
+function validateRequiredBoolean(
+	field: "next_thought_needed",
+	value: Partial<ThoughtData>[typeof field],
+): ValidationError[] {
+	if (typeof value === "boolean") {
+		return [];
+	}
+
+	return [createError(field, `${field} must be a boolean.`)];
+}
+
+function validateBranchId(branchId: Partial<ThoughtData>["branch_id"]): ValidationError[] {
+	if (branchId === undefined) {
+		return [];
+	}
+
+	if (typeof branchId === "string" && branchId.trim()) {
+		return [];
+	}
+
+	return [createError("branch_id", "branch_id must be a non-empty string.")];
+}
+
 export function validateThoughtData(data: Partial<ThoughtData>): ValidationError[] {
-	const errors: ValidationError[] = [];
-
-	// thought: non-empty string with max length
-	if (!data.thought?.trim()) {
-		errors.push({ field: "thought", message: "Thought cannot be empty." });
-	} else if (data.thought.length > MAX_THOUGHT_LENGTH) {
-		errors.push({
-			field: "thought",
-			message: `Thought exceeds ${MAX_THOUGHT_LENGTH} characters.`,
-		});
-	}
-
-	// thought_number: positive integer
-	if (typeof data.thought_number !== "number" || !Number.isInteger(data.thought_number) || data.thought_number < 1) {
-		errors.push({
-			field: "thought_number",
-			message: "thought_number must be a positive integer.",
-		});
-	}
-
-	// total_thoughts: positive integer
-	if (typeof data.total_thoughts !== "number" || !Number.isInteger(data.total_thoughts) || data.total_thoughts < 1) {
-		errors.push({
-			field: "total_thoughts",
-			message: "total_thoughts must be a positive integer.",
-		});
-	}
-
-	// next_thought_needed: boolean
-	if (typeof data.next_thought_needed !== "boolean") {
-		errors.push({
-			field: "next_thought_needed",
-			message: "next_thought_needed must be a boolean.",
-		});
-	}
-
-	// is_revision: boolean (optional)
-	if (data.is_revision !== undefined && typeof data.is_revision !== "boolean") {
-		errors.push({ field: "is_revision", message: "is_revision must be a boolean." });
-	}
-
-	// revises_thought: positive integer (optional)
-	if (
-		data.revises_thought !== undefined &&
-		(typeof data.revises_thought !== "number" || !Number.isInteger(data.revises_thought) || data.revises_thought < 1)
-	) {
-		errors.push({
-			field: "revises_thought",
-			message: "revises_thought must be a positive integer.",
-		});
-	}
-
-	// branch_from_thought: positive integer (optional)
-	if (
-		data.branch_from_thought !== undefined &&
-		(typeof data.branch_from_thought !== "number" ||
-			!Number.isInteger(data.branch_from_thought) ||
-			data.branch_from_thought < 1)
-	) {
-		errors.push({
-			field: "branch_from_thought",
-			message: "branch_from_thought must be a positive integer.",
-		});
-	}
-
-	// branch_id: non-empty string (optional)
-	if (data.branch_id !== undefined && (typeof data.branch_id !== "string" || !data.branch_id.trim())) {
-		errors.push({ field: "branch_id", message: "branch_id must be a non-empty string." });
-	}
-
-	return errors;
+	return [
+		...validateThoughtField(data.thought),
+		...validateRequiredPositiveInteger("thought_number", data.thought_number),
+		...validateRequiredPositiveInteger("total_thoughts", data.total_thoughts),
+		...validateRequiredBoolean("next_thought_needed", data.next_thought_needed),
+		...validateOptionalBoolean("is_revision", data.is_revision),
+		...validateOptionalPositiveInteger("revises_thought", data.revises_thought),
+		...validateOptionalPositiveInteger("branch_from_thought", data.branch_from_thought),
+		...validateBranchId(data.branch_id),
+	];
 }
 
 export function isValidThoughtData(data: Partial<ThoughtData>): boolean {
