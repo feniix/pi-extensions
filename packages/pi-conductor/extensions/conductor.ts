@@ -3,6 +3,7 @@ import { deriveProjectKey } from "./project-key.js";
 import { addWorker, createEmptyRun, createWorkerRecord, readRun, setWorkerTask, writeRun } from "./storage.js";
 import type { RunRecord, WorkerRecord } from "./types.js";
 import { createManagedWorktree } from "./worktrees.js";
+import { createWorkerSessionLink } from "./sessions.js";
 import { createWorkerId } from "./workers.js";
 
 export function getOrCreateRunForRepo(repoRoot: string): RunRecord {
@@ -17,19 +18,20 @@ export function getOrCreateRunForRepo(repoRoot: string): RunRecord {
 	return run;
 }
 
-export function createWorkerForRepo(repoRoot: string, workerName: string): WorkerRecord {
+export async function createWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
 	const run = getOrCreateRunForRepo(repoRoot);
 	const workerId = createWorkerId();
 	const worktree = createManagedWorktree(run.repoRoot, {
 		workerId,
 		workerName,
 	});
+	const sessionFile = await createWorkerSessionLink(worktree.worktreePath);
 	const worker = createWorkerRecord({
 		workerId,
 		name: workerName,
 		branch: worktree.branch,
 		worktreePath: worktree.worktreePath,
-		sessionFile: null,
+		sessionFile,
 	});
 	const updatedRun = addWorker(run, worker);
 	writeRun(updatedRun);

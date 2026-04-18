@@ -39,15 +39,18 @@ describe("conductor service", () => {
 		expect(readFileSync(join(run.storageDir, "run.json"), "utf-8")).toContain("projectKey");
 	});
 
-	it("creates a worker, worktree, and persisted worker record", () => {
-		const worker = createWorkerForRepo(repoDir, "backend");
+	it("creates a worker, worktree, and persisted worker record", async () => {
+		const worker = await createWorkerForRepo(repoDir, "backend");
 		expect(worker.name).toBe("backend");
 		expect(worker.branch).toBe("conductor/backend");
 		expect(worker.worktreePath).toBeTruthy();
 		expect(existsSync(worker.worktreePath!)).toBe(true);
+		expect(worker.sessionFile).toBeTruthy();
+		expect(existsSync(worker.sessionFile!)).toBe(true);
 
 		const run = getOrCreateRunForRepo(repoDir);
 		expect(run.workers).toHaveLength(1);
 		expect(run.workers[0]?.name).toBe("backend");
+		expect(run.workers[0]?.sessionFile).toBeTruthy();
 	});
 });

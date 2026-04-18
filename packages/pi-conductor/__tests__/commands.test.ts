@@ -32,32 +32,32 @@ describe("runConductorCommand", () => {
 		}
 	});
 
-	it("returns status for the current repo", () => {
-		const text = runConductorCommand(repoDir, "status");
+	it("returns status for the current repo", async () => {
+		const text = await runConductorCommand(repoDir, "status");
 		expect(text).toContain("workers: 0");
 	});
 
-	it("creates a worker from the start subcommand", () => {
-		const text = runConductorCommand(repoDir, "start backend");
+	it("creates a worker from the start subcommand", async () => {
+		const text = await runConductorCommand(repoDir, "start backend");
 		expect(text).toContain("created worker");
 		expect(text).toContain("backend");
 
-		const status = runConductorCommand(repoDir, "status");
+		const status = await runConductorCommand(repoDir, "status");
 		expect(status).toContain("workers: 1");
 		expect(status).toContain("backend");
 	});
 
-	it("updates a worker task through the task subcommand", () => {
-		runConductorCommand(repoDir, "start backend");
-		const text = runConductorCommand(repoDir, "task backend implement status command");
+	it("updates a worker task through the task subcommand", async () => {
+		await runConductorCommand(repoDir, "start backend");
+		const text = await runConductorCommand(repoDir, "task backend implement status command");
 		expect(text).toContain("updated task for backend");
 
-		const status = runConductorCommand(repoDir, "status");
+		const status = await runConductorCommand(repoDir, "status");
 		expect(status).toContain("task=implement status command");
 	});
 
-	it("shows help for unknown subcommands", () => {
-		const text = runConductorCommand(repoDir, "wat");
+	it("shows help for unknown subcommands", async () => {
+		const text = await runConductorCommand(repoDir, "wat");
 		expect(text).toContain("usage:");
 	});
 });

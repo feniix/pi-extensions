@@ -10,7 +10,7 @@ function getUsage(): string {
 	].join("\n");
 }
 
-export function runConductorCommand(cwd: string, args: string): string {
+export async function runConductorCommand(cwd: string, args: string): Promise<string> {
 	const trimmed = args.trim();
 	if (!trimmed || trimmed === "help") {
 		return getUsage();
@@ -25,7 +25,7 @@ export function runConductorCommand(cwd: string, args: string): string {
 		if (!workerName) {
 			return `${getUsage()}\n\nerror: missing worker name`;
 		}
-		const worker = createWorkerForRepo(cwd, workerName);
+		const worker = await createWorkerForRepo(cwd, workerName);
 		return `created worker ${worker.name} [${worker.workerId}] on branch ${worker.branch}`;
 	}
 	if (subcommand === "task") {

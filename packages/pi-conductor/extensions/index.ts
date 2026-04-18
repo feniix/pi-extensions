@@ -51,7 +51,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
 	pi.registerCommand("conductor", {
 		description: "Manage pi-conductor workers (status, start)",
 		handler: async (args, ctx) => {
-			const text = runConductorCommand(ctx.cwd, args);
+			const text = await runConductorCommand(ctx.cwd, args);
 			if (ctx.hasUI) {
 				ctx.ui.notify(text, "info");
 			} else {
@@ -82,7 +82,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
 			name: Type.String({ description: "Worker name" }),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const worker = createWorkerForRepo(ctx.cwd, params.name);
+			const worker = await createWorkerForRepo(ctx.cwd, params.name);
 			return {
 				content: [
 					{ type: "text", text: `created worker ${worker.name} [${worker.workerId}] on branch ${worker.branch}` },
