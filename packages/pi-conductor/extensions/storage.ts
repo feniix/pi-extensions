@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import type { RunRecord, WorkerRecord } from "./types.js";
+import type { RunRecord, WorkerPrState, WorkerRecord } from "./types.js";
 
 function getConductorRoot(): string {
 	const override = process.env.PI_CONDUCTOR_HOME?.trim();
@@ -163,5 +163,32 @@ export function removeWorker(run: RunRecord, workerId: string): RunRecord {
 		...run,
 		workers,
 		updatedAt: new Date().toISOString(),
+	};
+}
+
+export function setWorkerPrState(run: RunRecord, workerId: string, pr: Partial<WorkerPrState>): RunRecord {
+	let found = false;
+	const now = new Date().toISOString();
+	const workers = run.workers.map((worker) => {
+		if (worker.workerId !== workerId) {
+			return worker;
+		}
+		found = true;
+		return {
+			...worker,
+			pr: {
+				...worker.pr,
+				...pr,
+			},
+			updatedAt: now,
+		};
+	});
+	if (!found) {
+		throw new Error(`Worker ${workerId} not found`);
+	}
+	return {
+		...run,
+		workers,
+		updatedAt: now,
 	};
 }

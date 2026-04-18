@@ -1,6 +1,9 @@
 import {
+	commitWorkerForRepo,
 	createWorkerForRepo,
+	createWorkerPrForRepo,
 	getOrCreateRunForRepo,
+	pushWorkerForRepo,
 	removeWorkerForRepo,
 	reconcileWorkerHealth,
 	recoverWorkerForRepo,
@@ -18,6 +21,9 @@ function getUsage(): string {
 		"  /conductor recover <worker-name>",
 		"  /conductor summarize <worker-name>",
 		"  /conductor cleanup <worker-name>",
+		"  /conductor commit <worker-name> <message>",
+		"  /conductor push <worker-name>",
+		"  /conductor pr <worker-name> <title>",
 	].join("\n");
 }
 
@@ -71,6 +77,32 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
 		}
 		const worker = removeWorkerForRepo(cwd, workerName);
 		return `removed worker ${worker.name} [${worker.workerId}]`;
+	}
+	if (subcommand === "commit") {
+		const [workerName, ...messageParts] = rest;
+		const message = messageParts.join(" ").trim();
+		if (!workerName || !message) {
+			return `${getUsage()}\n\nerror: missing worker name or commit message`;
+		}
+		const worker = commitWorkerForRepo(cwd, workerName, message);
+		return `committed worker ${worker.name}: ${message}`;
+	}
+	if (subcommand === "push") {
+		const workerName = rest.join(" ").trim();
+		if (!workerName) {
+			return `${getUsage()}\n\nerror: missing worker name`;
+		}
+		const worker = pushWorkerForRepo(cwd, workerName);
+		return `pushed worker ${worker.name} on branch ${worker.branch}`;
+	}
+	if (subcommand === "pr") {
+		const [workerName, ...titleParts] = rest;
+		const title = titleParts.join(" ").trim();
+		if (!workerName || !title) {
+			return `${getUsage()}\n\nerror: missing worker name or PR title`;
+		}
+		const worker = createWorkerPrForRepo(cwd, workerName, title);
+		return `created PR for ${worker.name}: ${worker.pr.url}`;
 	}
 
 	return `${getUsage()}\n\nerror: unknown subcommand '${subcommand}'`;

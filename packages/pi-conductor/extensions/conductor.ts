@@ -1,7 +1,18 @@
 import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { deriveProjectKey } from "./project-key.js";
-import { addWorker, createEmptyRun, createWorkerRecord, readRun, removeWorker, setWorkerSummary, setWorkerTask, writeRun } from "./storage.js";
+import { createPullRequest, commitAllChanges, pushBranchToOrigin } from "./git-pr.js";
+import {
+	addWorker,
+	createEmptyRun,
+	createWorkerRecord,
+	readRun,
+	removeWorker,
+	setWorkerPrState,
+	setWorkerSummary,
+	setWorkerTask,
+	writeRun,
+} from "./storage.js";
 import type { RunRecord, WorkerRecord } from "./types.js";
 import { createManagedWorktree, recreateManagedWorktree, removeManagedWorktree } from "./worktrees.js";
 import { createWorkerSessionLink } from "./sessions.js";
@@ -110,6 +121,80 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
 	const updatedRun = removeWorker(run, worker.workerId);
 	writeRun(updatedRun);
 	return worker;
+}
+
+export function commitWorkerForRepo(repoRoot: string, workerName: string, message: string): WorkerRecord {
+	const run = getOrCreateRunForRepo(repoRoot);
+	const worker = run.workers.find((entry) => entry.name === workerName);
+	if (!worker) {
+		throw new Error(`Worker named ${workerName} not found`);
+	}
+	if (!worker.worktreePath || !existsSync(worker.worktreePath)) {
+		throw new Error(`Worker named ${workerName} does not have a valid worktree`);
+	}
+	commitAllChanges(worker.worktreePath, message);
+	const updatedRun = setWorkerPrState(run, worker.workerId, {
+		commitSucceeded: true,
+		pushSucceeded: false,
+		prCreationAttempted: false,
+		url: null,
+		number: null,
+	});
+	writeRun(updatedRun);
+	return updatedRun.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
+}
+
+export function pushWorkerForRepo(repoRoot: string, workerName: string): WorkerRecord {
+	const run = getOrCreateRunForRepo(repoRoot);
+	const worker = run.workers.find((entry) => entry.name === workerName);
+	if (!worker) {
+		throw new Error(`Worker named ${workerName} not found`);
+	}
+	if (!worker.worktreePath || !existsSync(worker.worktreePath) || !worker.branch) {
+		throw new Error(`Worker named ${workerName} does not have a valid worktree or branch`);
+	}
+	pushBranchToOrigin(worker.worktreePath, worker.branch);
+	const updatedRun = setWorkerPrState(run, worker.workerId, {
+		pushSucceeded: true,
+	});
+	writeRun(updatedRun);
+	return updatedRun.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
+}
+
+export function createWorkerPrForRepo(repoRoot: string, workerName: string, title: string, body?: string): WorkerRecord {
+	const run = getOrCreateRunForRepo(repoRoot);
+	const worker = run.workers.find((entry) => entry.name === workerName);
+	if (!worker) {
+		throw new Error(`Worker named ${workerName} not found`);
+	}
+	if (!worker.worktreePath || !existsSync(worker.worktreePath) || !worker.branch) {
+		throw new Error(`Worker named ${workerName} does not have a valid worktree or branch`);
+	}
+	const prBody = body?.trim() || worker.summary.text || worker.currentTask || `PR for ${worker.name}`;
+	try {
+		const pr = createPullRequest({
+			repoRoot: run.repoRoot,
+			worktreePath: worker.worktreePath,
+			branch: worker.branch,
+			title,
+			body: prBody,
+		});
+		const updatedRun = setWorkerPrState(run, worker.workerId, {
+			prCreationAttempted: true,
+			url: pr.url,
+			number: pr.number,
+		});
+		writeRun(updatedRun);
+		return updatedRun.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
+	} catch (error) {
+		const updatedRun = setWorkerPrState(run, worker.workerId, {
+			prCreationAttempted: true,
+			url: null,
+			number: null,
+		});
+		writeRun(updatedRun);
+		throw error;
+	}
 }
 
 export async function recoverWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {

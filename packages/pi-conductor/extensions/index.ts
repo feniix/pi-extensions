@@ -4,8 +4,13 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { runConductorCommand } from "./commands.js";
 import {
+	commitWorkerForRepo,
 	createWorkerForRepo,
+	createWorkerPrForRepo,
+	getOrCreateRunForRepo,
+	pushWorkerForRepo,
 	removeWorkerForRepo,
+	reconcileWorkerHealth,
 	recoverWorkerForRepo,
 	refreshWorkerSummaryForRepo,
 	updateWorkerTaskForRepo,
@@ -38,7 +43,7 @@ function getStatusText(cwd: string): string {
 		writeRun(run);
 	}
 
-	return formatRunStatus(run);
+	return formatRunStatus(reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot)));
 }
 
 export default function conductorExtension(pi: ExtensionAPI) {
@@ -55,7 +60,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("conductor", {
-		description: "Manage pi-conductor workers (status, start)",
+		description: "Manage pi-conductor workers and PR preparation",
 		handler: async (args, ctx) => {
 			const text = await runConductorCommand(ctx.cwd, args);
 			if (ctx.hasUI) {
@@ -159,6 +164,57 @@ export default function conductorExtension(pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text", text: `removed worker ${worker.name} [${worker.workerId}]` }],
 				details: { workerId: worker.workerId },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "conductor_commit",
+		label: "Conductor Commit",
+		description: "Commit all current worker worktree changes with a supplied commit message",
+		parameters: Type.Object({
+			name: Type.String({ description: "Worker name" }),
+			message: Type.String({ description: "Commit message" }),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const worker = commitWorkerForRepo(ctx.cwd, params.name, params.message);
+			return {
+				content: [{ type: "text", text: `committed worker ${worker.name}: ${params.message}` }],
+				details: { workerId: worker.workerId, commitSucceeded: worker.pr.commitSucceeded },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "conductor_push",
+		label: "Conductor Push",
+		description: "Push a worker branch to origin",
+		parameters: Type.Object({
+			name: Type.String({ description: "Worker name" }),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const worker = pushWorkerForRepo(ctx.cwd, params.name);
+			return {
+				content: [{ type: "text", text: `pushed worker ${worker.name} on branch ${worker.branch}` }],
+				details: { workerId: worker.workerId, pushSucceeded: worker.pr.pushSucceeded },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "conductor_pr_create",
+		label: "Conductor PR Create",
+		description: "Create a GitHub pull request for a worker branch",
+		parameters: Type.Object({
+			name: Type.String({ description: "Worker name" }),
+			title: Type.String({ description: "PR title" }),
+			body: Type.Optional(Type.String({ description: "Optional PR body" })),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const worker = createWorkerPrForRepo(ctx.cwd, params.name, params.title, params.body);
+			return {
+				content: [{ type: "text", text: `created PR for ${worker.name}: ${worker.pr.url}` }],
+				details: { workerId: worker.workerId, pr: worker.pr },
 			};
 		},
 	});

@@ -21,6 +21,9 @@ export function formatRunStatus(run: RunRecord): string {
 				`branch=${worker.branch ?? "none"} ` +
 				`session=${worker.sessionFile ?? "none"} ` +
 				`pr=${worker.pr.url ?? "none"} ` +
+				`commit=${worker.pr.commitSucceeded} ` +
+				`push=${worker.pr.pushSucceeded} ` +
+				`prAttempted=${worker.pr.prCreationAttempted} ` +
 				`summary=${summary}`,
 		);
 	}

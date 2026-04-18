@@ -24,10 +24,17 @@ describe("formatRunStatus", () => {
 		worker.summary.stale = true;
 		worker.pr.url = "https://github.com/example/repo/pull/123";
 
+		worker.pr.commitSucceeded = true;
+		worker.pr.pushSucceeded = true;
+		worker.pr.prCreationAttempted = true;
+
 		const text = formatRunStatus({ ...run, workers: [worker] });
 		expect(text).toContain("task=implement status command");
 		expect(text).toContain("session=/tmp/session.jsonl");
 		expect(text).toContain("pr=https://github.com/example/repo/pull/123");
+		expect(text).toContain("commit=true");
+		expect(text).toContain("push=true");
+		expect(text).toContain("prAttempted=true");
 		expect(text).toContain("recoverable=false");
 		expect(text).toContain("summary=stale: Half done");
 	});
