@@ -1,7 +1,7 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	formatBlocks,
 	formatDatabase,
@@ -282,33 +282,46 @@ describe("pi-notion loadConfig", () => {
 });
 
 describe("pi-notion checkNotionAuth", () => {
-	it("returns not authenticated when no config exists", async () => {
-		// Clear env var for this test
+	async function importCheckNotionAuthInIsolatedEnv(apiKey?: string) {
+		const originalHome = process.env.HOME;
 		const originalApiKey = process.env.NOTION_API_KEY;
-		delete process.env.NOTION_API_KEY;
+		const originalCwd = process.cwd();
+		const tempHome = mkdtempSync(join(tmpdir(), "pi-notion-auth-home-"));
+		const tempProject = mkdtempSync(join(tmpdir(), "pi-notion-auth-project-"));
 
-		const { checkNotionAuth } = await import("../extensions/index.js");
-		const result = checkNotionAuth();
+		mkdirSync(join(tempHome, ".pi", "agent", "extensions"), { recursive: true });
+		mkdirSync(join(tempProject, ".pi", "extensions"), { recursive: true });
+
+		process.env.HOME = tempHome;
+		process.chdir(tempProject);
+		if (apiKey) process.env.NOTION_API_KEY = apiKey;
+		else delete process.env.NOTION_API_KEY;
+
+		vi.resetModules();
+
+		try {
+			const { checkNotionAuth } = await import("../extensions/index.js");
+			return checkNotionAuth();
+		} finally {
+			process.chdir(originalCwd);
+			if (originalHome) process.env.HOME = originalHome;
+			else delete process.env.HOME;
+			if (originalApiKey) process.env.NOTION_API_KEY = originalApiKey;
+			else delete process.env.NOTION_API_KEY;
+		}
+	}
+
+	it("returns not authenticated when no config exists", async () => {
+		const result = await importCheckNotionAuthInIsolatedEnv();
 		expect(result.authenticated).toBe(false);
 		expect(result.message).toContain("Not authenticated");
-
-		// Restore
-		if (originalApiKey) process.env.NOTION_API_KEY = originalApiKey;
 	});
 
 	it("detects NOTION_API_KEY but still requires MCP auth", async () => {
-		const originalApiKey = process.env.NOTION_API_KEY;
-		process.env.NOTION_API_KEY = "test-key";
-
-		const { checkNotionAuth } = await import("../extensions/index.js");
-		const result = checkNotionAuth();
+		const result = await importCheckNotionAuthInIsolatedEnv("test-key");
 		expect(result.authenticated).toBe(false);
 		expect(result.message).toContain("NOTION_API_KEY");
 		expect(result.message).toContain("MCP OAuth is still required");
-
-		// Restore
-		if (originalApiKey) process.env.NOTION_API_KEY = originalApiKey;
-		else delete process.env.NOTION_API_KEY;
 	});
 });
 
