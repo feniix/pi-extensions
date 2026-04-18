@@ -38,6 +38,17 @@ export function createManagedWorktree(
 	return { branch, baseBranch, worktreePath };
 }
 
+export function recreateManagedWorktree(
+	repoRoot: string,
+	input: { workerName: string; branch: string },
+): { branch: string; worktreePath: string } {
+	const worktreePath = planWorktreePath(repoRoot, input.workerName);
+	ensureDir(dirname(worktreePath));
+	execGit(repoRoot, "git worktree prune");
+	execGit(repoRoot, `git worktree add ${shellQuote(worktreePath)} ${shellQuote(input.branch)}`);
+	return { branch: input.branch, worktreePath };
+}
+
 function shellQuote(value: string): string {
 	return `'${value.replace(/'/g, `'\\''`)}'`;
 }

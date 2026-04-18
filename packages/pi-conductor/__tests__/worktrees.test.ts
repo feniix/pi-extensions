@@ -2,7 +2,7 @@ import { execSync } from "node:child_process";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createManagedWorktree, getCurrentBranch, planWorktreePath } from "../extensions/worktrees.js";
+import { createManagedWorktree, getCurrentBranch, planWorktreePath, recreateManagedWorktree } from "../extensions/worktrees.js";
 
 describe("worktree helpers", () => {
 	let tempDir: string;
@@ -52,5 +52,21 @@ describe("worktree helpers", () => {
 			encoding: "utf-8",
 		}).trim();
 		expect(branch).toBe("conductor/backend");
+	});
+
+	it("recreates a pruned managed worktree on an existing branch", () => {
+		const created = createManagedWorktree(tempDir, {
+			workerId: "worker-1",
+			workerName: "backend",
+		});
+		rmSync(created.worktreePath, { recursive: true, force: true });
+
+		const recreated = recreateManagedWorktree(tempDir, {
+			workerName: "backend",
+			branch: created.branch,
+		});
+
+		expect(recreated.branch).toBe(created.branch);
+		expect(existsSync(recreated.worktreePath)).toBe(true);
 	});
 });

@@ -48,4 +48,15 @@ describe("recovery flows", () => {
 		expect(recovered.lifecycle).toBe("idle");
 		expect(recovered.recoverable).toBe(false);
 	});
+
+	it("recreates a missing worktree during recovery", async () => {
+		const worker = await createWorkerForRepo(repoDir, "backend");
+		rmSync(worker.worktreePath!, { recursive: true, force: true });
+		const recovered = await recoverWorkerForRepo(repoDir, "backend");
+		expect(recovered.worktreePath).toBeTruthy();
+		expect(existsSync(recovered.worktreePath!)).toBe(true);
+		expect(recovered.sessionFile).toBeTruthy();
+		expect(existsSync(recovered.sessionFile!)).toBe(true);
+		expect(recovered.lifecycle).toBe("idle");
+	});
 });
