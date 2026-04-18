@@ -325,54 +325,55 @@ function mergePrTool(
 	}
 }
 
+type CiCheck = {
+	name?: string;
+	state?: string;
+	link?: string;
+	workflow?: string;
+	workflowName?: string;
+	status?: string;
+	conclusion?: string;
+	url?: string;
+};
+
+function getCiCheckCommand(prNumber?: number, branch?: string): string {
+	if (prNumber) {
+		return `gh pr checks ${prNumber} --json name,state,link,workflow`;
+	}
+
+	const targetBranch = branch ?? execGit("git branch --show-current");
+	return `gh run list --branch ${shellQuote(targetBranch)} --limit 5 --json workflowName,status,conclusion,url`;
+}
+
+function formatCiCheck(check: CiCheck): string {
+	const status = check.conclusion ?? check.state ?? check.status ?? "unknown";
+	const name = check.name ?? check.workflowName ?? check.workflow ?? "Unknown workflow";
+	const link = check.link ?? check.url;
+	return `- ${name}: ${status}${link ? ` (${link})` : ""}`;
+}
+
 function checkCiTool(prNumber?: number, branch?: string): ToolResult {
 	try {
-		let checkCommand: string;
-
-		if (prNumber) {
-			checkCommand = `gh run list --pr ${prNumber} --limit 5 --json workflowName,status,conclusion,url`;
-		} else if (branch) {
-			checkCommand = `gh run list --branch ${shellQuote(branch)} --limit 5 --json workflowName,status,conclusion,url`;
-		} else {
-			const currentBranch = execGit("git branch --show-current");
-			checkCommand = `gh run list --branch ${shellQuote(currentBranch)} --limit 5 --json workflowName,status,conclusion,url`;
-		}
-
-		const runs = execGh(checkCommand);
-
-		if (!runs) {
+		const checks = execGh(getCiCheckCommand(prNumber, branch));
+		if (!checks) {
 			return {
 				content: [{ type: "text", text: "No CI runs found for this PR/branch." }],
 				details: { checks: [] },
 			};
 		}
 
-		const parsedRuns = JSON.parse(runs) as Array<{
-			workflowName?: string;
-			status?: string;
-			conclusion?: string;
-			url?: string;
-		}>;
-
-		if (!Array.isArray(parsedRuns) || parsedRuns.length === 0) {
+		const parsedChecks = JSON.parse(checks) as CiCheck[];
+		if (!Array.isArray(parsedChecks) || parsedChecks.length === 0) {
 			return {
 				content: [{ type: "text", text: "No CI runs found for this PR/branch." }],
 				details: { checks: [] },
 			};
 		}
 
-		const checkSummary = parsedRuns
-			.map((run) => {
-				const status = run.conclusion ?? run.status ?? "unknown";
-				const name = run.workflowName ?? "Unknown workflow";
-				const link = run.url ? ` (${run.url})` : "";
-				return `- ${name}: ${status}${link}`;
-			})
-			.join("\n");
-
+		const checkSummary = parsedChecks.map(formatCiCheck).join("\n");
 		return {
 			content: [{ type: "text", text: `CI Status:\n${checkSummary}` }],
-			details: { checks: parsedRuns },
+			details: { checks: parsedChecks },
 		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
