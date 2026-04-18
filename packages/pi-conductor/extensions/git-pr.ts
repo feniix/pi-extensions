@@ -20,7 +20,18 @@ function execInCwd(cwd: string, command: string, label: string): string {
 export function getPreferredBaseBranch(repoRoot: string): string {
 	const currentBranch = execInCwd(repoRoot, "git branch --show-current", "git");
 	if (currentBranch && !currentBranch.startsWith("conductor/")) {
-		return currentBranch;
+		try {
+			const remoteMatch = execInCwd(
+				repoRoot,
+				`git ls-remote --heads origin ${shellQuote(currentBranch)}`,
+				"git",
+			);
+			if (remoteMatch.includes(`refs/heads/${currentBranch}`)) {
+				return currentBranch;
+			}
+		} catch {
+			// fall through
+		}
 	}
 	try {
 		const originHead = execInCwd(
