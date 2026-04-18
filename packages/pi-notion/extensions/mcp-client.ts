@@ -23,6 +23,17 @@ import { getPort as lookupPort } from "portfinder";
 // =============================================================================
 
 const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
+const HTTP_REQUEST_COMPLETE_MARKER = "\r\n\r\n";
+const CALLBACK_PATH_PREFIX = "GET /callback?";
+
+type NotifyLevel = "info" | "error";
+type NotifyFn = (message: string, type?: NotifyLevel) => void;
+
+type ToolExecutionResult = {
+	content: Array<{ type: "text"; text: string }>;
+	isError?: boolean;
+	details: Record<string, unknown>;
+};
 
 // =============================================================================
 // Types
@@ -58,6 +69,86 @@ interface OAuthCallbackServerResult {
 	result: Promise<OAuthCallbackResult>;
 }
 
+function buildHtmlResponse(statusLine: string, html: string): string {
+	return `${statusLine}\r\nContent-Length: ${html.length}\r\nContent-Type: text/html\r\n\r\n${html}`;
+}
+
+function writeHtmlResponse(socket: NodeJS.WritableStream, statusLine: string, html: string): void {
+	socket.write(buildHtmlResponse(statusLine, html));
+}
+
+function extractCallbackParams(buffer: string): URLSearchParams | null {
+	if (!buffer.includes(HTTP_REQUEST_COMPLETE_MARKER)) return null;
+
+	const requestLine = buffer.split("\r\n", 1)[0] ?? "";
+	if (!requestLine.startsWith(CALLBACK_PATH_PREFIX)) return null;
+
+	const queryString = requestLine.slice(CALLBACK_PATH_PREFIX.length).split(" ", 1)[0] ?? "";
+	return new URLSearchParams(queryString);
+}
+
+function resolveCallbackResult(
+	params: URLSearchParams,
+	expectedState: string,
+): {
+	response: { statusLine: string; html: string };
+	result: OAuthCallbackResult;
+} {
+	if (params.get("state") !== expectedState) {
+		return {
+			response: {
+				statusLine: "HTTP/1.1 400 Bad Request",
+				html: `<html><body><h1>State mismatch</h1><p>Please try again.</p></body></html>`,
+			},
+			result: { error: "State mismatch" },
+		};
+	}
+
+	const error = params.get("error");
+	if (error) {
+		return {
+			response: {
+				statusLine: "HTTP/1.1 400 Bad Request",
+				html: `<html><body><h1>Authorization failed</h1><p>Error: ${error}</p><p>${params.get("error_description") || ""}</p></body></html>`,
+			},
+			result: {
+				error,
+				errorDescription: params.get("error_description") || undefined,
+			},
+		};
+	}
+
+	const accessToken = params.get("access_token");
+	if (accessToken) {
+		return {
+			response: {
+				statusLine: "HTTP/1.1 200 OK",
+				html: `<html><body><h1>Authorized!</h1><p>You can close this window.</p><script>window.close();</script></body></html>`,
+			},
+			result: { accessToken },
+		};
+	}
+
+	const code = params.get("code");
+	if (code) {
+		return {
+			response: {
+				statusLine: "HTTP/1.1 200 OK",
+				html: `<html><body><h1>Authorized!</h1><p>You can close this window.</p><script>window.close();</script></body></html>`,
+			},
+			result: { code },
+		};
+	}
+
+	return {
+		response: {
+			statusLine: "HTTP/1.1 400 Bad Request",
+			html: `<html><body><h1>Authorization failed</h1><p>No code or token in callback.</p></body></html>`,
+		},
+		result: { error: "No code or token in callback" },
+	};
+}
+
 async function startOAuthCallbackServer(
 	preferredPort: number,
 	state: string,
@@ -66,79 +157,29 @@ async function startOAuthCallbackServer(
 	const port = await lookupPort({ port: preferredPort });
 
 	const resultPromise = new Promise<OAuthCallbackResult>((resolve, reject) => {
+		const server = createServer();
+		const finish = (result: OAuthCallbackResult) => {
+			clearTimeout(timeout);
+			server.close();
+			resolve(result);
+		};
 		const timeout = setTimeout(() => {
 			server.close();
 			reject(new Error("OAuth callback timed out (5 minutes)"));
 		}, timeoutMs);
-
-		const server = createServer();
 
 		server.on("connection", (socket) => {
 			let buffer = "";
 
 			socket.on("data", (chunk) => {
 				buffer += chunk.toString();
+				const params = extractCallbackParams(buffer);
+				if (!params) return;
 
-				if (buffer.includes("\r\n\r\n")) {
-					const requestMatch = buffer.match(/GET \/callback\?([^ ]+)/);
-					if (requestMatch) {
-						const queryString = requestMatch[1];
-						const params = new URLSearchParams(queryString);
-
-						// Check state
-						if (params.get("state") !== state) {
-							const html = `<html><body><h1>State mismatch</h1><p>Please try again.</p></body></html>`;
-							socket.write("HTTP/1.1 400 Bad Request\r\n");
-							socket.write(`Content-Length: ${html.length}\r\n`);
-							socket.write("Content-Type: text/html\r\n\r\n");
-							socket.write(html);
-							socket.end();
-							clearTimeout(timeout);
-							server.close();
-							resolve({ error: "State mismatch" });
-							return;
-						}
-
-						// Check for error
-						if (params.get("error")) {
-							const html = `<html><body><h1>Authorization failed</h1><p>Error: ${params.get("error")}</p><p>${params.get("error_description") || ""}</p></body></html>`;
-							socket.write("HTTP/1.1 400 Bad Request\r\n");
-							socket.write(`Content-Length: ${html.length}\r\n`);
-							socket.write("Content-Type: text/html\r\n\r\n");
-							socket.write(html);
-							socket.end();
-							clearTimeout(timeout);
-							server.close();
-							resolve({
-								error: params.get("error") || "Unknown error",
-								errorDescription: params.get("error_description") || undefined,
-							});
-							return;
-						}
-
-						// Check for access token (MCP server may return it directly)
-						const accessToken = params.get("access_token");
-						const code = params.get("code");
-
-						const html = `<html><body><h1>Authorized!</h1><p>You can close this window.</p><script>window.close();</script></body></html>`;
-						socket.write("HTTP/1.1 200 OK\r\n");
-						socket.write(`Content-Length: ${html.length}\r\n`);
-						socket.write("Content-Type: text/html\r\n\r\n");
-						socket.write(html);
-						socket.end();
-						clearTimeout(timeout);
-						server.close();
-
-						if (accessToken) {
-							resolve({ accessToken });
-						} else if (code) {
-							resolve({ code });
-						} else {
-							resolve({ error: "No code or token in callback" });
-						}
-						return;
-					}
-				}
+				const { response, result } = resolveCallbackResult(params, state);
+				writeHtmlResponse(socket, response.statusLine, response.html);
+				socket.end();
+				finish(result);
 			});
 
 			socket.on("error", () => {});
@@ -226,9 +267,92 @@ async function exchangeCodeForToken(
 	return { accessToken: data.access_token };
 }
 
+function createPkceChallenge(): { codeVerifier: string; codeChallenge: string } {
+	const codeVerifier = randomBytes(32).toString("base64url");
+	const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
+	return { codeVerifier, codeChallenge };
+}
+
+function buildAuthorizationUrl(
+	registration: ClientRegistration,
+	callbackUrl: string,
+	codeChallenge: string,
+	state: string,
+): string {
+	const authUrl = new URL("https://mcp.notion.com/authorize");
+	authUrl.searchParams.set("response_type", "code");
+	authUrl.searchParams.set("client_id", registration.client_id);
+	authUrl.searchParams.set("redirect_uri", callbackUrl);
+	authUrl.searchParams.set("code_challenge", codeChallenge);
+	authUrl.searchParams.set("code_challenge_method", "S256");
+	authUrl.searchParams.set("state", state);
+	authUrl.searchParams.set("prompt", "consent");
+	return authUrl.toString();
+}
+
+async function resolveAccessToken(
+	callbackResult: OAuthCallbackResult,
+	callbackUrl: string,
+	codeVerifier: string,
+	registration: ClientRegistration,
+	notify: NotifyFn,
+): Promise<string> {
+	if (callbackResult.error) {
+		throw new Error(`Authorization failed: ${callbackResult.error}`);
+	}
+
+	if (callbackResult.accessToken) {
+		return callbackResult.accessToken;
+	}
+
+	if (!callbackResult.code) {
+		throw new Error("No authorization code received");
+	}
+
+	notify("Exchanging authorization code for token...");
+	const tokenResult = await exchangeCodeForToken(
+		callbackResult.code,
+		callbackUrl,
+		codeVerifier,
+		registration.client_id,
+		registration.client_secret,
+	);
+	return tokenResult.accessToken;
+}
+
 // =============================================================================
 // MCP Client
 // =============================================================================
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNumericString(value: unknown): value is string {
+	return typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value));
+}
+
+function coercePropertyMap(properties: Record<string, unknown>): Record<string, unknown> {
+	return Object.fromEntries(
+		Object.entries(properties).map(([propName, propValue]) => [
+			propName,
+			isNumericString(propValue) ? Number(propValue) : coerceNumericProperties(propValue),
+		]),
+	);
+}
+
+function coerceNumericProperties(obj: unknown): unknown {
+	if (obj === null || obj === undefined) return obj;
+	if (Array.isArray(obj)) return obj.map(coerceNumericProperties);
+	if (!isRecord(obj)) return obj;
+
+	return Object.fromEntries(
+		Object.entries(obj).map(([key, value]) => [
+			key,
+			key === "properties" && isRecord(value) ? coercePropertyMap(value) : coerceNumericProperties(value),
+		]),
+	);
+}
 
 class NotionMCPClient {
 	state: MCPClientState = {
@@ -334,13 +458,9 @@ class NotionMCPClient {
 		}
 
 		const contentType = response.headers.get("content-type") || "";
-		let data: { result?: unknown; error?: { message: string } };
-
-		if (contentType.includes("text/event-stream")) {
-			data = await this.parseSSEResponse(response);
-		} else {
-			data = await response.json();
-		}
+		const data: { result?: unknown; error?: { message: string } } = contentType.includes("text/event-stream")
+			? await this.parseSSEResponse(response)
+			: await response.json();
 
 		if (data.error) {
 			throw new Error(`MCP Error: ${data.error.message}`);
@@ -385,42 +505,8 @@ class NotionMCPClient {
 		}
 	}
 
-	/**
-	 * Coerce numeric string values in "properties" objects back to numbers.
-	 *
-	 * The Notion API requires NUMBER properties to be actual JSON numbers, but
-	 * pi's framework may deliver them as strings (e.g. "1" instead of 1) when
-	 * the tool schema uses Type.Unsafe(). This walks the arguments and converts
-	 * any numeric string inside a "properties" object back to a number.
-	 */
-	private coerceNumericProperties(obj: unknown): unknown {
-		if (obj === null || obj === undefined) return obj;
-		if (Array.isArray(obj)) return obj.map((item) => this.coerceNumericProperties(item));
-		if (typeof obj === "object") {
-			const result: Record<string, unknown> = {};
-			for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-				if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
-					// Coerce numeric strings inside properties
-					const props: Record<string, unknown> = {};
-					for (const [propName, propValue] of Object.entries(value as Record<string, unknown>)) {
-						if (typeof propValue === "string" && propValue.trim() !== "" && !Number.isNaN(Number(propValue))) {
-							props[propName] = Number(propValue);
-						} else {
-							props[propName] = this.coerceNumericProperties(propValue);
-						}
-					}
-					result[key] = props;
-				} else {
-					result[key] = this.coerceNumericProperties(value);
-				}
-			}
-			return result;
-		}
-		return obj;
-	}
-
 	async callTool(mcpUrl: string, name: string, args: Record<string, unknown>): Promise<string> {
-		const coerced = this.coerceNumericProperties(args);
+		const coerced = coerceNumericProperties(args);
 		const result = await this.sendRequest(mcpUrl, "tools/call", { name, arguments: coerced });
 
 		// Format result
@@ -501,16 +587,161 @@ async function openBrowser(url: string): Promise<void> {
 	exec(`${cmd} "${url}"`);
 }
 
-export default function notionMCPClientExtension(pi: ExtensionAPI) {
-	mcpClient = new NotionMCPClient();
-
-	const notify = (message: string) => {
+function createUiNotifier(pi: ExtensionAPI): NotifyFn {
+	return (message, type = "info") => {
 		try {
-			pi.events.emit("ui:notify", { message, type: "info" as const });
+			pi.events.emit("ui:notify", { message, type });
 		} catch {
 			console.log(`[pi-notion] ${message}`);
 		}
 	};
+}
+
+function toolResult(tool: string, text: string, details: Record<string, unknown> = {}): ToolExecutionResult {
+	return {
+		content: [{ type: "text", text }],
+		details: { tool, ...details },
+	};
+}
+
+function toolError(tool: string, text: string, details: Record<string, unknown> = {}): ToolExecutionResult {
+	return {
+		content: [{ type: "text", text }],
+		isError: true,
+		details: { tool, ...details },
+	};
+}
+
+function getConnectionStatusText(client: NotionMCPClient): string {
+	const { connected, sessionId, mcpUrl } = client.state;
+	const tools = client.getTools();
+	const toolList = tools.length > 0 ? `\n\nAvailable tools:\n${tools.map((t) => `- ${t.name}`).join("\n")}` : "";
+
+	return `Notion MCP Status:
+- Connected: ${connected ? "Yes" : "No"}
+- URL: ${mcpUrl || "None"}
+- Session: ${sessionId ? `${sessionId.slice(0, 8)}...` : "None"}
+- Tools: ${tools.length} available${toolList}
+${!connected ? "\nRun /notion to connect." : ""}`;
+}
+
+function getConnectedStatusMessage(client: NotionMCPClient): string {
+	const { sessionId, mcpUrl } = client.state;
+	const tools = client.getTools();
+	return `Connected to Notion MCP
+URL: ${mcpUrl}
+Session: ${sessionId?.slice(0, 8)}...
+Tools: ${tools.length} available`;
+}
+
+function createRegisteredToolExecutor(
+	client: NotionMCPClient,
+	mcpUrl: string,
+	tool: MCPTool,
+): (
+	_toolCallId: string,
+	params: unknown,
+	_signal: AbortSignal,
+	_onUpdate: unknown,
+	_ctx: unknown,
+) => Promise<ToolExecutionResult> {
+	return async (_toolCallId, params) => {
+		if (!client.state.connected) {
+			return toolError(tool.name, "Not connected to Notion MCP. Run /notion to connect.", { tool: tool.name });
+		}
+
+		try {
+			const result = await client.callTool(mcpUrl, tool.name, params as Record<string, unknown>);
+			return toolResult(tool.name, result || "", { tool: tool.name });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return toolError(tool.name, `Error: ${message}`, { tool: tool.name, error: message });
+		}
+	};
+}
+
+interface OAuthConnectionData {
+	accessToken: string;
+	registration: ClientRegistration;
+}
+
+async function connectWithSavedConfig(client: NotionMCPClient, notify: NotifyFn): Promise<boolean> {
+	const savedConfig = await storage.load();
+	if (!savedConfig) return false;
+
+	notify("Connecting to saved Notion MCP...");
+	try {
+		await client.connect(savedConfig.mcpUrl, savedConfig.accessToken);
+		return true;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		notify(`Connection failed: ${message}`, "error");
+		await storage.clear();
+		return false;
+	}
+}
+
+async function performOAuthConnection(notify: NotifyFn): Promise<OAuthConnectionData> {
+	const state = randomBytes(16).toString("hex");
+	const callbackServer = await startOAuthCallbackServer(3000, state);
+	const callbackUrl = `http://localhost:${callbackServer.port}/callback`;
+
+	notify("Registering OAuth client...");
+	const registration = await registerClient(callbackUrl);
+	const { codeVerifier, codeChallenge } = createPkceChallenge();
+	const authUrl = buildAuthorizationUrl(registration, callbackUrl, codeChallenge, state);
+
+	notify("Opening Notion authorization page...");
+	await openBrowser(authUrl);
+	notify("Waiting for authorization callback...");
+
+	const callbackResult = await callbackServer.result;
+	const accessToken = await resolveAccessToken(callbackResult, callbackUrl, codeVerifier, registration, notify);
+	return { accessToken, registration };
+}
+
+async function finalizeConnection(
+	client: NotionMCPClient,
+	registration: ClientRegistration | null,
+	accessToken: string,
+	registerMCPTools: () => void,
+	notify: NotifyFn,
+): Promise<void> {
+	notify("Connecting to MCP server...");
+	await client.connect(NOTION_MCP_URL, accessToken);
+	await storage.save({
+		mcpUrl: NOTION_MCP_URL,
+		accessToken,
+		clientId: registration?.client_id,
+		clientSecret: registration?.client_secret,
+	});
+	registerMCPTools();
+}
+
+async function ensureConnected(
+	client: NotionMCPClient,
+	registerMCPTools: () => void,
+	notify: NotifyFn,
+): Promise<{ reusedSavedConfig: boolean }> {
+	const connectedFromSavedConfig = await connectWithSavedConfig(client, notify);
+	if (connectedFromSavedConfig) {
+		registerMCPTools();
+		return { reusedSavedConfig: true };
+	}
+
+	const { accessToken, registration } = await performOAuthConnection(notify);
+	await finalizeConnection(client, registration, accessToken, registerMCPTools, notify);
+	return { reusedSavedConfig: false };
+}
+
+async function disconnectClient(client: NotionMCPClient): Promise<void> {
+	await client.disconnect();
+	await storage.clear();
+}
+
+export default function notionMCPClientExtension(pi: ExtensionAPI) {
+	mcpClient = new NotionMCPClient();
+	const notify = createUiNotifier(pi);
 
 	// Register dynamic MCP tools after connection
 	const registerMCPTools = () => {
@@ -520,7 +751,6 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 		const mcpUrl = mcpClient.state.mcpUrl;
 
 		for (const tool of tools) {
-			// Skip if already registered
 			if (pi.getAllTools().find((t) => t.name === tool.name)) continue;
 
 			pi.registerTool({
@@ -528,30 +758,7 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 				label: `Notion: ${tool.name.replace(/_/g, " ")}`,
 				description: tool.description || `Notion MCP tool: ${tool.name}`,
 				parameters: Type.Unsafe(tool.inputSchema),
-				async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-					if (!mcpClient?.state.connected) {
-						return {
-							content: [{ type: "text", text: "Not connected to Notion MCP. Run /notion to connect." }],
-							isError: true,
-							details: { tool: tool.name },
-						};
-					}
-
-					try {
-						const result = await mcpClient?.callTool(mcpUrl, tool.name, params as Record<string, unknown>);
-						return {
-							content: [{ type: "text", text: result || "" }],
-							details: { tool: tool.name },
-						};
-					} catch (error) {
-						const message = error instanceof Error ? error.message : String(error);
-						return {
-							content: [{ type: "text", text: `Error: ${message}` }],
-							isError: true,
-							details: { tool: tool.name, error: message },
-						};
-					}
-				},
+				execute: createRegisteredToolExecutor(mcpClient, mcpUrl, tool),
 			});
 		}
 
@@ -569,135 +776,22 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			const { connected, sessionId, mcpUrl } = mcpClient.state;
-
-			if (!connected) {
-				// Try to load saved config
-				const savedConfig = await storage.load();
-
-				if (savedConfig) {
-					ctx.ui.notify("Connecting to saved Notion MCP...", "info");
-					try {
-						await mcpClient.connect(savedConfig.mcpUrl, savedConfig.accessToken);
-						registerMCPTools();
-						ctx.ui.notify(`Connected! Session: ${mcpClient.state.sessionId?.slice(0, 8)}...`, "info");
-					} catch (error) {
-						const message = error instanceof Error ? error.message : String(error);
-						ctx.ui.notify(`Connection failed: ${message}`, "error");
-						await storage.clear();
-					}
-					return;
-				}
-
-				// Start OAuth flow
-				const state = randomBytes(16).toString("hex");
-
-				// Start callback server on an available port
-				const callbackServer = await startOAuthCallbackServer(3000, state);
-				const callbackUrl = `http://localhost:${callbackServer.port}/callback`;
-
-				// Dynamic client registration
-				ctx.ui.notify("Registering OAuth client...", "info");
-				let registration: ClientRegistration;
+			if (!mcpClient.state.connected) {
+				const uiNotify: NotifyFn = (message, type = "info") => ctx.ui.notify(message, type);
 				try {
-					registration = await registerClient(callbackUrl);
-				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					ctx.ui.notify(`Client registration failed: ${message}`, "error");
-					return;
-				}
-
-				// Build authorization URL with PKCE
-				const codeVerifier = randomBytes(32).toString("base64url");
-				const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
-
-				const authUrl = new URL("https://mcp.notion.com/authorize");
-				authUrl.searchParams.set("response_type", "code");
-				authUrl.searchParams.set("client_id", registration.client_id);
-				authUrl.searchParams.set("redirect_uri", callbackUrl);
-				authUrl.searchParams.set("code_challenge", codeChallenge);
-				authUrl.searchParams.set("code_challenge_method", "S256");
-				authUrl.searchParams.set("state", state);
-				authUrl.searchParams.set("prompt", "consent");
-
-				ctx.ui.notify("Opening Notion authorization page...", "info");
-
-				// Open browser
-				await openBrowser(authUrl.toString());
-
-				ctx.ui.notify("Waiting for authorization callback...", "info");
-
-				// Wait for callback
-				try {
-					const result = await callbackServer.result;
-
-					if (result.error) {
-						ctx.ui.notify(`Authorization failed: ${result.error}`, "error");
-						return;
-					}
-
-					let accessToken: string;
-
-					if (result.accessToken) {
-						// MCP server returned token directly
-						accessToken = result.accessToken;
-					} else if (result.code) {
-						// Exchange code for token
-						ctx.ui.notify("Exchanging authorization code for token...", "info");
-						try {
-							const tokenResult = await exchangeCodeForToken(
-								result.code,
-								callbackUrl,
-								codeVerifier,
-								registration.client_id,
-								registration.client_secret,
-							);
-							accessToken = tokenResult.accessToken;
-						} catch (error) {
-							const message = error instanceof Error ? error.message : String(error);
-							ctx.ui.notify(`Token exchange failed: ${message}`, "error");
-							return;
-						}
-					} else {
-						ctx.ui.notify("No authorization code received", "error");
-						return;
-					}
-
-					// Connect to MCP
-					ctx.ui.notify("Connecting to MCP server...", "info");
-					await mcpClient.connect(NOTION_MCP_URL, accessToken);
-
-					// Save config
-					await storage.save({
-						mcpUrl: NOTION_MCP_URL,
-						accessToken,
-						clientId: registration.client_id,
-						clientSecret: registration.client_secret,
-					});
-
-					// Register tools
-					registerMCPTools();
-
+					await ensureConnected(mcpClient, registerMCPTools, uiNotify);
 					ctx.ui.notify(`Connected! Session: ${mcpClient.state.sessionId?.slice(0, 8)}...`, "info");
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
 					ctx.ui.notify(`Connection failed: ${message}`, "error");
 				}
-			} else {
-				// Connected - show status and offer disconnect
-				const tools = mcpClient.getTools();
-				const status = `Connected to Notion MCP
-URL: ${mcpUrl}
-Session: ${sessionId?.slice(0, 8)}...
-Tools: ${tools.length} available`;
+				return;
+			}
 
-				const choice = await ctx.ui.select(status, ["Disconnect", "Cancel"]);
-
-				if (choice === "Disconnect") {
-					await mcpClient.disconnect();
-					await storage.clear();
-					ctx.ui.notify("Disconnected from Notion MCP", "info");
-				}
+			const choice = await ctx.ui.select(getConnectedStatusMessage(mcpClient), ["Disconnect", "Cancel"]);
+			if (choice === "Disconnect") {
+				await disconnectClient(mcpClient);
+				ctx.ui.notify("Disconnected from Notion MCP", "info");
 			}
 		},
 	});
@@ -710,149 +804,27 @@ Tools: ${tools.length} available`;
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
 			if (!mcpClient) {
-				return {
-					content: [{ type: "text", text: "MCP client not initialized" }],
-					isError: true,
-					details: { tool: "notion_mcp_connect" },
-				};
+				return toolError("notion_mcp_connect", "MCP client not initialized");
 			}
 
 			if (mcpClient.state.connected) {
 				const tools = mcpClient.getTools();
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Already connected to Notion MCP!\n\n${tools.length} tools available: ${tools.map((t) => t.name).join(", ")}`,
-						},
-					],
-					details: { tool: "notion_mcp_connect" },
-				};
+				return toolResult(
+					"notion_mcp_connect",
+					`Already connected to Notion MCP!\n\n${tools.length} tools available: ${tools.map((t) => t.name).join(", ")}`,
+				);
 			}
-
-			// Try saved config first
-			const savedConfig = await storage.load();
-			if (savedConfig) {
-				try {
-					notify("Connecting to saved Notion MCP...");
-					await mcpClient.connect(savedConfig.mcpUrl, savedConfig.accessToken);
-					registerMCPTools();
-					const tools = mcpClient.getTools();
-					return {
-						content: [
-							{
-								type: "text",
-								text: `Connected to Notion MCP!\n\n${tools.length} tools available.`,
-							},
-						],
-						details: { tool: "notion_mcp_connect" },
-					};
-				} catch {
-					await storage.clear();
-				}
-			}
-
-			// Start OAuth flow
-			notify("Starting OAuth flow...");
-
-			const state = randomBytes(16).toString("hex");
-
-			// Start callback server on an available port
-			const callbackServer = await startOAuthCallbackServer(3000, state);
-			const callbackUrl = `http://localhost:${callbackServer.port}/callback`;
-
-			// Dynamic client registration
-			notify("Registering OAuth client...");
-			let registration: ClientRegistration;
-			try {
-				registration = await registerClient(callbackUrl);
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				return {
-					content: [{ type: "text", text: `Client registration failed: ${message}` }],
-					isError: true,
-					details: { tool: "notion_mcp_connect" },
-				};
-			}
-
-			// Build authorization URL
-			const codeVerifier = randomBytes(32).toString("base64url");
-			const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
-
-			const authUrl = new URL("https://mcp.notion.com/authorize");
-			authUrl.searchParams.set("response_type", "code");
-			authUrl.searchParams.set("client_id", registration.client_id);
-			authUrl.searchParams.set("redirect_uri", callbackUrl);
-			authUrl.searchParams.set("code_challenge", codeChallenge);
-			authUrl.searchParams.set("code_challenge_method", "S256");
-			authUrl.searchParams.set("state", state);
-			authUrl.searchParams.set("prompt", "consent");
-
-			notify("Opening Notion authorization page...");
-			await openBrowser(authUrl.toString());
-
-			notify("Waiting for authorization...");
 
 			try {
-				const result = await callbackServer.result;
-
-				if (result.error) {
-					return {
-						content: [{ type: "text", text: `Authorization failed: ${result.error}` }],
-						isError: true,
-						details: { tool: "notion_mcp_connect" },
-					};
-				}
-
-				let accessToken: string;
-
-				if (result.accessToken) {
-					accessToken = result.accessToken;
-				} else if (result.code) {
-					notify("Exchanging authorization code for token...");
-					const tokenResult = await exchangeCodeForToken(
-						result.code,
-						callbackUrl,
-						codeVerifier,
-						registration.client_id,
-						registration.client_secret,
-					);
-					accessToken = tokenResult.accessToken;
-				} else {
-					return {
-						content: [{ type: "text", text: "No authorization code received" }],
-						isError: true,
-						details: { tool: "notion_mcp_connect" },
-					};
-				}
-
-				notify("Connecting to MCP server...");
-				await mcpClient.connect(NOTION_MCP_URL, accessToken);
-				await storage.save({
-					mcpUrl: NOTION_MCP_URL,
-					accessToken,
-					clientId: registration.client_id,
-					clientSecret: registration.client_secret,
-				});
-				registerMCPTools();
-
+				await ensureConnected(mcpClient, registerMCPTools, notify);
 				const tools = mcpClient.getTools();
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Connected to Notion MCP!\n\n${tools.length} tools available.\n\nYou can now ask things like:\n- "Search my Notion for meeting notes"\n- "Get page abc123"\n- "Create a page in my workspace"`,
-						},
-					],
-					details: { tool: "notion_mcp_connect" },
-				};
+				return toolResult(
+					"notion_mcp_connect",
+					`Connected to Notion MCP!\n\n${tools.length} tools available.\n\nYou can now ask things like:\n- "Search my Notion for meeting notes"\n- "Get page abc123"\n- "Create a page in my workspace"`,
+				);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
-				return {
-					content: [{ type: "text", text: `Connection failed: ${message}` }],
-					isError: true,
-					details: { tool: "notion_mcp_connect", error: message },
-				};
+				return toolError("notion_mcp_connect", `Connection failed: ${message}`, { error: message });
 			}
 		},
 	});
@@ -865,20 +837,11 @@ Tools: ${tools.length} available`;
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
 			if (!mcpClient) {
-				return {
-					content: [{ type: "text", text: "MCP client not initialized" }],
-					isError: true,
-					details: { tool: "notion_mcp_disconnect" },
-				};
+				return toolError("notion_mcp_disconnect", "MCP client not initialized");
 			}
 
-			await mcpClient.disconnect();
-			await storage.clear();
-
-			return {
-				content: [{ type: "text", text: "Disconnected from Notion MCP and cleared config" }],
-				details: { tool: "notion_mcp_disconnect" },
-			};
+			await disconnectClient(mcpClient);
+			return toolResult("notion_mcp_disconnect", "Disconnected from Notion MCP and cleared config");
 		},
 	});
 
@@ -890,31 +853,15 @@ Tools: ${tools.length} available`;
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
 			if (!mcpClient) {
-				return {
-					content: [{ type: "text", text: "MCP client not initialized" }],
-					isError: true,
-					details: { tool: "notion_mcp_status" },
-				};
+				return toolError("notion_mcp_status", "MCP client not initialized");
 			}
 
 			const { connected, sessionId, mcpUrl } = mcpClient.state;
-			const tools = mcpClient.getTools();
-			const toolList = tools.length > 0 ? `\n\nAvailable tools:\n${tools.map((t) => `- ${t.name}`).join("\n")}` : "";
-
-			return {
-				content: [
-					{
-						type: "text",
-						text: `Notion MCP Status:
-- Connected: ${connected ? "Yes" : "No"}
-- URL: ${mcpUrl || "None"}
-- Session: ${sessionId ? `${sessionId.slice(0, 8)}...` : "None"}
-- Tools: ${tools.length} available${toolList}
-${!connected ? "\nRun /notion to connect." : ""}`,
-					},
-				],
-				details: { tool: "notion_mcp_status", connected, sessionId, mcpUrl },
-			};
+			return toolResult("notion_mcp_status", getConnectionStatusText(mcpClient), {
+				connected,
+				sessionId,
+				mcpUrl,
+			});
 		},
 	});
 }

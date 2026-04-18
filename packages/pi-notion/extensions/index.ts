@@ -40,81 +40,87 @@ interface NotionUserInfo {
 	ownerName?: string;
 }
 
+interface AuthStatus {
+	authenticated: boolean;
+	workspaceName?: string;
+	message: string;
+}
+
 // =============================================================================
 // Authentication Check
 // =============================================================================
 
-function checkNotionAuth(): { authenticated: boolean; workspaceName?: string; message: string } {
-	// Check MCP config from the OAuth-based MCP client
-	if (existsSync(MCP_CONFIG_FILE)) {
-		try {
-			const config = JSON.parse(readFileSync(MCP_CONFIG_FILE, "utf-8")) as { accessToken?: string; mcpUrl?: string };
-			if (typeof config.accessToken === "string" && config.accessToken.trim().length > 0) {
-				return {
-					authenticated: true,
-					message: `[notion] MCP config found (${config.mcpUrl ?? "https://mcp.notion.com/mcp"})`,
-				};
-			}
-		} catch {
-			// ignore malformed MCP config
-		}
+function readJsonIfExists<T>(path: string): T | null {
+	if (!existsSync(path)) return null;
+	try {
+		return JSON.parse(readFileSync(path, "utf-8")) as T;
+	} catch {
+		return null;
 	}
+}
 
-	// Check OAuth tokens file (legacy helper storage)
-	if (existsSync(TOKEN_FILE)) {
-		try {
-			const tokens: OAuthTokens = JSON.parse(readFileSync(TOKEN_FILE, "utf-8"));
-			if (tokens.accessToken && tokens.expiresAt > Date.now()) {
-				const userInfoPath = TOKEN_FILE.replace("-tokens.json", "-user.json");
-				if (existsSync(userInfoPath)) {
-					const userInfo: NotionUserInfo = JSON.parse(readFileSync(userInfoPath, "utf-8"));
-					return {
-						authenticated: true,
-						workspaceName: userInfo.workspaceName,
-						message: `[notion] Authenticated as ${userInfo.workspaceName || "Unknown workspace"}`,
-					};
-				}
-				return {
-					authenticated: true,
-					message: "[notion] Authenticated (OAuth tokens valid)",
-				};
-			}
-		} catch {
-			// Malformed token file
-		}
-	}
+function getMcpConfigAuthStatus(): AuthStatus | null {
+	const config = readJsonIfExists<{ accessToken?: string; mcpUrl?: string }>(MCP_CONFIG_FILE);
+	if (typeof config?.accessToken !== "string" || config.accessToken.trim().length === 0) return null;
 
-	// Legacy direct API token env vars are detected but do not establish MCP connectivity.
-	const apiKey = process.env.NOTION_API_KEY ?? process.env.NOTION_TOKEN;
-	if (apiKey) {
+	return {
+		authenticated: true,
+		message: `[notion] MCP config found (${config.mcpUrl ?? "https://mcp.notion.com/mcp"})`,
+	};
+}
+
+function getOAuthTokenAuthStatus(): AuthStatus | null {
+	const tokens = readJsonIfExists<OAuthTokens>(TOKEN_FILE);
+	if (!tokens?.accessToken || tokens.expiresAt <= Date.now()) return null;
+
+	const userInfoPath = TOKEN_FILE.replace("-tokens.json", "-user.json");
+	const userInfo = readJsonIfExists<NotionUserInfo>(userInfoPath);
+	if (!userInfo) {
 		return {
-			authenticated: false,
-			message: process.env.NOTION_API_KEY
-				? "[notion] NOTION_API_KEY detected (legacy direct API token). MCP OAuth is still required: run /notion."
-				: "[notion] NOTION_TOKEN detected (legacy). MCP OAuth is still required: run /notion.",
+			authenticated: true,
+			message: "[notion] Authenticated (OAuth tokens valid)",
 		};
 	}
 
-	// Check legacy config
-	if (existsSync(LEGACY_TOKEN_FILE)) {
-		try {
-			const config = JSON.parse(readFileSync(LEGACY_TOKEN_FILE, "utf-8"));
-			if (config.token) {
-				return {
-					authenticated: false,
-					message: "[notion] Legacy notion.json token detected. MCP OAuth is still required: run /notion.",
-				};
-			}
-		} catch {
-			// Malformed config
-		}
-	}
+	return {
+		authenticated: true,
+		workspaceName: userInfo.workspaceName,
+		message: `[notion] Authenticated as ${userInfo.workspaceName || "Unknown workspace"}`,
+	};
+}
 
-	// Not authenticated
+function getLegacyEnvAuthStatus(): AuthStatus | null {
+	const apiKey = process.env.NOTION_API_KEY ?? process.env.NOTION_TOKEN;
+	if (!apiKey) return null;
+
 	return {
 		authenticated: false,
-		message: "[notion] Not authenticated. Use /notion to connect your Notion workspace.",
+		message: process.env.NOTION_API_KEY
+			? "[notion] NOTION_API_KEY detected (legacy direct API token). MCP OAuth is still required: run /notion."
+			: "[notion] NOTION_TOKEN detected (legacy). MCP OAuth is still required: run /notion.",
 	};
+}
+
+function getLegacyConfigAuthStatus(): AuthStatus | null {
+	const config = readJsonIfExists<{ token?: string }>(LEGACY_TOKEN_FILE);
+	if (!config?.token) return null;
+
+	return {
+		authenticated: false,
+		message: "[notion] Legacy notion.json token detected. MCP OAuth is still required: run /notion.",
+	};
+}
+
+function checkNotionAuth(): AuthStatus {
+	return (
+		getMcpConfigAuthStatus() ??
+		getOAuthTokenAuthStatus() ??
+		getLegacyEnvAuthStatus() ??
+		getLegacyConfigAuthStatus() ?? {
+			authenticated: false,
+			message: "[notion] Not authenticated. Use /notion to connect your Notion workspace.",
+		}
+	);
 }
 
 // =============================================================================
