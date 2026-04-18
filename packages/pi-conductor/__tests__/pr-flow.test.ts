@@ -85,7 +85,7 @@ describe("PR preparation flow", () => {
 	});
 
 	it("creates a pull request and persists PR metadata", async () => {
-		writeFakeGhScript("echo 'https://github.com/example/repo/pull/123'");
+		writeFakeGhScript("if [ \"$1\" = \"--version\" ]; then echo 'gh version test'; exit 0; fi\nif [ \"$1 $2\" = \"auth status\" ]; then exit 0; fi\necho 'https://github.com/example/repo/pull/123'");
 		await createChangedWorker();
 		await runConductorCommand(repoDir, "commit backend feat: add backend worker");
 		await runConductorCommand(repoDir, "push backend");
@@ -100,7 +100,7 @@ describe("PR preparation flow", () => {
 	});
 
 	it("persists partial PR state when gh pr create fails", async () => {
-		writeFakeGhScript("echo 'gh pr create failed' >&2\nexit 1");
+		writeFakeGhScript("if [ \"$1\" = \"--version\" ]; then echo 'gh version test'; exit 0; fi\nif [ \"$1 $2\" = \"auth status\" ]; then exit 0; fi\necho 'gh pr create failed' >&2\nexit 1");
 		await createChangedWorker();
 		await runConductorCommand(repoDir, "commit backend feat: add backend worker");
 		await runConductorCommand(repoDir, "push backend");
@@ -112,5 +112,34 @@ describe("PR preparation flow", () => {
 		expect(run.workers[0]?.pr.pushSucceeded).toBe(true);
 		expect(run.workers[0]?.pr.prCreationAttempted).toBe(true);
 		expect(run.workers[0]?.pr.url).toBeNull();
+	});
+
+	it("reports a preflight error when gh is not installed", async () => {
+		writeFakeGhScript("exit 127");
+		process.env.PATH = `${fakeBinDir}:${originalPath ?? ""}`;
+		await createChangedWorker();
+		await runConductorCommand(repoDir, "commit backend feat: add backend worker");
+		await runConductorCommand(repoDir, "push backend");
+
+		await expect(runConductorCommand(repoDir, "pr backend Backend worker PR")).rejects.toThrow(/GitHub CLI/i);
+
+		const run = getOrCreateRunForRepo(repoDir);
+		expect(run.workers[0]?.pr.commitSucceeded).toBe(true);
+		expect(run.workers[0]?.pr.pushSucceeded).toBe(true);
+		expect(run.workers[0]?.pr.prCreationAttempted).toBe(false);
+	});
+
+	it("reports a preflight error when gh is not authenticated", async () => {
+		writeFakeGhScript("if [ \"$1\" = \"--version\" ]; then echo 'gh version test'; exit 0; fi\nif [ \"$1 $2\" = \"auth status\" ]; then echo 'not authenticated' >&2; exit 1; fi\necho 'unexpected call' >&2\nexit 1");
+		await createChangedWorker();
+		await runConductorCommand(repoDir, "commit backend feat: add backend worker");
+		await runConductorCommand(repoDir, "push backend");
+
+		await expect(runConductorCommand(repoDir, "pr backend Backend worker PR")).rejects.toThrow(/authenticated/i);
+
+		const run = getOrCreateRunForRepo(repoDir);
+		expect(run.workers[0]?.pr.commitSucceeded).toBe(true);
+		expect(run.workers[0]?.pr.pushSucceeded).toBe(true);
+		expect(run.workers[0]?.pr.prCreationAttempted).toBe(false);
 	});
 });

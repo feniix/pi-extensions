@@ -1,7 +1,13 @@
 import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { deriveProjectKey } from "./project-key.js";
-import { createPullRequest, commitAllChanges, pushBranchToOrigin } from "./git-pr.js";
+import {
+	createPullRequest,
+	commitAllChanges,
+	pushBranchToOrigin,
+	validatePrPreconditions,
+	validatePushPreconditions,
+} from "./git-pr.js";
 import {
 	addWorker,
 	createEmptyRun,
@@ -191,6 +197,7 @@ export function pushWorkerForRepo(repoRoot: string, workerName: string): WorkerR
 	if (!worker.worktreePath || !existsSync(worker.worktreePath) || !worker.branch) {
 		throw new Error(`Worker named ${workerName} does not have a valid worktree or branch`);
 	}
+	validatePushPreconditions(run.repoRoot);
 	pushBranchToOrigin(worker.worktreePath, worker.branch);
 	const updatedRun = setWorkerPrState(run, worker.workerId, {
 		pushSucceeded: true,
@@ -208,6 +215,7 @@ export function createWorkerPrForRepo(repoRoot: string, workerName: string, titl
 	if (!worker.worktreePath || !existsSync(worker.worktreePath) || !worker.branch) {
 		throw new Error(`Worker named ${workerName} does not have a valid worktree or branch`);
 	}
+	validatePrPreconditions(run.repoRoot);
 	const prBody = body?.trim() || worker.summary.text || worker.currentTask || `PR for ${worker.name}`;
 	try {
 		const pr = createPullRequest({

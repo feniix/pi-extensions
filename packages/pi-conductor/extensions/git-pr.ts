@@ -17,6 +17,41 @@ function execInCwd(cwd: string, command: string, label: string): string {
 	}
 }
 
+function execOrNull(cwd: string, command: string): string | null {
+	try {
+		return execInCwd(cwd, command, "git");
+	} catch {
+		return null;
+	}
+}
+
+export function validatePushPreconditions(repoRoot: string): void {
+	const remoteUrl = execOrNull(repoRoot, "git remote get-url origin");
+	if (!remoteUrl) {
+		throw new Error("Git remote 'origin' is not configured for this repository");
+	}
+}
+
+export function validatePrPreconditions(repoRoot: string): void {
+	validatePushPreconditions(repoRoot);
+	try {
+		execSync("command -v gh", {
+			cwd: repoRoot,
+			encoding: "utf-8",
+			stdio: ["pipe", "pipe", "pipe"],
+			shell: "/bin/bash",
+		});
+		execInCwd(repoRoot, "gh --version", "gh");
+	} catch {
+		throw new Error("GitHub CLI (gh) is not installed or not available on PATH");
+	}
+	try {
+		execInCwd(repoRoot, "gh auth status", "gh");
+	} catch {
+		throw new Error("GitHub CLI (gh) is not authenticated");
+	}
+}
+
 export function getPreferredBaseBranch(repoRoot: string): string {
 	const currentBranch = execInCwd(repoRoot, "git branch --show-current", "git");
 	if (currentBranch && !currentBranch.startsWith("conductor/")) {
