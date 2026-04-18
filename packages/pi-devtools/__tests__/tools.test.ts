@@ -327,14 +327,16 @@ describe("pi-devtools", () => {
 	});
 
 	describe("checkCiTool", () => {
-		it("checks CI by PR number", () => {
+		it("checks CI by PR number using gh pr checks", () => {
 			vi.mocked(execGh).mockReturnValue(
-				JSON.stringify([{ workflowName: "Build", status: "completed", conclusion: "success", url: "https://ci" }]),
+				JSON.stringify([{ name: "Build", state: "SUCCESS", link: "https://ci", workflow: "CI" }]),
 			);
 
 			const result = checkCiTool(123);
 
+			expect(vi.mocked(execGh)).toHaveBeenCalledWith("gh pr checks 123 --json name,state,link,workflow");
 			expect(result.content[0].text).toContain("CI Status");
+			expect(result.content[0].text).toContain("Build: SUCCESS");
 			expect(result.details.checks).toBeDefined();
 		});
 
