@@ -5,6 +5,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createWorkerForRepo, getOrCreateRunForRepo } from "../extensions/conductor.js";
 
+function requireValue<T>(value: T | null | undefined): T {
+	if (value == null) {
+		throw new Error("Expected value to be present in test");
+	}
+	return value;
+}
+
 describe("conductor service", () => {
 	let repoDir: string;
 	let conductorHome: string;
@@ -41,12 +48,14 @@ describe("conductor service", () => {
 
 	it("creates a worker, worktree, and persisted worker record", async () => {
 		const worker = await createWorkerForRepo(repoDir, "backend");
+		const worktreePath = requireValue(worker.worktreePath);
+		const sessionFile = requireValue(worker.sessionFile);
 		expect(worker.name).toBe("backend");
 		expect(worker.branch).toBe("conductor/backend");
 		expect(worker.worktreePath).toBeTruthy();
-		expect(existsSync(worker.worktreePath!)).toBe(true);
+		expect(existsSync(worktreePath)).toBe(true);
 		expect(worker.sessionFile).toBeTruthy();
-		expect(existsSync(worker.sessionFile!)).toBe(true);
+		expect(existsSync(sessionFile)).toBe(true);
 
 		const run = getOrCreateRunForRepo(repoDir);
 		expect(run.workers).toHaveLength(1);

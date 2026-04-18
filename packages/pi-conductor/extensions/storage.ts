@@ -193,11 +193,7 @@ export function setWorkerPrState(run: RunRecord, workerId: string, pr: Partial<W
 	};
 }
 
-export function setWorkerLifecycle(
-	run: RunRecord,
-	workerId: string,
-	lifecycle: WorkerLifecycleState,
-): RunRecord {
+export function setWorkerLifecycle(run: RunRecord, workerId: string, lifecycle: WorkerLifecycleState): RunRecord {
 	let found = false;
 	const now = new Date().toISOString();
 	const workers = run.workers.map((worker) => {

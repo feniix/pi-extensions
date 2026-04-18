@@ -18,5 +18,22 @@
 			"packages/*/src/**/*.ts",
 			"vitest.config.ts"
 		]
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["packages/pi-conductor/extensions/**/*.ts"],
+			"linter": {
+				"rules": {
+					"complexity": {
+						"noExcessiveCognitiveComplexity": {
+							"level": "warn",
+							"options": {
+								"maxAllowedComplexity": 15
+							}
+						}
+					}
+				}
+			}
+		}
+	]
 }

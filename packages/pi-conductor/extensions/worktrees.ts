@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { dirname, join } from "node:path";
-import { buildBranchName, normalizeWorkerSlug } from "./workers.js";
 import { ensureDir } from "./storage.js";
+import { buildBranchName, normalizeWorkerSlug } from "./workers.js";
 
 function execGit(cwd: string, command: string): string {
 	return execSync(command, {

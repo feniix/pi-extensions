@@ -4,6 +4,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createWorkerSessionLink } from "../extensions/sessions.js";
 
+function requireValue<T>(value: T | null | undefined): T {
+	if (value == null) {
+		throw new Error("Expected value to be present in test");
+	}
+	return value;
+}
+
 describe("session linkage", () => {
 	let repoDir: string;
 
@@ -24,8 +31,8 @@ describe("session linkage", () => {
 	});
 
 	it("creates a persisted pi session file for a worker worktree", async () => {
-		const sessionFile = await createWorkerSessionLink(repoDir);
+		const sessionFile = requireValue(await createWorkerSessionLink(repoDir));
 		expect(sessionFile).toBeTruthy();
-		expect(existsSync(sessionFile!)).toBe(true);
+		expect(existsSync(sessionFile)).toBe(true);
 	});
 });

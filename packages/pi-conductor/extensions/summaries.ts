@@ -20,8 +20,8 @@ function extractTextContent(content: string | TextPart[] | undefined): string[] 
 	}
 	return content
 		.filter((item) => item?.type === "text" && typeof item.text === "string")
-		.map((item) => item.text!.trim())
-		.filter(Boolean);
+		.map((item) => item.text?.trim())
+		.filter((item): item is string => Boolean(item));
 }
 
 export function generateWorkerSummaryFromSession(sessionFile: string): string {

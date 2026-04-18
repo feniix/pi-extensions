@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildBranchName, createWorkerId, normalizeWorkerSlug } from "../extensions/workers.js";
 import { createEmptyRun, createWorkerRecord, setWorkerTask } from "../extensions/storage.js";
+import { buildBranchName, createWorkerId, normalizeWorkerSlug } from "../extensions/workers.js";
 
 describe("worker helpers", () => {
 	it("normalizes worker names into branch-safe slugs", () => {
