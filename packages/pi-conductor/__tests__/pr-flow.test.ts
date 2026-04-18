@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -80,12 +80,17 @@ describe("PR preparation flow", () => {
 
 		const run = getOrCreateRunForRepo(repoDir);
 		expect(run.workers[0]?.pr.pushSucceeded).toBe(true);
-		const remoteHead = execSync("git ls-remote --heads origin conductor/backend", { cwd: repoDir, encoding: "utf-8" }).trim();
+		const remoteHead = execSync("git ls-remote --heads origin conductor/backend", {
+			cwd: repoDir,
+			encoding: "utf-8",
+		}).trim();
 		expect(remoteHead).toContain("refs/heads/conductor/backend");
 	});
 
 	it("creates a pull request and persists PR metadata", async () => {
-		writeFakeGhScript("if [ \"$1\" = \"--version\" ]; then echo 'gh version test'; exit 0; fi\nif [ \"$1 $2\" = \"auth status\" ]; then exit 0; fi\necho 'https://github.com/example/repo/pull/123'");
+		writeFakeGhScript(
+			'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'https://github.com/example/repo/pull/123\'',
+		);
 		await createChangedWorker();
 		await runConductorCommand(repoDir, "commit backend feat: add backend worker");
 		await runConductorCommand(repoDir, "push backend");
@@ -100,7 +105,9 @@ describe("PR preparation flow", () => {
 	});
 
 	it("persists partial PR state when gh pr create fails", async () => {
-		writeFakeGhScript("if [ \"$1\" = \"--version\" ]; then echo 'gh version test'; exit 0; fi\nif [ \"$1 $2\" = \"auth status\" ]; then exit 0; fi\necho 'gh pr create failed' >&2\nexit 1");
+		writeFakeGhScript(
+			'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'gh pr create failed\' >&2\nexit 1',
+		);
 		await createChangedWorker();
 		await runConductorCommand(repoDir, "commit backend feat: add backend worker");
 		await runConductorCommand(repoDir, "push backend");
@@ -130,7 +137,9 @@ describe("PR preparation flow", () => {
 	});
 
 	it("reports a preflight error when gh is not authenticated", async () => {
-		writeFakeGhScript("if [ \"$1\" = \"--version\" ]; then echo 'gh version test'; exit 0; fi\nif [ \"$1 $2\" = \"auth status\" ]; then echo 'not authenticated' >&2; exit 1; fi\necho 'unexpected call' >&2\nexit 1");
+		writeFakeGhScript(
+			'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then echo \'not authenticated\' >&2; exit 1; fi\necho \'unexpected call\' >&2\nexit 1',
+		);
 		await createChangedWorker();
 		await runConductorCommand(repoDir, "commit backend feat: add backend worker");
 		await runConductorCommand(repoDir, "push backend");

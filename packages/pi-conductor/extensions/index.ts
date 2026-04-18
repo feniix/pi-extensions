@@ -1,5 +1,5 @@
-import { existsSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { runConductorCommand } from "./commands.js";
@@ -9,17 +9,17 @@ import {
 	createWorkerPrForRepo,
 	getOrCreateRunForRepo,
 	pushWorkerForRepo,
-	removeWorkerForRepo,
 	reconcileWorkerHealth,
 	recoverWorkerForRepo,
 	refreshWorkerSummaryForRepo,
+	removeWorkerForRepo,
 	resumeWorkerForRepo,
 	updateWorkerLifecycleForRepo,
 	updateWorkerTaskForRepo,
 } from "./conductor.js";
 import { deriveProjectKey } from "./project-key.js";
-import { createEmptyRun, readRun, writeRun } from "./storage.js";
 import { formatRunStatus } from "./status.js";
+import { createEmptyRun, readRun, writeRun } from "./storage.js";
 
 function findRepoRoot(cwd: string): string | null {
 	try {

@@ -1,13 +1,14 @@
 import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
-import { deriveProjectKey } from "./project-key.js";
 import {
-	createPullRequest,
 	commitAllChanges,
+	createPullRequest,
 	pushBranchToOrigin,
 	validatePrPreconditions,
 	validatePushPreconditions,
 } from "./git-pr.js";
+import { deriveProjectKey } from "./project-key.js";
+import { createWorkerSessionLink } from "./sessions.js";
 import {
 	addWorker,
 	createEmptyRun,
@@ -20,11 +21,15 @@ import {
 	setWorkerTask,
 	writeRun,
 } from "./storage.js";
-import type { RunRecord, WorkerLifecycleState, WorkerRecord } from "./types.js";
-import { createManagedWorktree, recreateManagedWorktree, removeManagedBranch, removeManagedWorktree } from "./worktrees.js";
-import { createWorkerSessionLink } from "./sessions.js";
 import { generateWorkerSummaryFromSession } from "./summaries.js";
+import type { RunRecord, WorkerLifecycleState, WorkerRecord } from "./types.js";
 import { createWorkerId } from "./workers.js";
+import {
+	createManagedWorktree,
+	recreateManagedWorktree,
+	removeManagedBranch,
+	removeManagedWorktree,
+} from "./worktrees.js";
 
 export function getOrCreateRunForRepo(repoRoot: string): RunRecord {
 	const normalizedRoot = resolve(repoRoot);
@@ -206,7 +211,12 @@ export function pushWorkerForRepo(repoRoot: string, workerName: string): WorkerR
 	return updatedRun.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
 }
 
-export function createWorkerPrForRepo(repoRoot: string, workerName: string, title: string, body?: string): WorkerRecord {
+export function createWorkerPrForRepo(
+	repoRoot: string,
+	workerName: string,
+	title: string,
+	body?: string,
+): WorkerRecord {
 	const run = getOrCreateRunForRepo(repoRoot);
 	const worker = run.workers.find((entry) => entry.name === workerName);
 	if (!worker) {
@@ -269,13 +279,13 @@ export async function recoverWorkerForRepo(repoRoot: string, workerName: string)
 	const workers = run.workers.map((entry) =>
 		entry.workerId === worker.workerId
 			? {
-				...entry,
-				worktreePath,
-				sessionFile,
-				lifecycle: "idle" as const,
-				recoverable: false,
-				updatedAt: new Date().toISOString(),
-			}
+					...entry,
+					worktreePath,
+					sessionFile,
+					lifecycle: "idle" as const,
+					recoverable: false,
+					updatedAt: new Date().toISOString(),
+				}
 			: entry,
 	);
 	const updatedRun = {

@@ -3,7 +3,19 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createWorkerForRepo, getOrCreateRunForRepo, reconcileWorkerHealth, recoverWorkerForRepo } from "../extensions/conductor.js";
+import {
+	createWorkerForRepo,
+	getOrCreateRunForRepo,
+	reconcileWorkerHealth,
+	recoverWorkerForRepo,
+} from "../extensions/conductor.js";
+
+function requireValue<T>(value: T | null | undefined, message: string): T {
+	if (value == null) {
+		throw new Error(message);
+	}
+	return value;
+}
 
 describe("recovery flows", () => {
 	let repoDir: string;
@@ -33,7 +45,8 @@ describe("recovery flows", () => {
 
 	it("marks a worker broken and recoverable when its session file is missing", async () => {
 		const worker = await createWorkerForRepo(repoDir, "backend");
-		rmSync(worker.sessionFile!, { force: true });
+		const sessionFile = requireValue(worker.sessionFile, "worker session file missing");
+		rmSync(sessionFile, { force: true });
 		const updated = reconcileWorkerHealth(getOrCreateRunForRepo(repoDir));
 		expect(updated.workers[0]?.lifecycle).toBe("broken");
 		expect(updated.workers[0]?.recoverable).toBe(true);
@@ -41,22 +54,27 @@ describe("recovery flows", () => {
 
 	it("recreates a missing session file during recovery", async () => {
 		const worker = await createWorkerForRepo(repoDir, "backend");
-		rmSync(worker.sessionFile!, { force: true });
+		const sessionFile = requireValue(worker.sessionFile, "worker session file missing");
+		rmSync(sessionFile, { force: true });
 		const recovered = await recoverWorkerForRepo(repoDir, "backend");
+		const recoveredSessionFile = requireValue(recovered.sessionFile, "recovered session file missing");
 		expect(recovered.sessionFile).toBeTruthy();
-		expect(existsSync(recovered.sessionFile!)).toBe(true);
+		expect(existsSync(recoveredSessionFile)).toBe(true);
 		expect(recovered.lifecycle).toBe("idle");
 		expect(recovered.recoverable).toBe(false);
 	});
 
 	it("recreates a missing worktree during recovery", async () => {
 		const worker = await createWorkerForRepo(repoDir, "backend");
-		rmSync(worker.worktreePath!, { recursive: true, force: true });
+		const worktreePath = requireValue(worker.worktreePath, "worker worktree missing");
+		rmSync(worktreePath, { recursive: true, force: true });
 		const recovered = await recoverWorkerForRepo(repoDir, "backend");
+		const recoveredWorktreePath = requireValue(recovered.worktreePath, "recovered worktree missing");
+		const recoveredSessionFile = requireValue(recovered.sessionFile, "recovered session file missing");
 		expect(recovered.worktreePath).toBeTruthy();
-		expect(existsSync(recovered.worktreePath!)).toBe(true);
+		expect(existsSync(recoveredWorktreePath)).toBe(true);
 		expect(recovered.sessionFile).toBeTruthy();
-		expect(existsSync(recovered.sessionFile!)).toBe(true);
+		expect(existsSync(recoveredSessionFile)).toBe(true);
 		expect(recovered.lifecycle).toBe("idle");
 	});
 });

@@ -56,11 +56,7 @@ export function getPreferredBaseBranch(repoRoot: string): string {
 	const currentBranch = execInCwd(repoRoot, "git branch --show-current", "git");
 	if (currentBranch && !currentBranch.startsWith("conductor/")) {
 		try {
-			const remoteMatch = execInCwd(
-				repoRoot,
-				`git ls-remote --heads origin ${shellQuote(currentBranch)}`,
-				"git",
-			);
+			const remoteMatch = execInCwd(repoRoot, `git ls-remote --heads origin ${shellQuote(currentBranch)}`, "git");
 			if (remoteMatch.includes(`refs/heads/${currentBranch}`)) {
 				return currentBranch;
 			}
@@ -105,7 +101,11 @@ export function createPullRequest(input: {
 		`gh pr create --base ${shellQuote(base)} --head ${shellQuote(input.branch)} --title ${shellQuote(input.title)} --body ${shellQuote(input.body)}`,
 		"gh",
 	);
-	const url = output.split("\n").map((line) => line.trim()).find((line) => line.startsWith("http")) ?? null;
+	const url =
+		output
+			.split("\n")
+			.map((line) => line.trim())
+			.find((line) => line.startsWith("http")) ?? null;
 	const match = url?.match(/\/pull\/(\d+)/);
 	return {
 		url,

@@ -19,8 +19,11 @@ function extractTextContent(content: string | TextPart[] | undefined): string[] 
 		return [];
 	}
 	return content
-		.filter((item) => item?.type === "text" && typeof item.text === "string")
-		.map((item) => item.text!.trim())
+		.filter(
+			(item): item is TextPart & { type: string; text: string } =>
+				item?.type === "text" && typeof item.text === "string",
+		)
+		.map((item) => item.text.trim())
 		.filter(Boolean);
 }
 

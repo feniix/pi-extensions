@@ -2,7 +2,12 @@ import { execSync } from "node:child_process";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createManagedWorktree, getCurrentBranch, planWorktreePath, recreateManagedWorktree } from "../extensions/worktrees.js";
+import {
+	createManagedWorktree,
+	getCurrentBranch,
+	planWorktreePath,
+	recreateManagedWorktree,
+} from "../extensions/worktrees.js";
 
 describe("worktree helpers", () => {
 	let tempDir: string;
