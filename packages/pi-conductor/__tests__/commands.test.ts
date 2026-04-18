@@ -56,6 +56,15 @@ describe("runConductorCommand", () => {
 		expect(status).toContain("task=implement status command");
 	});
 
+	it("refreshes a worker summary from its session", async () => {
+		await runConductorCommand(repoDir, "start backend");
+		const text = await runConductorCommand(repoDir, "summarize backend");
+		expect(text).toContain("refreshed summary for backend");
+
+		const status = await runConductorCommand(repoDir, "status");
+		expect(status).toContain("summary=fresh:");
+	});
+
 	it("shows help for unknown subcommands", async () => {
 		const text = await runConductorCommand(repoDir, "wat");
 		expect(text).toContain("usage:");

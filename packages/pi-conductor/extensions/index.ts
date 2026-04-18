@@ -3,7 +3,7 @@ import { execSync } from "node:child_process";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { runConductorCommand } from "./commands.js";
-import { createWorkerForRepo, updateWorkerTaskForRepo } from "./conductor.js";
+import { createWorkerForRepo, recoverWorkerForRepo, refreshWorkerSummaryForRepo, updateWorkerTaskForRepo } from "./conductor.js";
 import { deriveProjectKey } from "./project-key.js";
 import { createEmptyRun, readRun, writeRun } from "./storage.js";
 import { formatRunStatus } from "./status.js";
@@ -105,6 +105,38 @@ export default function conductorExtension(pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text", text: `updated task for ${worker.name}: ${worker.currentTask}` }],
 				details: { workerId: worker.workerId, task: worker.currentTask },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "conductor_recover",
+		label: "Conductor Recover",
+		description: "Recover a broken pi-conductor worker with a missing session link",
+		parameters: Type.Object({
+			name: Type.String({ description: "Worker name" }),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const worker = await recoverWorkerForRepo(ctx.cwd, params.name);
+			return {
+				content: [{ type: "text", text: `recovered worker ${worker.name}: session=${worker.sessionFile}` }],
+				details: { workerId: worker.workerId, sessionFile: worker.sessionFile },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "conductor_summary_refresh",
+		label: "Conductor Summary Refresh",
+		description: "Refresh a named pi-conductor worker summary from its persisted session",
+		parameters: Type.Object({
+			name: Type.String({ description: "Worker name" }),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const worker = refreshWorkerSummaryForRepo(ctx.cwd, params.name);
+			return {
+				content: [{ type: "text", text: `refreshed summary for ${worker.name}: ${worker.summary.text}` }],
+				details: { workerId: worker.workerId, summary: worker.summary },
 			};
 		},
 	});

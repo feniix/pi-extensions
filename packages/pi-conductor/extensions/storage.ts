@@ -123,3 +123,33 @@ export function setWorkerTask(run: RunRecord, workerId: string, task: string): R
 		updatedAt: new Date().toISOString(),
 	};
 }
+
+export function setWorkerSummary(run: RunRecord, workerId: string, summaryText: string): RunRecord {
+	let found = false;
+	const now = new Date().toISOString();
+	const workers = run.workers.map((worker) => {
+		if (worker.workerId !== workerId) {
+			return worker;
+		}
+		found = true;
+		return {
+			...worker,
+			summary: {
+				text: summaryText,
+				updatedAt: now,
+				stale: false,
+			},
+			updatedAt: now,
+		};
+	});
+
+	if (!found) {
+		throw new Error(`Worker ${workerId} not found`);
+	}
+
+	return {
+		...run,
+		workers,
+		updatedAt: now,
+	};
+}

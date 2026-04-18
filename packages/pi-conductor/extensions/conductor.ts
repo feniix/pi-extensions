@@ -1,10 +1,11 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { deriveProjectKey } from "./project-key.js";
-import { addWorker, createEmptyRun, createWorkerRecord, readRun, setWorkerTask, writeRun } from "./storage.js";
+import { addWorker, createEmptyRun, createWorkerRecord, readRun, setWorkerSummary, setWorkerTask, writeRun } from "./storage.js";
 import type { RunRecord, WorkerRecord } from "./types.js";
-import { createManagedWorktree } from "./worktrees.js";
+import { createManagedWorktree, recreateManagedWorktree } from "./worktrees.js";
 import { createWorkerSessionLink } from "./sessions.js";
+import { generateWorkerSummaryFromSession } from "./summaries.js";
 import { createWorkerId } from "./workers.js";
 
 export function getOrCreateRunForRepo(repoRoot: string): RunRecord {
@@ -75,6 +76,25 @@ export function reconcileWorkerHealth(run: RunRecord): RunRecord {
 	};
 }
 
+export function refreshWorkerSummaryForRepo(repoRoot: string, workerName: string): WorkerRecord {
+	const run = getOrCreateRunForRepo(repoRoot);
+	const worker = run.workers.find((entry) => entry.name === workerName);
+	if (!worker) {
+		throw new Error(`Worker named ${workerName} not found`);
+	}
+	if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
+		throw new Error(`Worker named ${workerName} does not have a valid session file`);
+	}
+	const summaryText = generateWorkerSummaryFromSession(worker.sessionFile);
+	const updatedRun = setWorkerSummary(run, worker.workerId, summaryText);
+	writeRun(updatedRun);
+	const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
+	if (!updatedWorker) {
+		throw new Error(`Worker named ${workerName} disappeared during summary refresh`);
+	}
+	return updatedWorker;
+}
+
 export async function recoverWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
 	const run = getOrCreateRunForRepo(repoRoot);
 	const worker = run.workers.find((entry) => entry.name === workerName);
@@ -82,18 +102,27 @@ export async function recoverWorkerForRepo(repoRoot: string, workerName: string)
 		throw new Error(`Worker named ${workerName} not found`);
 	}
 
+	let worktreePath = worker.worktreePath;
+	if (!worktreePath || !existsSync(worktreePath)) {
+		if (!worker.branch) {
+			throw new Error(`Worker named ${workerName} cannot be recovered without a valid branch`);
+		}
+		worktreePath = recreateManagedWorktree(run.repoRoot, {
+			workerName: worker.name,
+			branch: worker.branch,
+		}).worktreePath;
+	}
+
 	let sessionFile = worker.sessionFile;
 	if (!sessionFile || !existsSync(sessionFile)) {
-		if (!worker.worktreePath || !existsSync(worker.worktreePath)) {
-			throw new Error(`Worker named ${workerName} cannot be recovered without a valid worktree`);
-		}
-		sessionFile = await createWorkerSessionLink(worker.worktreePath);
+		sessionFile = await createWorkerSessionLink(worktreePath);
 	}
 
 	const workers = run.workers.map((entry) =>
 		entry.workerId === worker.workerId
 			? {
 				...entry,
+				worktreePath,
 				sessionFile,
 				lifecycle: "idle" as const,
 				recoverable: false,

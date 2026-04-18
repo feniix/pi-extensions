@@ -13,5 +13,7 @@ describe("pi-conductor extension", () => {
 		expect(extension).toContain('name: "conductor_status"');
 		expect(extension).toContain('name: "conductor_start"');
 		expect(extension).toContain('name: "conductor_task_update"');
+		expect(extension).toContain('name: "conductor_recover"');
+		expect(extension).toContain('name: "conductor_summary_refresh"');
 	});
 });
