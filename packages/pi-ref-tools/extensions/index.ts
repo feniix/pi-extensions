@@ -539,6 +539,58 @@ function extractJsonRpcResponse(response: unknown, requestId: unknown): JsonRpcR
 	throw new Error("Invalid MCP response payload.");
 }
 
+function extractSseData(line: string): string | undefined {
+	if (!line.startsWith("data:")) {
+		return undefined;
+	}
+
+	const data = line.slice(5).trim();
+	if (!data || data === "[DONE]") {
+		return undefined;
+	}
+
+	return data;
+}
+
+function parseMatchingSseMessage(data: string, requestId: unknown): unknown {
+	try {
+		const parsed: unknown = JSON.parse(data);
+		if (isRecord(parsed) && parsed.id === requestId) {
+			return parsed;
+		}
+	} catch {
+		// Ignore malformed SSE chunk.
+	}
+
+	return undefined;
+}
+
+function extractMatchingSseResponse(
+	buffer: string,
+	requestId: unknown,
+): { remainingBuffer: string; matched: unknown } {
+	let remainingBuffer = buffer;
+	let newlineIndex = remainingBuffer.indexOf("\n");
+
+	while (newlineIndex >= 0) {
+		const line = remainingBuffer.slice(0, newlineIndex).trimEnd();
+		remainingBuffer = remainingBuffer.slice(newlineIndex + 1);
+		newlineIndex = remainingBuffer.indexOf("\n");
+
+		const data = extractSseData(line);
+		if (!data) {
+			continue;
+		}
+
+		const matched = parseMatchingSseMessage(data, requestId);
+		if (matched) {
+			return { remainingBuffer, matched };
+		}
+	}
+
+	return { remainingBuffer, matched: undefined };
+}
+
 async function parseSseResponse(response: Response, requestId: unknown): Promise<unknown> {
 	if (!response.body) {
 		throw new Error("MCP response stream missing body.");
@@ -547,45 +599,21 @@ async function parseSseResponse(response: Response, requestId: unknown): Promise
 	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
 	let buffer = "";
-	let matched: unknown;
 
 	while (true) {
 		const { value, done } = await reader.read();
 		if (done) {
 			break;
 		}
+
 		buffer += decoder.decode(value, { stream: true });
+		const result = extractMatchingSseResponse(buffer, requestId);
+		buffer = result.remainingBuffer;
 
-		let newlineIndex = buffer.indexOf("\n");
-		while (newlineIndex >= 0) {
-			const line = buffer.slice(0, newlineIndex).trimEnd();
-			buffer = buffer.slice(newlineIndex + 1);
-			newlineIndex = buffer.indexOf("\n");
-
-			if (!line.startsWith("data:")) {
-				continue;
-			}
-
-			const data = line.slice(5).trim();
-			if (!data || data === "[DONE]") {
-				continue;
-			}
-
-			try {
-				const parsed: unknown = JSON.parse(data);
-				if (isRecord(parsed) && parsed.id === requestId) {
-					matched = parsed;
-					await reader.cancel();
-					return matched;
-				}
-			} catch {
-				// Ignore malformed SSE chunk.
-			}
+		if (result.matched) {
+			await reader.cancel();
+			return result.matched;
 		}
-	}
-
-	if (matched) {
-		return matched;
 	}
 
 	throw new Error("MCP SSE response ended without a matching result.");
@@ -657,19 +685,98 @@ const readUrlParams = Type.Object(
 // Extension Entry Point
 // =============================================================================
 
+function getConfigOverride(pi: ExtensionAPI): string | undefined {
+	const configFlag = pi.getFlag("--ref-mcp-config");
+	return typeof configFlag === "string" ? configFlag : undefined;
+}
+
+type ApiKeySource = "CLI flag" | "REF_API_KEY env var" | "config file";
+
+interface RefRuntimeSettings {
+	config: RefMcpConfig | null;
+	endpoint: string;
+	apiKey?: string;
+	apiKeySource?: ApiKeySource;
+	maxBytes: number;
+	maxLines: number;
+	timeoutMs: number;
+	protocolVersion: string;
+}
+
+function loadRuntimeConfig(pi: ExtensionAPI): RefMcpConfig | null {
+	return loadConfig(getConfigOverride(pi));
+}
+
+function resolveRuntimeSettings(pi: ExtensionAPI): RefRuntimeSettings {
+	const config = loadRuntimeConfig(pi);
+	const urlFlag = normalizeString(pi.getFlag("--ref-mcp-url"));
+	const envUrl = normalizeString(process.env.REF_MCP_URL);
+	const configUrl = normalizeString(config?.url);
+	const endpoint = urlFlag ?? envUrl ?? configUrl ?? DEFAULT_ENDPOINT;
+
+	const apiKeyFlag = normalizeString(pi.getFlag("--ref-mcp-api-key"));
+	const envApiKey = normalizeString(process.env.REF_API_KEY);
+	const configApiKey = normalizeString(config?.apiKey);
+	const apiKey = apiKeyFlag ?? envApiKey ?? configApiKey;
+	const apiKeySource = apiKeyFlag
+		? "CLI flag"
+		: envApiKey
+			? "REF_API_KEY env var"
+			: configApiKey
+				? "config file"
+				: undefined;
+
+	const maxBytesFlag = normalizeNumber(pi.getFlag("--ref-mcp-max-bytes"));
+	const maxLinesFlag = normalizeNumber(pi.getFlag("--ref-mcp-max-lines"));
+	const maxBytes = maxBytesFlag ?? normalizeNumber(process.env.REF_MCP_MAX_BYTES ?? config?.maxBytes) ?? DEFAULT_MAX_BYTES;
+	const maxLines = maxLinesFlag ?? normalizeNumber(process.env.REF_MCP_MAX_LINES ?? config?.maxLines) ?? DEFAULT_MAX_LINES;
+
+	const timeoutFlag = pi.getFlag("--ref-mcp-timeout-ms");
+	const timeoutValue = typeof timeoutFlag === "string" ? timeoutFlag : (process.env.REF_MCP_TIMEOUT_MS ?? config?.timeoutMs);
+	const timeoutMs = parseTimeoutMs(timeoutValue, DEFAULT_TIMEOUT_MS);
+
+	const protocolFlag = normalizeString(pi.getFlag("--ref-mcp-protocol"));
+	const envProtocol = normalizeString(process.env.REF_MCP_PROTOCOL_VERSION);
+	const protocolVersion = protocolFlag ?? envProtocol ?? config?.protocolVersion ?? DEFAULT_PROTOCOL_VERSION;
+
+	return {
+		config,
+		endpoint,
+		apiKey,
+		apiKeySource,
+		maxBytes,
+		maxLines,
+		timeoutMs,
+		protocolVersion,
+	};
+}
+
+function formatSessionStartMessage(settings: RefRuntimeSettings): string {
+	if (settings.apiKeySource) {
+		return `[ref-tools] Connected to ${settings.endpoint} (API key: ${settings.apiKeySource})`;
+	}
+	return `[ref-tools] No API key configured for ${settings.endpoint}. Set REF_API_KEY or use --ref-mcp-api-key.`;
+}
+
 export {
 	DEFAULT_CONFIG_FILE,
 	ensureDefaultConfigFile,
+	extractMatchingSseResponse,
+	extractSseData,
+	formatSessionStartMessage,
 	formatToolOutput,
 	isJsonRpcResponse,
 	isRecord,
+	loadRuntimeConfig,
 	normalizeNumber,
 	normalizeString,
 	parseConfig,
+	parseMatchingSseMessage,
 	parseTimeoutMs,
 	redactApiKey,
 	resolveConfigPath,
 	resolveEffectiveLimits,
+	resolveRuntimeSettings,
 	splitParams,
 	toJsonString,
 	writeTempFile,
@@ -678,32 +785,7 @@ export {
 export default function refTools(pi: ExtensionAPI) {
 	// SessionStart: check config and print status
 	pi.on("session_start", async () => {
-		const urlFlag = pi.getFlag("--ref-mcp-url");
-		const hasUrlFlag = typeof urlFlag === "string" && urlFlag.trim().length > 0;
-		const hasEnvUrl = typeof process.env.REF_MCP_URL === "string" && process.env.REF_MCP_URL.trim().length > 0;
-		const configFlag = pi.getFlag("--ref-mcp-config");
-		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-		const hasConfigUrl = config?.url && config.url.trim().length > 0;
-
-		const endpoint = hasUrlFlag
-			? String(urlFlag)
-			: hasEnvUrl
-				? (process.env.REF_MCP_URL ?? "https://api.ref.tools/mcp")
-				: hasConfigUrl
-					? (config?.url ?? "https://api.ref.tools/mcp")
-					: "https://api.ref.tools/mcp";
-
-		const apiKeyFlag = pi.getFlag("--ref-mcp-api-key");
-		const hasApiKey = typeof apiKeyFlag === "string" && apiKeyFlag.trim().length > 0;
-		const hasEnvKey = typeof process.env.REF_API_KEY === "string" && process.env.REF_API_KEY.trim().length > 0;
-		const hasConfigKey = config?.apiKey != null && config.apiKey.trim().length > 0;
-
-		if (hasApiKey || hasEnvKey || hasConfigKey) {
-			const source = hasApiKey ? "CLI flag" : hasEnvKey ? "REF_API_KEY env var" : "config file";
-			console.log(`[ref-tools] Connected to ${endpoint} (API key: ${source})`);
-		} else {
-			console.log(`[ref-tools] No API key configured for ${endpoint}. Set REF_API_KEY or use --ref-mcp-api-key.`);
-		}
+		console.log(formatSessionStartMessage(resolveRuntimeSettings(pi)));
 	});
 
 	// Register CLI flags
@@ -736,76 +818,19 @@ export default function refTools(pi: ExtensionAPI) {
 		type: "string",
 	});
 
-	const getBaseUrl = (): string => {
-		const configFlag = pi.getFlag("--ref-mcp-config");
-		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-
-		const urlFlag = pi.getFlag("--ref-mcp-url");
-		const fromFlag = typeof urlFlag === "string" ? normalizeString(urlFlag) : undefined;
-		const fromEnv = normalizeString(process.env.REF_MCP_URL);
-		const fromConfig = normalizeString(config?.url);
-		return fromFlag ?? fromEnv ?? fromConfig ?? DEFAULT_ENDPOINT;
-	};
-
-	const getApiKey = (): string | undefined => {
-		const apiKeyFlag = pi.getFlag("--ref-mcp-api-key");
-		const fromFlag = typeof apiKeyFlag === "string" ? normalizeString(apiKeyFlag) : undefined;
-		if (fromFlag) {
-			return fromFlag;
-		}
-		const configFlag = pi.getFlag("--ref-mcp-config");
-		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-		return normalizeString(process.env.REF_API_KEY) ?? normalizeString(config?.apiKey);
-	};
-
+	const getRuntimeSettings = (): RefRuntimeSettings => resolveRuntimeSettings(pi);
+	const getBaseUrl = (): string => getRuntimeSettings().endpoint;
+	const getApiKey = (): string | undefined => getRuntimeSettings().apiKey;
 	const getMaxLimits = (): { maxBytes: number; maxLines: number } => {
-		const maxBytesFlag = pi.getFlag("--ref-mcp-max-bytes");
-		const maxLinesFlag = pi.getFlag("--ref-mcp-max-lines");
-		const configFlag = pi.getFlag("--ref-mcp-config");
-		const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-
-		const maxBytes =
-			typeof maxBytesFlag === "string"
-				? normalizeNumber(maxBytesFlag)
-				: normalizeNumber(process.env.REF_MCP_MAX_BYTES ?? config?.maxBytes);
-		const maxLines =
-			typeof maxLinesFlag === "string"
-				? normalizeNumber(maxLinesFlag)
-				: normalizeNumber(process.env.REF_MCP_MAX_LINES ?? config?.maxLines);
-
-		return {
-			maxBytes: maxBytes ?? DEFAULT_MAX_BYTES,
-			maxLines: maxLines ?? DEFAULT_MAX_LINES,
-		};
+		const { maxBytes, maxLines } = getRuntimeSettings();
+		return { maxBytes, maxLines };
 	};
 
 	const client = new RefMcpClient(
 		() => getBaseUrl(),
 		() => getApiKey(),
-		() => {
-			const configFlag = pi.getFlag("--ref-mcp-config");
-			const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-			const timeoutFlag = pi.getFlag("--ref-mcp-timeout-ms");
-			const timeoutValue =
-				typeof timeoutFlag === "string" ? timeoutFlag : (process.env.REF_MCP_TIMEOUT_MS ?? config?.timeoutMs);
-			return parseTimeoutMs(timeoutValue, DEFAULT_TIMEOUT_MS);
-		},
-		() => {
-			const configFlag = pi.getFlag("--ref-mcp-config");
-			const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
-			const protocolFlag = pi.getFlag("--ref-mcp-protocol");
-			if (typeof protocolFlag === "string" && protocolFlag.trim().length > 0) {
-				return protocolFlag.trim();
-			}
-			const envVersion = process.env.REF_MCP_PROTOCOL_VERSION;
-			if (envVersion && envVersion.trim().length > 0) {
-				return envVersion.trim();
-			}
-			if (config?.protocolVersion) {
-				return config.protocolVersion;
-			}
-			return DEFAULT_PROTOCOL_VERSION;
-		},
+		() => getRuntimeSettings().timeoutMs,
+		() => getRuntimeSettings().protocolVersion,
 	);
 
 	// Register ref_search_documentation tool
