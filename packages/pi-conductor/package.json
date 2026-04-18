@@ -1,0 +1,41 @@
+{
+	"name": "@feniix/pi-conductor",
+	"version": "0.1.0",
+	"description": "Long-lived multi-session worker orchestration for pi with git worktrees, resumable sessions, and PR flows",
+	"keywords": [
+		"pi",
+		"pi-package",
+		"pi-extension",
+		"pi-coding-agent",
+		"orchestration",
+		"worktree",
+		"git",
+		"session"
+	],
+	"type": "module",
+	"files": [
+		"extensions/",
+		"README.md",
+		"LICENSE"
+	],
+	"pi": {
+		"extensions": [
+			"./extensions/index.ts"
+		]
+	},
+	"peerDependencies": {
+		"@mariozechner/pi-ai": "*",
+		"@mariozechner/pi-coding-agent": "*",
+		"@sinclair/typebox": "*"
+	},
+	"repository": {
+		"url": "git+https://github.com/feniix/pi-extensions.git",
+		"directory": "packages/pi-conductor"
+	},
+	"author": "feniix",
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/feniix/pi-extensions/issues"
+	},
+	"homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-conductor#readme"
+}

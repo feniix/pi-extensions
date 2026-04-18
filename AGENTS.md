@@ -31,6 +31,7 @@ Local package testing:
 - Framework: Vitest (see `vitest.config.ts`).
 - Tests are per-package under `packages/*/__tests__/`.
 - Keep unit tests focused on extension behavior and helpers; prefer fast, isolated tests.
+- For `packages/pi-conductor/`, follow **test-first development**: write or update the failing test first, then implement the minimal code needed to make it pass.
 
 ## Commit & Pull Request Guidelines
 - Commit messages follow Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`.
