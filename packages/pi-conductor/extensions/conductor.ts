@@ -1,9 +1,9 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { deriveProjectKey } from "./project-key.js";
-import { addWorker, createEmptyRun, createWorkerRecord, readRun, setWorkerSummary, setWorkerTask, writeRun } from "./storage.js";
+import { addWorker, createEmptyRun, createWorkerRecord, readRun, removeWorker, setWorkerSummary, setWorkerTask, writeRun } from "./storage.js";
 import type { RunRecord, WorkerRecord } from "./types.js";
-import { createManagedWorktree, recreateManagedWorktree } from "./worktrees.js";
+import { createManagedWorktree, recreateManagedWorktree, removeManagedWorktree } from "./worktrees.js";
 import { createWorkerSessionLink } from "./sessions.js";
 import { generateWorkerSummaryFromSession } from "./summaries.js";
 import { createWorkerId } from "./workers.js";
@@ -93,6 +93,23 @@ export function refreshWorkerSummaryForRepo(repoRoot: string, workerName: string
 		throw new Error(`Worker named ${workerName} disappeared during summary refresh`);
 	}
 	return updatedWorker;
+}
+
+export function removeWorkerForRepo(repoRoot: string, workerName: string): WorkerRecord {
+	const run = getOrCreateRunForRepo(repoRoot);
+	const worker = run.workers.find((entry) => entry.name === workerName);
+	if (!worker) {
+		throw new Error(`Worker named ${workerName} not found`);
+	}
+	if (worker.worktreePath && existsSync(worker.worktreePath)) {
+		removeManagedWorktree(run.repoRoot, worker.worktreePath);
+	}
+	if (worker.sessionFile && existsSync(worker.sessionFile)) {
+		rmSync(worker.sessionFile, { force: true });
+	}
+	const updatedRun = removeWorker(run, worker.workerId);
+	writeRun(updatedRun);
+	return worker;
 }
 
 export async function recoverWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {

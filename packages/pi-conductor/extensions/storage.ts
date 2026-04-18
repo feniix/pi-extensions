@@ -153,3 +153,15 @@ export function setWorkerSummary(run: RunRecord, workerId: string, summaryText: 
 		updatedAt: now,
 	};
 }
+
+export function removeWorker(run: RunRecord, workerId: string): RunRecord {
+	const workers = run.workers.filter((worker) => worker.workerId !== workerId);
+	if (workers.length === run.workers.length) {
+		throw new Error(`Worker ${workerId} not found`);
+	}
+	return {
+		...run,
+		workers,
+		updatedAt: new Date().toISOString(),
+	};
+}

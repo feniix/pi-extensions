@@ -49,6 +49,15 @@ export function recreateManagedWorktree(
 	return { branch: input.branch, worktreePath };
 }
 
+export function removeManagedWorktree(repoRoot: string, worktreePath: string): void {
+	execGit(repoRoot, "git worktree prune");
+	try {
+		execGit(repoRoot, `git worktree remove --force ${shellQuote(worktreePath)}`);
+	} catch {
+		execGit(repoRoot, "git worktree prune");
+	}
+}
+
 function shellQuote(value: string): string {
 	return `'${value.replace(/'/g, `'\\''`)}'`;
 }

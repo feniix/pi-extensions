@@ -1,6 +1,7 @@
 import {
 	createWorkerForRepo,
 	getOrCreateRunForRepo,
+	removeWorkerForRepo,
 	reconcileWorkerHealth,
 	recoverWorkerForRepo,
 	refreshWorkerSummaryForRepo,
@@ -16,6 +17,7 @@ function getUsage(): string {
 		"  /conductor task <worker-name> <task>",
 		"  /conductor recover <worker-name>",
 		"  /conductor summarize <worker-name>",
+		"  /conductor cleanup <worker-name>",
 	].join("\n");
 }
 
@@ -61,6 +63,14 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
 		}
 		const worker = refreshWorkerSummaryForRepo(cwd, workerName);
 		return `refreshed summary for ${worker.name}: ${worker.summary.text}`;
+	}
+	if (subcommand === "cleanup") {
+		const workerName = rest.join(" ").trim();
+		if (!workerName) {
+			return `${getUsage()}\n\nerror: missing worker name`;
+		}
+		const worker = removeWorkerForRepo(cwd, workerName);
+		return `removed worker ${worker.name} [${worker.workerId}]`;
 	}
 
 	return `${getUsage()}\n\nerror: unknown subcommand '${subcommand}'`;

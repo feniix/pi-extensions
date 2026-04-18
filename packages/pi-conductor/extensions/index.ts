@@ -3,7 +3,13 @@ import { execSync } from "node:child_process";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { runConductorCommand } from "./commands.js";
-import { createWorkerForRepo, recoverWorkerForRepo, refreshWorkerSummaryForRepo, updateWorkerTaskForRepo } from "./conductor.js";
+import {
+	createWorkerForRepo,
+	removeWorkerForRepo,
+	recoverWorkerForRepo,
+	refreshWorkerSummaryForRepo,
+	updateWorkerTaskForRepo,
+} from "./conductor.js";
 import { deriveProjectKey } from "./project-key.js";
 import { createEmptyRun, readRun, writeRun } from "./storage.js";
 import { formatRunStatus } from "./status.js";
@@ -137,6 +143,22 @@ export default function conductorExtension(pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text", text: `refreshed summary for ${worker.name}: ${worker.summary.text}` }],
 				details: { workerId: worker.workerId, summary: worker.summary },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "conductor_cleanup",
+		label: "Conductor Cleanup",
+		description: "Remove a named pi-conductor worker and clean up its worktree and session link",
+		parameters: Type.Object({
+			name: Type.String({ description: "Worker name" }),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const worker = removeWorkerForRepo(ctx.cwd, params.name);
+			return {
+				content: [{ type: "text", text: `removed worker ${worker.name} [${worker.workerId}]` }],
+				details: { workerId: worker.workerId },
 			};
 		},
 	});
