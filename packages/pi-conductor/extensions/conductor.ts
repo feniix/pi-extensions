@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { deriveProjectKey } from "./project-key.js";
 import { addWorker, createEmptyRun, createWorkerRecord, readRun, setWorkerTask, writeRun } from "./storage.js";
@@ -49,6 +50,66 @@ export function updateWorkerTaskForRepo(repoRoot: string, workerName: string, ta
 	const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
 	if (!updatedWorker) {
 		throw new Error(`Worker named ${workerName} disappeared during task update`);
+	}
+	return updatedWorker;
+}
+
+export function reconcileWorkerHealth(run: RunRecord): RunRecord {
+	const workers = run.workers.map((worker) => {
+		const worktreeMissing = !worker.worktreePath || !existsSync(worker.worktreePath);
+		const sessionMissing = !worker.sessionFile || !existsSync(worker.sessionFile);
+		if (!worktreeMissing && !sessionMissing) {
+			return worker;
+		}
+		return {
+			...worker,
+			lifecycle: "broken" as const,
+			recoverable: true,
+			updatedAt: new Date().toISOString(),
+		};
+	});
+	return {
+		...run,
+		workers,
+		updatedAt: new Date().toISOString(),
+	};
+}
+
+export async function recoverWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
+	const run = getOrCreateRunForRepo(repoRoot);
+	const worker = run.workers.find((entry) => entry.name === workerName);
+	if (!worker) {
+		throw new Error(`Worker named ${workerName} not found`);
+	}
+
+	let sessionFile = worker.sessionFile;
+	if (!sessionFile || !existsSync(sessionFile)) {
+		if (!worker.worktreePath || !existsSync(worker.worktreePath)) {
+			throw new Error(`Worker named ${workerName} cannot be recovered without a valid worktree`);
+		}
+		sessionFile = await createWorkerSessionLink(worker.worktreePath);
+	}
+
+	const workers = run.workers.map((entry) =>
+		entry.workerId === worker.workerId
+			? {
+				...entry,
+				sessionFile,
+				lifecycle: "idle" as const,
+				recoverable: false,
+				updatedAt: new Date().toISOString(),
+			}
+			: entry,
+	);
+	const updatedRun = {
+		...run,
+		workers,
+		updatedAt: new Date().toISOString(),
+	};
+	writeRun(updatedRun);
+	const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
+	if (!updatedWorker) {
+		throw new Error(`Worker named ${workerName} disappeared during recovery`);
 	}
 	return updatedWorker;
 }

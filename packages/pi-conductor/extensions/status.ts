@@ -16,6 +16,7 @@ export function formatRunStatus(run: RunRecord): string {
 		lines.push(
 			`- ${worker.name} [${worker.workerId}] ` +
 				`state=${worker.lifecycle} ` +
+				`recoverable=${worker.recoverable} ` +
 				`task=${worker.currentTask ?? "none"} ` +
 				`branch=${worker.branch ?? "none"} ` +
 				`session=${worker.sessionFile ?? "none"} ` +
