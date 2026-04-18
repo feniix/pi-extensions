@@ -8,8 +8,11 @@ import {
 	ensureDefaultConfigFile,
 	formatCrawlResults,
 	formatSearchResults,
+	getAuthStatusMessage,
+	isToolEnabledForConfig,
 	loadConfig,
 	parseConfig,
+	resolveAuth,
 	resolveConfigPath,
 } from "../extensions/index.js";
 
@@ -259,6 +262,71 @@ describe("pi-exa ensureDefaultConfigFile", () => {
 		const secondContent = readFileSync(globalConfigPath, "utf-8");
 
 		expect(firstContent).toBe(secondContent);
+	});
+});
+
+describe("pi-exa auth helpers", () => {
+	it("prefers CLI flag over config and environment", () => {
+		const pi = {
+			getFlag(flag: string) {
+				if (flag === "--exa-api-key") {
+					return " cli-key ";
+				}
+				return undefined;
+			},
+		} as { getFlag: (flag: string) => unknown };
+
+		process.env.EXA_API_KEY = "env-key";
+		expect(resolveAuth(pi as never)).toEqual({ apiKey: "cli-key", source: "CLI flag" });
+	});
+
+	it("uses config when CLI flag is absent", () => {
+		const base = mkdtempSync(join(tmpdir(), "pi-exa-auth-config-"));
+		const configPath = join(base, "exa.json");
+		writeFileSync(configPath, JSON.stringify({ apiKey: "config-key" }), "utf-8");
+
+		const pi = {
+			getFlag(flag: string) {
+				if (flag === "--exa-config") {
+					return configPath;
+				}
+				return undefined;
+			},
+		} as { getFlag: (flag: string) => unknown };
+
+		delete process.env.EXA_API_KEY;
+		expect(resolveAuth(pi as never)).toEqual({ apiKey: "config-key", source: "config file" });
+	});
+
+	it("builds unauthenticated status message", () => {
+		const pi = { getFlag: () => undefined } as { getFlag: (flag: string) => unknown };
+		delete process.env.EXA_API_KEY;
+		expect(getAuthStatusMessage(pi as never)).toContain("Not authenticated");
+	});
+});
+
+describe("pi-exa tool enablement helpers", () => {
+	it("enables default tools without config", () => {
+		const pi = { getFlag: () => undefined } as { getFlag: (flag: string) => unknown };
+		expect(isToolEnabledForConfig(pi as never, null, "web_search_exa")).toBe(true);
+		expect(isToolEnabledForConfig(pi as never, null, "web_fetch_exa")).toBe(true);
+	});
+
+	it("respects advanced tool flag override", () => {
+		const pi = {
+			getFlag(flag: string) {
+				return flag === "--exa-enable-advanced" ? true : undefined;
+			},
+		} as { getFlag: (flag: string) => unknown };
+		const config = { advancedEnabled: false };
+		expect(isToolEnabledForConfig(pi as never, config, "web_search_advanced_exa")).toBe(true);
+	});
+
+	it("respects explicit enabled tools list", () => {
+		const pi = { getFlag: () => undefined } as { getFlag: (flag: string) => unknown };
+		const config = { enabledTools: ["web_search_advanced_exa"] };
+		expect(isToolEnabledForConfig(pi as never, config, "web_search_exa")).toBe(false);
+		expect(isToolEnabledForConfig(pi as never, config, "web_search_advanced_exa")).toBe(true);
 	});
 });
 
