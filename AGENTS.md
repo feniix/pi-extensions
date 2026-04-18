@@ -16,10 +16,14 @@ Run these from the repo root unless noted:
 - `npm run test` — Vitest test suite.
 - `npm run check` — lint + typecheck.
 - `npm run check:ci` — CI-friendly Biome + typecheck.
+- `npm run ci:detect -- <base> <head>` — show which packages the CI workflow will check for a given diff.
 
 Local package testing:
 - `cd packages/<package-name>`
 - `pi -e .` — run the package in pi without installing.
+- `npx biome ci packages/<package-name>` — lint a single package.
+- `npx tsc --noEmit --project packages/<package-name>/tsconfig.json` — typecheck a single package using the shared root TS config via the package wrapper tsconfig.
+- `npx vitest run packages/<package-name>/__tests__` — run tests for a single package.
 
 ## Coding Style & Naming Conventions
 - Language: TypeScript.
@@ -31,6 +35,9 @@ Local package testing:
 - Framework: Vitest (see `vitest.config.ts`).
 - Tests are per-package under `packages/*/__tests__/`.
 - Keep unit tests focused on extension behavior and helpers; prefer fast, isolated tests.
+- CI uses a single GitHub Actions workflow at `.github/workflows/ci.yml` that detects changed packages and runs package-scoped lint, typecheck, and test jobs.
+- Changes to shared files such as `package.json`, `package-lock.json`, `tsconfig.json`, `vitest.config.ts`, `biome.json`, or `.github/workflows/**` should be treated as affecting all packages.
+- Each package must keep its `tsconfig.json` aligned by extending the shared root `tsconfig.json`; do not introduce divergent compiler options in individual package configs unless the repo-wide config is intentionally updated.
 - For `packages/pi-conductor/`, follow **test-first development**: write or update the failing test first, then implement the minimal code needed to make it pass.
 
 ## Commit & Pull Request Guidelines

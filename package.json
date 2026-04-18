@@ -9,7 +9,8 @@
     "lint:fix": "biome check --write .",
     "check": "npm run lint && npm run typecheck",
     "check:ci": "biome ci . && tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "ci:detect": "./scripts/detect-ci-packages.sh"
   },
   "workspaces": [
     "packages/*"
