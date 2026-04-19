@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
+import notionMCPClientExtension, {
   buildAuthorizationUrl,
   buildHtmlResponse,
   coerceNumericProperties,
@@ -61,6 +61,9 @@ describe("pi-notion mcp client runtime helpers", () => {
 
     const code = resolveCallbackResult(new URLSearchParams("state=expected&code=code-123"), "expected");
     expect(code.result.code).toBe("code-123");
+
+    const missing = resolveCallbackResult(new URLSearchParams("state=expected"), "expected");
+    expect(missing.result.error).toBe("No code or token in callback");
   });
 
   it("creates a PKCE challenge pair and authorization URL", () => {
@@ -264,6 +267,25 @@ describe("pi-notion mcp client runtime helpers", () => {
     }
   });
 
+  it("supports deprecated auth file environment alias with warning", () => {
+    const original = process.env.NOTION_MCP_AUTH;
+    const originalFile = process.env.NOTION_MCP_AUTH_FILE;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    delete process.env.NOTION_MCP_AUTH_FILE;
+    process.env.NOTION_MCP_AUTH = "~/legacy-notion-auth.json";
+
+    try {
+      expect(getDefaultAuthFilePath()).toContain("legacy-notion-auth.json");
+      expect(warnSpy).toHaveBeenCalledWith("[pi-notion] NOTION_MCP_AUTH is deprecated; use NOTION_MCP_AUTH_FILE.");
+    } finally {
+      warnSpy.mockRestore();
+      if (original) process.env.NOTION_MCP_AUTH = original;
+      else delete process.env.NOTION_MCP_AUTH;
+      if (originalFile) process.env.NOTION_MCP_AUTH_FILE = originalFile;
+      else delete process.env.NOTION_MCP_AUTH_FILE;
+    }
+  });
+
   it("saves and clears config files with file token storage", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pi-notion-mcp-storage-"));
     const tokenStorage = new FileTokenStorage();
@@ -297,6 +319,32 @@ describe("pi-notion mcp client runtime helpers", () => {
     expect(clearSpy).toHaveBeenCalled();
   });
 
+  it("falls back to console logging when ui notifications fail", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const notify = createUiNotifier({
+      events: { emit: vi.fn(() => { throw new Error("no ui"); }) },
+    } as unknown as import("@mariozechner/pi-coding-agent").ExtensionAPI);
+
+    notify("fallback message", "error");
+    expect(logSpy).toHaveBeenCalledWith("[pi-notion] fallback message");
+    logSpy.mockRestore();
+  });
+
+  it("returns false when saved config is missing or invalid", async () => {
+    vi.spyOn(storage, "load").mockResolvedValueOnce(null);
+    expect(await connectWithSavedConfig(new NotionMCPClient(), vi.fn())).toBe(false);
+
+    const notify = vi.fn();
+    const client = new NotionMCPClient();
+    vi.spyOn(storage, "load").mockResolvedValueOnce({ mcpUrl: "https://mcp.notion.com/mcp", accessToken: "token" });
+    vi.spyOn(client, "connect").mockRejectedValueOnce(new Error("bad auth"));
+    const clearSpy = vi.spyOn(storage, "clear").mockResolvedValueOnce();
+
+    expect(await connectWithSavedConfig(client, notify)).toBe(false);
+    expect(notify).toHaveBeenCalledWith("Connection failed: bad auth", "error");
+    expect(clearSpy).toHaveBeenCalled();
+  });
+
   it("finalizes and ensures connections", async () => {
     const client = new NotionMCPClient();
     vi.spyOn(client, "connect").mockResolvedValue();
@@ -320,6 +368,70 @@ describe("pi-notion mcp client runtime helpers", () => {
     const reused = await ensureConnected(reuseClient, vi.fn(), vi.fn());
     expect(reused).toEqual({ reusedSavedConfig: true });
     expect(savedSpy).toHaveBeenCalled();
+  });
+
+  it("registers extension flags and management tools", () => {
+    const mockPi = {
+      registerFlag: vi.fn(),
+      getFlag: vi.fn(() => undefined),
+      registerTool: vi.fn(),
+      registerCommand: vi.fn(),
+      getAllTools: vi.fn(() => []),
+      events: { emit: vi.fn() },
+    };
+
+    notionMCPClientExtension(mockPi as never);
+
+    const flags = mockPi.registerFlag.mock.calls.map(([name]) => name);
+    expect(flags).toContain("--notion-mcp-auth-file");
+    expect(flags).toContain("--notion-mcp-auth");
+
+    const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool.name);
+    expect(tools).toEqual(expect.arrayContaining(["notion_mcp_connect", "notion_mcp_disconnect", "notion_mcp_status"]));
+    expect(mockPi.registerCommand).toHaveBeenCalledWith("notion", expect.any(Object));
+  });
+
+  it("uses deprecated auth file flag alias with a warning", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const original = process.env.NOTION_MCP_AUTH_FILE;
+    delete process.env.NOTION_MCP_AUTH_FILE;
+
+    const mockPi = {
+      registerFlag: vi.fn(),
+      getFlag: vi.fn((flag: string) => (flag === "--notion-mcp-auth" ? "~/legacy-auth.json" : undefined)),
+      registerTool: vi.fn(),
+      registerCommand: vi.fn(),
+      getAllTools: vi.fn(() => []),
+      events: { emit: vi.fn() },
+    };
+
+    try {
+      notionMCPClientExtension(mockPi as never);
+      expect(process.env.NOTION_MCP_AUTH_FILE).toBe("~/legacy-auth.json");
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[pi-notion] --notion-mcp-auth is deprecated; use --notion-mcp-auth-file.",
+      );
+    } finally {
+      warnSpy.mockRestore();
+      if (original) process.env.NOTION_MCP_AUTH_FILE = original;
+      else delete process.env.NOTION_MCP_AUTH_FILE;
+    }
+  });
+
+  it("reports disconnected MCP status through the registered tool", async () => {
+    const mockPi = {
+      registerFlag: vi.fn(),
+      getFlag: vi.fn(() => undefined),
+      registerTool: vi.fn(),
+      registerCommand: vi.fn(),
+      getAllTools: vi.fn(() => []),
+      events: { emit: vi.fn() },
+    };
+
+    notionMCPClientExtension(mockPi as never);
+    const statusTool = mockPi.registerTool.mock.calls.map(([tool]) => tool).find((tool) => tool.name === "notion_mcp_status");
+    const result = await statusTool.execute("id", {}, new AbortController().signal, undefined, undefined);
+    expect(result.content[0].text).toContain("Connected: No");
   });
 
   it("runs an OAuth callback server and resolves callback results", async () => {
