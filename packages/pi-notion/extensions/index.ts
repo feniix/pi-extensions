@@ -6,7 +6,7 @@
  * - Tool call guardrails: advisory warnings for common Notion mistakes
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -37,12 +37,41 @@ function resolveOptionalPath(path: string): string {
   return resolve(process.cwd(), trimmed);
 }
 
-function getMcpConfigFile(): string {
+function getLegacyMcpConfigFile(): string {
+  return join(getConfigDir(), "notion-mcp.json");
+}
+
+function migrateLegacyMcpConfigFile(): string {
   const configuredPath = process.env.NOTION_MCP_AUTH_FILE;
   if (typeof configuredPath === "string" && configuredPath.trim().length > 0) {
     return resolveOptionalPath(configuredPath);
   }
-  return join(getConfigDir(), "notion-mcp-auth.json");
+
+  const legacyConfiguredPath = process.env.NOTION_MCP_AUTH;
+  if (typeof legacyConfiguredPath === "string" && legacyConfiguredPath.trim().length > 0) {
+    console.warn("[pi-notion] NOTION_MCP_AUTH is deprecated; use NOTION_MCP_AUTH_FILE.");
+    return resolveOptionalPath(legacyConfiguredPath);
+  }
+
+  const nextPath = join(getConfigDir(), "notion-mcp-auth.json");
+  const legacyPath = getLegacyMcpConfigFile();
+
+  if (!existsSync(nextPath) && existsSync(legacyPath)) {
+    try {
+      mkdirSync(getConfigDir(), { recursive: true });
+      renameSync(legacyPath, nextPath);
+      console.warn(`[pi-notion] Migrated legacy MCP auth file from ${legacyPath} to ${nextPath}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[pi-notion] Failed to migrate legacy MCP auth file ${legacyPath}: ${message}`);
+    }
+  }
+
+  return nextPath;
+}
+
+function getMcpConfigFile(): string {
+  return migrateLegacyMcpConfigFile();
 }
 
 function getTokenFile(): string {

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -313,6 +313,37 @@ describe("pi-notion checkNotionAuth", () => {
     const result = await importCheckNotionAuthInIsolatedEnv();
     expect(result.authenticated).toBe(false);
     expect(result.message).toContain("Not authenticated");
+  });
+
+  it("migrates legacy MCP auth file to the new filename", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-notion-migrate-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-notion-migrate-project-"));
+    const configDir = join(tempHome, ".pi", "agent", "extensions");
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "notion-mcp.json"),
+      JSON.stringify({ mcpUrl: "https://mcp.notion.com/mcp", accessToken: "token-123" }),
+      "utf-8",
+    );
+
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+
+    try {
+      const mod = await import("../extensions/index.js");
+      const result = mod.checkNotionAuth();
+      expect(result.authenticated).toBe(true);
+      expect(existsSync(join(configDir, "notion-mcp.json"))).toBe(false);
+      expect(existsSync(join(configDir, "notion-mcp-auth.json"))).toBe(true);
+    } finally {
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
   });
 
   it("detects NOTION_API_KEY but still requires MCP auth", async () => {
