@@ -113,7 +113,7 @@ export CODE_REASONING_MAX_LINES=5000
 
 ### Settings File
 
-Use pi's standard settings locations:
+Use pi's standard settings locations for non-secret configuration:
 
 - project: `.pi/settings.json`
 - global: `~/.pi/agent/settings.json`
@@ -128,6 +128,9 @@ Under the `pi-code-reasoning` key:
   }
 }
 ```
+
+> Best practice: use `settings.json` for non-secret defaults only.
+> If you need a separate private override file, use `--code-reasoning-config` or `CODE_REASONING_CONFIG` to point to a custom JSON config file.
 
 ## CLI Flags
 

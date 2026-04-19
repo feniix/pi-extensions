@@ -53,8 +53,8 @@ Under the `pi-ref-tools` key:
 }
 ```
 
-> Best practice: keep `REF_API_KEY` in an environment variable, not in `settings.json`.
-> If you need a persisted private file, use `--ref-mcp-config` or `REF_MCP_CONFIG` to point to a custom JSON config outside your project.
+> Best practice: use `settings.json` for non-secret defaults only.
+> Keep `REF_API_KEY` in an environment variable, or use `--ref-mcp-config` / `REF_MCP_CONFIG` to point to a custom private JSON config file when you need to persist secrets outside your project.
 
 ### Option 3: CLI Flags
 

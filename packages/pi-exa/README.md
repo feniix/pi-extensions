@@ -49,8 +49,8 @@ Under the `pi-exa` key:
 }
 ```
 
-> Best practice: keep `EXA_API_KEY` in an environment variable, not in `settings.json`.
-> If you need a persisted private file, use `--exa-config` or `EXA_CONFIG` to point to a custom JSON config outside your project.
+> Best practice: use `settings.json` for non-secret defaults only.
+> Keep `EXA_API_KEY` in an environment variable, or use `--exa-config` / `EXA_CONFIG` to point to a custom private JSON config file when you need to persist secrets outside your project.
 
 ### Option 3: CLI Flags
 

@@ -58,6 +58,9 @@ Under the `pi-sequential-thinking` key:
 }
 ```
 
+> Best practice: use `settings.json` for non-secret defaults only.
+> If you want a separate private override file, use `--seq-think-config` or `SEQ_THINK_CONFIG` to point to a custom JSON config file.
+
 ### Option 4: CLI Flags
 
 ```bash
