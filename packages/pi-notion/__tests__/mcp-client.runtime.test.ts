@@ -322,7 +322,11 @@ describe("pi-notion mcp client runtime helpers", () => {
   it("falls back to console logging when ui notifications fail", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
     const notify = createUiNotifier({
-      events: { emit: vi.fn(() => { throw new Error("no ui"); }) },
+      events: {
+        emit: vi.fn(() => {
+          throw new Error("no ui");
+        }),
+      },
     } as unknown as import("@mariozechner/pi-coding-agent").ExtensionAPI);
 
     notify("fallback message", "error");
@@ -408,9 +412,7 @@ describe("pi-notion mcp client runtime helpers", () => {
     try {
       notionMCPClientExtension(mockPi as never);
       expect(process.env.NOTION_MCP_AUTH_FILE).toBe("~/legacy-auth.json");
-      expect(warnSpy).toHaveBeenCalledWith(
-        "[pi-notion] --notion-mcp-auth is deprecated; use --notion-mcp-auth-file.",
-      );
+      expect(warnSpy).toHaveBeenCalledWith("[pi-notion] --notion-mcp-auth is deprecated; use --notion-mcp-auth-file.");
     } finally {
       warnSpy.mockRestore();
       if (original) process.env.NOTION_MCP_AUTH_FILE = original;
@@ -429,7 +431,9 @@ describe("pi-notion mcp client runtime helpers", () => {
     };
 
     notionMCPClientExtension(mockPi as never);
-    const statusTool = mockPi.registerTool.mock.calls.map(([tool]) => tool).find((tool) => tool.name === "notion_mcp_status");
+    const statusTool = mockPi.registerTool.mock.calls
+      .map(([tool]) => tool)
+      .find((tool) => tool.name === "notion_mcp_status");
     const result = await statusTool.execute("id", {}, new AbortController().signal, undefined, undefined);
     expect(result.content[0].text).toContain("Connected: No");
   });
