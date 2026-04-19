@@ -350,11 +350,9 @@ function loadConfig(configPath: string | undefined): RefMcpConfig | null {
 
   const globalSettingsPath = join(getHomeDir(), ".pi", "agent", "settings.json");
   const projectSettingsPath = join(process.cwd(), ".pi", "settings.json");
-  const legacyGlobalConfigPath = join(getHomeDir(), ".pi", "agent", "extensions", "ref-tools.json");
-  const legacyProjectConfigPath = join(process.cwd(), ".pi", "extensions", "ref-tools.json");
 
-  const globalConfig = loadSettingsConfig(globalSettingsPath) ?? loadConfigFile(legacyGlobalConfigPath);
-  const projectConfig = loadSettingsConfig(projectSettingsPath) ?? loadConfigFile(legacyProjectConfigPath);
+  const globalConfig = loadSettingsConfig(globalSettingsPath);
+  const projectConfig = loadSettingsConfig(projectSettingsPath);
 
   if (!globalConfig && !projectConfig) {
     return null;

@@ -68,8 +68,6 @@ pi --ref-mcp-api-key=your_key
 2. `REF_MCP_CONFIG` environment variable
 3. `.pi/settings.json` under `pi-ref-tools` (project-level)
 4. `~/.pi/agent/settings.json` under `pi-ref-tools` (global)
-5. legacy `.pi/extensions/ref-tools.json` (project-level fallback)
-6. legacy `~/.pi/agent/extensions/ref-tools.json` (global fallback)
 
 ## Tools
 
