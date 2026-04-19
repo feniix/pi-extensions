@@ -42,36 +42,36 @@ const DEFAULT_NUM_RESULTS = 5;
 // =============================================================================
 
 interface ExaConfig {
-	apiKey?: string;
-	enabledTools?: string[];
-	advancedEnabled?: boolean;
+  apiKey?: string;
+  enabledTools?: string[];
+  advancedEnabled?: boolean;
 }
 
 interface AuthResolution {
-	apiKey: string;
-	source?: "CLI flag" | "EXA_API_KEY env var" | "config file";
+  apiKey: string;
+  source?: "CLI flag" | "EXA_API_KEY env var" | "config file";
 }
 
 function normalizeString(value: unknown): string | undefined {
-	if (typeof value !== "string") {
-		return undefined;
-	}
-	const trimmed = value.trim();
-	return trimmed.length > 0 ? trimmed : undefined;
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 interface SearchResult {
-	title?: string;
-	url: string;
-	publishedDate?: string;
-	author?: string;
-	highlights?: string[];
-	text?: string;
+  title?: string;
+  url: string;
+  publishedDate?: string;
+  author?: string;
+  highlights?: string[];
+  text?: string;
 }
 
 interface ExaSearchResponse {
-	results?: SearchResult[];
-	searchTime?: number;
+  results?: SearchResult[];
+  searchTime?: number;
 }
 
 // =============================================================================
@@ -79,143 +79,143 @@ interface ExaSearchResponse {
 // =============================================================================
 
 function resolveConfigPath(configPath: string): string {
-	const trimmed = configPath.trim();
-	if (trimmed.startsWith("~/")) {
-		return join(homedir(), trimmed.slice(2));
-	}
-	if (trimmed.startsWith("~")) {
-		return join(homedir(), trimmed.slice(1));
-	}
-	if (isAbsolute(trimmed)) {
-		return trimmed;
-	}
-	return resolve(process.cwd(), trimmed);
+  const trimmed = configPath.trim();
+  if (trimmed.startsWith("~/")) {
+    return join(homedir(), trimmed.slice(2));
+  }
+  if (trimmed.startsWith("~")) {
+    return join(homedir(), trimmed.slice(1));
+  }
+  if (isAbsolute(trimmed)) {
+    return trimmed;
+  }
+  return resolve(process.cwd(), trimmed);
 }
 
 function parseConfig(raw: unknown): ExaConfig {
-	if (typeof raw !== "object" || raw === null) {
-		return {};
-	}
-	const obj = raw as Record<string, unknown>;
-	return {
-		apiKey: normalizeString(obj.apiKey),
-		enabledTools: Array.isArray(obj.enabledTools)
-			? obj.enabledTools
-					.filter((t): t is string => typeof t === "string")
-					.map((t) => t.trim())
-					.filter((t) => t.length > 0)
-			: undefined,
-		advancedEnabled: typeof obj.advancedEnabled === "boolean" ? obj.advancedEnabled : false,
-	};
+  if (typeof raw !== "object" || raw === null) {
+    return {};
+  }
+  const obj = raw as Record<string, unknown>;
+  return {
+    apiKey: normalizeString(obj.apiKey),
+    enabledTools: Array.isArray(obj.enabledTools)
+      ? obj.enabledTools
+          .filter((t): t is string => typeof t === "string")
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0)
+      : undefined,
+    advancedEnabled: typeof obj.advancedEnabled === "boolean" ? obj.advancedEnabled : false,
+  };
 }
 
 function loadConfig(configPath?: string): ExaConfig | null {
-	const candidates: string[] = [];
+  const candidates: string[] = [];
 
-	if (configPath) {
-		candidates.push(resolveConfigPath(configPath));
-	} else if (process.env.EXA_CONFIG) {
-		candidates.push(resolveConfigPath(process.env.EXA_CONFIG));
-	} else {
-		const projectConfigPath = join(process.cwd(), ".pi", "extensions", "exa.json");
-		const globalConfigPath = join(homedir(), ".pi", "agent", "extensions", "exa.json");
-		ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-		candidates.push(projectConfigPath, globalConfigPath);
-	}
+  if (configPath) {
+    candidates.push(resolveConfigPath(configPath));
+  } else if (process.env.EXA_CONFIG) {
+    candidates.push(resolveConfigPath(process.env.EXA_CONFIG));
+  } else {
+    const projectConfigPath = join(process.cwd(), ".pi", "extensions", "exa.json");
+    const globalConfigPath = join(homedir(), ".pi", "agent", "extensions", "exa.json");
+    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
+    candidates.push(projectConfigPath, globalConfigPath);
+  }
 
-	for (const candidate of candidates) {
-		if (!existsSync(candidate)) {
-			continue;
-		}
-		try {
-			const raw = readFileSync(candidate, "utf-8");
-			const parsed = JSON.parse(raw);
-			return parseConfig(parsed);
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			console.warn(`[pi-exa] Failed to parse config ${candidate}: ${message}`);
-		}
-	}
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+    try {
+      const raw = readFileSync(candidate, "utf-8");
+      const parsed = JSON.parse(raw);
+      return parseConfig(parsed);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[pi-exa] Failed to parse config ${candidate}: ${message}`);
+    }
+  }
 
-	return null;
+  return null;
 }
 
 function ensureDefaultConfigFile(projectConfigPath: string, globalConfigPath: string): void {
-	if (existsSync(projectConfigPath) || existsSync(globalConfigPath)) {
-		return;
-	}
+  if (existsSync(projectConfigPath) || existsSync(globalConfigPath)) {
+    return;
+  }
 
-	const defaultConfig = {
-		apiKey: null,
-		enabledTools: ["web_search_exa", "web_fetch_exa"],
-		advancedEnabled: false,
-	};
+  const defaultConfig = {
+    apiKey: null,
+    enabledTools: ["web_search_exa", "web_fetch_exa"],
+    advancedEnabled: false,
+  };
 
-	try {
-		mkdirSync(dirname(globalConfigPath), { recursive: true });
-		writeFileSync(globalConfigPath, `${JSON.stringify(defaultConfig, null, 2)}\n`, "utf-8");
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		console.warn(`[pi-exa] Failed to write ${globalConfigPath}: ${message}`);
-	}
+  try {
+    mkdirSync(dirname(globalConfigPath), { recursive: true });
+    writeFileSync(globalConfigPath, `${JSON.stringify(defaultConfig, null, 2)}\n`, "utf-8");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[pi-exa] Failed to write ${globalConfigPath}: ${message}`);
+  }
 }
 
 function getConfigOverrideFlag(pi: ExtensionAPI): string | undefined {
-	return normalizeString(pi.getFlag("--exa-config"));
+  return normalizeString(pi.getFlag("--exa-config"));
 }
 
 function getResolvedConfig(pi: ExtensionAPI): ExaConfig | null {
-	return loadConfig(getConfigOverrideFlag(pi));
+  return loadConfig(getConfigOverrideFlag(pi));
 }
 
 function resolveAuth(pi: ExtensionAPI): AuthResolution {
-	const apiKeyFlag = normalizeString(pi.getFlag("--exa-api-key"));
-	if (apiKeyFlag) {
-		return { apiKey: apiKeyFlag, source: "CLI flag" };
-	}
+  const apiKeyFlag = normalizeString(pi.getFlag("--exa-api-key"));
+  if (apiKeyFlag) {
+    return { apiKey: apiKeyFlag, source: "CLI flag" };
+  }
 
-	const configApiKey = normalizeString(getResolvedConfig(pi)?.apiKey);
-	if (configApiKey) {
-		return { apiKey: configApiKey, source: "config file" };
-	}
+  const configApiKey = normalizeString(getResolvedConfig(pi)?.apiKey);
+  if (configApiKey) {
+    return { apiKey: configApiKey, source: "config file" };
+  }
 
-	const envApiKey = normalizeString(process.env.EXA_API_KEY);
-	if (envApiKey) {
-		return { apiKey: envApiKey, source: "EXA_API_KEY env var" };
-	}
+  const envApiKey = normalizeString(process.env.EXA_API_KEY);
+  if (envApiKey) {
+    return { apiKey: envApiKey, source: "EXA_API_KEY env var" };
+  }
 
-	return { apiKey: "" };
+  return { apiKey: "" };
 }
 
 function getAuthStatusMessage(pi: ExtensionAPI): string {
-	const auth = resolveAuth(pi);
-	return auth.source
-		? `[exa] Authenticated via ${auth.source}`
-		: "[exa] Not authenticated. Set EXA_API_KEY or use --exa-api-key flag.";
+  const auth = resolveAuth(pi);
+  return auth.source
+    ? `[exa] Authenticated via ${auth.source}`
+    : "[exa] Not authenticated. Set EXA_API_KEY or use --exa-api-key flag.";
 }
 
 function isAdvancedToolEnabled(pi: ExtensionAPI, config: ExaConfig | null): boolean {
-	const advancedFlag = pi.getFlag("--exa-enable-advanced");
-	if (typeof advancedFlag === "boolean") {
-		return advancedFlag;
-	}
-	return config?.advancedEnabled ?? false;
+  const advancedFlag = pi.getFlag("--exa-enable-advanced");
+  if (typeof advancedFlag === "boolean") {
+    return advancedFlag;
+  }
+  return config?.advancedEnabled ?? false;
 }
 
 function isToolEnabledForConfig(pi: ExtensionAPI, config: ExaConfig | null, toolName: string): boolean {
-	if (config?.enabledTools && Array.isArray(config.enabledTools)) {
-		return config.enabledTools.includes(toolName);
-	}
+  if (config?.enabledTools && Array.isArray(config.enabledTools)) {
+    return config.enabledTools.includes(toolName);
+  }
 
-	if (toolName === "web_search_exa" || toolName === "web_fetch_exa") {
-		return true;
-	}
+  if (toolName === "web_search_exa" || toolName === "web_fetch_exa") {
+    return true;
+  }
 
-	if (toolName === "web_search_advanced_exa") {
-		return isAdvancedToolEnabled(pi, config);
-	}
+  if (toolName === "web_search_advanced_exa") {
+    return isAdvancedToolEnabled(pi, config);
+  }
 
-	return false;
+  return false;
 }
 
 // =============================================================================
@@ -223,49 +223,49 @@ function isToolEnabledForConfig(pi: ExtensionAPI, config: ExaConfig | null, tool
 // =============================================================================
 
 const webSearchParams = Type.Object(
-	{
-		query: Type.String({
-			description:
-				"Natural language search query. Should be a semantically rich description of the ideal page, not just keywords.",
-		}),
-		numResults: Type.Optional(
-			Type.Integer({ description: "Number of search results to return (1-20, default: 5)", minimum: 1, maximum: 20 }),
-		),
-	},
-	{ additionalProperties: true },
+  {
+    query: Type.String({
+      description:
+        "Natural language search query. Should be a semantically rich description of the ideal page, not just keywords.",
+    }),
+    numResults: Type.Optional(
+      Type.Integer({ description: "Number of search results to return (1-20, default: 5)", minimum: 1, maximum: 20 }),
+    ),
+  },
+  { additionalProperties: true },
 );
 
 const webFetchParams = Type.Object(
-	{
-		urls: Type.Array(Type.String({ description: "URLs to read. Batch multiple URLs in one call." }), {
-			description: "URLs to read",
-		}),
-		maxCharacters: Type.Optional(
-			Type.Integer({ description: "Maximum characters to extract per page (default: 3000)", minimum: 1 }),
-		),
-	},
-	{ additionalProperties: true },
+  {
+    urls: Type.Array(Type.String({ description: "URLs to read. Batch multiple URLs in one call." }), {
+      description: "URLs to read",
+    }),
+    maxCharacters: Type.Optional(
+      Type.Integer({ description: "Maximum characters to extract per page (default: 3000)", minimum: 1 }),
+    ),
+  },
+  { additionalProperties: true },
 );
 
 const webSearchAdvancedParams = Type.Object(
-	{
-		query: Type.String({ description: "Search query" }),
-		numResults: Type.Optional(Type.Integer({ description: "Number of results (1-100)", minimum: 1, maximum: 100 })),
-		category: Type.Optional(
-			Type.String({
-				description: "Category filter: company, research paper, financial report, people, news, etc.",
-			}),
-		),
-		type: Type.Optional(Type.String({ description: "Search type: auto, fast, deep, neural" })),
-		startPublishedDate: Type.Optional(Type.String({ description: "ISO date filter (e.g., 2024-01-01)" })),
-		endPublishedDate: Type.Optional(Type.String({ description: "ISO date filter (e.g., 2024-12-31)" })),
-		includeDomains: Type.Optional(Type.Array(Type.String())),
-		excludeDomains: Type.Optional(Type.Array(Type.String())),
-		textMaxCharacters: Type.Optional(Type.Integer()),
-		enableHighlights: Type.Optional(Type.Boolean()),
-		highlightsNumSentences: Type.Optional(Type.Integer()),
-	},
-	{ additionalProperties: true },
+  {
+    query: Type.String({ description: "Search query" }),
+    numResults: Type.Optional(Type.Integer({ description: "Number of results (1-100)", minimum: 1, maximum: 100 })),
+    category: Type.Optional(
+      Type.String({
+        description: "Category filter: company, research paper, financial report, people, news, etc.",
+      }),
+    ),
+    type: Type.Optional(Type.String({ description: "Search type: auto, fast, deep, neural" })),
+    startPublishedDate: Type.Optional(Type.String({ description: "ISO date filter (e.g., 2024-01-01)" })),
+    endPublishedDate: Type.Optional(Type.String({ description: "ISO date filter (e.g., 2024-12-31)" })),
+    includeDomains: Type.Optional(Type.Array(Type.String())),
+    excludeDomains: Type.Optional(Type.Array(Type.String())),
+    textMaxCharacters: Type.Optional(Type.Integer()),
+    enableHighlights: Type.Optional(Type.Boolean()),
+    highlightsNumSentences: Type.Optional(Type.Integer()),
+  },
+  { additionalProperties: true },
 );
 
 // =============================================================================
@@ -273,189 +273,189 @@ const webSearchAdvancedParams = Type.Object(
 // =============================================================================
 
 function formatSearchResults(results: SearchResult[]): string {
-	if (results.length === 0) {
-		return "No search results found. Please try a different query.";
-	}
+  if (results.length === 0) {
+    return "No search results found. Please try a different query.";
+  }
 
-	return results
-		.map((r) => {
-			const lines: string[] = [
-				`Title: ${r.title || "N/A"}`,
-				`URL: ${r.url}`,
-				`Published: ${r.publishedDate || "N/A"}`,
-				`Author: ${r.author || "N/A"}`,
-			];
-			if (Array.isArray(r.highlights) && r.highlights.length > 0) {
-				lines.push(`Highlights:\n${r.highlights.join("\n")}`);
-			} else if (r.text) {
-				lines.push(`Text: ${r.text}`);
-			}
-			return lines.join("\n");
-		})
-		.join("\n\n---\n\n");
+  return results
+    .map((r) => {
+      const lines: string[] = [
+        `Title: ${r.title || "N/A"}`,
+        `URL: ${r.url}`,
+        `Published: ${r.publishedDate || "N/A"}`,
+        `Author: ${r.author || "N/A"}`,
+      ];
+      if (Array.isArray(r.highlights) && r.highlights.length > 0) {
+        lines.push(`Highlights:\n${r.highlights.join("\n")}`);
+      } else if (r.text) {
+        lines.push(`Text: ${r.text}`);
+      }
+      return lines.join("\n");
+    })
+    .join("\n\n---\n\n");
 }
 
 function formatCrawlResults(
-	results: Array<{
-		title?: string;
-		url: string;
-		publishedDate?: string;
-		author?: string;
-		text?: string;
-	}>,
+  results: Array<{
+    title?: string;
+    url: string;
+    publishedDate?: string;
+    author?: string;
+    text?: string;
+  }>,
 ): string {
-	if (results.length === 0) {
-		return "No content found.";
-	}
+  if (results.length === 0) {
+    return "No content found.";
+  }
 
-	return results
-		.map((r) => {
-			const lines: string[] = [`# ${r.title || "(no title)"}`, `URL: ${r.url}`];
-			if (r.publishedDate) {
-				lines.push(`Published: ${r.publishedDate.split("T")[0]}`);
-			}
-			if (r.author) {
-				lines.push(`Author: ${r.author}`);
-			}
-			lines.push("");
-			if (r.text) {
-				lines.push(r.text);
-			}
-			lines.push("");
-			return lines.join("\n");
-		})
-		.join("\n");
+  return results
+    .map((r) => {
+      const lines: string[] = [`# ${r.title || "(no title)"}`, `URL: ${r.url}`];
+      if (r.publishedDate) {
+        lines.push(`Published: ${r.publishedDate.split("T")[0]}`);
+      }
+      if (r.author) {
+        lines.push(`Author: ${r.author}`);
+      }
+      lines.push("");
+      if (r.text) {
+        lines.push(r.text);
+      }
+      lines.push("");
+      return lines.join("\n");
+    })
+    .join("\n");
 }
 
 async function performWebSearch(apiKey: string, query: string, numResults: number): Promise<string> {
-	const exa = new Exa(apiKey);
+  const exa = new Exa(apiKey);
 
-	const searchRequest = {
-		query,
-		type: "auto",
-		numResults,
-		contents: {
-			highlights: { query },
-			text: { maxCharacters: 300 },
-		},
-	};
+  const searchRequest = {
+    query,
+    type: "auto",
+    numResults,
+    contents: {
+      highlights: { query },
+      text: { maxCharacters: 300 },
+    },
+  };
 
-	// Exa SDK already prefixes requests with its configured baseURL.
-	// Pass a relative endpoint here, not a full URL, or the SDK will build
-	// an invalid URL like "https://api.exa.aihttps://api.exa.ai/search".
-	const response = await exa.request<ExaSearchResponse>("/search", "POST", searchRequest);
+  // Exa SDK already prefixes requests with its configured baseURL.
+  // Pass a relative endpoint here, not a full URL, or the SDK will build
+  // an invalid URL like "https://api.exa.aihttps://api.exa.ai/search".
+  const response = await exa.request<ExaSearchResponse>("/search", "POST", searchRequest);
 
-	if (!response?.results || response.results.length === 0) {
-		return "No search results found. Please try a different query.";
-	}
+  if (!response?.results || response.results.length === 0) {
+    return "No search results found. Please try a different query.";
+  }
 
-	return formatSearchResults(response.results);
+  return formatSearchResults(response.results);
 }
 
 async function performWebFetch(apiKey: string, urls: string[], maxCharacters: number): Promise<string> {
-	const exa = new Exa(apiKey);
+  const exa = new Exa(apiKey);
 
-	const crawlRequest = {
-		ids: urls,
-		contents: {
-			text: {
-				maxCharacters,
-			},
-		},
-	};
+  const crawlRequest = {
+    ids: urls,
+    contents: {
+      text: {
+        maxCharacters,
+      },
+    },
+  };
 
-	const response = await exa.request<{
-		results?: Array<{
-			title?: string;
-			url: string;
-			publishedDate?: string;
-			author?: string;
-			text?: string;
-		}>;
-	}>("/contents", "POST", crawlRequest);
+  const response = await exa.request<{
+    results?: Array<{
+      title?: string;
+      url: string;
+      publishedDate?: string;
+      author?: string;
+      text?: string;
+    }>;
+  }>("/contents", "POST", crawlRequest);
 
-	if (!response?.results || response.results.length === 0) {
-		return "No content found for the requested URLs.";
-	}
+  if (!response?.results || response.results.length === 0) {
+    return "No content found for the requested URLs.";
+  }
 
-	return formatCrawlResults(response.results);
+  return formatCrawlResults(response.results);
 }
 
 async function performAdvancedSearch(
-	apiKey: string,
-	query: string,
-	options: {
-		numResults?: number;
-		category?: string;
-		type?: string;
-		startPublishedDate?: string;
-		endPublishedDate?: string;
-		includeDomains?: string[];
-		excludeDomains?: string[];
-		textMaxCharacters?: number;
-		enableHighlights?: boolean;
-		highlightsNumSentences?: number;
-	},
+  apiKey: string,
+  query: string,
+  options: {
+    numResults?: number;
+    category?: string;
+    type?: string;
+    startPublishedDate?: string;
+    endPublishedDate?: string;
+    includeDomains?: string[];
+    excludeDomains?: string[];
+    textMaxCharacters?: number;
+    enableHighlights?: boolean;
+    highlightsNumSentences?: number;
+  },
 ): Promise<string> {
-	const exa = new Exa(apiKey);
+  const exa = new Exa(apiKey);
 
-	const searchRequest: Record<string, unknown> = {
-		query,
-		numResults: options.numResults || 10,
-		contents: {
-			text: { maxCharacters: options.textMaxCharacters || 3000 },
-		},
-	};
+  const searchRequest: Record<string, unknown> = {
+    query,
+    numResults: options.numResults || 10,
+    contents: {
+      text: { maxCharacters: options.textMaxCharacters || 3000 },
+    },
+  };
 
-	if (options.category) {
-		searchRequest.category = options.category;
-	}
-	if (options.type) {
-		searchRequest.type = options.type;
-	}
-	if (options.startPublishedDate) {
-		searchRequest.startPublishedDate = options.startPublishedDate;
-	}
-	if (options.endPublishedDate) {
-		searchRequest.endPublishedDate = options.endPublishedDate;
-	}
-	if (options.includeDomains && options.includeDomains.length > 0) {
-		searchRequest.includeDomains = options.includeDomains;
-	}
-	if (options.excludeDomains && options.excludeDomains.length > 0) {
-		searchRequest.excludeDomains = options.excludeDomains;
-	}
-	if (options.enableHighlights) {
-		const existingContents = searchRequest.contents as Record<string, unknown>;
-		searchRequest.contents = {
-			...existingContents,
-			highlights: {
-				highlightsPerUrl: options.highlightsNumSentences || 3,
-			},
-		};
-	}
+  if (options.category) {
+    searchRequest.category = options.category;
+  }
+  if (options.type) {
+    searchRequest.type = options.type;
+  }
+  if (options.startPublishedDate) {
+    searchRequest.startPublishedDate = options.startPublishedDate;
+  }
+  if (options.endPublishedDate) {
+    searchRequest.endPublishedDate = options.endPublishedDate;
+  }
+  if (options.includeDomains && options.includeDomains.length > 0) {
+    searchRequest.includeDomains = options.includeDomains;
+  }
+  if (options.excludeDomains && options.excludeDomains.length > 0) {
+    searchRequest.excludeDomains = options.excludeDomains;
+  }
+  if (options.enableHighlights) {
+    const existingContents = searchRequest.contents as Record<string, unknown>;
+    searchRequest.contents = {
+      ...existingContents,
+      highlights: {
+        highlightsPerUrl: options.highlightsNumSentences || 3,
+      },
+    };
+  }
 
-	const response = await exa.request<ExaSearchResponse>("/search", "POST", searchRequest);
+  const response = await exa.request<ExaSearchResponse>("/search", "POST", searchRequest);
 
-	if (!response?.results || response.results.length === 0) {
-		return "No search results found. Please try a different query.";
-	}
+  if (!response?.results || response.results.length === 0) {
+    return "No search results found. Please try a different query.";
+  }
 
-	return formatSearchResults(response.results);
+  return formatSearchResults(response.results);
 }
 
 export {
-	DEFAULT_MAX_CHARACTERS,
-	DEFAULT_NUM_RESULTS,
-	ensureDefaultConfigFile,
-	formatCrawlResults,
-	formatSearchResults,
-	getAuthStatusMessage,
-	isToolEnabledForConfig,
-	loadConfig,
-	parseConfig,
-	resolveAuth,
-	resolveConfigPath,
+  DEFAULT_MAX_CHARACTERS,
+  DEFAULT_NUM_RESULTS,
+  ensureDefaultConfigFile,
+  formatCrawlResults,
+  formatSearchResults,
+  getAuthStatusMessage,
+  isToolEnabledForConfig,
+  loadConfig,
+  parseConfig,
+  resolveAuth,
+  resolveConfigPath,
 };
 
 // =============================================================================
@@ -463,202 +463,202 @@ export {
 // =============================================================================
 
 export default function exaExtension(pi: ExtensionAPI) {
-	// SessionStart: check auth and print status
-	pi.on("session_start", async () => {
-		console.log(getAuthStatusMessage(pi));
-	});
+  // SessionStart: check auth and print status
+  pi.on("session_start", async () => {
+    console.log(getAuthStatusMessage(pi));
+  });
 
-	// Register CLI flags
-	pi.registerFlag("--exa-api-key", {
-		description: "Exa AI API key for search operations",
-		type: "string",
-	});
-	pi.registerFlag("--exa-enable-advanced", {
-		description: "Enable web_search_advanced_exa tool",
-		type: "boolean",
-	});
-	pi.registerFlag("--exa-config", {
-		description: "Path to JSON config file (defaults to ~/.pi/agent/extensions/exa.json)",
-		type: "string",
-	});
+  // Register CLI flags
+  pi.registerFlag("--exa-api-key", {
+    description: "Exa AI API key for search operations",
+    type: "string",
+  });
+  pi.registerFlag("--exa-enable-advanced", {
+    description: "Enable web_search_advanced_exa tool",
+    type: "boolean",
+  });
+  pi.registerFlag("--exa-config", {
+    description: "Path to JSON config file (defaults to ~/.pi/agent/extensions/exa.json)",
+    type: "string",
+  });
 
-	const getApiKey = (): string => resolveAuth(pi).apiKey;
+  const getApiKey = (): string => resolveAuth(pi).apiKey;
 
-	const isToolEnabled = (toolName: string): boolean => isToolEnabledForConfig(pi, getResolvedConfig(pi), toolName);
+  const isToolEnabled = (toolName: string): boolean => isToolEnabledForConfig(pi, getResolvedConfig(pi), toolName);
 
-	// Register web_search_exa tool
-	if (isToolEnabled("web_search_exa")) {
-		pi.registerTool({
-			name: "web_search_exa",
-			label: "Exa Web Search",
-			description:
-				"Search the web for any topic and get clean, ready-to-use content. " +
-				"Best for: Finding current information, news, facts, or answering questions. " +
-				"Query tips: describe the ideal page, not keywords. 'blog post comparing React and Vue' not 'React Vue'.",
-			parameters: webSearchParams,
-			async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-				const apiKey = getApiKey();
-				if (!apiKey) {
-					return {
-						content: [{ type: "text", text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." }],
-						isError: true,
-						details: { tool: "web_search_exa", error: "missing_api_key" },
-					};
-				}
+  // Register web_search_exa tool
+  if (isToolEnabled("web_search_exa")) {
+    pi.registerTool({
+      name: "web_search_exa",
+      label: "Exa Web Search",
+      description:
+        "Search the web for any topic and get clean, ready-to-use content. " +
+        "Best for: Finding current information, news, facts, or answering questions. " +
+        "Query tips: describe the ideal page, not keywords. 'blog post comparing React and Vue' not 'React Vue'.",
+      parameters: webSearchParams,
+      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+        const apiKey = getApiKey();
+        if (!apiKey) {
+          return {
+            content: [{ type: "text", text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." }],
+            isError: true,
+            details: { tool: "web_search_exa", error: "missing_api_key" },
+          };
+        }
 
-				if (signal?.aborted) {
-					return {
-						content: [{ type: "text", text: "Cancelled." }],
-						details: { cancelled: true },
-					};
-				}
+        if (signal?.aborted) {
+          return {
+            content: [{ type: "text", text: "Cancelled." }],
+            details: { cancelled: true },
+          };
+        }
 
-				onUpdate?.({
-					content: [{ type: "text", text: "Searching the web via Exa..." }],
-					details: { status: "pending" },
-				});
+        onUpdate?.({
+          content: [{ type: "text", text: "Searching the web via Exa..." }],
+          details: { status: "pending" },
+        });
 
-				try {
-					const typedParams = params as { query: string; numResults?: number };
-					const result = await performWebSearch(
-						apiKey,
-						typedParams.query,
-						typedParams.numResults || DEFAULT_NUM_RESULTS,
-					);
-					return { content: [{ type: "text", text: result }], details: { tool: "web_search_exa" } };
-				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					return {
-						content: [{ type: "text", text: `Exa search error: ${message}` }],
-						isError: true,
-						details: { tool: "web_search_exa", error: message },
-					};
-				}
-			},
-		});
-	}
+        try {
+          const typedParams = params as { query: string; numResults?: number };
+          const result = await performWebSearch(
+            apiKey,
+            typedParams.query,
+            typedParams.numResults || DEFAULT_NUM_RESULTS,
+          );
+          return { content: [{ type: "text", text: result }], details: { tool: "web_search_exa" } };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            content: [{ type: "text", text: `Exa search error: ${message}` }],
+            isError: true,
+            details: { tool: "web_search_exa", error: message },
+          };
+        }
+      },
+    });
+  }
 
-	// Register web_fetch_exa tool
-	if (isToolEnabled("web_fetch_exa")) {
-		pi.registerTool({
-			name: "web_fetch_exa",
-			label: "Exa Web Fetch",
-			description:
-				"Read a webpage's full content as clean markdown. " +
-				"Use after web_search_exa when highlights are insufficient or to read any URL. " +
-				"Best for: Extracting full content from known URLs. Batch multiple URLs in one call.",
-			parameters: webFetchParams,
-			async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-				const apiKey = getApiKey();
-				if (!apiKey) {
-					return {
-						content: [{ type: "text", text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." }],
-						isError: true,
-						details: { tool: "web_fetch_exa", error: "missing_api_key" },
-					};
-				}
+  // Register web_fetch_exa tool
+  if (isToolEnabled("web_fetch_exa")) {
+    pi.registerTool({
+      name: "web_fetch_exa",
+      label: "Exa Web Fetch",
+      description:
+        "Read a webpage's full content as clean markdown. " +
+        "Use after web_search_exa when highlights are insufficient or to read any URL. " +
+        "Best for: Extracting full content from known URLs. Batch multiple URLs in one call.",
+      parameters: webFetchParams,
+      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+        const apiKey = getApiKey();
+        if (!apiKey) {
+          return {
+            content: [{ type: "text", text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." }],
+            isError: true,
+            details: { tool: "web_fetch_exa", error: "missing_api_key" },
+          };
+        }
 
-				if (signal?.aborted) {
-					return {
-						content: [{ type: "text", text: "Cancelled." }],
-						details: { cancelled: true },
-					};
-				}
+        if (signal?.aborted) {
+          return {
+            content: [{ type: "text", text: "Cancelled." }],
+            details: { cancelled: true },
+          };
+        }
 
-				onUpdate?.({
-					content: [{ type: "text", text: "Fetching content via Exa..." }],
-					details: { status: "pending" },
-				});
+        onUpdate?.({
+          content: [{ type: "text", text: "Fetching content via Exa..." }],
+          details: { status: "pending" },
+        });
 
-				try {
-					const typedParams = params as { urls: string[]; maxCharacters?: number };
-					const result = await performWebFetch(
-						apiKey,
-						typedParams.urls,
-						typedParams.maxCharacters || DEFAULT_MAX_CHARACTERS,
-					);
-					return { content: [{ type: "text", text: result }], details: { tool: "web_fetch_exa" } };
-				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					return {
-						content: [{ type: "text", text: `Exa fetch error: ${message}` }],
-						isError: true,
-						details: { tool: "web_fetch_exa", error: message },
-					};
-				}
-			},
-		});
-	}
+        try {
+          const typedParams = params as { urls: string[]; maxCharacters?: number };
+          const result = await performWebFetch(
+            apiKey,
+            typedParams.urls,
+            typedParams.maxCharacters || DEFAULT_MAX_CHARACTERS,
+          );
+          return { content: [{ type: "text", text: result }], details: { tool: "web_fetch_exa" } };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            content: [{ type: "text", text: `Exa fetch error: ${message}` }],
+            isError: true,
+            details: { tool: "web_fetch_exa", error: message },
+          };
+        }
+      },
+    });
+  }
 
-	// Register web_search_advanced_exa tool (disabled by default)
-	if (isToolEnabled("web_search_advanced_exa")) {
-		pi.registerTool({
-			name: "web_search_advanced_exa",
-			label: "Exa Advanced Search",
-			description:
-				"Advanced web search with full Exa API control including category filters, domain restrictions, date ranges, " +
-				"highlights, summaries, and subpage crawling. Requires --exa-enable-advanced flag or advancedEnabled in config.",
-			parameters: webSearchAdvancedParams,
-			async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-				const apiKey = getApiKey();
-				if (!apiKey) {
-					return {
-						content: [{ type: "text", text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." }],
-						isError: true,
-						details: { tool: "web_search_advanced_exa", error: "missing_api_key" },
-					};
-				}
+  // Register web_search_advanced_exa tool (disabled by default)
+  if (isToolEnabled("web_search_advanced_exa")) {
+    pi.registerTool({
+      name: "web_search_advanced_exa",
+      label: "Exa Advanced Search",
+      description:
+        "Advanced web search with full Exa API control including category filters, domain restrictions, date ranges, " +
+        "highlights, summaries, and subpage crawling. Requires --exa-enable-advanced flag or advancedEnabled in config.",
+      parameters: webSearchAdvancedParams,
+      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+        const apiKey = getApiKey();
+        if (!apiKey) {
+          return {
+            content: [{ type: "text", text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." }],
+            isError: true,
+            details: { tool: "web_search_advanced_exa", error: "missing_api_key" },
+          };
+        }
 
-				if (signal?.aborted) {
-					return {
-						content: [{ type: "text", text: "Cancelled." }],
-						details: { cancelled: true },
-					};
-				}
+        if (signal?.aborted) {
+          return {
+            content: [{ type: "text", text: "Cancelled." }],
+            details: { cancelled: true },
+          };
+        }
 
-				onUpdate?.({
-					content: [{ type: "text", text: "Performing advanced search via Exa..." }],
-					details: { status: "pending" },
-				});
+        onUpdate?.({
+          content: [{ type: "text", text: "Performing advanced search via Exa..." }],
+          details: { status: "pending" },
+        });
 
-				try {
-					const typedParams = params as {
-						query: string;
-						numResults?: number;
-						category?: string;
-						type?: string;
-						startPublishedDate?: string;
-						endPublishedDate?: string;
-						includeDomains?: string[];
-						excludeDomains?: string[];
-						textMaxCharacters?: number;
-						enableHighlights?: boolean;
-						highlightsNumSentences?: number;
-					};
+        try {
+          const typedParams = params as {
+            query: string;
+            numResults?: number;
+            category?: string;
+            type?: string;
+            startPublishedDate?: string;
+            endPublishedDate?: string;
+            includeDomains?: string[];
+            excludeDomains?: string[];
+            textMaxCharacters?: number;
+            enableHighlights?: boolean;
+            highlightsNumSentences?: number;
+          };
 
-					const result = await performAdvancedSearch(apiKey, typedParams.query, {
-						numResults: typedParams.numResults,
-						category: typedParams.category,
-						type: typedParams.type,
-						startPublishedDate: typedParams.startPublishedDate,
-						endPublishedDate: typedParams.endPublishedDate,
-						includeDomains: typedParams.includeDomains,
-						excludeDomains: typedParams.excludeDomains,
-						textMaxCharacters: typedParams.textMaxCharacters,
-						enableHighlights: typedParams.enableHighlights,
-						highlightsNumSentences: typedParams.highlightsNumSentences,
-					});
+          const result = await performAdvancedSearch(apiKey, typedParams.query, {
+            numResults: typedParams.numResults,
+            category: typedParams.category,
+            type: typedParams.type,
+            startPublishedDate: typedParams.startPublishedDate,
+            endPublishedDate: typedParams.endPublishedDate,
+            includeDomains: typedParams.includeDomains,
+            excludeDomains: typedParams.excludeDomains,
+            textMaxCharacters: typedParams.textMaxCharacters,
+            enableHighlights: typedParams.enableHighlights,
+            highlightsNumSentences: typedParams.highlightsNumSentences,
+          });
 
-					return { content: [{ type: "text", text: result }], details: { tool: "web_search_advanced_exa" } };
-				} catch (error) {
-					const message = error instanceof Error ? error.message : String(error);
-					return {
-						content: [{ type: "text", text: `Exa advanced search error: ${message}` }],
-						isError: true,
-						details: { tool: "web_search_advanced_exa", error: message },
-					};
-				}
-			},
-		});
-	}
+          return { content: [{ type: "text", text: result }], details: { tool: "web_search_advanced_exa" } };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return {
+            content: [{ type: "text", text: `Exa advanced search error: ${message}` }],
+            isError: true,
+            details: { tool: "web_search_advanced_exa", error: message },
+          };
+        }
+      },
+    });
+  }
 }
