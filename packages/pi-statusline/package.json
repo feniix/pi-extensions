@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-statusline",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Fixed two-line status footer for pi with model, thinking, context, git, token, worktree, and skill indicators",
   "keywords": [
     "pi",

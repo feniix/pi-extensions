@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-ref-tools",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Ref.tools MCP extension for pi — documentation search and URL reading via Ref's Model Context Protocol",
   "keywords": [
     "pi",
