@@ -8,7 +8,7 @@
  * 1. Install: pi install npm:@feniix/pi-ref-tools
  * 2. Optional config:
  *    - Settings file: ~/.pi/agent/settings.json or .pi/settings.json under the pi-ref-tools key
- *      (or set REF_MCP_CONFIG / --ref-mcp-config for a custom JSON config path)
+ *      (or set REF_MCP_CONFIG_FILE / --ref-mcp-config-file for a custom JSON config path)
  *      Keys: url, apiKey, timeoutMs, protocolVersion, maxBytes, maxLines
  *    - REF_MCP_URL (default: https://api.ref.tools/mcp)
  *    - REF_API_KEY (API key, sent as x-ref-api-key header)
@@ -18,7 +18,7 @@
  *    - REF_MCP_MAX_LINES (default: 2000)
  * 3. Or pass flags:
  *    --ref-mcp-url, --ref-mcp-api-key, --ref-mcp-timeout-ms,
- *    --ref-mcp-protocol, --ref-mcp-config, --ref-mcp-max-bytes, --ref-mcp-max-lines
+ *    --ref-mcp-protocol, --ref-mcp-config-file, --ref-mcp-max-bytes, --ref-mcp-max-lines
  *
  * Usage:
  *   "Search the docs for React Server Components"
@@ -339,14 +339,36 @@ function loadSettingsConfig(path: string): RefMcpConfig | null {
   }
 }
 
+function warnIgnoredLegacyConfigFiles(): void {
+  const legacyPaths = [
+    join(process.cwd(), ".pi", "extensions", "ref-tools.json"),
+    join(getHomeDir(), ".pi", "agent", "extensions", "ref-tools.json"),
+  ];
+
+  for (const legacyPath of legacyPaths) {
+    if (existsSync(legacyPath)) {
+      console.warn(
+        `[pi-ref-tools] Ignoring legacy config file ${legacyPath}. Migrate non-secret settings to .pi/settings.json or ~/.pi/agent/settings.json under "pi-ref-tools". Keep secrets in REF_API_KEY or an explicit custom config via --ref-mcp-config-file / REF_MCP_CONFIG_FILE.`,
+      );
+    }
+  }
+}
+
 function loadConfig(configPath: string | undefined): RefMcpConfig | null {
-  const envConfig = process.env.REF_MCP_CONFIG;
+  const envConfigFile = process.env.REF_MCP_CONFIG_FILE;
+  const legacyEnvConfig = process.env.REF_MCP_CONFIG;
   if (configPath) {
     return loadConfigFile(resolveConfigPath(configPath));
   }
-  if (envConfig) {
-    return loadConfigFile(resolveConfigPath(envConfig));
+  if (envConfigFile) {
+    return loadConfigFile(resolveConfigPath(envConfigFile));
   }
+  if (legacyEnvConfig) {
+    console.warn("[pi-ref-tools] REF_MCP_CONFIG is deprecated; use REF_MCP_CONFIG_FILE.");
+    return loadConfigFile(resolveConfigPath(legacyEnvConfig));
+  }
+
+  warnIgnoredLegacyConfigFiles();
 
   const globalSettingsPath = join(getHomeDir(), ".pi", "agent", "settings.json");
   const projectSettingsPath = join(process.cwd(), ".pi", "settings.json");
@@ -715,8 +737,18 @@ const readUrlParams = Type.Object(
 // =============================================================================
 
 function getConfigOverride(pi: ExtensionAPI): string | undefined {
-  const configFlag = pi.getFlag("--ref-mcp-config");
-  return typeof configFlag === "string" ? configFlag : undefined;
+  const configFileFlag = pi.getFlag("--ref-mcp-config-file");
+  if (typeof configFileFlag === "string") {
+    return configFileFlag;
+  }
+
+  const legacyConfigFlag = pi.getFlag("--ref-mcp-config");
+  if (typeof legacyConfigFlag === "string") {
+    console.warn("[pi-ref-tools] --ref-mcp-config is deprecated; use --ref-mcp-config-file.");
+    return legacyConfigFlag;
+  }
+
+  return undefined;
 }
 
 type ApiKeySource = "CLI flag" | "REF_API_KEY env var" | "config file";
@@ -836,8 +868,12 @@ export default function refTools(pi: ExtensionAPI) {
     description: "MCP protocol version for initialize() (default: 2025-06-18).",
     type: "string",
   });
-  pi.registerFlag("--ref-mcp-config", {
+  pi.registerFlag("--ref-mcp-config-file", {
     description: "Path to custom JSON config file for private overrides such as API keys.",
+    type: "string",
+  });
+  pi.registerFlag("--ref-mcp-config", {
+    description: "Deprecated alias for --ref-mcp-config-file.",
     type: "string",
   });
   pi.registerFlag("--ref-mcp-max-bytes", {

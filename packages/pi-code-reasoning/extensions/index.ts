@@ -7,7 +7,7 @@
  * Setup:
  * 1. Install: pi install npm:@feniix/pi-code-reasoning
  * 2. Or pass flags:
- *    --code-reasoning-config, --code-reasoning-max-bytes, --code-reasoning-max-lines
+ *    --code-reasoning-config-file, --code-reasoning-max-bytes, --code-reasoning-max-lines
  *
  * Usage:
  *   "Use code reasoning to think through this architecture decision"
@@ -255,14 +255,36 @@ function loadSettingsConfig(path: string): CodeReasoningConfig | null {
   }
 }
 
+function warnIgnoredLegacyConfigFiles(): void {
+  const legacyPaths = [
+    join(process.cwd(), ".pi", "extensions", "code-reasoning.json"),
+    join(getHomeDir(), ".pi", "agent", "extensions", "code-reasoning.json"),
+  ];
+
+  for (const legacyPath of legacyPaths) {
+    if (existsSync(legacyPath)) {
+      console.warn(
+        `[pi-code-reasoning] Ignoring legacy config file ${legacyPath}. Migrate non-secret settings to .pi/settings.json or ~/.pi/agent/settings.json under "pi-code-reasoning", or pass --code-reasoning-config-file / CODE_REASONING_CONFIG_FILE explicitly.`,
+      );
+    }
+  }
+}
+
 function loadConfig(configPath: string | undefined): CodeReasoningConfig | null {
-  const envConfig = process.env.CODE_REASONING_CONFIG;
+  const envConfigFile = process.env.CODE_REASONING_CONFIG_FILE;
+  const legacyEnvConfig = process.env.CODE_REASONING_CONFIG;
   if (configPath) {
     return loadConfigFile(resolveConfigPath(configPath));
   }
-  if (envConfig) {
-    return loadConfigFile(resolveConfigPath(envConfig));
+  if (envConfigFile) {
+    return loadConfigFile(resolveConfigPath(envConfigFile));
   }
+  if (legacyEnvConfig) {
+    console.warn("[pi-code-reasoning] CODE_REASONING_CONFIG is deprecated; use CODE_REASONING_CONFIG_FILE.");
+    return loadConfigFile(resolveConfigPath(legacyEnvConfig));
+  }
+
+  warnIgnoredLegacyConfigFiles();
 
   const globalSettingsPath = join(getHomeDir(), ".pi", "agent", "settings.json");
   const projectSettingsPath = join(process.cwd(), ".pi", "settings.json");
@@ -472,9 +494,13 @@ export {
 
 export default function codeReasoning(pi: ExtensionAPI) {
   // Register CLI flags
-  pi.registerFlag("--code-reasoning-config", {
+  pi.registerFlag("--code-reasoning-config-file", {
     description:
-      "Path to JSON config file (defaults to .pi/settings.json or ~/.pi/agent/settings.json under pi-code-reasoning).",
+      "Path to JSON config file (overrides .pi/settings.json or ~/.pi/agent/settings.json under pi-code-reasoning).",
+    type: "string",
+  });
+  pi.registerFlag("--code-reasoning-config", {
+    description: "Deprecated alias for --code-reasoning-config-file.",
     type: "string",
   });
   pi.registerFlag("--code-reasoning-max-bytes", {
@@ -491,8 +517,18 @@ export default function codeReasoning(pi: ExtensionAPI) {
   const getMaxLimits = (): { maxBytes: number; maxLines: number } => {
     const maxBytesFlag = pi.getFlag("--code-reasoning-max-bytes");
     const maxLinesFlag = pi.getFlag("--code-reasoning-max-lines");
-    const configFlag = pi.getFlag("--code-reasoning-config");
-    const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
+    const configFileFlag = pi.getFlag("--code-reasoning-config-file");
+    const legacyConfigFlag = pi.getFlag("--code-reasoning-config");
+    const configFlag =
+      typeof configFileFlag === "string"
+        ? configFileFlag
+        : typeof legacyConfigFlag === "string"
+          ? legacyConfigFlag
+          : undefined;
+    if (typeof configFileFlag !== "string" && typeof legacyConfigFlag === "string") {
+      console.warn("[pi-code-reasoning] --code-reasoning-config is deprecated; use --code-reasoning-config-file.");
+    }
+    const config = loadConfig(configFlag);
 
     const maxBytes =
       typeof maxBytesFlag === "string"

@@ -103,6 +103,36 @@ describe("pi-sequential-thinking helpers", () => {
       else delete process.env.HOME;
     }
   });
+
+  it("warns when a legacy config file exists but is ignored", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-seq-think-legacy-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-seq-think-legacy-project-"));
+
+    mkdirSync(join(tempHome, ".pi", "agent", "extensions"), { recursive: true });
+    writeFileSync(
+      join(tempHome, ".pi", "agent", "extensions", "sequential-thinking.json"),
+      JSON.stringify({ maxBytes: 111 }),
+      "utf-8",
+    );
+
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const mod = await import("../extensions/index.js");
+      expect(mod.loadConfig(undefined)).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Ignoring legacy config file"));
+    } finally {
+      warnSpy.mockRestore();
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
+  });
 });
 
 describe("pi-sequential-thinking type guards", () => {

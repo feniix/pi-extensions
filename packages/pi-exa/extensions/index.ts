@@ -153,13 +153,34 @@ function loadSettingsConfig(path: string): ExaConfig | null {
   }
 }
 
+function warnIgnoredLegacyConfigFiles(): void {
+  const legacyPaths = [
+    join(process.cwd(), ".pi", "extensions", "exa.json"),
+    join(getHomeDir(), ".pi", "agent", "extensions", "exa.json"),
+  ];
+
+  for (const legacyPath of legacyPaths) {
+    if (existsSync(legacyPath)) {
+      console.warn(
+        `[pi-exa] Ignoring legacy config file ${legacyPath}. Migrate non-secret settings to .pi/settings.json or ~/.pi/agent/settings.json under "pi-exa". Keep secrets in EXA_API_KEY or an explicit custom config via --exa-config-file / EXA_CONFIG_FILE.`,
+      );
+    }
+  }
+}
+
 function loadConfig(configPath?: string): ExaConfig | null {
   if (configPath) {
     return loadConfigFile(resolveConfigPath(configPath));
   }
+  if (process.env.EXA_CONFIG_FILE) {
+    return loadConfigFile(resolveConfigPath(process.env.EXA_CONFIG_FILE));
+  }
   if (process.env.EXA_CONFIG) {
+    console.warn("[pi-exa] EXA_CONFIG is deprecated; use EXA_CONFIG_FILE.");
     return loadConfigFile(resolveConfigPath(process.env.EXA_CONFIG));
   }
+
+  warnIgnoredLegacyConfigFiles();
 
   const globalSettingsPath = join(getHomeDir(), ".pi", "agent", "settings.json");
   const projectSettingsPath = join(process.cwd(), ".pi", "settings.json");
@@ -179,7 +200,18 @@ function loadConfig(configPath?: string): ExaConfig | null {
 }
 
 function getConfigOverrideFlag(pi: ExtensionAPI): string | undefined {
-  return normalizeString(pi.getFlag("--exa-config"));
+  const configFileFlag = normalizeString(pi.getFlag("--exa-config-file"));
+  if (configFileFlag) {
+    return configFileFlag;
+  }
+
+  const legacyConfigFlag = normalizeString(pi.getFlag("--exa-config"));
+  if (legacyConfigFlag) {
+    console.warn("[pi-exa] --exa-config is deprecated; use --exa-config-file.");
+    return legacyConfigFlag;
+  }
+
+  return undefined;
 }
 
 function getResolvedConfig(pi: ExtensionAPI): ExaConfig | null {
@@ -494,8 +526,12 @@ export default function exaExtension(pi: ExtensionAPI) {
     description: "Enable web_search_advanced_exa tool",
     type: "boolean",
   });
-  pi.registerFlag("--exa-config", {
+  pi.registerFlag("--exa-config-file", {
     description: "Path to custom JSON config file for private overrides such as API keys.",
+    type: "string",
+  });
+  pi.registerFlag("--exa-config", {
+    description: "Deprecated alias for --exa-config-file.",
     type: "string",
   });
 

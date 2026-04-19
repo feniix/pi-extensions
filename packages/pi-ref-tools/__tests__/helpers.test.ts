@@ -116,6 +116,36 @@ describe("pi-ref-tools helpers", () => {
       else delete process.env.HOME;
     }
   });
+
+  it("warns when a legacy config file exists but is ignored", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-ref-legacy-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-ref-legacy-project-"));
+
+    mkdirSync(join(tempHome, ".pi", "agent", "extensions"), { recursive: true });
+    writeFileSync(
+      join(tempHome, ".pi", "agent", "extensions", "ref-tools.json"),
+      JSON.stringify({ apiKey: "legacy-key" }),
+      "utf-8",
+    );
+
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const mod = await import("../extensions/index.js");
+      expect(mod.loadRuntimeConfig({ getFlag: () => undefined } as never)).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Ignoring legacy config file"));
+    } finally {
+      warnSpy.mockRestore();
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
+  });
 });
 
 describe("pi-ref-tools type guards", () => {

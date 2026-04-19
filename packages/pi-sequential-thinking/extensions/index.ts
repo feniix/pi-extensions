@@ -8,13 +8,13 @@
  * 1. Install: pi install npm:@feniix/pi-sequential-thinking
  * 2. Optional config:
  *    - Settings file: ~/.pi/agent/settings.json or .pi/settings.json under the pi-sequential-thinking key
- *      (or set SEQ_THINK_CONFIG / --seq-think-config for a custom path)
+ *      (or set SEQ_THINK_CONFIG_FILE / --seq-think-config-file for a custom path)
  *      Keys: storageDir, maxBytes, maxLines
  *    - MCP_STORAGE_DIR (storage directory for thought sessions)
  *    - SEQ_THINK_MAX_BYTES (default: 51200)
  *    - SEQ_THINK_MAX_LINES (default: 2000)
  * 3. Or pass flags:
- *    --seq-think-storage-dir, --seq-think-config, --seq-think-max-bytes, --seq-think-max-lines
+ *    --seq-think-storage-dir, --seq-think-config-file, --seq-think-max-bytes, --seq-think-max-lines
  *
  * Usage:
  *   "Think through this architecture decision step by step"
@@ -231,14 +231,36 @@ function loadSettingsConfig(path: string): SeqThinkConfig | null {
   }
 }
 
+function warnIgnoredLegacyConfigFiles(): void {
+  const legacyPaths = [
+    join(process.cwd(), ".pi", "extensions", "sequential-thinking.json"),
+    join(getHomeDir(), ".pi", "agent", "extensions", "sequential-thinking.json"),
+  ];
+
+  for (const legacyPath of legacyPaths) {
+    if (existsSync(legacyPath)) {
+      console.warn(
+        `[pi-sequential-thinking] Ignoring legacy config file ${legacyPath}. Migrate non-secret settings to .pi/settings.json or ~/.pi/agent/settings.json under "pi-sequential-thinking", or pass --seq-think-config-file / SEQ_THINK_CONFIG_FILE explicitly.`,
+      );
+    }
+  }
+}
+
 function loadConfig(configPath: string | undefined): SeqThinkConfig | null {
-  const envConfig = process.env.SEQ_THINK_CONFIG;
+  const envConfigFile = process.env.SEQ_THINK_CONFIG_FILE;
+  const legacyEnvConfig = process.env.SEQ_THINK_CONFIG;
   if (configPath) {
     return loadConfigFile(resolveConfigPath(configPath));
   }
-  if (envConfig) {
-    return loadConfigFile(resolveConfigPath(envConfig));
+  if (envConfigFile) {
+    return loadConfigFile(resolveConfigPath(envConfigFile));
   }
+  if (legacyEnvConfig) {
+    console.warn("[pi-sequential-thinking] SEQ_THINK_CONFIG is deprecated; use SEQ_THINK_CONFIG_FILE.");
+    return loadConfigFile(resolveConfigPath(legacyEnvConfig));
+  }
+
+  warnIgnoredLegacyConfigFiles();
 
   const projectSettingsPath = join(process.cwd(), ".pi", "settings.json");
   const globalSettingsPath = join(getHomeDir(), ".pi", "agent", "settings.json");
@@ -374,8 +396,12 @@ export default function sequentialThinking(pi: ExtensionAPI) {
     description: "Storage directory for thought sessions.",
     type: "string",
   });
-  pi.registerFlag("--seq-think-config", {
+  pi.registerFlag("--seq-think-config-file", {
     description: "Path to custom JSON config file (overrides settings.json lookup).",
+    type: "string",
+  });
+  pi.registerFlag("--seq-think-config", {
+    description: "Deprecated alias for --seq-think-config-file.",
     type: "string",
   });
   pi.registerFlag("--seq-think-max-bytes", {
@@ -393,8 +419,18 @@ export default function sequentialThinking(pi: ExtensionAPI) {
       return resolveConfigPath(storageDirFlag);
     }
 
-    const configFlag = pi.getFlag("--seq-think-config");
-    const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
+    const configFileFlag = pi.getFlag("--seq-think-config-file");
+    const legacyConfigFlag = pi.getFlag("--seq-think-config");
+    const configFlag =
+      typeof configFileFlag === "string"
+        ? configFileFlag
+        : typeof legacyConfigFlag === "string"
+          ? legacyConfigFlag
+          : undefined;
+    if (typeof configFileFlag !== "string" && typeof legacyConfigFlag === "string") {
+      console.warn("[pi-sequential-thinking] --seq-think-config is deprecated; use --seq-think-config-file.");
+    }
+    const config = loadConfig(configFlag);
     const envStorageDir = normalizeString(process.env.MCP_STORAGE_DIR);
     if (envStorageDir) {
       return resolveConfigPath(envStorageDir);
@@ -412,8 +448,18 @@ export default function sequentialThinking(pi: ExtensionAPI) {
   const getMaxLimits = (): { maxBytes: number; maxLines: number } => {
     const maxBytesFlag = pi.getFlag("--seq-think-max-bytes");
     const maxLinesFlag = pi.getFlag("--seq-think-max-lines");
-    const configFlag = pi.getFlag("--seq-think-config");
-    const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
+    const configFileFlag = pi.getFlag("--seq-think-config-file");
+    const legacyConfigFlag = pi.getFlag("--seq-think-config");
+    const configFlag =
+      typeof configFileFlag === "string"
+        ? configFileFlag
+        : typeof legacyConfigFlag === "string"
+          ? legacyConfigFlag
+          : undefined;
+    if (typeof configFileFlag !== "string" && typeof legacyConfigFlag === "string") {
+      console.warn("[pi-sequential-thinking] --seq-think-config is deprecated; use --seq-think-config-file.");
+    }
+    const config = loadConfig(configFlag);
 
     const maxBytes =
       typeof maxBytesFlag === "string"

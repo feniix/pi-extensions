@@ -292,7 +292,7 @@ describe("pi-exa auth helpers", () => {
 
     const pi = {
       getFlag(flag: string) {
-        if (flag === "--exa-config") {
+        if (flag === "--exa-config-file") {
           return configPath;
         }
         return undefined;
@@ -370,6 +370,36 @@ describe("pi-exa loadConfig", () => {
 
     const result = loadConfig(configPath);
     expect(result?.apiKey).toBe("env-api-key");
+  });
+
+  it("warns when a legacy config file exists but is ignored", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-exa-legacy-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-exa-legacy-project-"));
+
+    mkdirSync(join(tempHome, ".pi", "agent", "extensions"), { recursive: true });
+    writeFileSync(
+      join(tempHome, ".pi", "agent", "extensions", "exa.json"),
+      JSON.stringify({ apiKey: "legacy-key" }),
+      "utf-8",
+    );
+
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const mod = await import("../extensions/index.js");
+      expect(mod.loadConfig(undefined)).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Ignoring legacy config file"));
+    } finally {
+      warnSpy.mockRestore();
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
   });
 
   it("returns null when no settings or legacy config exist", async () => {
