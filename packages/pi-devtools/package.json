@@ -43,7 +43,10 @@
     "url": "git+https://github.com/feniix/pi-extensions.git",
     "directory": "packages/pi-devtools"
   },
-  "author": "feniix",
+  "author": {
+    "name": "Sebastian Otaegui",
+    "url": "https://github.com/feniix"
+  },
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/feniix/pi-extensions/issues"
