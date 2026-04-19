@@ -6,7 +6,7 @@
  * - Tool call guardrails: advisory warnings for common Notion mistakes
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -15,10 +15,29 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 // Config Paths
 // =============================================================================
 
-const CONFIG_DIR = join(homedir(), ".pi", "agent", "extensions");
-const MCP_CONFIG_FILE = join(CONFIG_DIR, "notion-mcp.json");
-const TOKEN_FILE = join(CONFIG_DIR, "notion-tokens.json");
-const LEGACY_TOKEN_FILE = join(process.cwd(), ".pi", "extensions", "notion.json");
+function getHomeDir(): string {
+  return process.env.HOME || homedir();
+}
+
+function getConfigDir(): string {
+  return join(getHomeDir(), ".pi", "agent", "extensions");
+}
+
+function getMcpConfigFile(): string {
+  return join(getConfigDir(), "notion-mcp.json");
+}
+
+function getTokenFile(): string {
+  return join(getConfigDir(), "notion-tokens.json");
+}
+
+function getLegacyGlobalTokenFile(): string {
+  return join(getConfigDir(), "notion.json");
+}
+
+function getLegacyProjectTokenFile(): string {
+  return join(process.cwd(), ".pi", "extensions", "notion.json");
+}
 
 // =============================================================================
 // Token Types
@@ -60,7 +79,7 @@ function readJsonIfExists<T>(path: string): T | null {
 }
 
 function getMcpConfigAuthStatus(): AuthStatus | null {
-  const config = readJsonIfExists<{ accessToken?: string; mcpUrl?: string }>(MCP_CONFIG_FILE);
+  const config = readJsonIfExists<{ accessToken?: string; mcpUrl?: string }>(getMcpConfigFile());
   if (typeof config?.accessToken !== "string" || config.accessToken.trim().length === 0) return null;
 
   return {
@@ -70,10 +89,11 @@ function getMcpConfigAuthStatus(): AuthStatus | null {
 }
 
 function getOAuthTokenAuthStatus(): AuthStatus | null {
-  const tokens = readJsonIfExists<OAuthTokens>(TOKEN_FILE);
+  const tokenFile = getTokenFile();
+  const tokens = readJsonIfExists<OAuthTokens>(tokenFile);
   if (!tokens?.accessToken || tokens.expiresAt <= Date.now()) return null;
 
-  const userInfoPath = TOKEN_FILE.replace("-tokens.json", "-user.json");
+  const userInfoPath = tokenFile.replace("-tokens.json", "-user.json");
   const userInfo = readJsonIfExists<NotionUserInfo>(userInfoPath);
   if (!userInfo) {
     return {
@@ -102,12 +122,12 @@ function getLegacyEnvAuthStatus(): AuthStatus | null {
 }
 
 function getLegacyConfigAuthStatus(): AuthStatus | null {
-  const config = readJsonIfExists<{ token?: string }>(LEGACY_TOKEN_FILE);
+  const config = loadConfig();
   if (!config?.token) return null;
 
   return {
     authenticated: false,
-    message: "[notion] Legacy notion.json token detected. MCP OAuth is still required: run /notion.",
+    message: "[notion] Legacy direct token config detected. MCP OAuth is still required: run /notion.",
   };
 }
 
@@ -220,16 +240,6 @@ export { checkNotionAuth, extractShortName, toolChecks };
 export default function notion(pi: ExtensionAPI) {
   // SessionStart: check auth and print status
   pi.on("session_start", async () => {
-    // Ensure config directory exists
-    if (!existsSync(CONFIG_DIR)) {
-      try {
-        mkdirSync(CONFIG_DIR, { recursive: true });
-        writeFileSync(join(CONFIG_DIR, "notion-mcp.json"), JSON.stringify({}), "utf-8");
-      } catch {
-        // Ignore if can't create
-      }
-    }
-
     const auth = checkNotionAuth();
     console.log(auth.message);
   });
@@ -250,28 +260,37 @@ interface NotionConfig {
 
 function resolveConfigPath(configPath: string): string {
   const trimmed = configPath.trim();
-  if (trimmed.startsWith("~/")) return join(homedir(), trimmed.slice(2));
-  if (trimmed.startsWith("~")) return join(homedir(), trimmed.slice(1));
+  if (trimmed.startsWith("~/")) return join(getHomeDir(), trimmed.slice(2));
+  if (trimmed.startsWith("~")) return join(getHomeDir(), trimmed.slice(1));
   return resolve(process.cwd(), trimmed);
 }
 
+function loadConfigFile(path: string): NotionConfig | null {
+  if (!existsSync(path)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as NotionConfig;
+  } catch {
+    return null;
+  }
+}
+
 function loadConfig(configPath?: string): NotionConfig | null {
-  const candidates: string[] = [];
-  if (configPath) candidates.push(resolveConfigPath(configPath));
-  else if (process.env.NOTION_CONFIG) candidates.push(resolveConfigPath(process.env.NOTION_CONFIG));
-  else {
-    const projectConfigPath = join(process.cwd(), ".pi", "extensions", "notion.json");
-    const globalConfigPath = join(homedir(), ".pi", "agent", "extensions", "notion.json");
-    candidates.push(projectConfigPath, globalConfigPath);
+  if (configPath) return loadConfigFile(resolveConfigPath(configPath));
+  if (process.env.NOTION_CONFIG) return loadConfigFile(resolveConfigPath(process.env.NOTION_CONFIG));
+
+  const globalConfig = loadConfigFile(getLegacyGlobalTokenFile());
+  const projectConfig = loadConfigFile(getLegacyProjectTokenFile());
+
+  if (!globalConfig && !projectConfig) {
+    return null;
   }
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      try {
-        return JSON.parse(readFileSync(candidate, "utf-8"));
-      } catch {}
-    }
-  }
-  return null;
+
+  return {
+    token: projectConfig?.token ?? globalConfig?.token,
+  };
 }
 
 interface TitleProp {

@@ -273,22 +273,24 @@ describe("pi-notion loadConfig", () => {
     expect(result).toBeNull();
   });
 
-  it("returns default config when a default config file exists in an isolated environment", () => {
+  it("loads from legacy private token files in an isolated environment", () => {
     const originalHome = process.env.HOME;
     const originalCwd = process.cwd();
     const tempHome = mkdtempSync(join(tmpdir(), "pi-notion-load-default-home-"));
     const tempProject = mkdtempSync(join(tmpdir(), "pi-notion-load-default-project-"));
-    const configDir = join(tempHome, ".pi", "agent", "extensions");
-    const configPath = join(configDir, "notion.json");
+    const globalConfigDir = join(tempHome, ".pi", "agent", "extensions");
+    const projectConfigDir = join(tempProject, ".pi", "extensions");
 
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(configPath, JSON.stringify({ token: null }), "utf-8");
+    mkdirSync(globalConfigDir, { recursive: true });
+    mkdirSync(projectConfigDir, { recursive: true });
+    writeFileSync(join(globalConfigDir, "notion.json"), JSON.stringify({ token: null }), "utf-8");
+    writeFileSync(join(projectConfigDir, "notion.json"), JSON.stringify({ token: "project-token" }), "utf-8");
     process.env.HOME = tempHome;
     process.chdir(tempProject);
 
     try {
       const result = loadConfig(undefined);
-      expect(result).toEqual({ token: null });
+      expect(result).toEqual({ token: "project-token" });
     } finally {
       process.chdir(originalCwd);
       if (originalHome) process.env.HOME = originalHome;
@@ -305,8 +307,8 @@ describe("pi-notion checkNotionAuth", () => {
     const tempHome = mkdtempSync(join(tmpdir(), "pi-notion-auth-home-"));
     const tempProject = mkdtempSync(join(tmpdir(), "pi-notion-auth-project-"));
 
-    mkdirSync(join(tempHome, ".pi", "agent", "extensions"), { recursive: true });
-    mkdirSync(join(tempProject, ".pi", "extensions"), { recursive: true });
+    mkdirSync(join(tempHome, ".pi", "agent"), { recursive: true });
+    mkdirSync(join(tempProject, ".pi"), { recursive: true });
 
     process.env.HOME = tempHome;
     process.chdir(tempProject);
