@@ -10,7 +10,7 @@ It also exposes a `/statusline` tool for explicit retrieval.
 
 ```text
 Model: ... | Thinking: ... | Ctx: ... | ⎇ ... | dirty: +... | ↑.../↓...
-<repo> | cwd: ... | 𖠰 ... | Skill: ...
+<repo> | cwd: ... | 𖠰 ... | Skill: ... | Act: ...
 ```
 
 ## Included fields
@@ -25,6 +25,32 @@ Model: ... | Thinking: ... | Ctx: ... | ⎇ ... | dirty: +... | ↑.../↓...
 - Current working directory
 - Git worktree label
 - Last explicitly invoked skill
+- Live activity indicator
+
+## Live updates
+
+The footer now updates continuously during active work instead of only at the end of a turn.
+This includes:
+
+- after user input is submitted
+- when the agent starts and each turn starts
+- while assistant messages are streaming
+- while tools are starting, streaming updates, and finishing
+- when the agent returns control to the user
+
+To avoid excessive redraws, streaming-triggered footer renders are throttled.
+
+## Activity behavior
+
+The activity segment summarizes what pi is doing right now.
+Examples:
+
+- `Act: queued`
+- `Act: thinking`
+- `Act: responding`
+- `Act: bash`
+- `Act: bash x2`
+- `Act: idle`
 
 ## Skill behavior
 
@@ -32,6 +58,11 @@ The skill segment tracks the latest explicit skill command seen in user input.
 Examples:
 - `/skill:release` -> `Skill: release`
 - `/release` -> `Skill: release` if `release` is registered as a skill command in the current session
+
+## Token behavior
+
+Token totals are based on assistant usage in the session branch.
+During active streaming, the extension also uses the latest live assistant usage when available so the token display can update before the turn fully finishes.
 
 ## Worktree behavior
 
@@ -48,9 +79,18 @@ npm run test
 npm run typecheck
 ```
 
-For quick manual testing:
+For quick manual testing from this monorepo:
 
 ```bash
 cd packages/pi-statusline
-pi -e ./extensions/index.ts
+pi
+```
+
+This repo's root `package.json` already auto-loads `packages/pi-statusline/extensions/index.ts`, so using `pi -e .` or `pi -e ./extensions/index.ts` from inside the workspace will load the extension twice and cause a tool-name conflict.
+
+If you want to test it as a standalone extension outside this workspace, run pi from another directory and pass the explicit file path:
+
+```bash
+cd /tmp
+pi -e /Users/feniix/src/personal/pi/pi-extensions/packages/pi-statusline/extensions/index.ts
 ```

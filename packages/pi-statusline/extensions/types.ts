@@ -10,6 +10,13 @@ export interface GitSnapshot {
   worktreeLabel: string;
 }
 
+export interface AssistantUsageLike {
+  input?: number;
+  output?: number;
+}
+
+export type ActivityPhase = "idle" | "queued" | "running" | "thinking" | "responding" | "tool";
+
 export interface StatuslineState {
   modelLabel: string;
   thinkingLabel: string;
@@ -17,6 +24,11 @@ export interface StatuslineState {
   tokenLabel: string;
   gitSnapshot: GitSnapshot;
   lastSkill: string | null;
+  activityLabel: string;
+  activityPhase: ActivityPhase;
+  activeToolCount: number;
+  activeToolName: string | null;
+  liveAssistantUsage: AssistantUsageLike | null;
 }
 
 export interface StatuslineLinesInput {
@@ -30,6 +42,7 @@ export interface StatuslineLinesInput {
   cwdLabel: string;
   worktreeLabel: string;
   skillLabel: string;
+  activityLabel: string;
 }
 
 export interface MinimalModel {
@@ -42,11 +55,6 @@ export interface ContextUsageLike {
   tokens?: number | null;
   percent?: number | null;
   contextWindow?: number | null;
-}
-
-export interface AssistantUsageLike {
-  input?: number;
-  output?: number;
 }
 
 export interface SessionEntryLike {

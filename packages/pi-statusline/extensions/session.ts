@@ -1,7 +1,10 @@
 import { formatCompactNumber, formatModelLabel, formatTokenPair } from "./format.js";
-import type { ContextUsageLike, MinimalModel, SessionEntryLike, TokenTotals } from "./types.js";
+import type { AssistantUsageLike, ContextUsageLike, MinimalModel, SessionEntryLike, TokenTotals } from "./types.js";
 
-export function getTokenTotals(entries: ReadonlyArray<SessionEntryLike>): TokenTotals {
+export function getTokenTotals(
+  entries: ReadonlyArray<SessionEntryLike>,
+  liveAssistantUsage?: AssistantUsageLike | null,
+): TokenTotals {
   let input = 0;
   let output = 0;
 
@@ -14,11 +17,27 @@ export function getTokenTotals(entries: ReadonlyArray<SessionEntryLike>): TokenT
     output += entry.message.usage?.output ?? 0;
   }
 
+  if (!liveAssistantUsage) {
+    return { input, output };
+  }
+
+  const lastEntry = entries.at(-1);
+  const liveInput = liveAssistantUsage.input ?? 0;
+  const liveOutput = liveAssistantUsage.output ?? 0;
+
+  if (lastEntry?.type === "message" && lastEntry.message?.role === "assistant") {
+    input -= lastEntry.message.usage?.input ?? 0;
+    output -= lastEntry.message.usage?.output ?? 0;
+  }
+
+  input += liveInput;
+  output += liveOutput;
+
   return { input, output };
 }
 
-export function getTokenLabel(entries: ReadonlyArray<SessionEntryLike>): string {
-  const totals = getTokenTotals(entries);
+export function getTokenLabel(entries: ReadonlyArray<SessionEntryLike>, liveAssistantUsage?: AssistantUsageLike | null): string {
+  const totals = getTokenTotals(entries, liveAssistantUsage);
   return formatTokenPair(totals.input, totals.output);
 }
 

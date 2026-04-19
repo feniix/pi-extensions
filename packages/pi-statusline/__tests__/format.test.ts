@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildStatusLines, formatCompactNumber, formatModelLabel, formatTokenPair } from "../extensions/format.js";
+import {
+  buildStatusLines,
+  formatCompactNumber,
+  formatModelLabel,
+  formatTokenPair,
+  stripAnsi,
+} from "../extensions/format.js";
+import { defaultPalette } from "../extensions/palette.js";
 
 describe("pi-statusline format helpers", () => {
   it("formats compact numbers", () => {
@@ -16,7 +23,12 @@ describe("pi-statusline format helpers", () => {
     expect(formatModelLabel({ name: "Opus 4.6", contextWindow: 1_000_000 })).toBe("Model: Opus 4.6 (1.0M context)");
   });
 
-  it("builds two status lines", () => {
+  it("exposes the default palette", () => {
+    expect(defaultPalette.model).toBe("#008787");
+    expect(defaultPalette.activity).toBe("#5FAF00");
+  });
+
+  it("builds two colorized status lines", () => {
     const lines = buildStatusLines({
       modelLabel: "Model: Opus 4.6",
       thinkingLabel: "Thinking: medium",
@@ -28,10 +40,13 @@ describe("pi-statusline format helpers", () => {
       cwdLabel: "cwd: /tmp/repo",
       worktreeLabel: "𖠰 none",
       skillLabel: "Skill: release",
+      activityLabel: "Act: responding",
     });
 
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain("Thinking: medium");
-    expect(lines[1]).toContain("Skill: release");
+    expect(lines[0]).toContain("\u001B[");
+    expect(stripAnsi(lines[0])).toContain("Thinking: medium");
+    expect(stripAnsi(lines[1])).toContain("Skill: release");
+    expect(stripAnsi(lines[1])).toContain("Act: responding");
   });
 });

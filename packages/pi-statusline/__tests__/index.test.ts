@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
-import statuslineExtension, { extractSkillName } from "../extensions/index.js";
+import statuslineExtension, { extractSkillName, getActivityLabel } from "../extensions/index.js";
 
 const createMockPi = () => ({
   on: vi.fn(),
@@ -17,7 +17,21 @@ describe("pi-statusline extension", () => {
 
     const eventNames = mockPi.on.mock.calls.map(([name]) => name);
     expect(eventNames).toEqual(
-      expect.arrayContaining(["session_start", "model_select", "agent_end", "input", "tool_execution_start"]),
+      expect.arrayContaining([
+        "session_start",
+        "agent_start",
+        "turn_start",
+        "message_start",
+        "message_update",
+        "message_end",
+        "tool_execution_start",
+        "tool_execution_update",
+        "tool_execution_end",
+        "model_select",
+        "agent_end",
+        "input",
+        "session_shutdown",
+      ]),
     );
   });
 
@@ -44,6 +58,11 @@ describe("pi-statusline extension", () => {
 
   it("ignores non-skill slash commands", () => {
     expect(extractSkillName("/model", [{ name: "release", source: "skill" }])).toBeNull();
+  });
+
+  it("formats activity labels", () => {
+    expect(getActivityLabel("idle")).toBe("Act: idle");
+    expect(getActivityLabel("tool", "bash", 2)).toBe("Act: bash x2");
   });
 
   it("registers a custom footer on session_start", async () => {

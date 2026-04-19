@@ -12,11 +12,31 @@ describe("pi-statusline session helpers", () => {
     expect(totals).toEqual({ input: 2000, output: 800 });
   });
 
+  it("replaces the trailing assistant usage with live usage", () => {
+    const totals = getTokenTotals(
+      [
+        { type: "message", message: { role: "assistant", usage: { input: 1200, output: 300 } } },
+        { type: "message", message: { role: "assistant", usage: { input: 800, output: 500 } } },
+      ],
+      { input: 950, output: 700 },
+    );
+
+    expect(totals).toEqual({ input: 2150, output: 1000 });
+  });
+
   it("formats token label from session entries", () => {
     const label = getTokenLabel([
-      { type: "message", message: { role: "assistant", usage: { input: 18000, output: 4200 } } },
+      { type: "message", message: { role: "assistant", usage: { input: 18_000, output: 4_200 } } },
     ]);
     expect(label).toBe("↑18.0k/↓4.2k");
+  });
+
+  it("formats token label with live assistant usage", () => {
+    const label = getTokenLabel(
+      [{ type: "message", message: { role: "assistant", usage: { input: 18_000, output: 4_200 } } }],
+      { input: 18_500, output: 4_400 },
+    );
+    expect(label).toBe("↑18.5k/↓4.4k");
   });
 
   it("formats context label from explicit percent", () => {

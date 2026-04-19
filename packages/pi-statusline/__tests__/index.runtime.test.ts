@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import statuslineExtension, {
   buildLines,
   createInitialGitSnapshot,
@@ -9,6 +9,7 @@ import statuslineExtension, {
   getDirtyLabel,
   getWorktreeLabel,
 } from "../extensions/index.js";
+import { stripAnsi } from "../extensions/format.js";
 
 function createMockPi() {
   return {
@@ -47,6 +48,7 @@ describe("pi-statusline runtime helpers", () => {
       worktreeLabel: "no git",
     });
     expect(createInitialState().modelLabel).toBe("Model: none");
+    expect(createInitialState().activityLabel).toBe("Act: idle");
     expect(getBranchLabel("main")).toBe("⎇ main");
     expect(getBranchLabel(null)).toBe("⎇ no git");
     expect(getWorktreeLabel("feature")).toBe("𖠰 feature");
@@ -64,14 +66,15 @@ describe("pi-statusline runtime helpers", () => {
         tokenLabel: "↑1.0k/↓2.0k",
         gitSnapshot: { repoName: "project", branch: "main", dirtyCount: 3, worktreeLabel: "main" },
         lastSkill: "release",
+        activityLabel: "Act: responding",
       },
       "main",
       30,
     );
 
     expect(lines).toHaveLength(2);
-    expect(lines[0]?.length).toBeLessThanOrEqual(30);
-    expect(lines[1]?.length).toBeLessThanOrEqual(30);
+    expect(stripAnsi(lines[0] ?? "").length).toBeLessThanOrEqual(30);
+    expect(stripAnsi(lines[1] ?? "").length).toBeLessThanOrEqual(30);
   });
 
   it("extracts and ignores skill commands", () => {
@@ -82,6 +85,16 @@ describe("pi-statusline runtime helpers", () => {
 });
 
 describe("pi-statusline extension runtime", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-19T12:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
   it("emits status lines on non-UI session start and updates footer in UI mode", async () => {
     const mockPi = createMockPi();
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -119,28 +132,84 @@ describe("pi-statusline extension runtime", () => {
     );
 
     expect(setFooter).toHaveBeenCalledTimes(1);
-    logSpy.mockRestore();
   });
 
-  it("captures skill usage from input and tool execution events", async () => {
+  it("throttles footer rerenders during rapid streaming updates", async () => {
+    const mockPi = createMockPi();
+    statuslineExtension(mockPi as unknown as ExtensionAPI);
+
+    const sessionStartHandler = mockPi.on.mock.calls.find(([name]) => name === "session_start")?.[1];
+    const messageUpdateHandler = mockPi.on.mock.calls.find(([name]) => name === "message_update")?.[1];
+    const setFooter = vi.fn();
+    const ctx = {
+      cwd: "/tmp/project",
+      hasUI: true,
+      model: { id: "opus", contextWindow: 1000000 },
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ percent: 12 }),
+      ui: { setFooter },
+    };
+
+    await sessionStartHandler?.({}, ctx);
+
+    const footerFactory = setFooter.mock.calls[0]?.[0];
+    const requestRender = vi.fn();
+    footerFactory?.(
+      { requestRender },
+      {},
+      {
+        getGitBranch: () => "main",
+        onBranchChange: () => vi.fn(),
+      },
+    );
+
+    await messageUpdateHandler?.({ message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta" } }, ctx);
+    await messageUpdateHandler?.({ message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta" } }, ctx);
+    await messageUpdateHandler?.({ message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta" } }, ctx);
+
+    expect(requestRender).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(requestRender).toHaveBeenCalledTimes(2);
+  });
+
+  it("tracks activity and live token usage during tool execution", async () => {
     const mockPi = createMockPi();
     statuslineExtension(mockPi as unknown as ExtensionAPI);
 
     const inputHandler = mockPi.on.mock.calls.find(([name]) => name === "input")?.[1];
-    const toolHandler = mockPi.on.mock.calls.find(([name]) => name === "tool_execution_start")?.[1];
+    const messageUpdateHandler = mockPi.on.mock.calls.find(([name]) => name === "message_update")?.[1];
+    const toolStartHandler = mockPi.on.mock.calls.find(([name]) => name === "tool_execution_start")?.[1];
     const toolDef = mockPi.registerTool.mock.calls[0]?.[0];
 
-    await inputHandler?.({ text: "/release" });
-    await toolHandler?.({ toolName: "Skill", args: { skill: "coverage" } });
-
-    const result = await toolDef.execute("tool-id", {}, new AbortController().signal, undefined, {
+    const branchEntries = [
+      { type: "message", message: { role: "assistant", usage: { input: 100, output: 40 } } },
+      { type: "message", message: { role: "assistant", usage: { input: 10, output: 5 } } },
+    ];
+    const ctx = {
       cwd: "/tmp/project",
       hasUI: false,
       model: { id: "opus", contextWindow: 1000000 },
-      sessionManager: { getBranch: () => [] },
+      sessionManager: { getBranch: () => branchEntries },
       getContextUsage: () => ({ percent: 12 }),
-    });
+    };
 
-    expect(result.content[0]?.text).toContain("Skill: coverage");
+    await inputHandler?.({ text: "/release" }, ctx);
+    await messageUpdateHandler?.(
+      {
+        message: { role: "assistant", usage: { input: 25, output: 9 } },
+        assistantMessageEvent: { type: "text_delta" },
+      },
+      ctx,
+    );
+    await toolStartHandler?.({ toolName: "bash", args: {} }, ctx);
+
+    const result = await toolDef.execute("tool-id", {}, new AbortController().signal, undefined, ctx);
+
+    const text = stripAnsi(result.content[0]?.text ?? "");
+    expect(text).toContain("Skill: release");
+    expect(text).toContain("Act: bash");
+    expect(text).toContain("↑125/↓49");
   });
 });
