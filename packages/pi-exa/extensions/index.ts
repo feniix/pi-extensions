@@ -9,7 +9,7 @@
  * 2. Get API key from: https://dashboard.exa.ai/api-keys
  * 3. Configure via:
  *    - Environment variable: EXA_API_KEY
- *    - JSON config: ~/.pi/agent/extensions/exa.json
+ *    - Settings file for non-secret config: .pi/settings.json or ~/.pi/agent/settings.json under pi-exa
  *    - CLI flag: --exa-api-key
  *
  * Usage:
@@ -163,11 +163,9 @@ function loadConfig(configPath?: string): ExaConfig | null {
 
   const globalSettingsPath = join(getHomeDir(), ".pi", "agent", "settings.json");
   const projectSettingsPath = join(process.cwd(), ".pi", "settings.json");
-  const legacyGlobalConfigPath = join(getHomeDir(), ".pi", "agent", "extensions", "exa.json");
-  const legacyProjectConfigPath = join(process.cwd(), ".pi", "extensions", "exa.json");
 
-  const globalConfig = loadSettingsConfig(globalSettingsPath) ?? loadConfigFile(legacyGlobalConfigPath);
-  const projectConfig = loadSettingsConfig(projectSettingsPath) ?? loadConfigFile(legacyProjectConfigPath);
+  const globalConfig = loadSettingsConfig(globalSettingsPath);
+  const projectConfig = loadSettingsConfig(projectSettingsPath);
 
   if (!globalConfig && !projectConfig) {
     return null;
