@@ -27,7 +27,12 @@ describe("pi-code-reasoning", () => {
 
     const flagNames = mockPi.registerFlag.mock.calls.map(([name]) => name);
     expect(flagNames).toEqual(
-      expect.arrayContaining(["--code-reasoning-config", "--code-reasoning-max-bytes", "--code-reasoning-max-lines"]),
+      expect.arrayContaining([
+        "--code-reasoning-config-file",
+        "--code-reasoning-config",
+        "--code-reasoning-max-bytes",
+        "--code-reasoning-max-lines",
+      ]),
     );
   });
 
@@ -39,12 +44,12 @@ describe("pi-code-reasoning", () => {
     expect(toolNames).toHaveLength(3);
   });
 
-  it("registers exactly 3 flags", () => {
+  it("registers exactly 4 flags", () => {
     const mockPi = createMockPi();
     codeReasoning(mockPi as unknown as ExtensionAPI);
 
     const flagNames = mockPi.registerFlag.mock.calls.map(([name]) => name);
-    expect(flagNames).toHaveLength(3);
+    expect(flagNames).toHaveLength(4);
   });
 
   it("registers tools with execute functions", () => {

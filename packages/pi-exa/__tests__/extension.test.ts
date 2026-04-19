@@ -53,15 +53,16 @@ describe("pi-exa extension", () => {
     const flagNames = mockPi.registerFlag.mock.calls.map(([name]) => name);
     expect(flagNames).toContain("--exa-api-key");
     expect(flagNames).toContain("--exa-enable-advanced");
+    expect(flagNames).toContain("--exa-config-file");
     expect(flagNames).toContain("--exa-config");
   });
 
-  it("registers exactly 3 flags", () => {
+  it("registers exactly 4 flags", () => {
     const mockPi = createMockPi();
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const flagNames = mockPi.registerFlag.mock.calls.map(([name]) => name);
-    expect(flagNames).toHaveLength(3);
+    expect(flagNames).toHaveLength(4);
   });
 
   it("registers web_search_exa by default", () => {
@@ -93,7 +94,7 @@ describe("pi-exa extension", () => {
       apiKey: "config-api-key",
       enabledTools: ["web_search_exa", "web_fetch_exa", "web_search_advanced_exa"],
     });
-    const mockPi = createMockPi({ "--exa-config": configPath });
+    const mockPi = createMockPi({ "--exa-config-file": configPath });
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const advancedTool = getRegisteredTool(mockPi, "web_search_advanced_exa");
@@ -313,7 +314,7 @@ describe("pi-exa extension", () => {
     const configPath = writeTempConfig({
       enabledTools: ["web_search_exa", "web_fetch_exa", "web_search_advanced_exa"],
     });
-    const mockPi = createMockPi({ "--exa-config": configPath });
+    const mockPi = createMockPi({ "--exa-config-file": configPath });
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const advancedTool = getRegisteredTool(mockPi, "web_search_advanced_exa");
@@ -328,7 +329,7 @@ describe("pi-exa extension", () => {
       apiKey: "config-api-key",
       enabledTools: ["web_search_exa", "web_fetch_exa", "web_search_advanced_exa"],
     });
-    const mockPi = createMockPi({ "--exa-config": configPath });
+    const mockPi = createMockPi({ "--exa-config-file": configPath });
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const advancedTool = getRegisteredTool(mockPi, "web_search_advanced_exa");
@@ -351,7 +352,7 @@ describe("pi-exa extension", () => {
       apiKey: "config-api-key",
       enabledTools: ["web_search_exa", "web_fetch_exa", "web_search_advanced_exa"],
     });
-    const mockPi = createMockPi({ "--exa-config": configPath });
+    const mockPi = createMockPi({ "--exa-config-file": configPath });
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const advancedTool = getRegisteredTool(mockPi, "web_search_advanced_exa");
@@ -408,7 +409,7 @@ describe("pi-exa extension", () => {
       apiKey: "config-api-key",
       enabledTools: ["web_search_exa", "web_fetch_exa", "web_search_advanced_exa"],
     });
-    const mockPi = createMockPi({ "--exa-config": configPath });
+    const mockPi = createMockPi({ "--exa-config-file": configPath });
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const advancedTool = getRegisteredTool(mockPi, "web_search_advanced_exa");

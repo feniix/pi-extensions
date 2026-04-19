@@ -130,13 +130,15 @@ Under the `pi-code-reasoning` key:
 ```
 
 > Best practice: use `settings.json` for non-secret defaults only.
-> If you need a separate private override file, use `--code-reasoning-config` or `CODE_REASONING_CONFIG` to point to a custom JSON config file.
+> If you need a separate private override file, use `--code-reasoning-config-file` or `CODE_REASONING_CONFIG_FILE` to point to a custom JSON config file.
+> Legacy aliases `--code-reasoning-config` and `CODE_REASONING_CONFIG` are still accepted but deprecated.
 
 ## CLI Flags
 
 | Flag | Env Variable | Default | Description |
 |------|-------------|---------|-------------|
-| `--code-reasoning-config` | `CODE_REASONING_CONFIG` | — | Custom JSON config file path (overrides settings.json lookup) |
+| `--code-reasoning-config-file` | `CODE_REASONING_CONFIG_FILE` | — | Custom JSON config file path (overrides settings.json lookup) |
+| `--code-reasoning-config` | `CODE_REASONING_CONFIG` | — | Deprecated alias for the config file path |
 | `--code-reasoning-max-bytes` | `CODE_REASONING_MAX_BYTES` | `51200` | Max output bytes |
 | `--code-reasoning-max-lines` | `CODE_REASONING_MAX_LINES` | `2000` | Max output lines |
 
