@@ -8,7 +8,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 // =============================================================================
@@ -23,8 +23,26 @@ function getConfigDir(): string {
   return join(getHomeDir(), ".pi", "agent", "extensions");
 }
 
+function resolveOptionalPath(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed.startsWith("~/")) {
+    return join(getHomeDir(), trimmed.slice(2));
+  }
+  if (trimmed.startsWith("~")) {
+    return join(getHomeDir(), trimmed.slice(1));
+  }
+  if (isAbsolute(trimmed)) {
+    return trimmed;
+  }
+  return resolve(process.cwd(), trimmed);
+}
+
 function getMcpConfigFile(): string {
-  return join(getConfigDir(), "notion-mcp.json");
+  const configuredPath = process.env.NOTION_MCP_AUTH_FILE;
+  if (typeof configuredPath === "string" && configuredPath.trim().length > 0) {
+    return resolveOptionalPath(configuredPath);
+  }
+  return join(getConfigDir(), "notion-mcp-auth.json");
 }
 
 function getTokenFile(): string {

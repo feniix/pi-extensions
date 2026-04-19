@@ -16,6 +16,7 @@ import {
   finalizeConnection,
   getConnectedStatusMessage,
   getConnectionStatusText,
+  getDefaultAuthFilePath,
   NotionMCPClient,
   resolveAccessToken,
   resolveCallbackResult,
@@ -251,13 +252,25 @@ describe("pi-notion mcp client runtime helpers", () => {
     expect(success.content[0]?.text).toBe("done");
   });
 
+  it("resolves auth file path from environment when configured", () => {
+    const original = process.env.NOTION_MCP_AUTH_FILE;
+    process.env.NOTION_MCP_AUTH_FILE = "~/custom-notion-auth.json";
+
+    try {
+      expect(getDefaultAuthFilePath()).toContain("custom-notion-auth.json");
+    } finally {
+      if (original) process.env.NOTION_MCP_AUTH_FILE = original;
+      else delete process.env.NOTION_MCP_AUTH_FILE;
+    }
+  });
+
   it("saves and clears config files with file token storage", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pi-notion-mcp-storage-"));
     const tokenStorage = new FileTokenStorage();
-    (tokenStorage as unknown as { path: string }).path = join(dir, "notion-mcp.json");
+    (tokenStorage as unknown as { path: string }).path = join(dir, "notion-mcp-auth.json");
 
     await tokenStorage.save({ mcpUrl: "https://mcp.notion.com/mcp", accessToken: "token-123" });
-    expect(existsSync(join(dir, "notion-mcp.json"))).toBe(true);
+    expect(existsSync(join(dir, "notion-mcp-auth.json"))).toBe(true);
     expect(await tokenStorage.load()).toMatchObject({ accessToken: "token-123" });
     await tokenStorage.clear();
     expect(await tokenStorage.load()).toBeNull();

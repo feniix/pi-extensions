@@ -13,7 +13,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { getPort as lookupPort } from "portfinder";
@@ -25,6 +25,7 @@ import { getPort as lookupPort } from "portfinder";
 const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
 const HTTP_REQUEST_COMPLETE_MARKER = "\r\n\r\n";
 const CALLBACK_PATH_PREFIX = "GET /callback?";
+const NOTION_MCP_AUTH_FILE_ENV = "NOTION_MCP_AUTH_FILE";
 
 type NotifyLevel = "info" | "error";
 type NotifyFn = (message: string, type?: NotifyLevel) => void;
@@ -533,12 +534,34 @@ interface StoredConfig {
   clientSecret?: string;
 }
 
+function resolveAuthFilePath(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed.startsWith("~/")) {
+    return join(homedir(), trimmed.slice(2));
+  }
+  if (trimmed.startsWith("~")) {
+    return join(homedir(), trimmed.slice(1));
+  }
+  if (isAbsolute(trimmed)) {
+    return trimmed;
+  }
+  return resolve(process.cwd(), trimmed);
+}
+
+function getDefaultAuthFilePath(): string {
+  const configuredPath = process.env[NOTION_MCP_AUTH_FILE_ENV];
+  if (typeof configuredPath === "string" && configuredPath.trim().length > 0) {
+    return resolveAuthFilePath(configuredPath);
+  }
+  const configDir = join(homedir(), ".pi", "agent", "extensions");
+  return join(configDir, "notion-mcp-auth.json");
+}
+
 class FileTokenStorage {
   private path: string;
 
   constructor() {
-    const configDir = join(homedir(), ".pi", "agent", "extensions");
-    this.path = join(configDir, "notion-mcp.json");
+    this.path = getDefaultAuthFilePath();
   }
 
   async save(config: StoredConfig): Promise<void> {
@@ -754,6 +777,7 @@ export {
   finalizeConnection,
   getConnectedStatusMessage,
   getConnectionStatusText,
+  getDefaultAuthFilePath,
   isNumericString,
   isRecord,
   NotionMCPClient,
