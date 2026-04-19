@@ -30,6 +30,7 @@ describe("pi-ref-tools", () => {
         "--ref-mcp-api-key",
         "--ref-mcp-timeout-ms",
         "--ref-mcp-protocol",
+        "--ref-mcp-config-file",
         "--ref-mcp-config",
         "--ref-mcp-max-bytes",
         "--ref-mcp-max-lines",
@@ -45,12 +46,12 @@ describe("pi-ref-tools", () => {
     expect(toolNames).toHaveLength(2);
   });
 
-  it("registers exactly 7 flags", () => {
+  it("registers exactly 8 flags", () => {
     const mockPi = createMockPi();
     refTools(mockPi as unknown as ExtensionAPI);
 
     const flagNames = mockPi.registerFlag.mock.calls.map(([name]) => name);
-    expect(flagNames).toHaveLength(7);
+    expect(flagNames).toHaveLength(8);
   });
 
   it("registers tool with correct parameters schema", () => {
@@ -124,6 +125,7 @@ describe("pi-ref-tools", () => {
     expect(flagNames).toContain("--ref-mcp-api-key");
     expect(flagNames).toContain("--ref-mcp-timeout-ms");
     expect(flagNames).toContain("--ref-mcp-protocol");
+    expect(flagNames).toContain("--ref-mcp-config-file");
     expect(flagNames).toContain("--ref-mcp-config");
     expect(flagNames).toContain("--ref-mcp-max-bytes");
     expect(flagNames).toContain("--ref-mcp-max-lines");
@@ -136,7 +138,7 @@ describe("pi-ref-tools", () => {
         getFlagCalls.push(name);
       }),
       getFlag: vi.fn((flag: string) => {
-        if (flag === "--ref-mcp-config") return "/path/to/config.json";
+        if (flag === "--ref-mcp-config-file") return "/path/to/config.json";
         return undefined;
       }),
       registerTool: vi.fn(),
@@ -145,7 +147,7 @@ describe("pi-ref-tools", () => {
 
     refTools(mockPi as unknown as ExtensionAPI);
 
-    expect(getFlagCalls).toContain("--ref-mcp-config");
+    expect(getFlagCalls).toContain("--ref-mcp-config-file");
   });
 
   it("registers tools with unique execute functions", () => {

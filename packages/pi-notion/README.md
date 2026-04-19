@@ -70,9 +70,16 @@ This package requires MCP OAuth (`/notion` or `notion_mcp_connect`) for tool con
 
 Session-start status checks for:
 
-1. MCP OAuth config (`~/.pi/agent/extensions/notion-mcp.json`)
+1. MCP OAuth config (`~/.pi/agent/extensions/notion-mcp-auth.json`, or `NOTION_MCP_AUTH_FILE` / `--notion-mcp-auth-file` if explicitly set)
 2. Legacy OAuth token files under `~/.pi/agent/extensions/`
-3. Legacy direct API token hints (`NOTION_API_KEY`, `NOTION_TOKEN`, `.pi/extensions/notion.json`) and warns that MCP OAuth is still required.
+3. Legacy direct API token hints (`NOTION_API_KEY`, `NOTION_TOKEN`) and warns that MCP OAuth is still required.
+
+Best practice: use `settings.json` for non-secret defaults only.
+Keep Notion credentials in dedicated private files under `~/.pi/agent/extensions/` (for example `notion-mcp-auth.json`) or in environment variables. If you want to move the auth file, set `NOTION_MCP_AUTH_FILE` or pass `--notion-mcp-auth-file` with a custom file path. Legacy aliases `NOTION_MCP_AUTH` and `--notion-mcp-auth` are still accepted but deprecated.
+
+For the legacy direct-token compatibility config path, prefer `NOTION_CONFIG_FILE` / `--notion-config-file`. Legacy aliases `NOTION_CONFIG` and `--notion-config` are still accepted but deprecated.
+
+Do not store tokens or client secrets in `settings.json`.
 
 ## Requirements
 

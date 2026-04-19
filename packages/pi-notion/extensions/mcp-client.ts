@@ -10,10 +10,10 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { getPort as lookupPort } from "portfinder";
@@ -25,6 +25,12 @@ import { getPort as lookupPort } from "portfinder";
 const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
 const HTTP_REQUEST_COMPLETE_MARKER = "\r\n\r\n";
 const CALLBACK_PATH_PREFIX = "GET /callback?";
+const NOTION_MCP_AUTH_FILE_ENV = "NOTION_MCP_AUTH_FILE";
+const NOTION_MCP_AUTH_FILE_LEGACY_ENV = "NOTION_MCP_AUTH";
+
+function getHomeDir(): string {
+  return process.env.HOME || homedir();
+}
 
 type NotifyLevel = "info" | "error";
 type NotifyFn = (message: string, type?: NotifyLevel) => void;
@@ -533,12 +539,60 @@ interface StoredConfig {
   clientSecret?: string;
 }
 
+function resolveAuthFilePath(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed.startsWith("~/")) {
+    return join(getHomeDir(), trimmed.slice(2));
+  }
+  if (trimmed.startsWith("~")) {
+    return join(getHomeDir(), trimmed.slice(1));
+  }
+  if (isAbsolute(trimmed)) {
+    return trimmed;
+  }
+  return resolve(process.cwd(), trimmed);
+}
+
+function getLegacyAuthFilePath(): string {
+  const configDir = join(getHomeDir(), ".pi", "agent", "extensions");
+  return join(configDir, "notion-mcp.json");
+}
+
+function getDefaultAuthFilePath(): string {
+  const configuredPath = process.env[NOTION_MCP_AUTH_FILE_ENV];
+  if (typeof configuredPath === "string" && configuredPath.trim().length > 0) {
+    return resolveAuthFilePath(configuredPath);
+  }
+
+  const legacyConfiguredPath = process.env[NOTION_MCP_AUTH_FILE_LEGACY_ENV];
+  if (typeof legacyConfiguredPath === "string" && legacyConfiguredPath.trim().length > 0) {
+    console.warn("[pi-notion] NOTION_MCP_AUTH is deprecated; use NOTION_MCP_AUTH_FILE.");
+    return resolveAuthFilePath(legacyConfiguredPath);
+  }
+
+  const configDir = join(getHomeDir(), ".pi", "agent", "extensions");
+  const nextPath = join(configDir, "notion-mcp-auth.json");
+  const legacyPath = getLegacyAuthFilePath();
+
+  if (!existsSync(nextPath) && existsSync(legacyPath)) {
+    try {
+      mkdirSync(configDir, { recursive: true });
+      renameSync(legacyPath, nextPath);
+      console.warn(`[pi-notion] Migrated legacy MCP auth file from ${legacyPath} to ${nextPath}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[pi-notion] Failed to migrate legacy MCP auth file ${legacyPath}: ${message}`);
+    }
+  }
+
+  return nextPath;
+}
+
 class FileTokenStorage {
   private path: string;
 
   constructor() {
-    const configDir = join(homedir(), ".pi", "agent", "extensions");
-    this.path = join(configDir, "notion-mcp.json");
+    this.path = getDefaultAuthFilePath();
   }
 
   async save(config: StoredConfig): Promise<void> {
@@ -754,6 +808,7 @@ export {
   finalizeConnection,
   getConnectedStatusMessage,
   getConnectionStatusText,
+  getDefaultAuthFilePath,
   isNumericString,
   isRecord,
   NotionMCPClient,
@@ -766,6 +821,24 @@ export {
 };
 
 export default function notionMCPClientExtension(pi: ExtensionAPI) {
+  pi.registerFlag("--notion-mcp-auth-file", {
+    description: "Path to the persisted Notion MCP auth file.",
+    type: "string",
+  });
+  pi.registerFlag("--notion-mcp-auth", {
+    description: "Deprecated alias for --notion-mcp-auth-file.",
+    type: "string",
+  });
+
+  const authFileFlag = pi.getFlag("--notion-mcp-auth-file");
+  const legacyAuthFileFlag = pi.getFlag("--notion-mcp-auth");
+  if (typeof authFileFlag === "string" && authFileFlag.trim().length > 0) {
+    process.env.NOTION_MCP_AUTH_FILE = authFileFlag;
+  } else if (typeof legacyAuthFileFlag === "string" && legacyAuthFileFlag.trim().length > 0) {
+    console.warn("[pi-notion] --notion-mcp-auth is deprecated; use --notion-mcp-auth-file.");
+    process.env.NOTION_MCP_AUTH_FILE = legacyAuthFileFlag;
+  }
+
   mcpClient = new NotionMCPClient();
   const notify = createUiNotifier(pi);
 

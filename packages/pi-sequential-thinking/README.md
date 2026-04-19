@@ -10,7 +10,7 @@
 - **Export Session** (`export_session`): Save thinking sessions to JSON files
 - **Import Session** (`import_session`): Load previously exported sessions
 - **Configurable Output Limits**: Client-side byte and line truncation
-- **Flexible Configuration**: JSON config files, environment variables, and CLI flags
+- **Flexible Configuration**: settings.json, custom JSON config files, environment variables, and CLI flags
 - **Native TypeScript**: No external dependencies or child processes
 
 ## Install
@@ -39,17 +39,28 @@ export SEQ_THINK_MAX_BYTES=102400
 export SEQ_THINK_MAX_LINES=5000
 ```
 
-### Option 3: JSON Config File
+### Option 3: Settings File
 
-Create `~/.pi/agent/extensions/sequential-thinking.json` (auto-created on first run):
+Use pi's standard settings locations:
+
+- project: `.pi/settings.json`
+- global: `~/.pi/agent/settings.json`
+
+Under the `pi-sequential-thinking` key:
 
 ```json
 {
-  "storageDir": null,
-  "maxBytes": 51200,
-  "maxLines": 2000
+  "pi-sequential-thinking": {
+    "storageDir": null,
+    "maxBytes": 51200,
+    "maxLines": 2000
+  }
 }
 ```
+
+> Best practice: use `settings.json` for non-secret defaults only.
+> If you want a separate private override file, use `--seq-think-config-file` or `SEQ_THINK_CONFIG_FILE` to point to a custom JSON config file.
+> Legacy aliases `--seq-think-config` and `SEQ_THINK_CONFIG` are still accepted but deprecated.
 
 ### Option 4: CLI Flags
 
@@ -59,10 +70,12 @@ pi --seq-think-storage-dir=/tmp/thoughts --seq-think-max-bytes=102400
 
 ### Config Resolution Order
 
-1. `--seq-think-config` flag path
-2. `SEQ_THINK_CONFIG` environment variable
-3. `./.pi/extensions/sequential-thinking.json` (project-level)
-4. `~/.pi/agent/extensions/sequential-thinking.json` (global)
+1. `--seq-think-config-file` flag path
+2. `SEQ_THINK_CONFIG_FILE` environment variable
+3. legacy `--seq-think-config` flag path (deprecated)
+4. legacy `SEQ_THINK_CONFIG` environment variable (deprecated)
+3. `.pi/settings.json` under `pi-sequential-thinking` (project-level)
+4. `~/.pi/agent/settings.json` under `pi-sequential-thinking` (global)
 
 ## Tools
 
@@ -110,7 +123,8 @@ Import a previously exported thinking session from a JSON file.
 | Flag | Env Variable | Default | Description |
 |------|-------------|---------|-------------|
 | `--seq-think-storage-dir` | `MCP_STORAGE_DIR` | — | Storage directory for sessions |
-| `--seq-think-config` | `SEQ_THINK_CONFIG` | — | Custom config file path |
+| `--seq-think-config-file` | `SEQ_THINK_CONFIG_FILE` | — | Custom JSON config file path (overrides settings.json lookup) |
+| `--seq-think-config` | `SEQ_THINK_CONFIG` | — | Deprecated alias for the config file path |
 | `--seq-think-max-bytes` | `SEQ_THINK_MAX_BYTES` | `51200` | Max output bytes |
 | `--seq-think-max-lines` | `SEQ_THINK_MAX_LINES` | `2000` | Max output lines |
 

@@ -1,10 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_CONFIG_FILE,
-  ensureDefaultConfigFile,
   formatToolOutput,
   isJsonRpcResponse,
   isRecord,
@@ -72,32 +71,80 @@ describe("pi-ref-tools helpers", () => {
     expect(redactApiKey("abcdefghijklmnop")).toBe("abcd...mnop");
   });
 
-  it("writes default config when none exists", () => {
-    const base = mkdtempSync(join(tmpdir(), "pi-ref-config-"));
-    const projectConfigPath = join(base, "project", ".pi", "extensions", "ref-tools.json");
-    const globalConfigPath = join(base, "global", "extensions", "ref-tools.json");
-
-    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-
-    expect(existsSync(globalConfigPath)).toBe(true);
-    const raw = readFileSync(globalConfigPath, "utf-8");
-    expect(JSON.parse(raw)).toEqual(DEFAULT_CONFIG_FILE);
+  it("keeps DEFAULT_CONFIG_FILE available for reference", () => {
+    expect(DEFAULT_CONFIG_FILE).toMatchObject({
+      url: "https://api.ref.tools/mcp",
+      maxBytes: 51200,
+      maxLines: 2000,
+    });
   });
 
-  it("does not overwrite existing config", () => {
-    const base = mkdtempSync(join(tmpdir(), "pi-ref-config-exists-"));
-    const projectConfigPath = join(base, "project", ".pi", "extensions", "ref-tools.json");
-    const globalConfigPath = join(base, "global", "extensions", "ref-tools.json");
+  it("loads config from standard pi settings files", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-ref-settings-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-ref-settings-project-"));
 
-    // First call creates the file
-    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-    const firstContent = readFileSync(globalConfigPath, "utf-8");
+    mkdirSync(join(tempHome, ".pi", "agent"), { recursive: true });
+    mkdirSync(join(tempProject, ".pi"), { recursive: true });
 
-    // Second call should not overwrite
-    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-    const secondContent = readFileSync(globalConfigPath, "utf-8");
+    writeFileSync(
+      join(tempHome, ".pi", "agent", "settings.json"),
+      JSON.stringify({ "pi-ref-tools": { timeoutMs: 1234 } }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(tempProject, ".pi", "settings.json"),
+      JSON.stringify({ "pi-ref-tools": { url: "https://project.example/mcp", maxLines: 99 } }),
+      "utf-8",
+    );
 
-    expect(firstContent).toBe(secondContent);
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+
+    try {
+      const mod = await import("../extensions/index.js");
+      const config = mod.loadRuntimeConfig({ getFlag: () => undefined } as never);
+      expect(config?.apiKey).toBeUndefined();
+      expect(config?.timeoutMs).toBe(1234);
+      expect(config?.url).toBe("https://project.example/mcp");
+      expect(config?.maxLines).toBe(99);
+    } finally {
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
+  });
+
+  it("warns when a legacy config file exists but is ignored", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-ref-legacy-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-ref-legacy-project-"));
+
+    mkdirSync(join(tempHome, ".pi", "agent", "extensions"), { recursive: true });
+    writeFileSync(
+      join(tempHome, ".pi", "agent", "extensions", "ref-tools.json"),
+      JSON.stringify({ apiKey: "legacy-key" }),
+      "utf-8",
+    );
+
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const mod = await import("../extensions/index.js");
+      expect(mod.loadRuntimeConfig({ getFlag: () => undefined } as never)).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Ignoring legacy config file"));
+    } finally {
+      warnSpy.mockRestore();
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
   });
 });
 

@@ -32,20 +32,30 @@ You need a Ref API key from [ref.tools/keys](https://ref.tools/keys).
 export REF_API_KEY="your_key"
 ```
 
-### Option 2: JSON Config File
+### Option 2: Settings File
 
-Create `~/.pi/agent/extensions/ref-tools.json` (auto-created on first run):
+Use pi's standard settings locations for non-secret configuration:
+
+- project: `.pi/settings.json`
+- global: `~/.pi/agent/settings.json`
+
+Under the `pi-ref-tools` key:
 
 ```json
 {
-  "url": "https://api.ref.tools/mcp",
-  "apiKey": "your_key",
-  "timeoutMs": 30000,
-  "protocolVersion": "2025-06-18",
-  "maxBytes": 51200,
-  "maxLines": 2000
+  "pi-ref-tools": {
+    "url": "https://api.ref.tools/mcp",
+    "timeoutMs": 30000,
+    "protocolVersion": "2025-06-18",
+    "maxBytes": 51200,
+    "maxLines": 2000
+  }
 }
 ```
+
+> Best practice: use `settings.json` for non-secret defaults only.
+> Keep `REF_API_KEY` in an environment variable, or use `--ref-mcp-config-file` / `REF_MCP_CONFIG_FILE` to point to a custom private JSON config file when you need to persist secrets outside your project.
+> Legacy aliases `--ref-mcp-config` and `REF_MCP_CONFIG` are still accepted but deprecated.
 
 ### Option 3: CLI Flags
 
@@ -55,10 +65,12 @@ pi --ref-mcp-api-key=your_key
 
 ### Config Resolution Order
 
-1. `--ref-mcp-config` flag path
-2. `REF_MCP_CONFIG` environment variable
-3. `./.pi/extensions/ref-tools.json` (project-level)
-4. `~/.pi/agent/extensions/ref-tools.json` (global)
+1. `--ref-mcp-config-file` flag path
+2. `REF_MCP_CONFIG_FILE` environment variable
+3. legacy `--ref-mcp-config` flag path (deprecated)
+4. legacy `REF_MCP_CONFIG` environment variable (deprecated)
+3. `.pi/settings.json` under `pi-ref-tools` (project-level)
+4. `~/.pi/agent/settings.json` under `pi-ref-tools` (global)
 
 ## Tools
 
@@ -90,7 +102,8 @@ Read a documentation URL and return optimized markdown. Pass the exact URL from 
 | `--ref-mcp-api-key` | `REF_API_KEY` | — | API key (sent as `x-ref-api-key` header) |
 | `--ref-mcp-timeout-ms` | `REF_MCP_TIMEOUT_MS` | `30000` | HTTP timeout in ms |
 | `--ref-mcp-protocol` | `REF_MCP_PROTOCOL_VERSION` | `2025-06-18` | MCP protocol version |
-| `--ref-mcp-config` | `REF_MCP_CONFIG` | — | Custom config file path |
+| `--ref-mcp-config-file` | `REF_MCP_CONFIG_FILE` | — | Custom config file path |
+| `--ref-mcp-config` | `REF_MCP_CONFIG` | — | Deprecated alias for the config file path |
 | `--ref-mcp-max-bytes` | `REF_MCP_MAX_BYTES` | `51200` | Max output bytes |
 | `--ref-mcp-max-lines` | `REF_MCP_MAX_LINES` | `2000` | Max output lines |
 

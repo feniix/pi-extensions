@@ -7,16 +7,16 @@
  * Setup:
  * 1. Install: pi install npm:@feniix/pi-code-reasoning
  * 2. Or pass flags:
- *    --code-reasoning-config, --code-reasoning-max-bytes, --code-reasoning-max-lines
+ *    --code-reasoning-config-file, --code-reasoning-max-bytes, --code-reasoning-max-lines
  *
  * Usage:
  *   "Use code reasoning to think through this architecture decision"
  *   "Process a thought about the database schema design"
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { AgentToolUpdateCallback, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -78,6 +78,10 @@ interface McpToolDetails {
 // =============================================================================
 // Utility Functions
 // =============================================================================
+
+function getHomeDir(): string {
+  return process.env.HOME || homedir();
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -194,10 +198,10 @@ function resolveEffectiveLimits(
 function resolveConfigPath(configPath: string): string {
   const trimmed = configPath.trim();
   if (trimmed.startsWith("~/")) {
-    return join(homedir(), trimmed.slice(2));
+    return join(getHomeDir(), trimmed.slice(2));
   }
   if (trimmed.startsWith("~")) {
-    return join(homedir(), trimmed.slice(1));
+    return join(getHomeDir(), trimmed.slice(1));
   }
   if (isAbsolute(trimmed)) {
     return trimmed;
@@ -215,43 +219,87 @@ function parseConfig(raw: unknown, pathHint: string): CodeReasoningConfig {
   };
 }
 
-function loadConfig(configPath: string | undefined): CodeReasoningConfig | null {
-  const candidates: string[] = [];
-  const envConfig = process.env.CODE_REASONING_CONFIG;
-  if (configPath) {
-    candidates.push(resolveConfigPath(configPath));
-  } else if (envConfig) {
-    candidates.push(resolveConfigPath(envConfig));
-  } else {
-    const projectConfigPath = join(process.cwd(), ".pi", "extensions", "code-reasoning.json");
-    const globalConfigPath = join(homedir(), ".pi", "agent", "extensions", "code-reasoning.json");
-    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-    candidates.push(projectConfigPath, globalConfigPath);
+function loadConfigFile(path: string): CodeReasoningConfig | null {
+  if (!existsSync(path)) {
+    return null;
   }
 
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) {
-      continue;
-    }
-    const raw = readFileSync(candidate, "utf-8");
-    const parsed = JSON.parse(raw);
-    return parseConfig(parsed, candidate);
-  }
-
-  return null;
-}
-
-function ensureDefaultConfigFile(projectConfigPath: string, globalConfigPath: string): void {
-  if (existsSync(projectConfigPath) || existsSync(globalConfigPath)) {
-    return;
-  }
   try {
-    mkdirSync(dirname(globalConfigPath), { recursive: true });
-    writeFileSync(globalConfigPath, `${JSON.stringify(DEFAULT_CONFIG_FILE, null, 2)}\n`, "utf-8");
+    const raw = readFileSync(path, "utf-8");
+    const parsed = JSON.parse(raw);
+    return parseConfig(parsed, path);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[pi-code-reasoning] Failed to write ${globalConfigPath}: ${message}`);
+    console.warn(`[pi-code-reasoning] Failed to parse config ${path}: ${message}`);
+    return null;
   }
+}
+
+function loadSettingsConfig(path: string): CodeReasoningConfig | null {
+  if (!existsSync(path)) {
+    return null;
+  }
+
+  try {
+    const raw = readFileSync(path, "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const config = parsed["pi-code-reasoning"];
+    if (!isRecord(config)) {
+      return null;
+    }
+    return parseConfig(config, path);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[pi-code-reasoning] Failed to parse settings ${path}: ${message}`);
+    return null;
+  }
+}
+
+function warnIgnoredLegacyConfigFiles(): void {
+  const legacyPaths = [
+    join(process.cwd(), ".pi", "extensions", "code-reasoning.json"),
+    join(getHomeDir(), ".pi", "agent", "extensions", "code-reasoning.json"),
+  ];
+
+  for (const legacyPath of legacyPaths) {
+    if (existsSync(legacyPath)) {
+      console.warn(
+        `[pi-code-reasoning] Ignoring legacy config file ${legacyPath}. Migrate non-secret settings to .pi/settings.json or ~/.pi/agent/settings.json under "pi-code-reasoning", or pass --code-reasoning-config-file / CODE_REASONING_CONFIG_FILE explicitly.`,
+      );
+    }
+  }
+}
+
+function loadConfig(configPath: string | undefined): CodeReasoningConfig | null {
+  const envConfigFile = process.env.CODE_REASONING_CONFIG_FILE;
+  const legacyEnvConfig = process.env.CODE_REASONING_CONFIG;
+  if (configPath) {
+    return loadConfigFile(resolveConfigPath(configPath));
+  }
+  if (envConfigFile) {
+    return loadConfigFile(resolveConfigPath(envConfigFile));
+  }
+  if (legacyEnvConfig) {
+    console.warn("[pi-code-reasoning] CODE_REASONING_CONFIG is deprecated; use CODE_REASONING_CONFIG_FILE.");
+    return loadConfigFile(resolveConfigPath(legacyEnvConfig));
+  }
+
+  warnIgnoredLegacyConfigFiles();
+
+  const globalSettingsPath = join(getHomeDir(), ".pi", "agent", "settings.json");
+  const projectSettingsPath = join(process.cwd(), ".pi", "settings.json");
+
+  const globalConfig = loadSettingsConfig(globalSettingsPath);
+  const projectConfig = loadSettingsConfig(projectSettingsPath);
+
+  if (!globalConfig && !projectConfig) {
+    return null;
+  }
+
+  return {
+    maxBytes: projectConfig?.maxBytes ?? globalConfig?.maxBytes,
+    maxLines: projectConfig?.maxLines ?? globalConfig?.maxLines,
+  };
 }
 
 // =============================================================================
@@ -446,8 +494,13 @@ export {
 
 export default function codeReasoning(pi: ExtensionAPI) {
   // Register CLI flags
+  pi.registerFlag("--code-reasoning-config-file", {
+    description:
+      "Path to JSON config file (overrides .pi/settings.json or ~/.pi/agent/settings.json under pi-code-reasoning).",
+    type: "string",
+  });
   pi.registerFlag("--code-reasoning-config", {
-    description: "Path to JSON config file (defaults to ~/.pi/agent/extensions/code-reasoning.json).",
+    description: "Deprecated alias for --code-reasoning-config-file.",
     type: "string",
   });
   pi.registerFlag("--code-reasoning-max-bytes", {
@@ -464,8 +517,18 @@ export default function codeReasoning(pi: ExtensionAPI) {
   const getMaxLimits = (): { maxBytes: number; maxLines: number } => {
     const maxBytesFlag = pi.getFlag("--code-reasoning-max-bytes");
     const maxLinesFlag = pi.getFlag("--code-reasoning-max-lines");
-    const configFlag = pi.getFlag("--code-reasoning-config");
-    const config = loadConfig(typeof configFlag === "string" ? configFlag : undefined);
+    const configFileFlag = pi.getFlag("--code-reasoning-config-file");
+    const legacyConfigFlag = pi.getFlag("--code-reasoning-config");
+    const configFlag =
+      typeof configFileFlag === "string"
+        ? configFileFlag
+        : typeof legacyConfigFlag === "string"
+          ? legacyConfigFlag
+          : undefined;
+    if (typeof configFileFlag !== "string" && typeof legacyConfigFlag === "string") {
+      console.warn("[pi-code-reasoning] --code-reasoning-config is deprecated; use --code-reasoning-config-file.");
+    }
+    const config = loadConfig(configFlag);
 
     const maxBytes =
       typeof maxBytesFlag === "string"

@@ -47,7 +47,7 @@ describe("pi-ref-tools runtime", () => {
     const configPath = join(base, "ref-tools.json");
     writeFileSync(configPath, JSON.stringify({ url: "https://docs.example.test/mcp", apiKey: "config-key" }), "utf-8");
 
-    const mockPi = createMockPi({ "--ref-mcp-config": configPath });
+    const mockPi = createMockPi({ "--ref-mcp-config-file": configPath });
     refTools(mockPi as unknown as ExtensionAPI);
 
     const sessionStart = getEventHandler(mockPi, "session_start");

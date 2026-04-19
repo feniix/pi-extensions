@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -273,27 +273,46 @@ describe("pi-notion loadConfig", () => {
     expect(result).toBeNull();
   });
 
-  it("returns default config when a default config file exists in an isolated environment", () => {
-    const originalHome = process.env.HOME;
-    const originalCwd = process.cwd();
-    const tempHome = mkdtempSync(join(tmpdir(), "pi-notion-load-default-home-"));
-    const tempProject = mkdtempSync(join(tmpdir(), "pi-notion-load-default-project-"));
-    const configDir = join(tempHome, ".pi", "agent", "extensions");
-    const configPath = join(configDir, "notion.json");
-
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(configPath, JSON.stringify({ token: null }), "utf-8");
-    process.env.HOME = tempHome;
-    process.chdir(tempProject);
+  it("loads from NOTION_CONFIG_FILE when set", () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-notion-load-env-file-"));
+    const configPath = join(base, "notion-config.json");
+    const original = process.env.NOTION_CONFIG_FILE;
+    writeFileSync(configPath, JSON.stringify({ token: "env-file-token" }), "utf-8");
+    process.env.NOTION_CONFIG_FILE = configPath;
 
     try {
-      const result = loadConfig(undefined);
-      expect(result).toEqual({ token: null });
+      expect(loadConfig(undefined)).toEqual({ token: "env-file-token" });
     } finally {
-      process.chdir(originalCwd);
-      if (originalHome) process.env.HOME = originalHome;
-      else delete process.env.HOME;
+      if (original) process.env.NOTION_CONFIG_FILE = original;
+      else delete process.env.NOTION_CONFIG_FILE;
     }
+  });
+
+  it("supports deprecated NOTION_CONFIG with warning", () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-notion-load-env-legacy-"));
+    const configPath = join(base, "notion-config.json");
+    const original = process.env.NOTION_CONFIG;
+    const originalFile = process.env.NOTION_CONFIG_FILE;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    writeFileSync(configPath, JSON.stringify({ token: "legacy-env-token" }), "utf-8");
+    delete process.env.NOTION_CONFIG_FILE;
+    process.env.NOTION_CONFIG = configPath;
+
+    try {
+      expect(loadConfig(undefined)).toEqual({ token: "legacy-env-token" });
+      expect(warnSpy).toHaveBeenCalledWith("[pi-notion] NOTION_CONFIG is deprecated; use NOTION_CONFIG_FILE.");
+    } finally {
+      warnSpy.mockRestore();
+      if (original) process.env.NOTION_CONFIG = original;
+      else delete process.env.NOTION_CONFIG;
+      if (originalFile) process.env.NOTION_CONFIG_FILE = originalFile;
+      else delete process.env.NOTION_CONFIG_FILE;
+    }
+  });
+
+  it("returns null when no custom config path is provided", () => {
+    const result = loadConfig(undefined);
+    expect(result).toBeNull();
   });
 });
 
@@ -305,8 +324,8 @@ describe("pi-notion checkNotionAuth", () => {
     const tempHome = mkdtempSync(join(tmpdir(), "pi-notion-auth-home-"));
     const tempProject = mkdtempSync(join(tmpdir(), "pi-notion-auth-project-"));
 
-    mkdirSync(join(tempHome, ".pi", "agent", "extensions"), { recursive: true });
-    mkdirSync(join(tempProject, ".pi", "extensions"), { recursive: true });
+    mkdirSync(join(tempHome, ".pi", "agent"), { recursive: true });
+    mkdirSync(join(tempProject, ".pi"), { recursive: true });
 
     process.env.HOME = tempHome;
     process.chdir(tempProject);
@@ -331,6 +350,37 @@ describe("pi-notion checkNotionAuth", () => {
     const result = await importCheckNotionAuthInIsolatedEnv();
     expect(result.authenticated).toBe(false);
     expect(result.message).toContain("Not authenticated");
+  });
+
+  it("migrates legacy MCP auth file to the new filename", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-notion-migrate-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-notion-migrate-project-"));
+    const configDir = join(tempHome, ".pi", "agent", "extensions");
+
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "notion-mcp.json"),
+      JSON.stringify({ mcpUrl: "https://mcp.notion.com/mcp", accessToken: "token-123" }),
+      "utf-8",
+    );
+
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+
+    try {
+      const mod = await import("../extensions/index.js");
+      const result = mod.checkNotionAuth();
+      expect(result.authenticated).toBe(true);
+      expect(existsSync(join(configDir, "notion-mcp.json"))).toBe(false);
+      expect(existsSync(join(configDir, "notion-mcp-auth.json"))).toBe(true);
+    } finally {
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
   });
 
   it("detects NOTION_API_KEY but still requires MCP auth", async () => {

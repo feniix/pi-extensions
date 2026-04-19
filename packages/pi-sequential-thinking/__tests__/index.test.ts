@@ -35,6 +35,7 @@ describe("pi-sequential-thinking", () => {
     expect(flagNames).toEqual(
       expect.arrayContaining([
         "--seq-think-storage-dir",
+        "--seq-think-config-file",
         "--seq-think-config",
         "--seq-think-max-bytes",
         "--seq-think-max-lines",

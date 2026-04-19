@@ -1,11 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_MAX_CHARACTERS,
   DEFAULT_NUM_RESULTS,
-  ensureDefaultConfigFile,
   formatCrawlResults,
   formatSearchResults,
   getAuthStatusMessage,
@@ -233,38 +232,44 @@ describe("pi-exa constants", () => {
   });
 });
 
-describe("pi-exa ensureDefaultConfigFile", () => {
-  it("writes default config when none exists", () => {
-    const base = mkdtempSync(join(tmpdir(), "pi-exa-config-"));
-    const projectConfigPath = join(base, "project", ".pi", "extensions", "exa.json");
-    const globalConfigPath = join(base, "global", "extensions", "exa.json");
+describe("pi-exa settings config", () => {
+  it("loads settings from standard pi settings files", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-exa-settings-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-exa-settings-project-"));
 
-    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
+    mkdirSync(join(tempHome, ".pi", "agent"), { recursive: true });
+    mkdirSync(join(tempProject, ".pi"), { recursive: true });
 
-    expect(existsSync(globalConfigPath)).toBe(true);
-    const raw = readFileSync(globalConfigPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    expect(parsed).toHaveProperty("apiKey");
-    expect(parsed).toHaveProperty("enabledTools");
-  });
+    writeFileSync(
+      join(tempHome, ".pi", "agent", "settings.json"),
+      JSON.stringify({ "pi-exa": { enabledTools: ["web_search_exa"] } }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(tempProject, ".pi", "settings.json"),
+      JSON.stringify({ "pi-exa": { advancedEnabled: true } }),
+      "utf-8",
+    );
 
-  it("does not overwrite existing config", () => {
-    const base = mkdtempSync(join(tmpdir(), "pi-exa-config-exists-"));
-    const projectConfigPath = join(base, "project", ".pi", "extensions", "exa.json");
-    const globalConfigPath = join(base, "global", "extensions", "exa.json");
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
 
-    // First call creates the file
-    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-    const firstContent = readFileSync(globalConfigPath, "utf-8");
-
-    // Second call should not overwrite
-    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-    const secondContent = readFileSync(globalConfigPath, "utf-8");
-
-    expect(firstContent).toBe(secondContent);
+    try {
+      const mod = await import("../extensions/index.js");
+      const result = mod.loadConfig(undefined);
+      expect(result?.apiKey).toBeUndefined();
+      expect(result?.enabledTools).toEqual(["web_search_exa"]);
+      expect(result?.advancedEnabled).toBe(true);
+    } finally {
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
   });
 });
-
 describe("pi-exa auth helpers", () => {
   it("prefers CLI flag over config and environment", () => {
     const pi = {
@@ -287,7 +292,7 @@ describe("pi-exa auth helpers", () => {
 
     const pi = {
       getFlag(flag: string) {
-        if (flag === "--exa-config") {
+        if (flag === "--exa-config-file") {
           return configPath;
         }
         return undefined;
@@ -367,11 +372,53 @@ describe("pi-exa loadConfig", () => {
     expect(result?.apiKey).toBe("env-api-key");
   });
 
-  it("returns default config for empty config path", () => {
-    const result = loadConfig(undefined);
-    // Creates default config and returns it
-    expect(result).not.toBeNull();
-    expect(result).toHaveProperty("enabledTools");
-    expect(result?.enabledTools).toContain("web_search_exa");
+  it("warns when a legacy config file exists but is ignored", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-exa-legacy-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-exa-legacy-project-"));
+
+    mkdirSync(join(tempHome, ".pi", "agent", "extensions"), { recursive: true });
+    writeFileSync(
+      join(tempHome, ".pi", "agent", "extensions", "exa.json"),
+      JSON.stringify({ apiKey: "legacy-key" }),
+      "utf-8",
+    );
+
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const mod = await import("../extensions/index.js");
+      expect(mod.loadConfig(undefined)).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Ignoring legacy config file"));
+    } finally {
+      warnSpy.mockRestore();
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
+  });
+
+  it("returns null when no settings or legacy config exist", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-exa-empty-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-exa-empty-project-"));
+
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+
+    try {
+      const mod = await import("../extensions/index.js");
+      expect(mod.loadConfig(undefined)).toBeNull();
+    } finally {
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
   });
 });

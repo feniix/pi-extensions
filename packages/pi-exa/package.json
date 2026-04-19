@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-exa",
-  "version": "2.0.4",
+  "version": "2.1.0",
   "description": "Exa MCP extension for pi — web search, content fetching, and advanced search via Exa AI",
   "keywords": [
     "pi",

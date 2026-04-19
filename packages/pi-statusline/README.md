@@ -79,7 +79,7 @@ Settings locations:
 - global: `~/.pi/agent/settings.json`
 - project: `.pi/settings.json`
 
-Use the `pi-statusline` key:
+Use the `pi-statusline` key for non-secret configuration:
 
 ```json
 {
@@ -91,6 +91,8 @@ Use the `pi-statusline` key:
   }
 }
 ```
+
+`pi-statusline` does not need secrets. As a general pi convention, keep `settings.json` for non-secret defaults; credentials belong in environment variables, OAuth/private auth files, or explicit custom config files used by extensions that support them.
 
 Supported palette keys:
 

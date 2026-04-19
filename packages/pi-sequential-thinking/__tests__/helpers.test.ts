@@ -1,12 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_CONFIG_FILE,
-  ensureDefaultConfigFile,
   formatToolOutput,
   isRecord,
+  loadConfig,
   normalizeNumber,
   normalizeString,
   parseConfig,
@@ -55,30 +55,83 @@ describe("pi-sequential-thinking helpers", () => {
     expect(normalizeNumber(Number.POSITIVE_INFINITY)).toBeUndefined();
   });
 
-  it("writes default config when none exists", () => {
-    const base = mkdtempSync(join(tmpdir(), "pi-seq-think-config-"));
-    const projectConfigPath = join(base, "project", ".pi", "extensions", "sequential-thinking.json");
-    const globalConfigPath = join(base, "global", "extensions", "sequential-thinking.json");
-
-    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-
-    expect(existsSync(globalConfigPath)).toBe(true);
-    const raw = readFileSync(globalConfigPath, "utf-8");
-    expect(JSON.parse(raw)).toEqual(DEFAULT_CONFIG_FILE);
+  it("keeps DEFAULT_CONFIG_FILE available for reference", () => {
+    expect(DEFAULT_CONFIG_FILE).toMatchObject({
+      storageDir: null,
+      maxBytes: 51200,
+      maxLines: 2000,
+    });
   });
 
-  it("does not overwrite existing config", () => {
-    const base = mkdtempSync(join(tmpdir(), "pi-seq-think-config-exists-"));
-    const projectConfigPath = join(base, "project", ".pi", "extensions", "sequential-thinking.json");
-    const globalConfigPath = join(base, "global", "extensions", "sequential-thinking.json");
+  it("loads config from standard pi settings files", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-seq-think-settings-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-seq-think-settings-project-"));
 
-    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-    const firstContent = readFileSync(globalConfigPath, "utf-8");
+    const globalSettingsDir = join(tempHome, ".pi", "agent");
+    const projectSettingsDir = join(tempProject, ".pi");
 
-    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-    const secondContent = readFileSync(globalConfigPath, "utf-8");
+    mkdirSync(globalSettingsDir, { recursive: true });
+    mkdirSync(projectSettingsDir, { recursive: true });
 
-    expect(firstContent).toBe(secondContent);
+    writeFileSync(
+      join(globalSettingsDir, "settings.json"),
+      JSON.stringify({ "pi-sequential-thinking": { maxBytes: 111 } }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(projectSettingsDir, "settings.json"),
+      JSON.stringify({ "pi-sequential-thinking": { storageDir: "/tmp/thoughts", maxLines: 22 } }),
+      "utf-8",
+    );
+
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+
+    try {
+      const mod = await import("../extensions/index.js");
+      expect(mod.loadConfig(undefined)).toEqual({
+        storageDir: "/tmp/thoughts",
+        maxBytes: 111,
+        maxLines: 22,
+      });
+    } finally {
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
+  });
+
+  it("warns when a legacy config file exists but is ignored", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-seq-think-legacy-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-seq-think-legacy-project-"));
+
+    mkdirSync(join(tempHome, ".pi", "agent", "extensions"), { recursive: true });
+    writeFileSync(
+      join(tempHome, ".pi", "agent", "extensions", "sequential-thinking.json"),
+      JSON.stringify({ maxBytes: 111 }),
+      "utf-8",
+    );
+
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const mod = await import("../extensions/index.js");
+      expect(mod.loadConfig(undefined)).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Ignoring legacy config file"));
+    } finally {
+      warnSpy.mockRestore();
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
   });
 });
 
@@ -153,6 +206,30 @@ describe("pi-sequential-thinking resolveConfigPath", () => {
   it("resolves relative paths from cwd", () => {
     const result = resolveConfigPath("relative/path.json");
     expect(result).toBe(resolve(process.cwd(), "relative/path.json"));
+  });
+});
+
+describe("pi-sequential-thinking loadConfig", () => {
+  it("returns null when no config exists", () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-seq-think-load-"));
+    const configPath = join(base, "nonexistent.json");
+    expect(loadConfig(configPath)).toBeNull();
+  });
+
+  it("loads valid config file", () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-seq-think-load-valid-"));
+    const configPath = join(base, "seq-think.json");
+    writeFileSync(configPath, JSON.stringify({ storageDir: "/custom", maxBytes: 123 }), "utf-8");
+
+    expect(loadConfig(configPath)).toEqual({ storageDir: "/custom", maxBytes: 123, maxLines: undefined });
+  });
+
+  it("returns null on invalid JSON", () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-seq-think-load-invalid-"));
+    const configPath = join(base, "invalid.json");
+    writeFileSync(configPath, "not valid json", "utf-8");
+
+    expect(loadConfig(configPath)).toBeNull();
   });
 });
 

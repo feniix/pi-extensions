@@ -6,19 +6,77 @@
  * - Tool call guardrails: advisory warnings for common Notion mistakes
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 // =============================================================================
 // Config Paths
 // =============================================================================
 
-const CONFIG_DIR = join(homedir(), ".pi", "agent", "extensions");
-const MCP_CONFIG_FILE = join(CONFIG_DIR, "notion-mcp.json");
-const TOKEN_FILE = join(CONFIG_DIR, "notion-tokens.json");
-const LEGACY_TOKEN_FILE = join(process.cwd(), ".pi", "extensions", "notion.json");
+function getHomeDir(): string {
+  return process.env.HOME || homedir();
+}
+
+function getConfigDir(): string {
+  return join(getHomeDir(), ".pi", "agent", "extensions");
+}
+
+function resolveOptionalPath(path: string): string {
+  const trimmed = path.trim();
+  if (trimmed.startsWith("~/")) {
+    return join(getHomeDir(), trimmed.slice(2));
+  }
+  if (trimmed.startsWith("~")) {
+    return join(getHomeDir(), trimmed.slice(1));
+  }
+  if (isAbsolute(trimmed)) {
+    return trimmed;
+  }
+  return resolve(process.cwd(), trimmed);
+}
+
+function getLegacyMcpConfigFile(): string {
+  return join(getConfigDir(), "notion-mcp.json");
+}
+
+function migrateLegacyMcpConfigFile(): string {
+  const configuredPath = process.env.NOTION_MCP_AUTH_FILE;
+  if (typeof configuredPath === "string" && configuredPath.trim().length > 0) {
+    return resolveOptionalPath(configuredPath);
+  }
+
+  const legacyConfiguredPath = process.env.NOTION_MCP_AUTH;
+  if (typeof legacyConfiguredPath === "string" && legacyConfiguredPath.trim().length > 0) {
+    console.warn("[pi-notion] NOTION_MCP_AUTH is deprecated; use NOTION_MCP_AUTH_FILE.");
+    return resolveOptionalPath(legacyConfiguredPath);
+  }
+
+  const nextPath = join(getConfigDir(), "notion-mcp-auth.json");
+  const legacyPath = getLegacyMcpConfigFile();
+
+  if (!existsSync(nextPath) && existsSync(legacyPath)) {
+    try {
+      mkdirSync(getConfigDir(), { recursive: true });
+      renameSync(legacyPath, nextPath);
+      console.warn(`[pi-notion] Migrated legacy MCP auth file from ${legacyPath} to ${nextPath}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[pi-notion] Failed to migrate legacy MCP auth file ${legacyPath}: ${message}`);
+    }
+  }
+
+  return nextPath;
+}
+
+function getMcpConfigFile(): string {
+  return migrateLegacyMcpConfigFile();
+}
+
+function getTokenFile(): string {
+  return join(getConfigDir(), "notion-tokens.json");
+}
 
 // =============================================================================
 // Token Types
@@ -60,7 +118,7 @@ function readJsonIfExists<T>(path: string): T | null {
 }
 
 function getMcpConfigAuthStatus(): AuthStatus | null {
-  const config = readJsonIfExists<{ accessToken?: string; mcpUrl?: string }>(MCP_CONFIG_FILE);
+  const config = readJsonIfExists<{ accessToken?: string; mcpUrl?: string }>(getMcpConfigFile());
   if (typeof config?.accessToken !== "string" || config.accessToken.trim().length === 0) return null;
 
   return {
@@ -70,10 +128,11 @@ function getMcpConfigAuthStatus(): AuthStatus | null {
 }
 
 function getOAuthTokenAuthStatus(): AuthStatus | null {
-  const tokens = readJsonIfExists<OAuthTokens>(TOKEN_FILE);
+  const tokenFile = getTokenFile();
+  const tokens = readJsonIfExists<OAuthTokens>(tokenFile);
   if (!tokens?.accessToken || tokens.expiresAt <= Date.now()) return null;
 
-  const userInfoPath = TOKEN_FILE.replace("-tokens.json", "-user.json");
+  const userInfoPath = tokenFile.replace("-tokens.json", "-user.json");
   const userInfo = readJsonIfExists<NotionUserInfo>(userInfoPath);
   if (!userInfo) {
     return {
@@ -101,22 +160,11 @@ function getLegacyEnvAuthStatus(): AuthStatus | null {
   };
 }
 
-function getLegacyConfigAuthStatus(): AuthStatus | null {
-  const config = readJsonIfExists<{ token?: string }>(LEGACY_TOKEN_FILE);
-  if (!config?.token) return null;
-
-  return {
-    authenticated: false,
-    message: "[notion] Legacy notion.json token detected. MCP OAuth is still required: run /notion.",
-  };
-}
-
 function checkNotionAuth(): AuthStatus {
   return (
     getMcpConfigAuthStatus() ??
     getOAuthTokenAuthStatus() ??
-    getLegacyEnvAuthStatus() ??
-    getLegacyConfigAuthStatus() ?? {
+    getLegacyEnvAuthStatus() ?? {
       authenticated: false,
       message: "[notion] Not authenticated. Use /notion to connect your Notion workspace.",
     }
@@ -218,18 +266,26 @@ export { checkNotionAuth, extractShortName, toolChecks };
 // =============================================================================
 
 export default function notion(pi: ExtensionAPI) {
+  pi.registerFlag("--notion-config-file", {
+    description: "Path to a custom JSON config file for direct-token compatibility overrides.",
+    type: "string",
+  });
+  pi.registerFlag("--notion-config", {
+    description: "Deprecated alias for --notion-config-file.",
+    type: "string",
+  });
+
+  const configFileFlag = pi.getFlag("--notion-config-file");
+  const legacyConfigFlag = pi.getFlag("--notion-config");
+  if (typeof configFileFlag === "string" && configFileFlag.trim().length > 0) {
+    process.env.NOTION_CONFIG_FILE = configFileFlag;
+  } else if (typeof legacyConfigFlag === "string" && legacyConfigFlag.trim().length > 0) {
+    console.warn("[pi-notion] --notion-config is deprecated; use --notion-config-file.");
+    process.env.NOTION_CONFIG_FILE = legacyConfigFlag;
+  }
+
   // SessionStart: check auth and print status
   pi.on("session_start", async () => {
-    // Ensure config directory exists
-    if (!existsSync(CONFIG_DIR)) {
-      try {
-        mkdirSync(CONFIG_DIR, { recursive: true });
-        writeFileSync(join(CONFIG_DIR, "notion-mcp.json"), JSON.stringify({}), "utf-8");
-      } catch {
-        // Ignore if can't create
-      }
-    }
-
     const auth = checkNotionAuth();
     console.log(auth.message);
   });
@@ -250,26 +306,29 @@ interface NotionConfig {
 
 function resolveConfigPath(configPath: string): string {
   const trimmed = configPath.trim();
-  if (trimmed.startsWith("~/")) return join(homedir(), trimmed.slice(2));
-  if (trimmed.startsWith("~")) return join(homedir(), trimmed.slice(1));
+  if (trimmed.startsWith("~/")) return join(getHomeDir(), trimmed.slice(2));
+  if (trimmed.startsWith("~")) return join(getHomeDir(), trimmed.slice(1));
   return resolve(process.cwd(), trimmed);
 }
 
-function loadConfig(configPath?: string): NotionConfig | null {
-  const candidates: string[] = [];
-  if (configPath) candidates.push(resolveConfigPath(configPath));
-  else if (process.env.NOTION_CONFIG) candidates.push(resolveConfigPath(process.env.NOTION_CONFIG));
-  else {
-    const projectConfigPath = join(process.cwd(), ".pi", "extensions", "notion.json");
-    const globalConfigPath = join(homedir(), ".pi", "agent", "extensions", "notion.json");
-    candidates.push(projectConfigPath, globalConfigPath);
+function loadConfigFile(path: string): NotionConfig | null {
+  if (!existsSync(path)) {
+    return null;
   }
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      try {
-        return JSON.parse(readFileSync(candidate, "utf-8"));
-      } catch {}
-    }
+
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as NotionConfig;
+  } catch {
+    return null;
+  }
+}
+
+function loadConfig(configPath?: string): NotionConfig | null {
+  if (configPath) return loadConfigFile(resolveConfigPath(configPath));
+  if (process.env.NOTION_CONFIG_FILE) return loadConfigFile(resolveConfigPath(process.env.NOTION_CONFIG_FILE));
+  if (process.env.NOTION_CONFIG) {
+    console.warn("[pi-notion] NOTION_CONFIG is deprecated; use NOTION_CONFIG_FILE.");
+    return loadConfigFile(resolveConfigPath(process.env.NOTION_CONFIG));
   }
   return null;
 }
