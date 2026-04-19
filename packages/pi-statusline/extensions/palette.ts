@@ -1,4 +1,6 @@
-export const defaultPalette = {
+import type { StatuslinePalette } from "./types.js";
+
+export const defaultPalette: StatuslinePalette = {
   background: "#0E2A35",
   model: "#008787",
   repo: "#008787",
@@ -12,4 +14,4 @@ export const defaultPalette = {
   cwd: "#87AFFF",
   worktree: "#005FD7",
   activity: "#5FAF00",
-} as const;
+};

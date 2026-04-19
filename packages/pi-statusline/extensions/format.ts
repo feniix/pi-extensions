@@ -1,7 +1,7 @@
 import { defaultPalette } from "./palette.js";
-import type { MinimalModel, StatuslineLinesInput } from "./types.js";
+import type { MinimalModel, StatuslineLinesInput, StatuslinePalette } from "./types.js";
 
-type SegmentColor = keyof typeof defaultPalette;
+type SegmentColor = keyof StatuslinePalette;
 
 type StyledSegment = {
   text: string;
@@ -52,8 +52,8 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
 }
 
-export function colorize(text: string, color: SegmentColor): string {
-  const [r, g, b] = hexToRgb(defaultPalette[color]);
+export function colorize(text: string, color: SegmentColor, palette: StatuslinePalette = defaultPalette): string {
+  const [r, g, b] = hexToRgb(palette[color]);
   return `\u001B[38;2;${r};${g};${b}m${text}${ANSI_RESET}`;
 }
 
@@ -67,7 +67,7 @@ function truncatePlainText(text: string, width: number): string {
   return `${text.slice(0, width - 3)}...`;
 }
 
-function buildStyledLine(segments: StyledSegment[], width?: number): string {
+function buildStyledLine(segments: StyledSegment[], width?: number, palette: StatuslinePalette = defaultPalette): string {
   if (width !== undefined && width <= 0) {
     return "";
   }
@@ -83,9 +83,9 @@ function buildStyledLine(segments: StyledSegment[], width?: number): string {
 
     if (width === undefined) {
       if (!isFirst) {
-        rendered.push(colorize(separator, "separators"));
+        rendered.push(colorize(separator, "separators", palette));
       }
-      rendered.push(colorize(segment.text, segment.color));
+      rendered.push(colorize(segment.text, segment.color, palette));
       continue;
     }
 
@@ -99,7 +99,7 @@ function buildStyledLine(segments: StyledSegment[], width?: number): string {
         rendered.push(truncatePlainText(separator, availableWidth));
         break;
       }
-      rendered.push(colorize(separator, "separators"));
+      rendered.push(colorize(separator, "separators", palette));
       usedWidth += separatorWidth;
     }
 
@@ -110,7 +110,7 @@ function buildStyledLine(segments: StyledSegment[], width?: number): string {
 
     const needsTruncation = segmentWidth > segmentAvailableWidth;
     const nextText = needsTruncation ? truncatePlainText(segment.text, segmentAvailableWidth) : segment.text;
-    rendered.push(colorize(nextText, segment.color));
+    rendered.push(colorize(nextText, segment.color, palette));
     usedWidth += nextText.length;
 
     if (needsTruncation) {
@@ -121,7 +121,7 @@ function buildStyledLine(segments: StyledSegment[], width?: number): string {
   return rendered.join("");
 }
 
-export function buildStatusLines(input: StatuslineLinesInput, width?: number): string[] {
+export function buildStatusLines(input: StatuslineLinesInput, width?: number, palette: StatuslinePalette = defaultPalette): string[] {
   const line1 = buildStyledLine(
     [
       { text: input.modelLabel, color: "model" },
@@ -132,6 +132,7 @@ export function buildStatusLines(input: StatuslineLinesInput, width?: number): s
       { text: input.tokenLabel, color: "token" },
     ],
     width,
+    palette,
   );
 
   const line2 = buildStyledLine(
@@ -143,6 +144,7 @@ export function buildStatusLines(input: StatuslineLinesInput, width?: number): s
       { text: input.activityLabel, color: "activity" },
     ],
     width,
+    palette,
   );
 
   return [line1, line2];

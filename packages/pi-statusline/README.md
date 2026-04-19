@@ -70,6 +70,51 @@ During active streaming, the extension also uses the latest live assistant usage
 - main worktree -> `𖠰 main`
 - non-git repo -> `𖠰 no git`
 
+## Palette configuration
+
+`pi-statusline` uses a built-in `defaultPalette`, but you can override any subset of colors through pi's standard settings files.
+
+Settings locations:
+
+- global: `~/.pi/agent/settings.json`
+- project: `.pi/settings.json`
+
+Use the `pi-statusline` key:
+
+```json
+{
+  "pi-statusline": {
+    "palette": {
+      "model": "#008787",
+      "activity": "#5FAF00"
+    }
+  }
+}
+```
+
+Supported palette keys:
+
+- `background`
+- `model`
+- `repo`
+- `thinking`
+- `skill`
+- `context`
+- `branch`
+- `dirty`
+- `token`
+- `separators`
+- `cwd`
+- `worktree`
+- `activity`
+
+Behavior:
+
+- project settings override global settings
+- missing keys fall back to `defaultPalette`
+- invalid color values are ignored
+- colors must be 6-digit hex values like `#008787`
+
 ## Development
 
 Run from the repo root:

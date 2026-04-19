@@ -1,7 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { loadStatuslinePalette } from "./config.js";
 import { buildStatusLines } from "./format.js";
 import { getGitSnapshot } from "./git.js";
+import { defaultPalette } from "./palette.js";
 import {
   getContextLabel,
   getCwdLabel,
@@ -10,7 +12,14 @@ import {
   getThinkingLabel,
   getTokenLabel,
 } from "./session.js";
-import type { ActivityPhase, AssistantUsageLike, CommandLike, GitSnapshot, StatuslineState } from "./types.js";
+import type {
+  ActivityPhase,
+  AssistantUsageLike,
+  CommandLike,
+  GitSnapshot,
+  StatuslinePalette,
+  StatuslineState,
+} from "./types.js";
 
 const FOOTER_RENDER_THROTTLE_MS = 100;
 
@@ -109,7 +118,13 @@ export function getDirtyLabel(dirtyCount: number): string {
   return `dirty: +${dirtyCount}`;
 }
 
-export function buildLines(cwd: string, state: StatuslineState, branchLabel: string | null, width?: number): string[] {
+export function buildLines(
+  cwd: string,
+  state: StatuslineState,
+  branchLabel: string | null,
+  width?: number,
+  palette: StatuslinePalette = defaultPalette,
+): string[] {
   const input: StatuslineInput = {
     modelLabel: state.modelLabel,
     thinkingLabel: state.thinkingLabel,
@@ -124,7 +139,7 @@ export function buildLines(cwd: string, state: StatuslineState, branchLabel: str
     activityLabel: state.activityLabel,
   };
 
-  return buildStatusLines(input, width);
+  return buildStatusLines(input, width, palette);
 }
 
 export default function statuslineExtension(pi: ExtensionAPI) {
@@ -133,6 +148,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   let requestFooterRender: (() => void) | null = null;
   let footerRenderTimeout: ReturnType<typeof setTimeout> | null = null;
   let lastFooterRenderAt = 0;
+  let currentPalette = defaultPalette;
 
   const clearFooterRenderTimeout = () => {
     if (footerRenderTimeout) {
@@ -141,7 +157,11 @@ export default function statuslineExtension(pi: ExtensionAPI) {
     }
   };
 
-  const updateActivity = (phase: ActivityPhase, activeToolName = state.activeToolName, activeToolCount = state.activeToolCount) => {
+  const updateActivity = (
+    phase: ActivityPhase,
+    activeToolName = state.activeToolName,
+    activeToolCount = state.activeToolCount,
+  ) => {
     state = {
       ...state,
       activityPhase: phase,
@@ -238,7 +258,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   };
 
   const emitStatusLines = (ctx: Pick<ExtensionContext, "cwd">) => {
-    const lines = buildLines(ctx.cwd, state, state.gitSnapshot.branch);
+    const lines = buildLines(ctx.cwd, state, state.gitSnapshot.branch, undefined, currentPalette);
     for (const line of lines) {
       console.log(line);
     }
@@ -254,6 +274,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     state = createInitialState();
+    currentPalette = await loadStatuslinePalette(ctx.cwd);
     requestFooterRender = null;
     clearFooterRenderTimeout();
     lastFooterRenderAt = 0;
@@ -281,7 +302,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
         invalidate() {},
         render(width: number): string[] {
           refreshDynamicState(ctx);
-          return buildLines(ctx.cwd, state, footerData.getGitBranch(), width);
+          return buildLines(ctx.cwd, state, footerData.getGitBranch(), width, currentPalette);
         },
       };
     });
@@ -403,7 +424,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx: ExtensionContext) {
       await updateAndLog(ctx, false);
-      const text = buildLines(ctx.cwd, state, state.gitSnapshot.branch).join("\n");
+      const text = buildLines(ctx.cwd, state, state.gitSnapshot.branch, undefined, currentPalette).join("\n");
       return {
         content: [{ type: "text", text }],
         details: {},

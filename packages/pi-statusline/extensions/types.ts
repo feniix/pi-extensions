@@ -17,6 +17,28 @@ export interface AssistantUsageLike {
 
 export type ActivityPhase = "idle" | "queued" | "running" | "thinking" | "responding" | "tool";
 
+export interface StatuslinePalette {
+  background: string;
+  model: string;
+  repo: string;
+  thinking: string;
+  skill: string;
+  context: string;
+  branch: string;
+  dirty: string;
+  token: string;
+  separators: string;
+  cwd: string;
+  worktree: string;
+  activity: string;
+}
+
+export type StatuslinePaletteInput = Partial<Record<keyof StatuslinePalette, unknown>>;
+
+export interface StatuslineConfig {
+  palette?: StatuslinePaletteInput;
+}
+
 export interface StatuslineState {
   modelLabel: string;
   thinkingLabel: string;
