@@ -266,11 +266,9 @@ function loadConfig(configPath: string | undefined): CodeReasoningConfig | null 
 
   const globalSettingsPath = join(getHomeDir(), ".pi", "agent", "settings.json");
   const projectSettingsPath = join(process.cwd(), ".pi", "settings.json");
-  const legacyProjectConfigPath = join(process.cwd(), ".pi", "extensions", "code-reasoning.json");
-  const legacyGlobalConfigPath = join(getHomeDir(), ".pi", "agent", "extensions", "code-reasoning.json");
 
-  const globalConfig = loadSettingsConfig(globalSettingsPath) ?? loadConfigFile(legacyGlobalConfigPath);
-  const projectConfig = loadSettingsConfig(projectSettingsPath) ?? loadConfigFile(legacyProjectConfigPath);
+  const globalConfig = loadSettingsConfig(globalSettingsPath);
+  const projectConfig = loadSettingsConfig(projectSettingsPath);
 
   if (!globalConfig && !projectConfig) {
     return null;
