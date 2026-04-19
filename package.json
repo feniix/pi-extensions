@@ -10,6 +10,7 @@
     "check": "npm run lint && npm run typecheck",
     "check:ci": "biome ci . && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "ci:detect": "./scripts/detect-ci-packages.sh"
   },
   "workspaces": [

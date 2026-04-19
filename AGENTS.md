@@ -14,6 +14,7 @@ Run these from the repo root unless noted:
 - `npm run lint:fix` — auto-fixable Biome issues.
 - `npm run typecheck` — TypeScript type checking only.
 - `npm run test` — Vitest test suite.
+- `npm run test:coverage` — Vitest coverage run with repo-wide thresholds.
 - `npm run check` — lint + typecheck.
 - `npm run check:ci` — CI-friendly Biome + typecheck.
 - `npm run ci:detect -- <base> <head>` — show which packages the CI workflow will check for a given diff.
@@ -27,7 +28,7 @@ Local package testing:
 
 ## Coding Style & Naming Conventions
 - Language: TypeScript.
-- Formatting: Biome with **tabs** for indentation and `lineWidth` 120.
+- Formatting: Biome with **2 spaces** for indentation and `lineWidth` 120.
 - File naming: tests live in `__tests__` and use `*.test.ts`.
 - Package naming: `packages/pi-<name>` with npm scope `@feniix/pi-<name>`.
 
@@ -35,9 +36,11 @@ Local package testing:
 - Framework: Vitest (see `vitest.config.ts`).
 - Tests are per-package under `packages/*/__tests__/`.
 - Keep unit tests focused on extension behavior and helpers; prefer fast, isolated tests.
-- CI uses a single GitHub Actions workflow at `.github/workflows/ci.yml` that detects changed packages and runs package-scoped lint, typecheck, and test jobs.
+- CI uses a single GitHub Actions workflow at `.github/workflows/ci.yml` that detects changed packages and runs package-scoped lint, typecheck, test, and coverage summary jobs.
+- Package-scoped CI coverage is enforced per extension with the same thresholds for every package: lines 70, statements 70, functions 70, branches 60.
 - Changes to shared files such as `package.json`, `package-lock.json`, `tsconfig.json`, `vitest.config.ts`, `biome.json`, or `.github/workflows/**` should be treated as affecting all packages.
 - Each package must keep its `tsconfig.json` aligned by extending the shared root `tsconfig.json`; do not introduce divergent compiler options in individual package configs unless the repo-wide config is intentionally updated.
+- Coverage thresholds are enforced in `vitest.config.ts` at: lines 70, statements 70, functions 70, branches 60.
 - For `packages/pi-conductor/`, follow **test-first development**: write or update the failing test first, then implement the minimal code needed to make it pass.
 
 ## Commit & Pull Request Guidelines
