@@ -38,7 +38,10 @@ export function resolvePalette(
   };
 }
 
-export function getStatuslineConfigPaths(cwd: string, homeDir = homedir()): { globalPath: string; projectPath: string } {
+export function getStatuslineConfigPaths(
+  cwd: string,
+  homeDir = homedir(),
+): { globalPath: string; projectPath: string } {
   return {
     globalPath: join(homeDir, ".pi", "agent", "settings.json"),
     projectPath: join(cwd, ".pi", "settings.json"),
@@ -75,7 +78,10 @@ async function readSettingsFile(path: string): Promise<unknown | null> {
 
 export async function loadStatuslinePalette(cwd: string, homeDir = homedir()): Promise<StatuslinePalette> {
   const { globalPath, projectPath } = getStatuslineConfigPaths(cwd, homeDir);
-  const [globalSettings, projectSettings] = await Promise.all([readSettingsFile(globalPath), readSettingsFile(projectPath)]);
+  const [globalSettings, projectSettings] = await Promise.all([
+    readSettingsFile(globalPath),
+    readSettingsFile(projectPath),
+  ]);
 
   return resolvePalette(extractStatuslineConfig(globalSettings), extractStatuslineConfig(projectSettings));
 }

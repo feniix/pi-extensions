@@ -52,11 +52,7 @@ export function createInitialGitSnapshot(): GitSnapshot {
   };
 }
 
-export function getActivityLabel(
-  phase: ActivityPhase,
-  activeToolName?: string | null,
-  activeToolCount = 0,
-): string {
+export function getActivityLabel(phase: ActivityPhase, activeToolName?: string | null, activeToolCount = 0): string {
   if (phase === "tool") {
     const toolName = activeToolName || "tool";
     const countSuffix = activeToolCount > 1 ? ` x${activeToolCount}` : "";
@@ -236,11 +232,14 @@ export default function statuslineExtension(pi: ExtensionAPI) {
       return;
     }
 
-    footerRenderTimeout = setTimeout(() => {
-      footerRenderTimeout = null;
-      lastFooterRenderAt = Date.now();
-      requestFooterRender?.();
-    }, FOOTER_RENDER_THROTTLE_MS - (now - lastFooterRenderAt));
+    footerRenderTimeout = setTimeout(
+      () => {
+        footerRenderTimeout = null;
+        lastFooterRenderAt = Date.now();
+        requestFooterRender?.();
+      },
+      FOOTER_RENDER_THROTTLE_MS - (now - lastFooterRenderAt),
+    );
   };
 
   const refreshDynamicFooter = (ctx: DynamicCtx, immediate = false) => {
@@ -356,7 +355,8 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   pi.on("message_update", async (event, ctx) => {
     updateLiveUsage((event as { message?: AssistantMessageLike }).message);
 
-    const assistantMessageEvent = (event as { assistantMessageEvent?: AssistantMessageEventLike }).assistantMessageEvent;
+    const assistantMessageEvent = (event as { assistantMessageEvent?: AssistantMessageEventLike })
+      .assistantMessageEvent;
     if (assistantMessageEvent?.type?.startsWith("thinking")) {
       updateActivity("thinking", null, state.activeToolCount);
     } else {
@@ -420,7 +420,8 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "statusline",
     label: "Statusline",
-    description: "Show the current status line with model, thinking effort, context, git info, token counts, and live activity",
+    description:
+      "Show the current status line with model, thinking effort, context, git info, token counts, and live activity",
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx: ExtensionContext) {
       await updateAndLog(ctx, false);

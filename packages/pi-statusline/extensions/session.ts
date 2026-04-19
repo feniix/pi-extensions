@@ -36,7 +36,10 @@ export function getTokenTotals(
   return { input, output };
 }
 
-export function getTokenLabel(entries: ReadonlyArray<SessionEntryLike>, liveAssistantUsage?: AssistantUsageLike | null): string {
+export function getTokenLabel(
+  entries: ReadonlyArray<SessionEntryLike>,
+  liveAssistantUsage?: AssistantUsageLike | null,
+): string {
   const totals = getTokenTotals(entries, liveAssistantUsage);
   return formatTokenPair(totals.input, totals.output);
 }

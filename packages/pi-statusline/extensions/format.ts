@@ -9,6 +9,7 @@ type StyledSegment = {
 };
 
 const ANSI_RESET = "\u001B[0m";
+const ANSI_ESCAPE = "\u001B";
 
 export function formatCompactNumber(value: number): string {
   const absValue = Math.abs(value);
@@ -43,7 +44,28 @@ export function formatModelLabel(model?: MinimalModel): string {
 }
 
 export function stripAnsi(text: string): string {
-  return text.replace(/\u001B\[[0-9;]*m/g, "");
+  let result = "";
+
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== ANSI_ESCAPE || text[index + 1] !== "[") {
+      result += text[index];
+      continue;
+    }
+
+    let cursor = index + 2;
+    while (cursor < text.length && /[0-9;]/.test(text[cursor] ?? "")) {
+      cursor += 1;
+    }
+
+    if (text[cursor] === "m") {
+      index = cursor;
+      continue;
+    }
+
+    result += text[index];
+  }
+
+  return result;
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -67,7 +89,11 @@ function truncatePlainText(text: string, width: number): string {
   return `${text.slice(0, width - 3)}...`;
 }
 
-function buildStyledLine(segments: StyledSegment[], width?: number, palette: StatuslinePalette = defaultPalette): string {
+function buildStyledLine(
+  segments: StyledSegment[],
+  width?: number,
+  palette: StatuslinePalette = defaultPalette,
+): string {
   if (width !== undefined && width <= 0) {
     return "";
   }
@@ -121,7 +147,11 @@ function buildStyledLine(segments: StyledSegment[], width?: number, palette: Sta
   return rendered.join("");
 }
 
-export function buildStatusLines(input: StatuslineLinesInput, width?: number, palette: StatuslinePalette = defaultPalette): string[] {
+export function buildStatusLines(
+  input: StatuslineLinesInput,
+  width?: number,
+  palette: StatuslinePalette = defaultPalette,
+): string[] {
   const line1 = buildStyledLine(
     [
       { text: input.modelLabel, color: "model" },

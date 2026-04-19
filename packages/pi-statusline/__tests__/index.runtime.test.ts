@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { stripAnsi } from "../extensions/format.js";
 import statuslineExtension, {
   buildLines,
   createInitialGitSnapshot,
@@ -9,7 +10,6 @@ import statuslineExtension, {
   getDirtyLabel,
   getWorktreeLabel,
 } from "../extensions/index.js";
-import { stripAnsi } from "../extensions/format.js";
 
 function createMockPi() {
   return {
@@ -163,9 +163,18 @@ describe("pi-statusline extension runtime", () => {
       },
     );
 
-    await messageUpdateHandler?.({ message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta" } }, ctx);
-    await messageUpdateHandler?.({ message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta" } }, ctx);
-    await messageUpdateHandler?.({ message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta" } }, ctx);
+    await messageUpdateHandler?.(
+      { message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta" } },
+      ctx,
+    );
+    await messageUpdateHandler?.(
+      { message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta" } },
+      ctx,
+    );
+    await messageUpdateHandler?.(
+      { message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta" } },
+      ctx,
+    );
 
     expect(requestRender).toHaveBeenCalledTimes(1);
 
