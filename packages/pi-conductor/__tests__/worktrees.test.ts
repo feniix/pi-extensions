@@ -38,11 +38,11 @@ describe("worktree helpers", () => {
     expect(getCurrentBranch(tempDir)).toBe("main");
   });
 
-  it("plans a worktree path outside the repo root", () => {
+  it("plans a worktree path under the managed worktree root", () => {
     const path = planWorktreePath(tempDir, "backend");
     expect(path).toContain(`${basename(tempDir)}.worktrees`);
     expect(path).toContain("backend");
-    expect(path.startsWith(tempDir)).toBe(false);
+    expect(dirname(path)).toContain(`${basename(tempDir)}.worktrees`);
   });
 
   it("creates a managed worktree on a conductor branch", () => {
