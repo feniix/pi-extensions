@@ -11,6 +11,7 @@
     "check:ci": "biome ci . && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "audit:workspaces": "./scripts/audit-workspaces.sh",
     "ci:detect": "./scripts/detect-ci-packages.sh"
   },
   "workspaces": [
