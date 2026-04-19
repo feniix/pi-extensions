@@ -28,6 +28,9 @@
     "@mariozechner/pi-coding-agent": "*",
     "@sinclair/typebox": "*"
   },
+  "dependencies": {
+    "@feniix/worktrees-core": "^1.0.0"
+  },
   "repository": {
     "url": "git+https://github.com/feniix/pi-extensions.git",
     "directory": "packages/pi-conductor"

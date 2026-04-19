@@ -1,6 +1,12 @@
 import { execSync } from "node:child_process";
-import { dirname, join } from "node:path";
-import { ensureDir } from "./storage.js";
+import {
+  createWorktree,
+  defaultWorktreeRoot,
+  findCurrentWorktree,
+  pruneWorktrees,
+  removeWorktree,
+  resolveWorktreePath,
+} from "@feniix/worktrees-core";
 import { buildBranchName, normalizeWorkerSlug } from "./workers.js";
 
 function execGit(cwd: string, command: string): string {
@@ -12,7 +18,7 @@ function execGit(cwd: string, command: string): string {
 }
 
 export function getCurrentBranch(repoRoot: string): string {
-  const branch = execGit(repoRoot, "git branch --show-current");
+  const branch = findCurrentWorktree(repoRoot)?.branch;
   if (!branch) {
     throw new Error("Unable to determine current branch");
   }
@@ -20,10 +26,8 @@ export function getCurrentBranch(repoRoot: string): string {
 }
 
 export function planWorktreePath(repoRoot: string, workerName: string): string {
-  const repoParent = dirname(repoRoot);
-  const repoBase = repoRoot.split("/").filter(Boolean).at(-1) ?? "repo";
-  const slug = normalizeWorkerSlug(workerName) ?? "worker";
-  return join(repoParent, ".pi-conductor-worktrees", repoBase, slug);
+  const directoryName = normalizeWorkerSlug(workerName) ?? "worker";
+  return resolveWorktreePath(directoryName, defaultWorktreeRoot(repoRoot));
 }
 
 export function createManagedWorktree(
@@ -33,8 +37,13 @@ export function createManagedWorktree(
   const baseBranch = getCurrentBranch(repoRoot);
   const branch = buildBranchName(input.workerId, input.workerName);
   const worktreePath = planWorktreePath(repoRoot, input.workerName);
-  ensureDir(dirname(worktreePath));
-  execGit(repoRoot, `git worktree add ${shellQuote(worktreePath)} -b ${shellQuote(branch)} ${shellQuote(baseBranch)}`);
+  createWorktree({
+    cwd: repoRoot,
+    path: worktreePath,
+    branch,
+    from: baseBranch,
+    createBranch: true,
+  });
   return { branch, baseBranch, worktreePath };
 }
 
@@ -43,18 +52,22 @@ export function recreateManagedWorktree(
   input: { workerName: string; branch: string },
 ): { branch: string; worktreePath: string } {
   const worktreePath = planWorktreePath(repoRoot, input.workerName);
-  ensureDir(dirname(worktreePath));
-  execGit(repoRoot, "git worktree prune");
-  execGit(repoRoot, `git worktree add ${shellQuote(worktreePath)} ${shellQuote(input.branch)}`);
+  pruneWorktrees(repoRoot);
+  createWorktree({
+    cwd: repoRoot,
+    path: worktreePath,
+    branch: input.branch,
+    createBranch: false,
+  });
   return { branch: input.branch, worktreePath };
 }
 
 export function removeManagedWorktree(repoRoot: string, worktreePath: string): void {
-  execGit(repoRoot, "git worktree prune");
+  pruneWorktrees(repoRoot);
   try {
-    execGit(repoRoot, `git worktree remove --force ${shellQuote(worktreePath)}`);
+    removeWorktree({ cwd: repoRoot, path: worktreePath, force: true });
   } catch {
-    execGit(repoRoot, "git worktree prune");
+    pruneWorktrees(repoRoot);
   }
 }
 

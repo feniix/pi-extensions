@@ -1,12 +1,14 @@
 import { execSync } from "node:child_process";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createManagedWorktree,
   getCurrentBranch,
   planWorktreePath,
   recreateManagedWorktree,
+  removeManagedBranch,
+  removeManagedWorktree,
 } from "../extensions/worktrees.js";
 
 describe("worktree helpers", () => {
@@ -38,7 +40,7 @@ describe("worktree helpers", () => {
 
   it("plans a worktree path outside the repo root", () => {
     const path = planWorktreePath(tempDir, "backend");
-    expect(path).toContain(`.pi-conductor-worktrees/${basename(tempDir)}`);
+    expect(path).toContain(`${basename(tempDir)}.worktrees`);
     expect(path).toContain("backend");
     expect(path.startsWith(tempDir)).toBe(false);
   });
@@ -73,5 +75,28 @@ describe("worktree helpers", () => {
 
     expect(recreated.branch).toBe(created.branch);
     expect(existsSync(recreated.worktreePath)).toBe(true);
+  });
+
+  it("removes a managed worktree and its branch safely", () => {
+    const created = createManagedWorktree(tempDir, {
+      workerId: "worker-1",
+      workerName: "backend",
+    });
+
+    expect(existsSync(created.worktreePath)).toBe(true);
+    removeManagedWorktree(tempDir, created.worktreePath);
+    expect(existsSync(created.worktreePath)).toBe(false);
+
+    removeManagedBranch(tempDir, created.branch);
+    const branches = execSync("git branch --list conductor/backend", {
+      cwd: tempDir,
+      encoding: "utf-8",
+    }).trim();
+    expect(branches).toBe("");
+  });
+
+  it("plans worktrees under the shared library default worktree root", () => {
+    const path = planWorktreePath(tempDir, "backend");
+    expect(dirname(path)).toContain(`${basename(tempDir)}.worktrees`);
   });
 });
