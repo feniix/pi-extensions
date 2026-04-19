@@ -111,14 +111,21 @@ export CODE_REASONING_MAX_BYTES=102400
 export CODE_REASONING_MAX_LINES=5000
 ```
 
-### JSON Config
+### Settings File
 
-Create `~/.pi/agent/extensions/code-reasoning.json`:
+Use pi's standard settings locations:
+
+- project: `.pi/settings.json`
+- global: `~/.pi/agent/settings.json`
+
+Under the `pi-code-reasoning` key:
 
 ```json
 {
-  "maxBytes": 51200,
-  "maxLines": 2000
+  "pi-code-reasoning": {
+    "maxBytes": 51200,
+    "maxLines": 2000
+  }
 }
 ```
 
@@ -126,7 +133,7 @@ Create `~/.pi/agent/extensions/code-reasoning.json`:
 
 | Flag | Env Variable | Default | Description |
 |------|-------------|---------|-------------|
-| `--code-reasoning-config` | `CODE_REASONING_CONFIG` | — | Custom config file path |
+| `--code-reasoning-config` | `CODE_REASONING_CONFIG` | — | Custom JSON config file path (overrides settings.json lookup) |
 | `--code-reasoning-max-bytes` | `CODE_REASONING_MAX_BYTES` | `51200` | Max output bytes |
 | `--code-reasoning-max-lines` | `CODE_REASONING_MAX_LINES` | `2000` | Max output lines |
 
