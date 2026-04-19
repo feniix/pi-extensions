@@ -5,34 +5,34 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createWorkerSessionLink } from "../extensions/sessions.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
-	if (value == null) {
-		throw new Error(message);
-	}
-	return value;
+  if (value == null) {
+    throw new Error(message);
+  }
+  return value;
 }
 
 describe("session linkage", () => {
-	let repoDir: string;
+  let repoDir: string;
 
-	beforeEach(() => {
-		repoDir = execSync("mktemp -d", { encoding: "utf-8" }).trim();
-		execSync("git init -b main", { cwd: repoDir, stdio: "pipe" });
-		execSync("git config user.email 'test@test.com'", { cwd: repoDir, stdio: "pipe" });
-		execSync("git config user.name 'Test User'", { cwd: repoDir, stdio: "pipe" });
-		writeFileSync(join(repoDir, "README.md"), "hello");
-		execSync("git add README.md", { cwd: repoDir, stdio: "pipe" });
-		execSync("git commit -m 'initial commit'", { cwd: repoDir, stdio: "pipe" });
-	});
+  beforeEach(() => {
+    repoDir = execSync("mktemp -d", { encoding: "utf-8" }).trim();
+    execSync("git init -b main", { cwd: repoDir, stdio: "pipe" });
+    execSync("git config user.email 'test@test.com'", { cwd: repoDir, stdio: "pipe" });
+    execSync("git config user.name 'Test User'", { cwd: repoDir, stdio: "pipe" });
+    writeFileSync(join(repoDir, "README.md"), "hello");
+    execSync("git add README.md", { cwd: repoDir, stdio: "pipe" });
+    execSync("git commit -m 'initial commit'", { cwd: repoDir, stdio: "pipe" });
+  });
 
-	afterEach(() => {
-		if (repoDir && existsSync(repoDir)) {
-			rmSync(repoDir, { recursive: true, force: true });
-		}
-	});
+  afterEach(() => {
+    if (repoDir && existsSync(repoDir)) {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
 
-	it("creates a persisted pi session file for a worker worktree", async () => {
-		const sessionFile = requireValue(await createWorkerSessionLink(repoDir), "session file missing");
-		expect(sessionFile).toBeTruthy();
-		expect(existsSync(sessionFile)).toBe(true);
-	});
+  it("creates a persisted pi session file for a worker worktree", async () => {
+    const sessionFile = requireValue(await createWorkerSessionLink(repoDir), "session file missing");
+    expect(sessionFile).toBeTruthy();
+    expect(existsSync(sessionFile)).toBe(true);
+  });
 });
