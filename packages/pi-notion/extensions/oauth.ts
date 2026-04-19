@@ -14,25 +14,25 @@ import { getPort as lookupPort } from "portfinder";
 // =============================================================================
 
 export interface OAuthConfig {
-	clientId: string;
-	clientSecret: string;
-	redirectUri: string;
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
 }
 
 export interface OAuthTokens {
-	accessToken: string;
-	refreshToken: string;
-	tokenType: string;
-	expiresAt: number;
+  accessToken: string;
+  refreshToken: string;
+  tokenType: string;
+  expiresAt: number;
 }
 
 export interface OAuthUserInfo {
-	workspaceId: string;
-	workspaceName: string;
-	workspaceIcon?: string;
-	botId: string;
-	ownerEmail?: string;
-	ownerName?: string;
+  workspaceId: string;
+  workspaceName: string;
+  workspaceIcon?: string;
+  botId: string;
+  ownerEmail?: string;
+  ownerName?: string;
 }
 
 // =============================================================================
@@ -43,22 +43,22 @@ export interface OAuthUserInfo {
  * Generate a random code verifier for PKCE
  */
 export function generateCodeVerifier(): string {
-	return randomBytes(32).toString("base64url");
+  return randomBytes(32).toString("base64url");
 }
 
 /**
  * Generate code challenge from verifier using S256 method
  */
 export function generateCodeChallenge(verifier: string): string {
-	const hash = createHash("sha256").update(verifier).digest();
-	return hash.toString("base64url");
+  const hash = createHash("sha256").update(verifier).digest();
+  return hash.toString("base64url");
 }
 
 /**
  * Generate random state parameter for CSRF protection
  */
 export function generateState(): string {
-	return randomBytes(16).toString("hex");
+  return randomBytes(16).toString("hex");
 }
 
 // =============================================================================
@@ -68,17 +68,17 @@ export function generateState(): string {
 const NOTION_AUTH_URL = "https://api.notion.com/v1/oauth/authorize";
 
 export function buildAuthorizationUrl(config: OAuthConfig, codeChallenge: string, state: string): string {
-	const params = new URLSearchParams({
-		client_id: config.clientId,
-		redirect_uri: config.redirectUri,
-		response_type: "code",
-		owner: "user",
-		code_challenge: codeChallenge,
-		code_challenge_method: "S256",
-		state,
-	});
+  const params = new URLSearchParams({
+    client_id: config.clientId,
+    redirect_uri: config.redirectUri,
+    response_type: "code",
+    owner: "user",
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+    state,
+  });
 
-	return `${NOTION_AUTH_URL}?${params.toString()}`;
+  return `${NOTION_AUTH_URL}?${params.toString()}`;
 }
 
 // =============================================================================
@@ -88,76 +88,76 @@ export function buildAuthorizationUrl(config: OAuthConfig, codeChallenge: string
 const NOTION_TOKEN_URL = "https://api.notion.com/v1/oauth/token";
 
 export async function exchangeCodeForTokens(
-	config: OAuthConfig,
-	code: string,
-	codeVerifier: string,
+  config: OAuthConfig,
+  code: string,
+  codeVerifier: string,
 ): Promise<OAuthTokens & { owner?: OAuthUserInfo }> {
-	const response = await axios.post(
-		NOTION_TOKEN_URL,
-		{
-			grant_type: "authorization_code",
-			code,
-			redirect_uri: config.redirectUri,
-			client_id: config.clientId,
-			client_secret: config.clientSecret,
-			code_verifier: codeVerifier,
-		},
-		{
-			headers: {
-				"Content-Type": "application/json",
-			},
-		},
-	);
+  const response = await axios.post(
+    NOTION_TOKEN_URL,
+    {
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: config.redirectUri,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      code_verifier: codeVerifier,
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+      },
+    },
+  );
 
-	const data = response.data;
+  const data = response.data;
 
-	const tokens: OAuthTokens = {
-		accessToken: data.access_token,
-		refreshToken: data.refresh_token,
-		tokenType: data.token_type,
-		expiresAt: Date.now() + 3600 * 1000, // Notion tokens typically last 1 hour
-	};
+  const tokens: OAuthTokens = {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    tokenType: data.token_type,
+    expiresAt: Date.now() + 3600 * 1000, // Notion tokens typically last 1 hour
+  };
 
-	const result: OAuthTokens & { owner?: OAuthUserInfo } = { ...tokens };
+  const result: OAuthTokens & { owner?: OAuthUserInfo } = { ...tokens };
 
-	if (data.owner?.user) {
-		result.owner = {
-			workspaceId: data.workspace_id,
-			workspaceName: data.workspace_name,
-			workspaceIcon: data.workspace_icon,
-			botId: data.bot_id,
-			ownerEmail: data.owner.user.person?.email,
-			ownerName: data.owner.user.name,
-		};
-	}
+  if (data.owner?.user) {
+    result.owner = {
+      workspaceId: data.workspace_id,
+      workspaceName: data.workspace_name,
+      workspaceIcon: data.workspace_icon,
+      botId: data.bot_id,
+      ownerEmail: data.owner.user.person?.email,
+      ownerName: data.owner.user.name,
+    };
+  }
 
-	return result;
+  return result;
 }
 
 export async function refreshTokens(config: OAuthConfig, refreshToken: string): Promise<OAuthTokens> {
-	const response = await axios.post(
-		NOTION_TOKEN_URL,
-		{
-			grant_type: "refresh_token",
-			refresh_token: refreshToken,
-			client_id: config.clientId,
-			client_secret: config.clientSecret,
-		},
-		{
-			headers: {
-				"Content-Type": "application/json",
-			},
-		},
-	);
+  const response = await axios.post(
+    NOTION_TOKEN_URL,
+    {
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+      },
+    },
+  );
 
-	const data = response.data;
+  const data = response.data;
 
-	return {
-		accessToken: data.access_token,
-		refreshToken: data.refresh_token || refreshToken, // Keep old if not provided
-		tokenType: data.token_type,
-		expiresAt: Date.now() + 3600 * 1000,
-	};
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token || refreshToken, // Keep old if not provided
+    tokenType: data.token_type,
+    expiresAt: Date.now() + 3600 * 1000,
+  };
 }
 
 // =============================================================================
@@ -165,166 +165,166 @@ export async function refreshTokens(config: OAuthConfig, refreshToken: string): 
 // =============================================================================
 
 interface CallbackResult {
-	code: string;
-	state: string;
-	error?: string;
+  code: string;
+  state: string;
+  error?: string;
 }
 
 const CALLBACK_REQUEST_PREFIX = "GET /callback?";
 const HTTP_REQUEST_COMPLETE_MARKER = "\r\n\r\n";
 
-function parseQueryParams(url: string): Record<string, string> {
-	const urlObj = new URL(url);
-	const params: Record<string, string> = {};
-	urlObj.searchParams.forEach((value, key) => {
-		params[key] = value;
-	});
-	return params;
+export function parseQueryParams(url: string): Record<string, string> {
+  const urlObj = new URL(url, "http://localhost");
+  const params: Record<string, string> = {};
+  urlObj.searchParams.forEach((value, key) => {
+    params[key] = value;
+  });
+  return params;
 }
 
-function writeHtmlResponse(socket: NodeJS.WritableStream, statusLine: string, html: string): void {
-	socket.write(`${statusLine}\r\n`);
-	socket.write(`Content-Length: ${html.length}\r\n`);
-	socket.write("Content-Type: text/html\r\n\r\n");
-	socket.write(html);
+export function writeHtmlResponse(socket: NodeJS.WritableStream, statusLine: string, html: string): void {
+  socket.write(`${statusLine}\r\n`);
+  socket.write(`Content-Length: ${html.length}\r\n`);
+  socket.write("Content-Type: text/html\r\n\r\n");
+  socket.write(html);
 }
 
-function extractCallbackParams(buffer: string): Record<string, string> | null {
-	if (!buffer.includes(HTTP_REQUEST_COMPLETE_MARKER)) return null;
+export function extractCallbackParams(buffer: string): Record<string, string> | null {
+  if (!buffer.includes(HTTP_REQUEST_COMPLETE_MARKER)) return null;
 
-	const requestLine = buffer.split("\r\n", 1)[0] ?? "";
-	if (!requestLine.startsWith(CALLBACK_REQUEST_PREFIX)) return null;
+  const requestLine = buffer.split("\r\n", 1)[0] ?? "";
+  if (!requestLine.startsWith(CALLBACK_REQUEST_PREFIX)) return null;
 
-	const queryString = requestLine.slice(CALLBACK_REQUEST_PREFIX.length).split(" ", 1)[0] ?? "";
-	return parseQueryParams(`/?${queryString}`);
+  const queryString = requestLine.slice(CALLBACK_REQUEST_PREFIX.length).split(" ", 1)[0] ?? "";
+  return parseQueryParams(`/?${queryString}`);
 }
 
-function getStateMismatchHtml(): string {
-	return `<html><body><h1>State mismatch error</h1><p>The OAuth state does not match. Please try again.</p></body></html>`;
+export function getStateMismatchHtml(): string {
+  return `<html><body><h1>State mismatch error</h1><p>The OAuth state does not match. Please try again.</p></body></html>`;
 }
 
-function getAuthorizationErrorHtml(params: Record<string, string>): string {
-	return `<html><body><h1>Authorization failed</h1><p>Error: ${params.error}</p><p>${params.error_description || ""}</p></body></html>`;
+export function getAuthorizationErrorHtml(params: Record<string, string>): string {
+  return `<html><body><h1>Authorization failed</h1><p>Error: ${params.error}</p><p>${params.error_description || ""}</p></body></html>`;
 }
 
-function getAuthorizationSuccessHtml(): string {
-	return `<html><body><h1>Authorization successful!</h1><p>You can close this window and return to the terminal.</p><script>window.close();</script></body></html>`;
+export function getAuthorizationSuccessHtml(): string {
+  return `<html><body><h1>Authorization successful!</h1><p>You can close this window and return to the terminal.</p><script>window.close();</script></body></html>`;
 }
 
 type CallbackOutcome =
-	| { type: "ignore" }
-	| { type: "reject"; html: string; error: Error }
-	| { type: "resolve"; html: string; result: CallbackResult };
+  | { type: "ignore" }
+  | { type: "reject"; html: string; error: Error }
+  | { type: "resolve"; html: string; result: CallbackResult };
 
-function handleCallbackParams(params: Record<string, string>, expectedState: string): CallbackOutcome {
-	if (params.state !== expectedState) {
-		return {
-			type: "reject",
-			html: getStateMismatchHtml(),
-			error: new Error("State mismatch - possible CSRF attack"),
-		};
-	}
+export function handleCallbackParams(params: Record<string, string>, expectedState: string): CallbackOutcome {
+  if (params.state !== expectedState) {
+    return {
+      type: "reject",
+      html: getStateMismatchHtml(),
+      error: new Error("State mismatch - possible CSRF attack"),
+    };
+  }
 
-	if (params.error) {
-		return {
-			type: "resolve",
-			html: getAuthorizationErrorHtml(params),
-			result: { code: "", state: expectedState, error: params.error },
-		};
-	}
+  if (params.error) {
+    return {
+      type: "resolve",
+      html: getAuthorizationErrorHtml(params),
+      result: { code: "", state: expectedState, error: params.error },
+    };
+  }
 
-	if (!params.code) {
-		return { type: "ignore" };
-	}
+  if (!params.code) {
+    return { type: "ignore" };
+  }
 
-	return {
-		type: "resolve",
-		html: getAuthorizationSuccessHtml(),
-		result: { code: params.code, state: params.state },
-	};
+  return {
+    type: "resolve",
+    html: getAuthorizationSuccessHtml(),
+    result: { code: params.code, state: params.state },
+  };
 }
 
-function writeOutcomeResponse(
-	clientSocket: NodeJS.Socket,
-	outcome: Exclude<CallbackOutcome, { type: "ignore" }>,
+export function writeOutcomeResponse(
+  clientSocket: NodeJS.Socket,
+  outcome: Exclude<CallbackOutcome, { type: "ignore" }>,
 ): void {
-	writeHtmlResponse(
-		clientSocket,
-		outcome.type === "resolve" && !outcome.result.error ? "HTTP/1.1 200 OK" : "HTTP/1.1 400 Bad Request",
-		outcome.html,
-	);
-	clientSocket.end();
+  writeHtmlResponse(
+    clientSocket,
+    outcome.type === "resolve" && !outcome.result.error ? "HTTP/1.1 200 OK" : "HTTP/1.1 400 Bad Request",
+    outcome.html,
+  );
+  clientSocket.end();
 }
 
-function processCallbackChunk(
-	buffer: string,
-	chunk: Buffer,
-	expectedState: string,
+export function processCallbackChunk(
+  buffer: string,
+  chunk: Buffer,
+  expectedState: string,
 ): { buffer: string; outcome: CallbackOutcome } {
-	const nextBuffer = buffer + chunk.toString();
-	const params = extractCallbackParams(nextBuffer);
-	return {
-		buffer: nextBuffer,
-		outcome: params ? handleCallbackParams(params, expectedState) : { type: "ignore" },
-	};
+  const nextBuffer = buffer + chunk.toString();
+  const params = extractCallbackParams(nextBuffer);
+  return {
+    buffer: nextBuffer,
+    outcome: params ? handleCallbackParams(params, expectedState) : { type: "ignore" },
+  };
 }
 
 /**
  * Start a local callback server and wait for the OAuth redirect
  */
 export async function startCallbackServer(expectedState: string, timeoutMs = 120000): Promise<CallbackResult> {
-	const port = await lookupPort({ port: 3000 });
+  const port = await lookupPort({ port: 3000 });
 
-	return new Promise((resolve, reject) => {
-		const callbackServer = createServer();
-		const timeout = setTimeout(() => {
-			callbackServer.close();
-			reject(new Error("OAuth callback timed out"));
-		}, timeoutMs);
-		const cleanup = () => {
-			clearTimeout(timeout);
-			callbackServer.close();
-		};
+  return new Promise((resolve, reject) => {
+    const callbackServer = createServer();
+    const timeout = setTimeout(() => {
+      callbackServer.close();
+      reject(new Error("OAuth callback timed out"));
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timeout);
+      callbackServer.close();
+    };
 
-		callbackServer.on("connection", (clientSocket) => {
-			let buffer = "";
+    callbackServer.on("connection", (clientSocket) => {
+      let buffer = "";
 
-			clientSocket.on("data", (chunk) => {
-				const processed = processCallbackChunk(buffer, chunk, expectedState);
-				buffer = processed.buffer;
-				if (processed.outcome.type === "ignore") return;
+      clientSocket.on("data", (chunk) => {
+        const processed = processCallbackChunk(buffer, chunk, expectedState);
+        buffer = processed.buffer;
+        if (processed.outcome.type === "ignore") return;
 
-				writeOutcomeResponse(clientSocket, processed.outcome);
-				cleanup();
+        writeOutcomeResponse(clientSocket, processed.outcome);
+        cleanup();
 
-				if (processed.outcome.type === "reject") {
-					reject(processed.outcome.error);
-					return;
-				}
+        if (processed.outcome.type === "reject") {
+          reject(processed.outcome.error);
+          return;
+        }
 
-				resolve(processed.outcome.result);
-			});
+        resolve(processed.outcome.result);
+      });
 
-			clientSocket.on("error", () => {
-				// Ignore connection errors
-			});
-		});
+      clientSocket.on("error", () => {
+        // Ignore connection errors
+      });
+    });
 
-		callbackServer.on("error", (err: NodeJS.ErrnoException) => {
-			cleanup();
-			if (err.code === "EADDRINUSE") {
-				lookupPort({ port: 3001 }).then((newPort: number) => {
-					reject(new Error(`Port ${newPort} already in use`));
-				});
-				return;
-			}
-			reject(err);
-		});
+    callbackServer.on("error", (err: NodeJS.ErrnoException) => {
+      cleanup();
+      if (err.code === "EADDRINUSE") {
+        lookupPort({ port: 3001 }).then((newPort: number) => {
+          reject(new Error(`Port ${newPort} already in use`));
+        });
+        return;
+      }
+      reject(err);
+    });
 
-		callbackServer.listen(port, "127.0.0.1", () => {
-			// Server started, will handle callback
-		});
-	});
+    callbackServer.listen(port, "127.0.0.1", () => {
+      // Server started, will handle callback
+    });
+  });
 }
 
 // =============================================================================
@@ -332,55 +332,55 @@ export async function startCallbackServer(expectedState: string, timeoutMs = 120
 // =============================================================================
 
 export interface TokenStorage {
-	save(tokens: OAuthTokens, userInfo?: OAuthUserInfo): Promise<void>;
-	load(): Promise<OAuthTokens | null>;
-	clear(): Promise<void>;
-	getUserInfo(): Promise<OAuthUserInfo | null>;
+  save(tokens: OAuthTokens, userInfo?: OAuthUserInfo): Promise<void>;
+  load(): Promise<OAuthTokens | null>;
+  clear(): Promise<void>;
+  getUserInfo(): Promise<OAuthUserInfo | null>;
 }
 
 export class FileTokenStorage implements TokenStorage {
-	private path: string;
-	private userInfoPath: string;
+  private path: string;
+  private userInfoPath: string;
 
-	constructor(basePath: string) {
-		// Store tokens in same directory as config
-		this.path = basePath.replace(/\.json$/, "-tokens.json");
-		this.userInfoPath = basePath.replace(/\.json$/, "-user.json");
-	}
+  constructor(basePath: string) {
+    // Store tokens in same directory as config
+    this.path = basePath.replace(/\.json$/, "-tokens.json");
+    this.userInfoPath = basePath.replace(/\.json$/, "-user.json");
+  }
 
-	async save(tokens: OAuthTokens, userInfo?: OAuthUserInfo): Promise<void> {
-		const { writeFileSync } = await import("node:fs");
-		writeFileSync(this.path, JSON.stringify(tokens, null, 2), "utf-8");
-		if (userInfo) {
-			writeFileSync(this.userInfoPath, JSON.stringify(userInfo, null, 2), "utf-8");
-		}
-	}
+  async save(tokens: OAuthTokens, userInfo?: OAuthUserInfo): Promise<void> {
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(this.path, JSON.stringify(tokens, null, 2), "utf-8");
+    if (userInfo) {
+      writeFileSync(this.userInfoPath, JSON.stringify(userInfo, null, 2), "utf-8");
+    }
+  }
 
-	async load(): Promise<OAuthTokens | null> {
-		const { existsSync, readFileSync } = await import("node:fs");
-		if (!existsSync(this.path)) {
-			return null;
-		}
-		return JSON.parse(readFileSync(this.path, "utf-8")) as OAuthTokens;
-	}
+  async load(): Promise<OAuthTokens | null> {
+    const { existsSync, readFileSync } = await import("node:fs");
+    if (!existsSync(this.path)) {
+      return null;
+    }
+    return JSON.parse(readFileSync(this.path, "utf-8")) as OAuthTokens;
+  }
 
-	async clear(): Promise<void> {
-		const { existsSync, unlinkSync } = await import("node:fs");
-		if (existsSync(this.path)) {
-			unlinkSync(this.path);
-		}
-		if (existsSync(this.userInfoPath)) {
-			unlinkSync(this.userInfoPath);
-		}
-	}
+  async clear(): Promise<void> {
+    const { existsSync, unlinkSync } = await import("node:fs");
+    if (existsSync(this.path)) {
+      unlinkSync(this.path);
+    }
+    if (existsSync(this.userInfoPath)) {
+      unlinkSync(this.userInfoPath);
+    }
+  }
 
-	async getUserInfo(): Promise<OAuthUserInfo | null> {
-		const { existsSync, readFileSync } = await import("node:fs");
-		if (!existsSync(this.userInfoPath)) {
-			return null;
-		}
-		return JSON.parse(readFileSync(this.userInfoPath, "utf-8")) as OAuthUserInfo;
-	}
+  async getUserInfo(): Promise<OAuthUserInfo | null> {
+    const { existsSync, readFileSync } = await import("node:fs");
+    if (!existsSync(this.userInfoPath)) {
+      return null;
+    }
+    return JSON.parse(readFileSync(this.userInfoPath, "utf-8")) as OAuthUserInfo;
+  }
 }
 
 // =============================================================================
@@ -388,8 +388,20 @@ export class FileTokenStorage implements TokenStorage {
 // =============================================================================
 
 export interface OAuthFlowResult {
-	tokens: OAuthTokens;
-	userInfo: OAuthUserInfo;
+  tokens: OAuthTokens;
+  userInfo: OAuthUserInfo;
+}
+
+interface OAuthFlowDependencies {
+  generateCodeVerifierFn?: () => string;
+  generateCodeChallengeFn?: (verifier: string) => string;
+  generateStateFn?: () => string;
+  startCallbackServerFn?: (expectedState: string) => Promise<CallbackResult>;
+  exchangeCodeForTokensFn?: (
+    config: OAuthConfig,
+    code: string,
+    codeVerifier: string,
+  ) => Promise<OAuthTokens & { owner?: OAuthUserInfo }>;
 }
 
 /**
@@ -401,94 +413,101 @@ export interface OAuthFlowResult {
  * 5. Store tokens
  */
 export async function executeOAuthFlow(
-	config: OAuthConfig,
-	storage: TokenStorage,
-	openBrowserFn: (url: string) => void,
-	notifyFn: (message: string, type: "info" | "success" | "error") => void,
+  config: OAuthConfig,
+  storage: TokenStorage,
+  openBrowserFn: (url: string) => void,
+  notifyFn: (message: string, type: "info" | "success" | "error") => void,
+  deps: OAuthFlowDependencies = {},
 ): Promise<OAuthFlowResult> {
-	// Generate PKCE parameters
-	const codeVerifier = generateCodeVerifier();
-	const codeChallenge = generateCodeChallenge(codeVerifier);
-	const state = generateState();
+  const generateCodeVerifierFn = deps.generateCodeVerifierFn ?? generateCodeVerifier;
+  const generateCodeChallengeFn = deps.generateCodeChallengeFn ?? generateCodeChallenge;
+  const generateStateFn = deps.generateStateFn ?? generateState;
+  const startCallbackServerFn = deps.startCallbackServerFn ?? startCallbackServer;
+  const exchangeCodeForTokensFn = deps.exchangeCodeForTokensFn ?? exchangeCodeForTokens;
 
-	// Build authorization URL
-	const authUrl = buildAuthorizationUrl(config, codeChallenge, state);
+  // Generate PKCE parameters
+  const codeVerifier = generateCodeVerifierFn();
+  const codeChallenge = generateCodeChallengeFn(codeVerifier);
+  const state = generateStateFn();
 
-	// Start callback server (need to do this before opening browser)
-	const callbackPromise = startCallbackServer(state);
+  // Build authorization URL
+  const authUrl = buildAuthorizationUrl(config, codeChallenge, state);
 
-	// Open browser
-	notifyFn("Opening Notion authorization page in your browser...", "info");
-	openBrowserFn(authUrl);
+  // Start callback server (need to do this before opening browser)
+  const callbackPromise = startCallbackServerFn(state);
 
-	// Wait for callback
-	notifyFn("Waiting for authorization callback...", "info");
+  // Open browser
+  notifyFn("Opening Notion authorization page in your browser...", "info");
+  openBrowserFn(authUrl);
 
-	let callbackResult: CallbackResult;
-	try {
-		callbackResult = await callbackPromise;
-	} catch (error) {
-		throw new Error(`OAuth callback failed: ${error instanceof Error ? error.message : String(error)}`);
-	}
+  // Wait for callback
+  notifyFn("Waiting for authorization callback...", "info");
 
-	if (callbackResult.error) {
-		throw new Error(`Authorization failed: ${callbackResult.error}`);
-	}
+  let callbackResult: CallbackResult;
+  try {
+    callbackResult = await callbackPromise;
+  } catch (error) {
+    throw new Error(`OAuth callback failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
-	// Exchange code for tokens
-	notifyFn("Exchanging authorization code for access token...", "info");
+  if (callbackResult.error) {
+    throw new Error(`Authorization failed: ${callbackResult.error}`);
+  }
 
-	try {
-		const result = await exchangeCodeForTokens(config, callbackResult.code, codeVerifier);
+  // Exchange code for tokens
+  notifyFn("Exchanging authorization code for access token...", "info");
 
-		// Save tokens and user info
-		await storage.save(result, result.owner || undefined);
+  try {
+    const result = await exchangeCodeForTokensFn(config, callbackResult.code, codeVerifier);
 
-		notifyFn("OAuth authorization successful!", "success");
+    // Save tokens and user info
+    await storage.save(result, result.owner || undefined);
 
-		if (result.owner) {
-			notifyFn(`Connected to workspace: ${result.owner.workspaceName}`, "info");
-		}
+    notifyFn("OAuth authorization successful!", "success");
 
-		return {
-			tokens: result,
-			userInfo: result.owner ?? {
-				workspaceId: "",
-				workspaceName: "Unknown",
-				botId: "",
-			},
-		};
-	} catch (error) {
-		throw new Error(`Token exchange failed: ${error instanceof Error ? error.message : String(error)}`);
-	}
+    if (result.owner) {
+      notifyFn(`Connected to workspace: ${result.owner.workspaceName}`, "info");
+    }
+
+    return {
+      tokens: result,
+      userInfo: result.owner ?? {
+        workspaceId: "",
+        workspaceName: "Unknown",
+        botId: "",
+      },
+    };
+  } catch (error) {
+    throw new Error(`Token exchange failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 /**
  * Get a valid access token, refreshing if necessary
  */
 export async function getValidAccessToken(config: OAuthConfig, storage: TokenStorage): Promise<string | null> {
-	const tokens = await storage.load();
-	if (!tokens) {
-		return null;
-	}
+  const tokens = await storage.load();
+  if (!tokens) {
+    return null;
+  }
 
-	// Check if token needs refresh (refresh 5 minutes before expiry)
-	const refreshThreshold = 5 * 60 * 1000;
-	const needsRefresh = Date.now() > tokens.expiresAt - refreshThreshold;
+  // Check if token needs refresh (refresh 5 minutes before expiry)
+  const refreshThreshold = 5 * 60 * 1000;
+  const needsRefresh = Date.now() > tokens.expiresAt - refreshThreshold;
 
-	if (!needsRefresh) {
-		return tokens.accessToken;
-	}
+  if (!needsRefresh) {
+    return tokens.accessToken;
+  }
 
-	// Refresh the token
-	try {
-		const newTokens = await refreshTokens(config, tokens.refreshToken);
-		const userInfo = await storage.getUserInfo();
-		await storage.save(newTokens, userInfo || undefined);
-		return newTokens.accessToken;
-	} catch (error) {
-		// Refresh failed, clear tokens
-		await storage.clear();
-		throw new Error(`Token refresh failed: ${error instanceof Error ? error.message : String(error)}`);
-	}
+  // Refresh the token
+  try {
+    const newTokens = await refreshTokens(config, tokens.refreshToken);
+    const userInfo = await storage.getUserInfo();
+    await storage.save(newTokens, userInfo || undefined);
+    return newTokens.accessToken;
+  } catch (error) {
+    // Refresh failed, clear tokens
+    await storage.clear();
+    throw new Error(`Token refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
