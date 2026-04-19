@@ -72,7 +72,7 @@ Session-start status checks for:
 
 1. MCP OAuth config (`~/.pi/agent/extensions/notion-mcp.json`)
 2. Legacy OAuth token files under `~/.pi/agent/extensions/`
-3. Legacy direct API token hints (`NOTION_API_KEY`, `NOTION_TOKEN`, `.pi/extensions/notion.json`, `~/.pi/agent/extensions/notion.json`) and warns that MCP OAuth is still required.
+3. Legacy direct API token hints (`NOTION_API_KEY`, `NOTION_TOKEN`) and warns that MCP OAuth is still required.
 
 Best practice: keep Notion credentials in dedicated private files under `~/.pi/agent/extensions/` or in environment variables. Do not store tokens or client secrets in `settings.json`.
 

@@ -31,14 +31,6 @@ function getTokenFile(): string {
   return join(getConfigDir(), "notion-tokens.json");
 }
 
-function getLegacyGlobalTokenFile(): string {
-  return join(getConfigDir(), "notion.json");
-}
-
-function getLegacyProjectTokenFile(): string {
-  return join(process.cwd(), ".pi", "extensions", "notion.json");
-}
-
 // =============================================================================
 // Token Types
 // =============================================================================
@@ -121,22 +113,11 @@ function getLegacyEnvAuthStatus(): AuthStatus | null {
   };
 }
 
-function getLegacyConfigAuthStatus(): AuthStatus | null {
-  const config = loadConfig();
-  if (!config?.token) return null;
-
-  return {
-    authenticated: false,
-    message: "[notion] Legacy direct token config detected. MCP OAuth is still required: run /notion.",
-  };
-}
-
 function checkNotionAuth(): AuthStatus {
   return (
     getMcpConfigAuthStatus() ??
     getOAuthTokenAuthStatus() ??
-    getLegacyEnvAuthStatus() ??
-    getLegacyConfigAuthStatus() ?? {
+    getLegacyEnvAuthStatus() ?? {
       authenticated: false,
       message: "[notion] Not authenticated. Use /notion to connect your Notion workspace.",
     }
@@ -280,17 +261,7 @@ function loadConfigFile(path: string): NotionConfig | null {
 function loadConfig(configPath?: string): NotionConfig | null {
   if (configPath) return loadConfigFile(resolveConfigPath(configPath));
   if (process.env.NOTION_CONFIG) return loadConfigFile(resolveConfigPath(process.env.NOTION_CONFIG));
-
-  const globalConfig = loadConfigFile(getLegacyGlobalTokenFile());
-  const projectConfig = loadConfigFile(getLegacyProjectTokenFile());
-
-  if (!globalConfig && !projectConfig) {
-    return null;
-  }
-
-  return {
-    token: projectConfig?.token ?? globalConfig?.token,
-  };
+  return null;
 }
 
 interface TitleProp {
