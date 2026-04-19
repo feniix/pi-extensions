@@ -61,7 +61,11 @@ describe("pi-notion oauth callback helpers", () => {
     const first = processCallbackChunk("", Buffer.from("GET /callback?state=good"), "good");
     expect(first.outcome.type).toBe("ignore");
 
-    const second = processCallbackChunk(first.buffer, Buffer.from("&code=abc HTTP/1.1\r\nHost: localhost\r\n\r\n"), "good");
+    const second = processCallbackChunk(
+      first.buffer,
+      Buffer.from("&code=abc HTTP/1.1\r\nHost: localhost\r\n\r\n"),
+      "good",
+    );
     expect(second.outcome).toMatchObject({ type: "resolve", result: { code: "abc" } });
   });
 });

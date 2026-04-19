@@ -740,13 +740,18 @@ async function disconnectClient(client: NotionMCPClient): Promise<void> {
 }
 
 export {
-  buildHtmlResponse,
   buildAuthorizationUrl,
+  buildHtmlResponse,
   coerceNumericProperties,
   coercePropertyMap,
+  connectWithSavedConfig,
   createPkceChallenge,
   createRegisteredToolExecutor,
+  createUiNotifier,
+  disconnectClient,
+  ensureConnected,
   FileTokenStorage,
+  finalizeConnection,
   getConnectedStatusMessage,
   getConnectionStatusText,
   isNumericString,
@@ -758,11 +763,6 @@ export {
   storage,
   toolError,
   toolResult,
-  connectWithSavedConfig,
-  createUiNotifier,
-  disconnectClient,
-  ensureConnected,
-  finalizeConnection,
 };
 
 export default function notionMCPClientExtension(pi: ExtensionAPI) {

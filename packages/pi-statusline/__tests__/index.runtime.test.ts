@@ -16,13 +16,20 @@ function createMockPi() {
     getThinkingLevel: vi.fn(() => "medium"),
     exec: vi.fn(async (_cmd: string, args: string[]) => {
       const joined = args.join(" ");
-      if (joined.includes("rev-parse --is-inside-work-tree")) return { code: 0, stdout: "true", stderr: "", killed: false };
-      if (joined.includes("rev-parse --show-toplevel")) return { code: 0, stdout: "/tmp/project", stderr: "", killed: false };
+      if (joined.includes("rev-parse --is-inside-work-tree"))
+        return { code: 0, stdout: "true", stderr: "", killed: false };
+      if (joined.includes("rev-parse --show-toplevel"))
+        return { code: 0, stdout: "/tmp/project", stderr: "", killed: false };
       if (joined.includes("rev-parse --git-dir")) return { code: 0, stdout: ".git", stderr: "", killed: false };
       if (joined.includes("branch --show-current")) return { code: 0, stdout: "main", stderr: "", killed: false };
       if (joined.includes("status --porcelain")) return { code: 0, stdout: " M file.ts\n", stderr: "", killed: false };
       if (joined.includes("worktree list --porcelain")) {
-        return { code: 0, stdout: "worktree /tmp/project\nHEAD abc\nbranch refs/heads/main\n", stderr: "", killed: false };
+        return {
+          code: 0,
+          stdout: "worktree /tmp/project\nHEAD abc\nbranch refs/heads/main\n",
+          stderr: "",
+          killed: false,
+        };
       }
       return { code: 1, stdout: "", stderr: "", killed: false };
     }),
@@ -33,7 +40,12 @@ function createMockPi() {
 
 describe("pi-statusline runtime helpers", () => {
   it("builds initial snapshots and labels", () => {
-    expect(createInitialGitSnapshot()).toEqual({ repoName: null, branch: null, dirtyCount: 0, worktreeLabel: "no git" });
+    expect(createInitialGitSnapshot()).toEqual({
+      repoName: null,
+      branch: null,
+      dirtyCount: 0,
+      worktreeLabel: "no git",
+    });
     expect(createInitialState().modelLabel).toBe("Model: none");
     expect(getBranchLabel("main")).toBe("⎇ main");
     expect(getBranchLabel(null)).toBe("⎇ no git");
@@ -84,7 +96,9 @@ describe("pi-statusline extension runtime", () => {
         cwd: "/tmp/project",
         hasUI: false,
         model: { id: "opus", contextWindow: 1000000 },
-        sessionManager: { getBranch: () => [{ type: "message", message: { role: "assistant", usage: { input: 10, output: 20 } } }] },
+        sessionManager: {
+          getBranch: () => [{ type: "message", message: { role: "assistant", usage: { input: 10, output: 20 } } }],
+        },
         getContextUsage: () => ({ percent: 12 }),
         ui: { setFooter },
       },
@@ -119,19 +133,13 @@ describe("pi-statusline extension runtime", () => {
     await inputHandler?.({ text: "/release" });
     await toolHandler?.({ toolName: "Skill", args: { skill: "coverage" } });
 
-    const result = await toolDef.execute(
-      "tool-id",
-      {},
-      new AbortController().signal,
-      undefined,
-      {
-        cwd: "/tmp/project",
-        hasUI: false,
-        model: { id: "opus", contextWindow: 1000000 },
-        sessionManager: { getBranch: () => [] },
-        getContextUsage: () => ({ percent: 12 }),
-      },
-    );
+    const result = await toolDef.execute("tool-id", {}, new AbortController().signal, undefined, {
+      cwd: "/tmp/project",
+      hasUI: false,
+      model: { id: "opus", contextWindow: 1000000 },
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ percent: 12 }),
+    });
 
     expect(result.content[0]?.text).toContain("Skill: coverage");
   });

@@ -67,7 +67,12 @@ describe("pi-notion mcp client runtime helpers", () => {
     expect(codeVerifier).toBeTruthy();
     expect(codeChallenge).toBeTruthy();
 
-    const url = buildAuthorizationUrl({ client_id: "client-1" }, "http://localhost:3333/callback", codeChallenge, "state-1");
+    const url = buildAuthorizationUrl(
+      { client_id: "client-1" },
+      "http://localhost:3333/callback",
+      codeChallenge,
+      "state-1",
+    );
     expect(url).toContain("client_id=client-1");
     expect(url).toContain("code_challenge_method=S256");
     expect(url).toContain("prompt=consent");
@@ -104,7 +109,8 @@ describe("pi-notion mcp client runtime helpers", () => {
   });
 
   it("connects, discovers tools, formats status, and calls tools", async () => {
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       .mockResolvedValueOnce({
         ok: true,
         headers: new Headers({ "content-type": "application/json", "mcp-session-id": "session-12345678" }),
@@ -143,10 +149,7 @@ describe("pi-notion mcp client runtime helpers", () => {
 
     const result = await client.callTool("https://mcp.notion.com/mcp", "notion-search", { properties: { count: "2" } });
     expect(result).toContain("hello");
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://mcp.notion.com/mcp",
-      expect.objectContaining({ method: "POST" }),
-    );
+    expect(fetchMock).toHaveBeenCalledWith("https://mcp.notion.com/mcp", expect.objectContaining({ method: "POST" }));
 
     await client.disconnect();
     expect(client.state.connected).toBe(false);
@@ -154,7 +157,8 @@ describe("pi-notion mcp client runtime helpers", () => {
 
   it("handles SSE responses and request errors", async () => {
     const client = new NotionMCPClient();
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       .mockResolvedValueOnce({
         ok: true,
         headers: new Headers({ "content-type": "text/event-stream", "mcp-session-id": "session-sse" }),
@@ -193,7 +197,13 @@ describe("pi-notion mcp client runtime helpers", () => {
   it("resolves access tokens from direct callbacks and code exchanges", async () => {
     const notify = vi.fn();
     expect(
-      await resolveAccessToken({ accessToken: "direct-token" }, "http://localhost/callback", "verifier", { client_id: "client" }, notify),
+      await resolveAccessToken(
+        { accessToken: "direct-token" },
+        "http://localhost/callback",
+        "verifier",
+        { client_id: "client" },
+        notify,
+      ),
     ).toBe("direct-token");
 
     global.fetch = vi.fn().mockResolvedValue({
@@ -204,7 +214,13 @@ describe("pi-notion mcp client runtime helpers", () => {
     }) as typeof fetch;
 
     expect(
-      await resolveAccessToken({ code: "code-123" }, "http://localhost/callback", "verifier", { client_id: "client" }, notify),
+      await resolveAccessToken(
+        { code: "code-123" },
+        "http://localhost/callback",
+        "verifier",
+        { client_id: "client" },
+        notify,
+      ),
     ).toBe("exchanged-token");
     expect(notify).toHaveBeenCalledWith("Exchanging authorization code for token...");
 
@@ -249,7 +265,9 @@ describe("pi-notion mcp client runtime helpers", () => {
 
   it("creates UI notifiers and connection helpers", async () => {
     const emit = vi.fn();
-    const notify = createUiNotifier({ events: { emit } } as unknown as import("@mariozechner/pi-coding-agent").ExtensionAPI);
+    const notify = createUiNotifier({
+      events: { emit },
+    } as unknown as import("@mariozechner/pi-coding-agent").ExtensionAPI);
     notify("hello");
     expect(emit).toHaveBeenCalledWith("ui:notify", { message: "hello", type: "info" });
 
@@ -271,12 +289,20 @@ describe("pi-notion mcp client runtime helpers", () => {
     vi.spyOn(client, "connect").mockResolvedValue();
     const saveSpy = vi.spyOn(storage, "save").mockResolvedValue();
     const registerTools = vi.fn();
-    await finalizeConnection(client, { client_id: "client-1", client_secret: "secret-1" }, "token-123", registerTools, vi.fn());
+    await finalizeConnection(
+      client,
+      { client_id: "client-1", client_secret: "secret-1" },
+      "token-123",
+      registerTools,
+      vi.fn(),
+    );
     expect(saveSpy).toHaveBeenCalled();
     expect(registerTools).toHaveBeenCalled();
 
     const reuseClient = new NotionMCPClient();
-    const savedSpy = vi.spyOn(storage, "load").mockResolvedValueOnce({ mcpUrl: "https://mcp.notion.com/mcp", accessToken: "token-123" });
+    const savedSpy = vi
+      .spyOn(storage, "load")
+      .mockResolvedValueOnce({ mcpUrl: "https://mcp.notion.com/mcp", accessToken: "token-123" });
     vi.spyOn(reuseClient, "connect").mockResolvedValueOnce();
     const reused = await ensureConnected(reuseClient, vi.fn(), vi.fn());
     expect(reused).toEqual({ reusedSavedConfig: true });
