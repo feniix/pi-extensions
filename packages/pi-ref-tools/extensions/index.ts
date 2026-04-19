@@ -7,8 +7,8 @@
  * Setup:
  * 1. Install: pi install npm:@feniix/pi-ref-tools
  * 2. Optional config:
- *    - JSON config: ~/.pi/agent/extensions/ref-tools.json or .pi/extensions/ref-tools.json
- *      (or set REF_MCP_CONFIG / --ref-mcp-config for a custom path)
+ *    - Settings file: ~/.pi/agent/settings.json or .pi/settings.json under the pi-ref-tools key
+ *      (or set REF_MCP_CONFIG / --ref-mcp-config for a custom JSON config path)
  *      Keys: url, apiKey, timeoutMs, protocolVersion, maxBytes, maxLines
  *    - REF_MCP_URL (default: https://api.ref.tools/mcp)
  *    - REF_API_KEY (API key, sent as x-ref-api-key header)
@@ -29,9 +29,9 @@
  *   - ref_read_url: Fetch and read a documentation URL as optimized markdown
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -110,6 +110,10 @@ interface RefMcpConfig {
   protocolVersion?: string;
   maxBytes?: number;
   maxLines?: number;
+}
+
+function getHomeDir(): string {
+  return process.env.HOME || homedir();
 }
 
 // =============================================================================
@@ -267,10 +271,10 @@ function resolveEffectiveLimits(
 function resolveConfigPath(configPath: string): string {
   const trimmed = configPath.trim();
   if (trimmed.startsWith("~/")) {
-    return join(homedir(), trimmed.slice(2));
+    return join(getHomeDir(), trimmed.slice(2));
   }
   if (trimmed.startsWith("~")) {
-    return join(homedir(), trimmed.slice(1));
+    return join(getHomeDir(), trimmed.slice(1));
   }
   if (isAbsolute(trimmed)) {
     return trimmed;
@@ -292,48 +296,78 @@ function parseConfig(raw: unknown, pathHint: string): RefMcpConfig {
   };
 }
 
-function loadConfig(configPath: string | undefined): RefMcpConfig | null {
-  const candidates: string[] = [];
-  const envConfig = process.env.REF_MCP_CONFIG;
-  if (configPath) {
-    candidates.push(resolveConfigPath(configPath));
-  } else if (envConfig) {
-    candidates.push(resolveConfigPath(envConfig));
-  } else {
-    const projectConfigPath = join(process.cwd(), ".pi", "extensions", "ref-tools.json");
-    const globalConfigPath = join(homedir(), ".pi", "agent", "extensions", "ref-tools.json");
-    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-    candidates.push(projectConfigPath, globalConfigPath);
+function loadConfigFile(path: string): RefMcpConfig | null {
+  if (!existsSync(path)) {
+    return null;
   }
 
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) {
-      continue;
-    }
-    try {
-      const raw = readFileSync(candidate, "utf-8");
-      const parsed = JSON.parse(raw);
-      return parseConfig(parsed, candidate);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[pi-ref-tools] Failed to parse config ${candidate}: ${message}`);
-    }
-  }
-
-  return null;
-}
-
-function ensureDefaultConfigFile(projectConfigPath: string, globalConfigPath: string): void {
-  if (existsSync(projectConfigPath) || existsSync(globalConfigPath)) {
-    return;
-  }
   try {
-    mkdirSync(dirname(globalConfigPath), { recursive: true });
-    writeFileSync(globalConfigPath, `${JSON.stringify(DEFAULT_CONFIG_FILE, null, 2)}\n`, "utf-8");
+    const raw = readFileSync(path, "utf-8");
+    const parsed = JSON.parse(raw);
+    return parseConfig(parsed, path);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[pi-ref-tools] Failed to write ${globalConfigPath}: ${message}`);
+    console.warn(`[pi-ref-tools] Failed to parse config ${path}: ${message}`);
+    return null;
   }
+}
+
+function loadSettingsConfig(path: string): RefMcpConfig | null {
+  if (!existsSync(path)) {
+    return null;
+  }
+
+  try {
+    const raw = readFileSync(path, "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const config = parsed["pi-ref-tools"];
+    if (!isRecord(config)) {
+      return null;
+    }
+    const parsedConfig = parseConfig(config, path);
+    return {
+      url: parsedConfig.url,
+      timeoutMs: parsedConfig.timeoutMs,
+      protocolVersion: parsedConfig.protocolVersion,
+      maxBytes: parsedConfig.maxBytes,
+      maxLines: parsedConfig.maxLines,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[pi-ref-tools] Failed to parse settings ${path}: ${message}`);
+    return null;
+  }
+}
+
+function loadConfig(configPath: string | undefined): RefMcpConfig | null {
+  const envConfig = process.env.REF_MCP_CONFIG;
+  if (configPath) {
+    return loadConfigFile(resolveConfigPath(configPath));
+  }
+  if (envConfig) {
+    return loadConfigFile(resolveConfigPath(envConfig));
+  }
+
+  const globalSettingsPath = join(getHomeDir(), ".pi", "agent", "settings.json");
+  const projectSettingsPath = join(process.cwd(), ".pi", "settings.json");
+  const legacyGlobalConfigPath = join(getHomeDir(), ".pi", "agent", "extensions", "ref-tools.json");
+  const legacyProjectConfigPath = join(process.cwd(), ".pi", "extensions", "ref-tools.json");
+
+  const globalConfig = loadSettingsConfig(globalSettingsPath) ?? loadConfigFile(legacyGlobalConfigPath);
+  const projectConfig = loadSettingsConfig(projectSettingsPath) ?? loadConfigFile(legacyProjectConfigPath);
+
+  if (!globalConfig && !projectConfig) {
+    return null;
+  }
+
+  return {
+    url: projectConfig?.url ?? globalConfig?.url,
+    apiKey: projectConfig?.apiKey ?? globalConfig?.apiKey,
+    timeoutMs: projectConfig?.timeoutMs ?? globalConfig?.timeoutMs,
+    protocolVersion: projectConfig?.protocolVersion ?? globalConfig?.protocolVersion,
+    maxBytes: projectConfig?.maxBytes ?? globalConfig?.maxBytes,
+    maxLines: projectConfig?.maxLines ?? globalConfig?.maxLines,
+  };
 }
 
 function redactApiKey(apiKey: string | undefined): string {
@@ -760,7 +794,6 @@ function formatSessionStartMessage(settings: RefRuntimeSettings): string {
 
 export {
   DEFAULT_CONFIG_FILE,
-  ensureDefaultConfigFile,
   extractMatchingSseResponse,
   extractSseData,
   formatSessionStartMessage,
@@ -806,7 +839,7 @@ export default function refTools(pi: ExtensionAPI) {
     type: "string",
   });
   pi.registerFlag("--ref-mcp-config", {
-    description: "Path to JSON config file (defaults to ~/.pi/agent/extensions/ref-tools.json).",
+    description: "Path to custom JSON config file for private overrides such as API keys.",
     type: "string",
   });
   pi.registerFlag("--ref-mcp-max-bytes", {

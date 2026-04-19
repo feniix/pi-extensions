@@ -32,20 +32,29 @@ You need a Ref API key from [ref.tools/keys](https://ref.tools/keys).
 export REF_API_KEY="your_key"
 ```
 
-### Option 2: JSON Config File
+### Option 2: Settings File
 
-Create `~/.pi/agent/extensions/ref-tools.json` (auto-created on first run):
+Use pi's standard settings locations for non-secret configuration:
+
+- project: `.pi/settings.json`
+- global: `~/.pi/agent/settings.json`
+
+Under the `pi-ref-tools` key:
 
 ```json
 {
-  "url": "https://api.ref.tools/mcp",
-  "apiKey": "your_key",
-  "timeoutMs": 30000,
-  "protocolVersion": "2025-06-18",
-  "maxBytes": 51200,
-  "maxLines": 2000
+  "pi-ref-tools": {
+    "url": "https://api.ref.tools/mcp",
+    "timeoutMs": 30000,
+    "protocolVersion": "2025-06-18",
+    "maxBytes": 51200,
+    "maxLines": 2000
+  }
 }
 ```
+
+> Best practice: keep `REF_API_KEY` in an environment variable, not in `settings.json`.
+> If you need a persisted private file, use `--ref-mcp-config` or `REF_MCP_CONFIG` to point to a custom JSON config outside your project.
 
 ### Option 3: CLI Flags
 
@@ -57,8 +66,10 @@ pi --ref-mcp-api-key=your_key
 
 1. `--ref-mcp-config` flag path
 2. `REF_MCP_CONFIG` environment variable
-3. `./.pi/extensions/ref-tools.json` (project-level)
-4. `~/.pi/agent/extensions/ref-tools.json` (global)
+3. `.pi/settings.json` under `pi-ref-tools` (project-level)
+4. `~/.pi/agent/settings.json` under `pi-ref-tools` (global)
+5. legacy `.pi/extensions/ref-tools.json` (project-level fallback)
+6. legacy `~/.pi/agent/extensions/ref-tools.json` (global fallback)
 
 ## Tools
 

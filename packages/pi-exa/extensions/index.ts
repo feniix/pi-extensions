@@ -23,9 +23,9 @@
  *   - web_search_advanced_exa: Full-featured search (disabled by default)
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { Exa } from "exa-js";
@@ -74,6 +74,10 @@ interface ExaSearchResponse {
   searchTime?: number;
 }
 
+function getHomeDir(): string {
+  return process.env.HOME || homedir();
+}
+
 // =============================================================================
 // Config Loading
 // =============================================================================
@@ -81,10 +85,10 @@ interface ExaSearchResponse {
 function resolveConfigPath(configPath: string): string {
   const trimmed = configPath.trim();
   if (trimmed.startsWith("~/")) {
-    return join(homedir(), trimmed.slice(2));
+    return join(getHomeDir(), trimmed.slice(2));
   }
   if (trimmed.startsWith("~")) {
-    return join(homedir(), trimmed.slice(1));
+    return join(getHomeDir(), trimmed.slice(1));
   }
   if (isAbsolute(trimmed)) {
     return trimmed;
@@ -109,55 +113,71 @@ function parseConfig(raw: unknown): ExaConfig {
   };
 }
 
-function loadConfig(configPath?: string): ExaConfig | null {
-  const candidates: string[] = [];
-
-  if (configPath) {
-    candidates.push(resolveConfigPath(configPath));
-  } else if (process.env.EXA_CONFIG) {
-    candidates.push(resolveConfigPath(process.env.EXA_CONFIG));
-  } else {
-    const projectConfigPath = join(process.cwd(), ".pi", "extensions", "exa.json");
-    const globalConfigPath = join(homedir(), ".pi", "agent", "extensions", "exa.json");
-    ensureDefaultConfigFile(projectConfigPath, globalConfigPath);
-    candidates.push(projectConfigPath, globalConfigPath);
+function loadConfigFile(path: string): ExaConfig | null {
+  if (!existsSync(path)) {
+    return null;
   }
-
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) {
-      continue;
-    }
-    try {
-      const raw = readFileSync(candidate, "utf-8");
-      const parsed = JSON.parse(raw);
-      return parseConfig(parsed);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[pi-exa] Failed to parse config ${candidate}: ${message}`);
-    }
-  }
-
-  return null;
-}
-
-function ensureDefaultConfigFile(projectConfigPath: string, globalConfigPath: string): void {
-  if (existsSync(projectConfigPath) || existsSync(globalConfigPath)) {
-    return;
-  }
-
-  const defaultConfig = {
-    apiKey: null,
-    enabledTools: ["web_search_exa", "web_fetch_exa"],
-    advancedEnabled: false,
-  };
 
   try {
-    mkdirSync(dirname(globalConfigPath), { recursive: true });
-    writeFileSync(globalConfigPath, `${JSON.stringify(defaultConfig, null, 2)}\n`, "utf-8");
+    const raw = readFileSync(path, "utf-8");
+    const parsed = JSON.parse(raw);
+    return parseConfig(parsed);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[pi-exa] Failed to write ${globalConfigPath}: ${message}`);
+    console.warn(`[pi-exa] Failed to parse config ${path}: ${message}`);
+    return null;
   }
+}
+
+function loadSettingsConfig(path: string): ExaConfig | null {
+  if (!existsSync(path)) {
+    return null;
+  }
+
+  try {
+    const raw = readFileSync(path, "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const config = parsed["pi-exa"];
+    if (typeof config !== "object" || config === null) {
+      return null;
+    }
+    const parsedConfig = parseConfig(config);
+    return {
+      enabledTools: parsedConfig.enabledTools,
+      advancedEnabled: parsedConfig.advancedEnabled,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[pi-exa] Failed to parse settings ${path}: ${message}`);
+    return null;
+  }
+}
+
+function loadConfig(configPath?: string): ExaConfig | null {
+  if (configPath) {
+    return loadConfigFile(resolveConfigPath(configPath));
+  }
+  if (process.env.EXA_CONFIG) {
+    return loadConfigFile(resolveConfigPath(process.env.EXA_CONFIG));
+  }
+
+  const globalSettingsPath = join(getHomeDir(), ".pi", "agent", "settings.json");
+  const projectSettingsPath = join(process.cwd(), ".pi", "settings.json");
+  const legacyGlobalConfigPath = join(getHomeDir(), ".pi", "agent", "extensions", "exa.json");
+  const legacyProjectConfigPath = join(process.cwd(), ".pi", "extensions", "exa.json");
+
+  const globalConfig = loadSettingsConfig(globalSettingsPath) ?? loadConfigFile(legacyGlobalConfigPath);
+  const projectConfig = loadSettingsConfig(projectSettingsPath) ?? loadConfigFile(legacyProjectConfigPath);
+
+  if (!globalConfig && !projectConfig) {
+    return null;
+  }
+
+  return {
+    apiKey: projectConfig?.apiKey ?? globalConfig?.apiKey,
+    enabledTools: projectConfig?.enabledTools ?? globalConfig?.enabledTools,
+    advancedEnabled: projectConfig?.advancedEnabled ?? globalConfig?.advancedEnabled,
+  };
 }
 
 function getConfigOverrideFlag(pi: ExtensionAPI): string | undefined {
@@ -447,7 +467,6 @@ async function performAdvancedSearch(
 export {
   DEFAULT_MAX_CHARACTERS,
   DEFAULT_NUM_RESULTS,
-  ensureDefaultConfigFile,
   formatCrawlResults,
   formatSearchResults,
   getAuthStatusMessage,
@@ -478,7 +497,7 @@ export default function exaExtension(pi: ExtensionAPI) {
     type: "boolean",
   });
   pi.registerFlag("--exa-config", {
-    description: "Path to JSON config file (defaults to ~/.pi/agent/extensions/exa.json)",
+    description: "Path to custom JSON config file for private overrides such as API keys.",
     type: "string",
   });
 

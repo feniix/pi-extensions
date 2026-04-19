@@ -31,17 +31,26 @@ You need an Exa API key from [dashboard.exa.ai/api-keys](https://dashboard.exa.a
 export EXA_API_KEY="your_key"
 ```
 
-### Option 2: JSON Config File
+### Option 2: Settings File
 
-Create `~/.pi/agent/extensions/exa.json` (auto-created on first run):
+Use pi's standard settings locations for non-secret configuration:
+
+- project: `.pi/settings.json`
+- global: `~/.pi/agent/settings.json`
+
+Under the `pi-exa` key:
 
 ```json
 {
-  "apiKey": "your_key",
-  "enabledTools": ["web_search_exa", "web_fetch_exa"],
-  "advancedEnabled": false
+  "pi-exa": {
+    "enabledTools": ["web_search_exa", "web_fetch_exa"],
+    "advancedEnabled": false
+  }
 }
 ```
+
+> Best practice: keep `EXA_API_KEY` in an environment variable, not in `settings.json`.
+> If you need a persisted private file, use `--exa-config` or `EXA_CONFIG` to point to a custom JSON config outside your project.
 
 ### Option 3: CLI Flags
 
