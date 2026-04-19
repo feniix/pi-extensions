@@ -71,5 +71,25 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit --pretty false --project packages/${{ matrix.package }}/tsconfig.json
 
-      - name: Test
-        run: npx vitest run packages/${{ matrix.package }}/__tests__
+      - name: Test with coverage
+        run: >-
+          npx vitest run packages/${{ matrix.package }}/__tests__
+          --coverage.enabled
+          --coverage.reportsDirectory=coverage/${{ matrix.package }}
+          --coverage.include=packages/${{ matrix.package }}/extensions/**/*.ts
+          --coverage.thresholds.lines=70
+          --coverage.thresholds.statements=70
+          --coverage.thresholds.functions=70
+          --coverage.thresholds.branches=60
+
+      - name: Coverage summary
+        run: >-
+          node scripts/write-coverage-summary.mjs
+          coverage/${{ matrix.package }}/coverage-summary.json
+          ${{ matrix.package }}
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.package }}
+          path: coverage/${{ matrix.package }}

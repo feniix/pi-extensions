@@ -1,22 +1,49 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
-	"linter": {
-		"enabled": true,
-		"rules": {
-			"recommended": true
-		}
-	},
-	"formatter": {
-		"enabled": true,
-		"indentStyle": "tab",
-		"lineWidth": 120
-	},
-	"files": {
-		"includes": [
-			"packages/*/extensions/**/*.ts",
-			"packages/*/__tests__/**/*.ts",
-			"packages/*/src/**/*.ts",
-			"vitest.config.ts"
-		]
-	}
+  "$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true,
+    "defaultBranch": "main"
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "packages/*/extensions/**/*.ts",
+      "packages/*/__tests__/**/*.ts",
+      "packages/*/src/**/*.ts",
+      "packages/*/package.json",
+      "package.json",
+      "tsconfig.json",
+      "biome.json",
+      "vitest.config.ts"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedImports": "error"
+      },
+      "style": {
+        "noNonNullAssertion": "error"
+      },
+      "suspicious": {
+        "noExplicitAny": "error"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always"
+    }
+  }
 }
