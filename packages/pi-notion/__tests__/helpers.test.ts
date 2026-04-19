@@ -273,6 +273,43 @@ describe("pi-notion loadConfig", () => {
     expect(result).toBeNull();
   });
 
+  it("loads from NOTION_CONFIG_FILE when set", () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-notion-load-env-file-"));
+    const configPath = join(base, "notion-config.json");
+    const original = process.env.NOTION_CONFIG_FILE;
+    writeFileSync(configPath, JSON.stringify({ token: "env-file-token" }), "utf-8");
+    process.env.NOTION_CONFIG_FILE = configPath;
+
+    try {
+      expect(loadConfig(undefined)).toEqual({ token: "env-file-token" });
+    } finally {
+      if (original) process.env.NOTION_CONFIG_FILE = original;
+      else delete process.env.NOTION_CONFIG_FILE;
+    }
+  });
+
+  it("supports deprecated NOTION_CONFIG with warning", () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-notion-load-env-legacy-"));
+    const configPath = join(base, "notion-config.json");
+    const original = process.env.NOTION_CONFIG;
+    const originalFile = process.env.NOTION_CONFIG_FILE;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    writeFileSync(configPath, JSON.stringify({ token: "legacy-env-token" }), "utf-8");
+    delete process.env.NOTION_CONFIG_FILE;
+    process.env.NOTION_CONFIG = configPath;
+
+    try {
+      expect(loadConfig(undefined)).toEqual({ token: "legacy-env-token" });
+      expect(warnSpy).toHaveBeenCalledWith("[pi-notion] NOTION_CONFIG is deprecated; use NOTION_CONFIG_FILE.");
+    } finally {
+      warnSpy.mockRestore();
+      if (original) process.env.NOTION_CONFIG = original;
+      else delete process.env.NOTION_CONFIG;
+      if (originalFile) process.env.NOTION_CONFIG_FILE = originalFile;
+      else delete process.env.NOTION_CONFIG_FILE;
+    }
+  });
+
   it("returns null when no custom config path is provided", () => {
     const result = loadConfig(undefined);
     expect(result).toBeNull();

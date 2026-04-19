@@ -30,6 +30,7 @@ describe("pi-notion Extension File Structure", () => {
     expect(content).toContain("resolveConfigPath");
     expect(content).toContain("loadConfig");
     expect(content).toContain("homedir");
+    expect(content).toContain("NOTION_CONFIG_FILE");
     expect(content).toContain("NOTION_CONFIG");
   });
 

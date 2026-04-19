@@ -16,6 +16,35 @@ const getEventHandler = (mockPi: ReturnType<typeof createMockPi>, eventName: str
 };
 
 describe("pi-notion extension runtime", () => {
+  it("registers config-file flags", () => {
+    const mockPi = createMockPi();
+    notion(mockPi as unknown as ExtensionAPI);
+
+    const flagNames = mockPi.registerFlag.mock.calls.map(([name]) => name);
+    expect(flagNames).toContain("--notion-config-file");
+    expect(flagNames).toContain("--notion-config");
+  });
+
+  it("supports deprecated notion config flag alias with warning", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const original = process.env.NOTION_CONFIG_FILE;
+    const mockPi = {
+      registerFlag: vi.fn(),
+      getFlag: vi.fn((flag: string) => (flag === "--notion-config" ? "~/legacy-notion-config.json" : undefined)),
+      registerTool: vi.fn(),
+      on: vi.fn(),
+    } satisfies Partial<ExtensionAPI>;
+
+    try {
+      notion(mockPi as unknown as ExtensionAPI);
+      expect(process.env.NOTION_CONFIG_FILE).toBe("~/legacy-notion-config.json");
+      expect(warnSpy).toHaveBeenCalledWith("[pi-notion] --notion-config is deprecated; use --notion-config-file.");
+    } finally {
+      warnSpy.mockRestore();
+      if (original) process.env.NOTION_CONFIG_FILE = original;
+      else delete process.env.NOTION_CONFIG_FILE;
+    }
+  });
   it("warns for incorrect notion-search inputs", async () => {
     const mockPi = createMockPi();
     notion(mockPi as unknown as ExtensionAPI);

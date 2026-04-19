@@ -266,6 +266,24 @@ export { checkNotionAuth, extractShortName, toolChecks };
 // =============================================================================
 
 export default function notion(pi: ExtensionAPI) {
+  pi.registerFlag("--notion-config-file", {
+    description: "Path to a custom JSON config file for direct-token compatibility overrides.",
+    type: "string",
+  });
+  pi.registerFlag("--notion-config", {
+    description: "Deprecated alias for --notion-config-file.",
+    type: "string",
+  });
+
+  const configFileFlag = pi.getFlag("--notion-config-file");
+  const legacyConfigFlag = pi.getFlag("--notion-config");
+  if (typeof configFileFlag === "string" && configFileFlag.trim().length > 0) {
+    process.env.NOTION_CONFIG_FILE = configFileFlag;
+  } else if (typeof legacyConfigFlag === "string" && legacyConfigFlag.trim().length > 0) {
+    console.warn("[pi-notion] --notion-config is deprecated; use --notion-config-file.");
+    process.env.NOTION_CONFIG_FILE = legacyConfigFlag;
+  }
+
   // SessionStart: check auth and print status
   pi.on("session_start", async () => {
     const auth = checkNotionAuth();
@@ -307,7 +325,11 @@ function loadConfigFile(path: string): NotionConfig | null {
 
 function loadConfig(configPath?: string): NotionConfig | null {
   if (configPath) return loadConfigFile(resolveConfigPath(configPath));
-  if (process.env.NOTION_CONFIG) return loadConfigFile(resolveConfigPath(process.env.NOTION_CONFIG));
+  if (process.env.NOTION_CONFIG_FILE) return loadConfigFile(resolveConfigPath(process.env.NOTION_CONFIG_FILE));
+  if (process.env.NOTION_CONFIG) {
+    console.warn("[pi-notion] NOTION_CONFIG is deprecated; use NOTION_CONFIG_FILE.");
+    return loadConfigFile(resolveConfigPath(process.env.NOTION_CONFIG));
+  }
   return null;
 }
 
