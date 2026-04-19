@@ -10,7 +10,7 @@
 - **Export Session** (`export_session`): Save thinking sessions to JSON files
 - **Import Session** (`import_session`): Load previously exported sessions
 - **Configurable Output Limits**: Client-side byte and line truncation
-- **Flexible Configuration**: JSON config files, environment variables, and CLI flags
+- **Flexible Configuration**: settings.json, custom JSON config files, environment variables, and CLI flags
 - **Native TypeScript**: No external dependencies or child processes
 
 ## Install
@@ -39,15 +39,22 @@ export SEQ_THINK_MAX_BYTES=102400
 export SEQ_THINK_MAX_LINES=5000
 ```
 
-### Option 3: JSON Config File
+### Option 3: Settings File
 
-Create `~/.pi/agent/extensions/sequential-thinking.json` (auto-created on first run):
+Use pi's standard settings locations:
+
+- project: `.pi/settings.json`
+- global: `~/.pi/agent/settings.json`
+
+Under the `pi-sequential-thinking` key:
 
 ```json
 {
-  "storageDir": null,
-  "maxBytes": 51200,
-  "maxLines": 2000
+  "pi-sequential-thinking": {
+    "storageDir": null,
+    "maxBytes": 51200,
+    "maxLines": 2000
+  }
 }
 ```
 
@@ -61,8 +68,8 @@ pi --seq-think-storage-dir=/tmp/thoughts --seq-think-max-bytes=102400
 
 1. `--seq-think-config` flag path
 2. `SEQ_THINK_CONFIG` environment variable
-3. `./.pi/extensions/sequential-thinking.json` (project-level)
-4. `~/.pi/agent/extensions/sequential-thinking.json` (global)
+3. `.pi/settings.json` under `pi-sequential-thinking` (project-level)
+4. `~/.pi/agent/settings.json` under `pi-sequential-thinking` (global)
 
 ## Tools
 
@@ -110,7 +117,7 @@ Import a previously exported thinking session from a JSON file.
 | Flag | Env Variable | Default | Description |
 |------|-------------|---------|-------------|
 | `--seq-think-storage-dir` | `MCP_STORAGE_DIR` | — | Storage directory for sessions |
-| `--seq-think-config` | `SEQ_THINK_CONFIG` | — | Custom config file path |
+| `--seq-think-config` | `SEQ_THINK_CONFIG` | — | Custom JSON config file path (overrides settings.json lookup) |
 | `--seq-think-max-bytes` | `SEQ_THINK_MAX_BYTES` | `51200` | Max output bytes |
 | `--seq-think-max-lines` | `SEQ_THINK_MAX_LINES` | `2000` | Max output lines |
 
