@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockRequest = vi.fn();
 
@@ -36,6 +36,29 @@ const writeTempConfig = (config: Record<string, unknown>) => {
 
 describe("pi-exa extension", () => {
   const originalApiKey = process.env.EXA_API_KEY;
+  const originalHome = process.env.HOME;
+  const originalCwd = process.cwd();
+
+  // Isolate tests from real settings files (e.g. ~/.pi/agent/settings.json)
+  // so loadConfig(undefined) returns null and default tool enablement applies.
+  let sandboxHome: string;
+  let sandboxProject: string;
+
+  beforeAll(() => {
+    sandboxHome = mkdtempSync(join(tmpdir(), "pi-exa-test-home-"));
+    sandboxProject = mkdtempSync(join(tmpdir(), "pi-exa-test-project-"));
+    process.env.HOME = sandboxHome;
+    process.chdir(sandboxProject);
+  });
+
+  afterAll(() => {
+    process.chdir(originalCwd);
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    } else {
+      delete process.env.HOME;
+    }
+  });
 
   beforeEach(() => {
     mockRequest.mockReset();
