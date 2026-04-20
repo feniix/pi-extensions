@@ -144,7 +144,12 @@ export function formatSearchResults(results: SearchResultForFormatting[]): strin
       if (subpages.length > 0) {
         lines.push("Subpages:");
         const formattedSubpages = subpages
-          .map((subpage, index) => `  ${index + 1}. ${subpage.url || "(no url)"}`)
+          .map((subpage, index) => {
+            const label = subpage.title || subpage.url || "(no url)";
+            return subpage.title && subpage.url
+              ? `  ${index + 1}. ${label} — ${subpage.url}`
+              : `  ${index + 1}. ${label}`;
+          })
           .join("\n");
         if (formattedSubpages.length > 0) {
           lines.push(formattedSubpages);
@@ -194,7 +199,12 @@ export function formatCrawlResults(results: SearchResultForFormatting[]): string
       if (subpages.length > 0) {
         lines.push("");
         lines.push("Subpages:");
-        const formattedSubpages = subpages.map((subpage, index) => `  ${index + 1}. ${subpage.url || "(no url)"}`);
+        const formattedSubpages = subpages.map((subpage, index) => {
+          const label = subpage.title || subpage.url || "(no url)";
+          return subpage.title && subpage.url
+            ? `  ${index + 1}. ${label} — ${subpage.url}`
+            : `  ${index + 1}. ${label}`;
+        });
         lines.push(...formattedSubpages);
       }
 

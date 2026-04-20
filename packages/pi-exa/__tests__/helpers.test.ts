@@ -135,6 +135,18 @@ describe("pi-exa formatSearchResults", () => {
     const result = formatSearchResults(results);
     expect(result).toContain("Fallback text content");
   });
+
+  it("includes subpage titles when available", () => {
+    const results = [
+      {
+        url: "https://example.com",
+        subpages: [{ title: "Subpage One", url: "https://example.com/sub-1" }, { url: "https://example.com/sub-2" }],
+      },
+    ];
+    const result = formatSearchResults(results);
+    expect(result).toContain("Subpage One — https://example.com/sub-1");
+    expect(result).toContain("https://example.com/sub-2");
+  });
 });
 
 describe("pi-exa formatCrawlResults", () => {
@@ -223,6 +235,18 @@ describe("pi-exa formatCrawlResults", () => {
     expect(result).toContain("First page");
     expect(result).toContain("Second page");
   });
+
+  it("includes titled crawl subpages when available", () => {
+    const results = [
+      {
+        url: "https://example.com",
+        text: "Content",
+        subpages: [{ title: "Nested Page", url: "https://example.com/nested" }],
+      },
+    ];
+    const result = formatCrawlResults(results);
+    expect(result).toContain("Nested Page — https://example.com/nested");
+  });
 });
 
 describe("pi-exa constants", () => {
@@ -236,6 +260,26 @@ describe("pi-exa constants", () => {
 });
 
 describe("pi-exa settings config", () => {
+  it("returns null when no settings or legacy config files exist", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-exa-empty-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-exa-empty-project-"));
+
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+
+    try {
+      const mod = await import("../extensions/index.js");
+      expect(mod.loadConfig(undefined)).toBeNull();
+    } finally {
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
+  });
+
   it("loads settings from standard pi settings files", async () => {
     const originalHome = process.env.HOME;
     const originalCwd = process.cwd();
@@ -267,6 +311,36 @@ describe("pi-exa settings config", () => {
       expect(result?.enabledTools).toEqual(["web_search_exa"]);
       expect(result?.advancedEnabled).toBe(true);
     } finally {
+      process.chdir(originalCwd);
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+    }
+  });
+
+  it("warns when apiKey is loaded from settings files", async () => {
+    const originalHome = process.env.HOME;
+    const originalCwd = process.cwd();
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-exa-settings-warn-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-exa-settings-warn-project-"));
+
+    mkdirSync(join(tempHome, ".pi", "agent"), { recursive: true });
+    writeFileSync(
+      join(tempHome, ".pi", "agent", "settings.json"),
+      JSON.stringify({ "pi-exa": { apiKey: "settings-key" } }),
+      "utf-8",
+    );
+
+    process.env.HOME = tempHome;
+    process.chdir(tempProject);
+    vi.resetModules();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const mod = await import("../extensions/index.js");
+      expect(mod.loadConfig(undefined)?.apiKey).toBe("settings-key");
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Loaded apiKey from settings file"));
+    } finally {
+      warnSpy.mockRestore();
       process.chdir(originalCwd);
       if (originalHome) process.env.HOME = originalHome;
       else delete process.env.HOME;

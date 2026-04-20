@@ -108,6 +108,11 @@ function loadSettingsConfig(path: string): ExaConfig | null {
       return null;
     }
     const parsedConfig = parseConfig(config);
+    if (parsedConfig.apiKey) {
+      console.warn(
+        `[pi-exa] Loaded apiKey from settings file ${path}. Prefer EXA_API_KEY or --exa-config-file for secrets.`,
+      );
+    }
     return {
       enabledTools: parsedConfig.enabledTools,
       apiKey: parsedConfig.apiKey,
