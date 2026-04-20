@@ -5,7 +5,7 @@ status: Draft
 owner: "Sebastian Otaegui"
 issue: "N/A"
 date: 2026-04-20
-version: "1.3"
+version: "1.6"
 ---
 
 # PRD: pi-exa Full Exa API Alignment
@@ -118,6 +118,7 @@ A new tool that uses Exa's `/search` endpoint with deep search types (`deep-reas
 - `type` (optional, default: `"deep-reasoning"`) — one of `deep-reasoning`, `deep-lite`, `deep`
 - `systemPrompt` (optional) — guides source selection and synthesis style
 - `outputSchema` (optional) — JSON Schema for structured output
+  - Supports `type: "object"` (default; parsed into `details.parsedOutput`) and `type: "text"`
 - `additionalQueries` (optional, max 5) — alternative query formulations to broaden exploration
 - `numResults` (optional, default: 10) — number of source results
 - `includeDomains` / `excludeDomains` (optional) — domain filters
@@ -167,9 +168,15 @@ Then the tool result text contains the string as plain text followed by groundin
 
 ```gherkin
 Given an authenticated Exa API key and the web_research_exa tool is enabled
-When the response output.content is a JSON object (outputSchema was provided)
+When the response output.content is a JSON object and `outputSchema.type` is "object"
 Then the tool result text contains the JSON formatted as a code block followed by grounding citations
 And the tool result details includes the parsed JSON object under a "parsedOutput" key
+```
+
+```gherkin
+Given an authenticated Exa API key and the web_research_exa tool is enabled
+When the response output.content is a plain text string and `outputSchema.type` is "text"
+Then the tool result text contains the plain-text output followed by grounding citations
 ```
 
 ```gherkin
@@ -231,6 +238,7 @@ A new tool that uses Exa's `/answer` endpoint to get a grounded LLM answer with 
 - `systemPrompt` (optional) — guides answer style and focus
 - `text` (optional, boolean, default: false) — include full source text in results alongside the answer
 - `outputSchema` (optional) — JSON Schema for structured answer output
+  - Supports `type: "object"` (default) and `type: "text"`
 
 **Acceptance criteria:**
 
@@ -264,10 +272,10 @@ Then onUpdate is called with a progress message "Fetching answer from Exa..."
 Given an authenticated Exa API key
 When the LLM calls web_answer_exa with query and outputSchema { "type": "object", "properties": { "answer": { "type": "string" }, "confidence": { "type": "string" } }, "required": ["answer"] }
 Then the Exa /answer endpoint receives the outputSchema
-And the response answer is a structured object matching the schema
+And the response answer is a structured object matching the schema when `outputSchema.type` is "object"
 ```
 
-**Note on response shape:** The `/answer` endpoint returns `{ answer, citations[], requestId, costDollars }` — a different structure from `/search`'s `{ results[], output?, costDollars }`. The `formatAnswerResult()` formatter handles this distinct shape: `answer` (string or structured object) + `citations[]` (each with `url`, `title`, `publishedDate`, `author`, optional `text`).
+**Note on response shape:** The `/answer` endpoint returns `{ answer, citations[], requestId, costDollars }` — a different structure from `/search`'s `{ results[], output?, costDollars }`. The `formatAnswerResult()` formatter handles this distinct shape: `answer` (string or structured object) + `citations[]` (each with `url`, `title`, `publishedDate`, `author`, optional `text`). When `outputSchema.type` is `text`, the response remains text and no object `parsedOutput` is returned.
 
 **Files:**
 - `packages/pi-exa/extensions/index.ts` — new tool registration
@@ -787,10 +795,10 @@ The `enabledTools` array in config continues to work as a fine-grained override.
 
 | # | Question | Owner | Due | Status |
 |---|----------|-------|-----|--------|
-| Q1 | Should `web_research_exa` be enabled by default in a future version? | Sebastian | Post-launch | Open |
+| Q1 | Should `web_research_exa` be enabled by default in a future version? | Sebastian | Post-launch | **Resolved:** No (keep disabled-by-default; requires explicit `--exa-enable-research`) |
 | Q2 | Should a `--exa-enable-research` convenience flag be added (similar to `--exa-enable-advanced`)? | Sebastian | During implementation | **Resolved:** Yes — `--exa-enable-research` flag and `researchEnabled` config key for `web_research_exa`. `web_answer_exa` and `web_find_similar_exa` are enabled by default (cheap, fast). See D3. |
-| Q3 | Should `outputSchema` support Exa's `type: "text"` mode (plain text with optional description) in addition to `type: "object"`? | Sebastian | During implementation | Open |
-| Q4 | Should entity properties (company metadata from category searches) be surfaced in a follow-up? | Sebastian | Post-launch | Open |
+| Q3 | Should `outputSchema` support Exa's `type: "text"` mode (plain text with optional description) in addition to `type: "object"`? | Sebastian | During implementation | **Resolved:** Yes — support both; `object` remains default. |
+| Q4 | Should entity properties (company metadata from category searches) be surfaced in a follow-up? | Sebastian | Post-launch | Open — tracked in [#31](https://github.com/feniix/pi-extensions/issues/31) |
 
 ---
 
@@ -811,3 +819,6 @@ The `enabledTools` array in config continues to work as a fine-grained override.
 | 2026-04-20 | 1.1 | Expanded scope: enablement tiers (D3), FR-1 deep type param, FR-2/3 full param specs, FR-6 deep type rejection, FR-7 skill rewrite scope, FR-8 promptSnippet/promptGuidelines, D2 typed SDK methods, FR-1b maxCharacters bump | Sebastian Otaegui |
 | 2026-04-20 | 1.2 | Updated file references for modular structure (refactor f14afb0). Added web-research.ts, web-answer.ts, web-find-similar.ts to file breakdown. Defined `ToolPerformResult`/`ExaResponseMetadata` return types (D2). Expanded D3 implementation with explicit `isToolEnabledForConfig()`, `loadSettingsConfig()`, `parseConfig()` changes. Added Gherkin for FR-1 `additionalQueries`, FR-2 `outputSchema`. Defined FR-4 TypeBox schemas. Clarified FR-5 metadata per endpoint and `CostDollars` nested shape. Corrected §1 problem statement re: deep types. Set version bump target 3.0.0. | Sebastian Otaegui |
 | 2026-04-20 | 1.3 | Added test mock migration scope (D2) to §9. Updated §4 details structure for tool-specific keys. Corrected version bump rationale. Added FR-1 implementation note on `output` optionality. Clarified §6 NFR error handling pattern. Documented FR-6 `systemPrompt`/`outputSchema` intentional omission from advanced search. | Sebastian Otaegui |
+| 2026-04-20 | 1.4 | Closed Q1: `web_research_exa` remains disabled-by-default (requires `--exa-enable-research`). | Claude Code |
+| 2026-04-20 | 1.5 | Closed Q3: `outputSchema` supports `type: "text"` (default remains `object`). | Claude Code |
+| 2026-04-20 | 1.6 | Linked Q4 (entity metadata surfacing) to issue [#31](https://github.com/feniix/pi-extensions/issues/31). | Claude Code |

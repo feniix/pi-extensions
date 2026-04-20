@@ -10,7 +10,7 @@ status: Draft
 
 ## Source
 
-- **PRD**: `docs/prd/PRD-002-pi-exa-api-alignment.md` (v1.3)
+- **PRD**: `docs/prd/PRD-002-pi-exa-api-alignment.md` (v1.6)
 - **Date**: 2026-04-20
 - **Author**: Claude Code
 
@@ -97,10 +97,12 @@ Argument verification tests change from `expect(mockRequest).toHaveBeenCalledWit
 
 **Key Details**:
 - New `performResearch()` in `web-research.ts` — calls `exa.search(query, deepSearchOptions)` with `DeepSearchOptions` overload
-- New `formatResearchOutput()` in `formatters.ts` — handles `output.content` (string or structured JSON) + `output.grounding[]` (citations with confidence levels)
+- New `formatResearchOutput()` in `formatters.ts` — handles `output.content` (string or structured JSON) + `output.grounding[]` (citations with confidence levels), with `outputSchema.type` defaulting to `object`
 - New `webResearchParams` schema: `query`, `type` (default `deep-reasoning`), `systemPrompt`, `outputSchema`, `additionalQueries` (max 5), `numResults`, domain/date filters
 - SDK types `output` as optional (`output?: DeepSearchOutput`); implementation must handle undefined with graceful error, even though runtime always populates it for deep types
-- When `outputSchema` is provided: `details.parsedOutput` contains the parsed JSON object
+- When `outputSchema` is provided:
+  - `type: "object"` (default): `details.parsedOutput` contains the parsed JSON object
+  - `type: "text"`: return plain text output; no parsed object added
 - Validate `type` is one of `deep-reasoning | deep-lite | deep`; reject non-deep types with error directing to `web_search_exa` / `web_search_advanced_exa`
 - `onUpdate` fires immediately ("Performing deep research via Exa...") given 10-60s latency
 
@@ -114,7 +116,7 @@ Argument verification tests change from `expect(mockRequest).toHaveBeenCalledWit
 
 **Key Details**:
 - New `performAnswer()` in `web-answer.ts` — calls `exa.answer(query, options)`
-- New `formatAnswerResult()` in `formatters.ts` — handles distinct response shape: `answer` (string or object) + `citations[]` (each with url, title, publishedDate, author, optional text)
+- New `formatAnswerResult()` in `formatters.ts` — handles distinct response shape: `answer` (string or object) + `citations[]` (each with url, title, publishedDate, author, optional text), with `outputSchema.type === "text"` supported
 - New `webAnswerParams` schema: `query`, `systemPrompt`, `text` (boolean), `outputSchema`
 - `AnswerResponse` has `costDollars` but no `searchTime` or `resolvedSearchType`
 - Test mock adds `answer` method to fake Exa class
@@ -247,9 +249,9 @@ Argument verification tests change from `expect(mockRequest).toHaveBeenCalledWit
 
 ## Open Questions
 
-- **Q1** (PRD §12): Should `web_research_exa` be enabled by default in a future version? (Post-launch)
-- **Q3** (PRD §12): Should `outputSchema` support Exa's `type: "text"` mode in addition to `type: "object"`? (During implementation)
-- **Q4** (PRD §12): Should entity properties (company metadata from category searches) be surfaced in a follow-up? (Post-launch)
+- ~~**Q1** (PRD §12): Should `web_research_exa` be enabled by default in a future version?~~ **Resolved:** No — keep disabled-by-default; use `--exa-enable-research` / `researchEnabled` to opt in.
+- **Q3** (PRD §12): Should `outputSchema` support Exa's `type: "text"` mode in addition to `type: "object"`? (During implementation) **Resolved:** Yes; support both, default to `object`.
+- **Q4** (PRD §12): Should entity properties (company metadata from category searches) be surfaced in a follow-up? (Post-launch) **Open — tracked in #31:** https://github.com/feniix/pi-extensions/issues/31
 - ~~**Version**: Is 3.0.0 necessary?~~ **Resolved**: Phase 1 ships as 2.2.0; full scope ships as 3.0.0 (see Versioning Strategy).
 
 ## ADR Index
