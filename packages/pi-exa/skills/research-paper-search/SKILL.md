@@ -1,71 +1,28 @@
 ---
 name: research-paper-search
-description: Search for research papers and academic content using Exa advanced search. Full filter support including date ranges and text filtering. Use when searching for academic papers, arXiv preprints, or scientific research.
+description: Search for research papers and academic content using Exa.
 context: fork
 ---
 
 # Research Paper Search (Exa)
 
-## Tool Restriction (Critical)
+## Tool Selection
 
-ONLY use `web_search_exa` for basic searches or `web_search_advanced_exa` with `category: "research paper"` if enabled. Do NOT use `web_fetch_exa` unless following up on specific URLs.
+| Intent | Primary Tool | Notes |
+|---|---|---|
+| Paper discovery | `web_search_advanced_exa` | `category: "research paper"`, optional `includeDomains` (e.g., `arxiv.org`) |
+| Evidence-weighted synthesis across papers | `web_research_exa` | Use `systemPrompt`, optional structured `outputSchema` |
+| One-off definition / quick answer | `web_answer_exa` | Keep it concise and citation-focused |
 
-## Token Isolation (Critical)
+## Recommended settings
 
-Never run Exa searches in main context. Always spawn Task agents:
-- Agent calls `web_search_exa` or `web_search_advanced_exa`
-- Agent merges + deduplicates results before presenting
-- Agent returns distilled output (brief markdown or compact JSON)
-- Main context stays clean regardless of search volume
+- `web_search_advanced_exa`
+  - `{ "query": "LLM fine-tuning methods", "category": "research paper", "includeDomains": ["arxiv.org"], "numResults": 20 }`
+- `web_research_exa`
+  - `{ "query": "Summarize methodological differences between X and Y", "systemPrompt": "Prioritize peer-reviewed sources and methods sections", "outputSchema": { "type": "text" } }`
 
-## When to Use
+## Output Guidance
 
-Use this skill when you need:
-- Academic papers from arXiv, OpenReview, PubMed, etc.
-- Scientific research on specific topics
-- Literature reviews with date filtering
-- Papers containing specific methodologies or terms
-
-## Query Writing Tips
-
-- Include research domain keywords
-- Include specific methodologies if known
-- Use version numbers for frameworks/libraries
-- Consider adding "paper" or "arxiv" to focus results
-
-## Examples
-
-### Recent papers on a topic
-```
-web_search_exa {
-  "query": "transformer attention mechanisms efficiency 2024",
-  "numResults": 15
-}
-```
-
-### From specific venues
-```
-web_search_advanced_exa {
-  "query": "large language model agents arxiv",
-  "category": "research paper",
-  "includeDomains": ["arxiv.org"],
-  "numResults": 20
-}
-```
-
-### With date filter (if advanced enabled)
-```
-web_search_advanced_exa {
-  "query": "RLHF reinforcement learning human feedback",
-  "category": "research paper",
-  "startPublishedDate": "2024-01-01",
-  "numResults": 15
-}
-```
-
-## Output Format
-
-Return:
-1) Results (structured list with title, authors, date, abstract summary)
-2) Sources (URLs with publication venue)
-3) Notes (methodology differences, conflicting findings)
+1) Return paper title, venue, and year.
+2) Prefer direct quotations for claims.
+3) Provide caveats for methodology limits.

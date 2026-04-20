@@ -1,13 +1,15 @@
 # @feniix/pi-exa
 
-[Exa AI](https://exa.ai) search extension for [pi](https://pi.dev/) — web search, content fetching, and advanced search with category filtering.
+[Exa AI](https://exa.ai) extension for [pi](https://pi.dev/) with search, fetch, research, and answer capabilities.
 
 ## Features
 
-- **Web Search** (`web_search_exa`): Real-time web search with semantic query understanding
-- **Web Fetch** (`web_fetch_exa`): Read URLs and extract clean content
-- **Advanced Search** (`web_search_advanced_exa`): Full-featured search with category filters, date ranges, domain restrictions (disabled by default)
-- **Skills**: Specialized search skills for code, companies, people, research papers, financial reports, and personal sites
+- **web_search_exa**: default web search (highlights + short text snippets).
+- **web_fetch_exa**: fetch page content by URL.
+- **web_search_advanced_exa**: advanced search options and category filters (disabled by default).
+- **web_research_exa**: deep-research synthesis (disabled by default).
+- **web_answer_exa**: quick grounded answers.
+- **web_find_similar_exa**: discover related URLs.
 
 ## Install
 
@@ -15,7 +17,7 @@
 pi install npm:@feniix/pi-exa
 ```
 
-Ephemeral (one-off) use:
+For ephemeral use:
 
 ```bash
 pi -e npm:@feniix/pi-exa
@@ -25,95 +27,75 @@ pi -e npm:@feniix/pi-exa
 
 You need an Exa API key from [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys).
 
-### Option 1: Environment Variable
+### Option 1: Environment variable
 
 ```bash
-export EXA_API_KEY="your_key"
+export EXA_API_KEY="your-key"
 ```
 
-### Option 2: Settings File
+### Option 2: Settings files
 
-Use pi's standard settings locations for non-secret configuration:
+Supports standard pi settings locations:
 
 - project: `.pi/settings.json`
 - global: `~/.pi/agent/settings.json`
 
-Under the `pi-exa` key:
+Example:
 
 ```json
 {
   "pi-exa": {
-    "enabledTools": ["web_search_exa", "web_fetch_exa"],
-    "advancedEnabled": false
+    "apiKey": "your-key",
+    "enabledTools": ["web_search_exa", "web_fetch_exa", "web_answer_exa", "web_find_similar_exa"],
+    "advancedEnabled": false,
+    "researchEnabled": false
   }
 }
 ```
 
-> Best practice: use `settings.json` for non-secret defaults only.
-> Keep `EXA_API_KEY` in an environment variable, or use `--exa-config-file` / `EXA_CONFIG_FILE` to point to a custom private JSON config file when you need to persist secrets outside your project.
-> Legacy aliases `--exa-config` and `EXA_CONFIG` are still accepted but deprecated.
+## CLI flags
 
-### Option 3: CLI Flags
-
-```bash
-pi --exa-api-key=your_key
-```
+- `--exa-api-key <key>`: API key override.
+- `--exa-enable-advanced`: enable `web_search_advanced_exa`.
+- `--exa-enable-research`: enable `web_research_exa`.
+- `--exa-config-file <path>`: load configuration from file.
+- `--exa-config <path>` (deprecated alias for `--exa-config-file`).
 
 ## Tools
 
-### `web_search_exa` (enabled by default)
+### web_search_exa
 
-Search the web for any topic and get clean, ready-to-use content.
+Params: `query` (required), `numResults`.
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `query` | string | yes | Natural language search query |
-| `numResults` | integer | no | Number of results (1-20, default: 5) |
+Returns: formatted snippets with optional highlights and metadata (`costDollars`, `searchTime`, `resolvedSearchType`).
 
-**Best for:** Finding current information, news, facts, or answering questions about any topic.
+### web_fetch_exa
 
-### `web_fetch_exa` (enabled by default)
+Params: `urls` (required array), `maxCharacters`, `highlights`, `summary` (`query`), `maxAgeHours`.
 
-Read a webpage's full content as clean markdown.
+### web_search_advanced_exa
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `urls` | string[] | yes | URLs to read (batch multiple URLs) |
-| `maxCharacters` | integer | no | Max characters per page (default: 3000) |
+Params include `query`, `numResults`, `category`, `type` (`auto|neural|...`, no deep types), date filters, domain filters, and content controls.
 
-**Best for:** Extracting full content from known URLs after web search.
+### web_research_exa
 
-### `web_search_advanced_exa` (disabled by default)
+Params include:
 
-Advanced web search with full Exa API control.
+- `query` (required)
+- `type`: `deep-reasoning | deep-lite | deep`
+- `systemPrompt`
+- `outputSchema` (`type` may be `"object"` or `"text"`, default `"object"`)
+- optional `additionalQueries`, filters, and `numResults`
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `query` | string | yes | Search query |
-| `numResults` | integer | no | Number of results |
-| `category` | string | no | Filter: company, research paper, financial report, etc. |
-| `type` | string | no | Search type: auto, fast, deep, neural |
-| `startPublishedDate` | string | no | ISO date filter |
-| `endPublishedDate` | string | no | ISO date filter |
-| `includeDomains` | string[] | no | Domain whitelist |
-| `excludeDomains` | string[] | no | Domain blacklist |
+### web_answer_exa
 
-Enable via: `pi --exa-enable-advanced`
+Params include `query` (required), `systemPrompt`, `text`, and `outputSchema`.
 
-## Skills
+### web_find_similar_exa
 
-- **code-search**: Find code examples, API docs, debugging help
-- **company-research**: Competitor analysis, market research
-- **people-research**: Find experts, LinkedIn profiles
-- **research-paper-search**: Academic papers, arXiv
-- **financial-report-search**: SEC filings, earnings reports
-- **personal-site-search**: Independent blogs, tutorials
+Params include `url` (required), `numResults`, `excludeSourceDomain`, date filters, and domain filters.
 
-## Requirements
+## Notes
 
-- pi v0.51.0 or later
-- Exa API key from [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys)
-
-## License
-
-MIT
+- `web_search_advanced_exa` and `web_research_exa` are opt-in and disabled by default.
+- Research/tool output may include both `text` and `details.parsedOutput` depending on `outputSchema.type`.
