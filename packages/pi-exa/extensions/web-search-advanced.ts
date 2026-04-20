@@ -3,11 +3,10 @@
  */
 
 import type { HighlightsContentsOptions, SearchResponse, SearchResult, TextContentsOptions } from "exa-js";
-import { Exa } from "exa-js";
+import { DEEP_SEARCH_TYPES } from "./constants.js";
+import { getExaClient } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatSearchResults, toMetadata } from "./formatters.js";
-
-const DEEP_SEARCH_TYPES = ["deep-reasoning", "deep", "deep-lite"] as const;
 
 const SEARCH_CATEGORIES = [
   "company",
@@ -26,12 +25,16 @@ type AdvancedResult = SearchResult<{
   highlights?: HighlightsContentsOptions;
 }>;
 
-function sanitizeCategory(category: string | undefined): SearchCategory | undefined {
+function validateCategory(category: string | undefined): SearchCategory | undefined {
   if (!category) {
     return undefined;
   }
 
-  return SEARCH_CATEGORIES.includes(category as SearchCategory) ? (category as SearchCategory) : undefined;
+  if (SEARCH_CATEGORIES.includes(category as SearchCategory)) {
+    return category as SearchCategory;
+  }
+
+  throw new Error(`Invalid category "${category}". Supported categories: ${SEARCH_CATEGORIES.join(", ")}.`);
 }
 
 type AdvancedSearchOptions = {
@@ -66,7 +69,7 @@ export async function performAdvancedSearch(
 ): Promise<ToolPerformResult> {
   validateAdvancedType(options.type);
 
-  const exa = new Exa(apiKey);
+  const exa = getExaClient(apiKey);
 
   const searchOptions: {
     numResults?: number;
@@ -87,7 +90,7 @@ export async function performAdvancedSearch(
     };
   } = {
     numResults: options.numResults || 10,
-    category: sanitizeCategory(options.category),
+    category: validateCategory(options.category),
     type: options.type,
     startPublishedDate: options.startPublishedDate,
     endPublishedDate: options.endPublishedDate,

@@ -3,7 +3,7 @@
  */
 
 import type { ContentsOptions, SearchResponse, SearchResult } from "exa-js";
-import { Exa } from "exa-js";
+import { getExaClient } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatCrawlResults, toMetadata } from "./formatters.js";
 
@@ -30,7 +30,7 @@ export async function performWebFetch(
   urls: string[],
   options: FetchOptions = {},
 ): Promise<ToolPerformResult> {
-  const exa = new Exa(apiKey);
+  const exa = getExaClient(apiKey);
 
   const contents: ContentsOptions = {
     text: {

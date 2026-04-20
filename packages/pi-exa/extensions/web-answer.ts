@@ -3,7 +3,7 @@
  */
 
 import type { AnswerResponse } from "exa-js";
-import { Exa } from "exa-js";
+import { getExaClient } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatAnswerResult, toMetadata } from "./formatters.js";
 
@@ -15,7 +15,7 @@ interface AnswerParams {
 }
 
 export async function performAnswer(apiKey: string, params: AnswerParams): Promise<ToolPerformResult> {
-  const exa = new Exa(apiKey);
+  const exa = getExaClient(apiKey);
 
   const result: AnswerResponse = await exa.answer(params.query, {
     text: params.text,

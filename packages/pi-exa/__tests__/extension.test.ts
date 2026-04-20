@@ -12,9 +12,14 @@ const mockSearch = vi.fn();
 const mockGetContents = vi.fn();
 const mockAnswer = vi.fn();
 const mockFindSimilar = vi.fn();
+const mockExaConstructor = vi.fn();
 
 vi.mock("exa-js", () => ({
   Exa: class {
+    constructor(apiKey: string) {
+      mockExaConstructor(apiKey);
+    }
+
     search = mockSearch;
     getContents = mockGetContents;
     answer = mockAnswer;
@@ -22,6 +27,7 @@ vi.mock("exa-js", () => ({
   },
 }));
 
+import { resetExaClientCache } from "../extensions/exa-client.js";
 import exaExtension from "../extensions/index.js";
 
 const createMockPi = (flags: Record<string, string | boolean | undefined> = {}) =>
@@ -93,6 +99,8 @@ describe("pi-exa extension", () => {
     mockGetContents.mockReset();
     mockAnswer.mockReset();
     mockFindSimilar.mockReset();
+    mockExaConstructor.mockReset();
+    resetExaClientCache();
 
     delete process.env.EXA_API_KEY;
   });
@@ -378,6 +386,39 @@ describe("pi-exa extension", () => {
     expect(result.details.parsedOutput).toEqual({ summary: "research summary" });
   });
 
+  it("reuses a cached Exa client across tool calls for the same API key", async () => {
+    mockSearch.mockResolvedValue(defaultSearchResponse);
+    mockAnswer.mockResolvedValue({
+      answer: "A clear answer",
+      requestId: "answer-1",
+      citations: [],
+    });
+
+    const mockPi = createMockPi({ "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const searchTool = getRegisteredTool(mockPi, "web_search_exa");
+    const answerTool = getRegisteredTool(mockPi, "web_answer_exa");
+
+    await searchTool?.execute(
+      "call-1",
+      { query: "test query" },
+      { aborted: false } as AbortSignal,
+      vi.fn(),
+      undefined as never,
+    );
+    await answerTool?.execute(
+      "call-2",
+      { query: "who invented TS" },
+      { aborted: false } as AbortSignal,
+      vi.fn(),
+      undefined as never,
+    );
+
+    expect(mockExaConstructor).toHaveBeenCalledTimes(1);
+    expect(mockExaConstructor).toHaveBeenCalledWith("flag-key");
+  });
+
   it("executes web_answer_exa and formats answer with citations", async () => {
     mockAnswer.mockResolvedValue({
       answer: "A clear answer",
@@ -449,6 +490,72 @@ describe("pi-exa extension", () => {
       }),
     );
     expect(result.content[0].text).toContain("Similar 1");
+  });
+
+  it("returns an error when advanced search receives an invalid category", async () => {
+    const configPath = writeTempConfig({
+      enabledTools: [
+        "web_search_exa",
+        "web_fetch_exa",
+        "web_search_advanced_exa",
+        "web_answer_exa",
+        "web_find_similar_exa",
+      ],
+    });
+
+    const mockPi = createMockPi({ "--exa-config-file": configPath, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    const result = await tool?.execute(
+      "call-1",
+      { query: "advanced query", category: "companey" },
+      { aborted: false } as AbortSignal,
+      vi.fn(),
+      undefined as never,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Invalid category "companey"');
+  });
+
+  it("returns an error when search SDK calls fail", async () => {
+    mockSearch.mockRejectedValue(new Error("search down"));
+
+    const mockPi = createMockPi({ "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_exa");
+    const result = await tool.execute("call", { query: "test" }, undefined, undefined, undefined as never);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Exa search error: search down");
+  });
+
+  it("returns an error when research SDK calls fail", async () => {
+    mockSearch.mockRejectedValue(new Error("research down"));
+
+    const mockPi = createMockPi({ "--exa-enable-research": true, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_research_exa");
+    const result = await tool.execute("call", { query: "test" }, undefined, undefined, undefined as never);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Exa research error: research down");
+  });
+
+  it("returns an error when answer SDK calls fail", async () => {
+    mockAnswer.mockRejectedValue(new Error("answer down"));
+
+    const mockPi = createMockPi({ "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_answer_exa");
+    const result = await tool.execute("call", { query: "test" }, undefined, undefined, undefined as never);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Exa answer error: answer down");
   });
 
   it("returns cancelled result when signal is aborted", async () => {

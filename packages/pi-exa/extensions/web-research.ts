@@ -3,12 +3,13 @@
  */
 
 import type { DeepOutputSchema, DeepSearchOutput } from "exa-js";
-import { Exa } from "exa-js";
+import { DEEP_SEARCH_TYPES } from "./constants.js";
+import { getExaClient } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatResearchOutput, toMetadata } from "./formatters.js";
 
 export const DEFAULT_DEEP_NUM_RESULTS = 10;
-export const DEEP_RESEARCH_TYPES = ["deep-reasoning", "deep-lite", "deep"] as const;
+export const DEEP_RESEARCH_TYPES = DEEP_SEARCH_TYPES;
 
 interface ResearchParams {
   query: string;
@@ -40,7 +41,7 @@ function parseOutputSchema(outputSchema: Record<string, unknown> | undefined): D
 export async function performResearch(apiKey: string, params: ResearchParams): Promise<ToolPerformResult> {
   const outputSchema = parseOutputSchema(params.outputSchema);
 
-  const exa = new Exa(apiKey);
+  const exa = getExaClient(apiKey);
 
   const response = await exa.search(params.query, {
     type: params.type || "deep-reasoning",

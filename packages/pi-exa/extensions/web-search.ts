@@ -3,7 +3,7 @@
  */
 
 import type { HighlightsContentsOptions, SearchResult, TextContentsOptions } from "exa-js";
-import { Exa } from "exa-js";
+import { getExaClient } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatSearchResults, toMetadata } from "./formatters.js";
 
@@ -17,7 +17,7 @@ type SearchResultWithHighlight = SearchResult<{
 }>;
 
 export async function performWebSearch(apiKey: string, query: string, numResults: number): Promise<ToolPerformResult> {
-  const exa = new Exa(apiKey);
+  const exa = getExaClient(apiKey);
 
   const result = await exa.search(query, {
     type: "auto",
