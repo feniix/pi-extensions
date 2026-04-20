@@ -670,7 +670,7 @@ And it has Recommended Settings with concrete includeDomains (sec.gov) and outpu
 |---|----------|-------|-----|--------|
 | Q1 | Should `web_research_exa` be enabled by default in a future version? | Sebastian | Post-launch | Open |
 | Q2 | Should a `--exa-enable-research` convenience flag be added (similar to `--exa-enable-advanced`)? | Sebastian | During implementation | **Resolved:** Yes — `--exa-enable-research` flag and `researchEnabled` config key for `web_research_exa`. `web_answer_exa` and `web_find_similar_exa` are enabled by default (cheap, fast). See D3. |
-| Q3 | Should `outputSchema` support Exa's `type: "text"` mode (plain text with optional description) in addition to `type: "object"`? | Sebastian | During implementation | Open |
+| Q3 | Should `outputSchema` support Exa's `type: "text"` mode (plain text with optional description) in addition to `type: "object"`? | Sebastian | During implementation | **Resolved:** Yes — `outputSchema` accepts both `{ type: "object", properties: ... }` for structured JSON and `{ type: "text", description?: "..." }` for guided prose. Passed through to Exa as-is. |
 | Q4 | Should entity properties (company metadata from category searches) be surfaced in a follow-up? | Sebastian | Post-launch | Open |
 
 ---
