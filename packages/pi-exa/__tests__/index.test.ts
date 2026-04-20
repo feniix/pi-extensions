@@ -26,13 +26,14 @@ describe("pi-exa", () => {
     });
 
     it("should use relative Exa SDK endpoints instead of full API URLs", () => {
-      const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
-      expect(extension).toContain('exa.request<ExaSearchResponse>("/search", "POST", searchRequest)');
-      expect(extension).toContain('}>("/contents", "POST", crawlRequest)');
-      expect(extension).not.toContain(
+      const searchModule = readFileSync(join(__dirname, "../extensions/web-search.ts"), "utf-8");
+      const fetchModule = readFileSync(join(__dirname, "../extensions/web-fetch.ts"), "utf-8");
+      expect(searchModule).toContain('exa.request<ExaSearchResponse>("/search", "POST", searchRequest)');
+      expect(fetchModule).toContain('}>("/contents", "POST", crawlRequest)');
+      expect(searchModule).not.toContain(
         'exa.request<ExaSearchResponse>("https://api.exa.ai/search", "POST", searchRequest)',
       );
-      expect(extension).not.toContain('}>("https://api.exa.ai/contents", "POST", crawlRequest)');
+      expect(fetchModule).not.toContain('}>("https://api.exa.ai/contents", "POST", crawlRequest)');
     });
   });
 
