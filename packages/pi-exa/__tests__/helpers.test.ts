@@ -519,3 +519,393 @@ describe("pi-exa loadConfig", () => {
     }
   });
 });
+
+describe("pi-exa formatSearchResults entity properties", () => {
+  describe("company entity properties", () => {
+    it("includes company industry in formatted output", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "company-1",
+              type: "company" as const,
+              version: 1,
+              properties: {
+                industry: "Technology",
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Company Properties:");
+      expect(result).toContain("Industry: Technology");
+    });
+
+    it("includes employee count in formatted output", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "company-1",
+              type: "company" as const,
+              version: 1,
+              properties: {
+                workforce: { total: 10000 },
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Employees: 10,000");
+    });
+
+    it("includes funding information in formatted output", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "company-1",
+              type: "company" as const,
+              version: 1,
+              properties: {
+                financials: {
+                  fundingTotal: 50000000,
+                  fundingLatestRound: {
+                    name: "Series B",
+                    date: "2024-01",
+                    amount: 25000000,
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Total Funding: $50,000,000");
+      expect(result).toContain("Latest Funding: Series B (2024-01) $25,000,000");
+    });
+
+    it("includes location in formatted output", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "company-1",
+              type: "company" as const,
+              version: 1,
+              properties: {
+                headquarters: {
+                  city: "San Francisco",
+                  country: "USA",
+                },
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Location: San Francisco, USA");
+    });
+
+    it("includes description in formatted output", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "company-1",
+              type: "company" as const,
+              version: 1,
+              properties: {
+                description: "A leading AI company",
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Description: A leading AI company");
+    });
+
+    it("includes founded year in formatted output", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "company-1",
+              type: "company" as const,
+              version: 1,
+              properties: {
+                foundedYear: 2020,
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Founded: 2020");
+    });
+  });
+
+  describe("people entity properties", () => {
+    it("includes job titles in formatted output", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "person-1",
+              type: "person" as const,
+              version: 1,
+              properties: {
+                workHistory: [
+                  {
+                    title: "Software Engineer",
+                    company: { name: "Tech Corp" },
+                  },
+                  {
+                    title: "Senior Engineer",
+                    company: { name: "Big Tech" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Person Properties:");
+      expect(result).toContain("Job Titles: Software Engineer at Tech Corp, Senior Engineer at Big Tech");
+      expect(result).toContain("Employers: Tech Corp, Big Tech");
+    });
+
+    it("includes location in formatted output", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "person-1",
+              type: "person" as const,
+              version: 1,
+              properties: {
+                location: "New York, NY",
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Location: New York, NY");
+    });
+
+    it("limits work history to 3 entries", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "person-1",
+              type: "person" as const,
+              version: 1,
+              properties: {
+                workHistory: [
+                  { title: "Job 1", company: { name: "Company 1" } },
+                  { title: "Job 2", company: { name: "Company 2" } },
+                  { title: "Job 3", company: { name: "Company 3" } },
+                  { title: "Job 4", company: { name: "Company 4" } },
+                  { title: "Job 5", company: { name: "Company 5" } },
+                ],
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Job 1");
+      expect(result).toContain("Job 2");
+      expect(result).toContain("Job 3");
+      expect(result).not.toContain("Job 4");
+      expect(result).not.toContain("Job 5");
+    });
+  });
+
+  describe("mixed entity types", () => {
+    it("formats multiple entities of different types", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "company-1",
+              type: "company" as const,
+              version: 1,
+              properties: {
+                industry: "Technology",
+                workforce: { total: 500 },
+              },
+            },
+            {
+              id: "person-1",
+              type: "person" as const,
+              version: 1,
+              properties: {
+                location: "San Francisco",
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Company Properties:");
+      expect(result).toContain("Industry: Technology");
+      expect(result).toContain("Employees: 500");
+      expect(result).toContain("Person Properties:");
+      expect(result).toContain("Location: San Francisco");
+    });
+  });
+
+  describe("defensive behavior", () => {
+    it("handles results without entities", () => {
+      const results = [{ url: "https://example.com" }];
+      const result = formatSearchResults(results);
+      expect(result).toContain("https://example.com");
+      expect(result).not.toContain("Properties:");
+    });
+
+    it("handles empty entities array", () => {
+      const results = [{ url: "https://example.com", entities: [] }];
+      const result = formatSearchResults(results);
+      expect(result).toContain("https://example.com");
+      expect(result).not.toContain("Properties:");
+    });
+
+    it("handles entity with all null fields", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "company-1",
+              type: "company" as const,
+              version: 1,
+              properties: {},
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("https://example.com");
+      expect(result).toContain("Company Properties:");
+    });
+
+    it("includes annual revenue in formatted output", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "company-1",
+              type: "company" as const,
+              version: 1,
+              properties: {
+                financials: {
+                  revenueAnnual: 1000000,
+                },
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Annual Revenue: $1,000,000");
+    });
+  });
+
+  describe("people entity properties - work history details", () => {
+    it("includes work history location in formatted output", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "person-1",
+              type: "person" as const,
+              version: 1,
+              properties: {
+                workHistory: [
+                  {
+                    title: "Engineer",
+                    location: "San Francisco, CA",
+                    company: { name: "Tech Corp" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Engineer at Tech Corp");
+    });
+
+    it("includes work history dates in formatted output", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "person-1",
+              type: "person" as const,
+              version: 1,
+              properties: {
+                workHistory: [
+                  {
+                    title: "Senior Engineer",
+                    dates: { from: "2022-01", to: null },
+                    company: { name: "Big Tech" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Senior Engineer at Big Tech");
+    });
+
+    it("includes company reference with location in formatted output", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "person-1",
+              type: "person" as const,
+              version: 1,
+              properties: {
+                workHistory: [
+                  {
+                    title: "VP Engineering",
+                    company: { name: "Startup Inc", location: "Austin, TX" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("VP Engineering at Startup Inc");
+    });
+  });
+});

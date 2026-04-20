@@ -26,6 +26,26 @@ export interface FormattedResearch {
   parsedOutput?: unknown;
 }
 
+// =============================================================================
+// Entity Types (exported for use in tests and other modules)
+// =============================================================================
+
+export type {
+  CompanyEntity,
+  Entity,
+  EntityCompanyProperties,
+  EntityCompanyPropertiesFinancials,
+  EntityCompanyPropertiesFundingRound,
+  EntityCompanyPropertiesHeadquarters,
+  EntityCompanyPropertiesWebTraffic,
+  EntityCompanyPropertiesWorkforce,
+  EntityDateRange,
+  EntityPersonProperties,
+  EntityPersonPropertiesCompanyRef,
+  EntityPersonPropertiesWorkHistoryEntry,
+  PersonEntity,
+};
+
 type SearchResultSubpage = {
   url?: string;
   title?: string | null;
@@ -45,7 +65,102 @@ type SearchResultForFormatting = {
   highlights?: string[];
   summary?: string;
   subpages?: SearchResultSubpage[] | unknown[];
+  entities?: Entity[];
 };
+
+// =============================================================================
+// Entity Types
+// =============================================================================
+
+/** Company workforce information. */
+type EntityCompanyPropertiesWorkforce = {
+  total?: number | null;
+};
+
+/** Company headquarters information. */
+type EntityCompanyPropertiesHeadquarters = {
+  address?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+};
+
+/** Funding round information. */
+type EntityCompanyPropertiesFundingRound = {
+  name?: string | null;
+  date?: string | null;
+  amount?: number | null;
+};
+
+/** Company financial information. */
+type EntityCompanyPropertiesFinancials = {
+  revenueAnnual?: number | null;
+  fundingTotal?: number | null;
+  fundingLatestRound?: EntityCompanyPropertiesFundingRound | null;
+};
+
+/** Company web traffic information. */
+type EntityCompanyPropertiesWebTraffic = {
+  visitsMonthly?: number | null;
+};
+
+/** Structured properties for a company entity. */
+type EntityCompanyProperties = {
+  name?: string | null;
+  foundedYear?: number | null;
+  description?: string | null;
+  industry?: string | null;
+  workforce?: EntityCompanyPropertiesWorkforce | null;
+  headquarters?: EntityCompanyPropertiesHeadquarters | null;
+  financials?: EntityCompanyPropertiesFinancials | null;
+  webTraffic?: EntityCompanyPropertiesWebTraffic | null;
+};
+
+/** Date range for work history entries. */
+type EntityDateRange = {
+  from?: string | null;
+  to?: string | null;
+};
+
+/** Reference to a company in work history. */
+type EntityPersonPropertiesCompanyRef = {
+  id?: string | null;
+  name?: string | null;
+};
+
+/** A single work history entry for a person. */
+type EntityPersonPropertiesWorkHistoryEntry = {
+  title?: string | null;
+  location?: string | null;
+  dates?: EntityDateRange | null;
+  company?: EntityPersonPropertiesCompanyRef | null;
+};
+
+/** Structured properties for a person entity. */
+type EntityPersonProperties = {
+  name?: string | null;
+  location?: string | null;
+  workHistory?: EntityPersonPropertiesWorkHistoryEntry[];
+};
+
+/** Structured entity data for a company. */
+type CompanyEntity = {
+  id: string;
+  type: "company";
+  version: number;
+  properties: EntityCompanyProperties;
+};
+
+/** Structured entity data for a person. */
+type PersonEntity = {
+  id: string;
+  type: "person";
+  version: number;
+  properties: EntityPersonProperties;
+};
+
+/** Structured entity data for company or person search results. */
+type Entity = CompanyEntity | PersonEntity;
 
 // =============================================================================
 // Helpers
@@ -112,6 +227,119 @@ function formatCitations(
 }
 
 // =============================================================================
+// Entity Property Formatters
+// =============================================================================
+
+function isCompanyEntity(entity: Entity): entity is CompanyEntity {
+  return entity.type === "company";
+}
+
+function isPersonEntity(entity: Entity): entity is PersonEntity {
+  return entity.type === "person";
+}
+
+function formatEntityProperties(entities: Entity[] | undefined): string {
+  if (!entities || entities.length === 0) {
+    return "";
+  }
+
+  const lines: string[] = [];
+
+  for (const entity of entities) {
+    if (isCompanyEntity(entity)) {
+      lines.push(formatCompanyProperties(entity.properties));
+    } else if (isPersonEntity(entity)) {
+      lines.push(formatPersonProperties(entity.properties));
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function formatCompanyProperties(props: EntityCompanyProperties): string {
+  const lines: string[] = ["Company Properties:"];
+
+  if (props.description) {
+    lines.push(`  Description: ${props.description}`);
+  }
+
+  if (props.industry) {
+    lines.push(`  Industry: ${props.industry}`);
+  }
+
+  if (props.headquarters) {
+    const { city, country } = props.headquarters;
+    if (city || country) {
+      const locationParts = [city, country].filter(Boolean);
+      if (locationParts.length > 0) {
+        lines.push(`  Location: ${locationParts.join(", ")}`);
+      }
+    }
+  }
+
+  if (props.workforce?.total) {
+    lines.push(`  Employees: ${props.workforce.total.toLocaleString()}`);
+  }
+
+  if (props.financials) {
+    if (props.financials.fundingTotal) {
+      lines.push(`  Total Funding: $${props.financials.fundingTotal.toLocaleString()}`);
+    }
+    if (props.financials.fundingLatestRound) {
+      const round = props.financials.fundingLatestRound;
+      const roundParts = [
+        round.name,
+        round.date ? `(${round.date})` : null,
+        round.amount ? `$${round.amount.toLocaleString()}` : null,
+      ].filter((s): s is string => s !== null);
+      if (roundParts.length > 0) {
+        lines.push(`  Latest Funding: ${roundParts.join(" ")}`);
+      }
+    }
+    if (props.financials.revenueAnnual) {
+      lines.push(`  Annual Revenue: $${props.financials.revenueAnnual.toLocaleString()}`);
+    }
+  }
+
+  if (props.foundedYear) {
+    lines.push(`  Founded: ${props.foundedYear}`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatPersonProperties(props: EntityPersonProperties): string {
+  const lines: string[] = ["Person Properties:"];
+
+  if (props.location) {
+    lines.push(`  Location: ${props.location}`);
+  }
+
+  if (props.workHistory && props.workHistory.length > 0) {
+    const jobs = props.workHistory.slice(0, 3); // Limit to 3 most recent
+    const jobLines: string[] = [];
+
+    for (const job of jobs) {
+      const title = job.title || "Unknown title";
+      const company = job.company?.name || "Unknown company";
+      jobLines.push(`${title} at ${company}`);
+    }
+
+    if (jobLines.length > 0) {
+      lines.push(`  Job Titles: ${jobLines.join(", ")}`);
+      lines.push(
+        `  Employers: ${jobs
+          .map((j) => j.company?.name || "Unknown")
+          .filter((s): s is string => s !== "Unknown")
+          .join(", ")}`,
+      );
+    }
+  }
+
+  return lines.join("\n");
+}
+
+// =============================================================================
 // Formatters
 // =============================================================================
 
@@ -154,6 +382,11 @@ export function formatSearchResults(results: SearchResultForFormatting[]): strin
         if (formattedSubpages.length > 0) {
           lines.push(formattedSubpages);
         }
+      }
+
+      const entityProperties = formatEntityProperties(r.entities);
+      if (entityProperties) {
+        lines.push(entityProperties);
       }
 
       return lines.join("\n");
