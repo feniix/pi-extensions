@@ -100,6 +100,8 @@ type EntityCompanyPropertiesFinancials = {
 };
 
 /** Company web traffic information. */
+// Note: webTraffic is intentionally not rendered - monthly visits data is not typically
+// useful in search result summaries and would add noise.
 type EntityCompanyPropertiesWebTraffic = {
   visitsMonthly?: number | null;
 };
@@ -126,6 +128,7 @@ type EntityDateRange = {
 type EntityPersonPropertiesCompanyRef = {
   id?: string | null;
   name?: string | null;
+  location?: string | null;
 };
 
 /** A single work history entry for a person. */
@@ -271,9 +274,7 @@ function formatCompanyProperties(props: EntityCompanyProperties): string {
     const { city, country } = props.headquarters;
     if (city || country) {
       const locationParts = [city, country].filter(Boolean);
-      if (locationParts.length > 0) {
-        lines.push(`  Location: ${locationParts.join(", ")}`);
-      }
+      lines.push(`  Location: ${locationParts.join(", ")}`);
     }
   }
 
@@ -327,12 +328,10 @@ function formatPersonProperties(props: EntityPersonProperties): string {
 
     if (jobLines.length > 0) {
       lines.push(`  Job Titles: ${jobLines.join(", ")}`);
-      lines.push(
-        `  Employers: ${jobs
-          .map((j) => j.company?.name || "Unknown")
-          .filter((s): s is string => s !== "Unknown")
-          .join(", ")}`,
-      );
+      const employers = jobs.map((j) => j.company?.name).filter((s): s is string => s !== null && s !== undefined);
+      if (employers.length > 0) {
+        lines.push(`  Employers: ${employers.join(", ")}`);
+      }
     }
   }
 

@@ -831,7 +831,7 @@ describe("pi-exa formatSearchResults entity properties", () => {
   });
 
   describe("people entity properties - work history details", () => {
-    it("includes work history location in formatted output", () => {
+    it("handles work history with location without crashing", () => {
       const results = [
         {
           url: "https://example.com",
@@ -857,7 +857,7 @@ describe("pi-exa formatSearchResults entity properties", () => {
       expect(result).toContain("Engineer at Tech Corp");
     });
 
-    it("includes work history dates in formatted output", () => {
+    it("handles work history with dates without crashing", () => {
       const results = [
         {
           url: "https://example.com",
@@ -883,7 +883,7 @@ describe("pi-exa formatSearchResults entity properties", () => {
       expect(result).toContain("Senior Engineer at Big Tech");
     });
 
-    it("includes company reference with location in formatted output", () => {
+    it("handles company reference with location without crashing", () => {
       const results = [
         {
           url: "https://example.com",
@@ -906,6 +906,28 @@ describe("pi-exa formatSearchResults entity properties", () => {
       ];
       const result = formatSearchResults(results);
       expect(result).toContain("VP Engineering at Startup Inc");
+    });
+
+    it("omits employers line when no company names", () => {
+      const results = [
+        {
+          url: "https://example.com",
+          entities: [
+            {
+              id: "person-1",
+              type: "person" as const,
+              version: 1,
+              properties: {
+                workHistory: [{ title: "Consultant" }, { title: "Freelancer" }],
+              },
+            },
+          ],
+        },
+      ];
+      const result = formatSearchResults(results);
+      expect(result).toContain("Consultant at Unknown company");
+      expect(result).toContain("Freelancer at Unknown company");
+      expect(result).not.toContain("Employers:");
     });
   });
 });
