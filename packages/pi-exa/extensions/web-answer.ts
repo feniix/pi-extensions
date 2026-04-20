@@ -5,7 +5,7 @@
 import type { AnswerResponse } from "exa-js";
 import { Exa } from "exa-js";
 import type { ToolPerformResult } from "./formatters.js";
-import { formatAnswerResult } from "./formatters.js";
+import { formatAnswerResult, toMetadata } from "./formatters.js";
 
 interface AnswerParams {
   query: string;
@@ -29,7 +29,7 @@ export async function performAnswer(apiKey: string, params: AnswerParams): Promi
     text: formatted.text,
     details: {
       tool: "web_answer_exa",
-      ...(result.costDollars ? { costDollars: result.costDollars } : {}),
+      ...toMetadata(result),
       ...(formatted.parsedOutput === undefined ? {} : { parsedOutput: formatted.parsedOutput }),
     },
   };

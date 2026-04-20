@@ -87,6 +87,9 @@ export const webResearchParams = Type.Object(
       Type.Array(Type.String({ description: "Alternative query formulations" }), { maxItems: 5 }),
     ),
     numResults: Type.Optional(Type.Integer({ description: "Number of source results", minimum: 1, maximum: 20 })),
+    textMaxCharacters: Type.Optional(
+      Type.Integer({ description: "Maximum characters to extract for synthesis", minimum: 1 }),
+    ),
     includeDomains: Type.Optional(Type.Array(Type.String())),
     excludeDomains: Type.Optional(Type.Array(Type.String())),
     startPublishedDate: Type.Optional(Type.String()),
@@ -109,7 +112,10 @@ export const webFindSimilarParams = Type.Object(
   {
     url: Type.String({ description: "Base URL to find similar pages for" }),
     numResults: Type.Optional(
-      Type.Integer({ description: "Number of similar pages to return (1-10, default: 5)", minimum: 1, maximum: 20 }),
+      Type.Integer({ description: "Number of similar pages to return (1-20, default: 5)", minimum: 1, maximum: 20 }),
+    ),
+    textMaxCharacters: Type.Optional(
+      Type.Integer({ description: "Maximum characters to extract per similar result", minimum: 1 }),
     ),
     excludeSourceDomain: Type.Optional(Type.Boolean({ description: "Do not include pages from the same domain" })),
     startPublishedDate: Type.Optional(Type.String({ description: "ISO date filter" })),

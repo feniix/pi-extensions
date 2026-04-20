@@ -12,6 +12,7 @@ const DEFAULT_NUM_RESULTS = 5;
 interface FindSimilarParams {
   url: string;
   numResults?: number;
+  textMaxCharacters?: number;
   excludeSourceDomain?: boolean;
   startPublishedDate?: string;
   endPublishedDate?: string;
@@ -35,7 +36,7 @@ export async function performFindSimilar(apiKey: string, params: FindSimilarPara
     excludeDomains: params.excludeDomains,
     contents: {
       text: {
-        maxCharacters: 5000,
+        maxCharacters: params.textMaxCharacters || 5000,
       },
     },
   });

@@ -14,6 +14,7 @@ interface ResearchParams {
   query: string;
   type?: (typeof DEEP_RESEARCH_TYPES)[number];
   systemPrompt?: string;
+  textMaxCharacters?: number;
   outputSchema?: Record<string, unknown>;
   additionalQueries?: string[];
   numResults?: number;
@@ -53,10 +54,10 @@ export async function performResearch(apiKey: string, params: ResearchParams): P
     endPublishedDate: params.endPublishedDate,
     contents: {
       text: {
-        maxCharacters: 12000,
+        maxCharacters: params.textMaxCharacters || 12000,
       },
       highlights: {
-        query: params.systemPrompt,
+        query: params.systemPrompt || params.query,
         numSentences: 4,
       },
     },

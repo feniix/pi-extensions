@@ -279,6 +279,7 @@ export default function exaExtension(pi: ExtensionAPI) {
             query: params.query,
             type: params.type,
             systemPrompt: params.systemPrompt,
+            textMaxCharacters: params.textMaxCharacters,
             outputSchema: params.outputSchema,
             additionalQueries: params.additionalQueries,
             numResults: params.numResults,
@@ -392,6 +393,7 @@ export default function exaExtension(pi: ExtensionAPI) {
           const result = await performFindSimilar(apiKey, {
             url: params.url,
             numResults: params.numResults,
+            textMaxCharacters: params.textMaxCharacters,
             excludeSourceDomain: params.excludeSourceDomain,
             startPublishedDate: params.startPublishedDate,
             endPublishedDate: params.endPublishedDate,
