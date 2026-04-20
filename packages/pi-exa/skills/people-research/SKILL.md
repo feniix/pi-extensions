@@ -15,6 +15,15 @@ context: fork
 | Direct answer about one person | `web_answer_exa` | Good for short factual checks |
 | Read profile details | `web_fetch_exa` | Fetch selected profile URLs |
 
+## Filter Restrictions
+
+When using `web_search_advanced_exa` with `category: "people"`, avoid:
+- `excludeText`
+- `excludeDomains`
+- `startPublishedDate` / `endPublishedDate`
+
+These filters are rejected for this category by Exa and typically return `400`.
+
 ## Recommended settings
 
 - People discovery

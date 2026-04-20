@@ -15,6 +15,13 @@ context: fork
 | Explain one metric or line item | `web_answer_exa` | Fast direct answers with citations |
 | Read full filing text | `web_fetch_exa` | Fetch 1-3 URLs only |
 
+## Filter Restrictions
+
+When using `web_search_advanced_exa` with `category: "financial report"`, avoid:
+- `excludeText`
+
+This option is rejected for this category by Exa and may return `400`.
+
 ## Recommended settings
 
 - `web_search_advanced_exa`

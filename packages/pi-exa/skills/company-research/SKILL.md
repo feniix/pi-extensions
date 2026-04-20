@@ -21,6 +21,14 @@ context: fork
 - `category: "company"` focuses on company-facing pages and profile-like structure.
 - Deep search (`deep`, `deep-lite`) belongs to **`web_research_exa`**, not `web_search_advanced_exa`.
 
+## Filter Restrictions
+
+When using `web_search_advanced_exa` with `category: "company"`, avoid:
+- `includeDomains`
+- `startPublishedDate` / `endPublishedDate`
+
+These filters commonly trigger Exa `400` errors for this category. Prefer running a broader query first, then post-filtering results locally if needed.
+
 ## Recommended settings
 
 ```json
