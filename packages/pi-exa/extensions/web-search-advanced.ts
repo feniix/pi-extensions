@@ -2,69 +2,131 @@
  * Exa advanced web search — full API control with category filters, domain restrictions, and date ranges.
  */
 
+import type { HighlightsContentsOptions, SearchResponse, SearchResult, TextContentsOptions } from "exa-js";
 import { Exa } from "exa-js";
-import type { ExaSearchResponse } from "./formatters.js";
-import { formatSearchResults } from "./formatters.js";
+import type { ToolPerformResult } from "./formatters.js";
+import { formatSearchResults, toMetadata } from "./formatters.js";
+
+const DEEP_SEARCH_TYPES = ["deep-reasoning", "deep", "deep-lite"] as const;
+
+const SEARCH_CATEGORIES = [
+  "company",
+  "research paper",
+  "news",
+  "pdf",
+  "personal site",
+  "financial report",
+  "people",
+] as const;
+
+type SearchCategory = (typeof SEARCH_CATEGORIES)[number];
+
+type AdvancedResult = SearchResult<{
+  text: TextContentsOptions;
+  highlights?: HighlightsContentsOptions;
+}>;
+
+function sanitizeCategory(category: string | undefined): SearchCategory | undefined {
+  if (!category) {
+    return undefined;
+  }
+
+  return SEARCH_CATEGORIES.includes(category as SearchCategory) ? (category as SearchCategory) : undefined;
+}
+
+type AdvancedSearchOptions = {
+  numResults?: number;
+  category?: string;
+  type?: "keyword" | "neural" | "auto" | "hybrid" | "fast" | "instant";
+  startPublishedDate?: string;
+  endPublishedDate?: string;
+  includeDomains?: string[];
+  excludeDomains?: string[];
+  textMaxCharacters?: number;
+  enableHighlights?: boolean;
+  highlightsNumSentences?: number;
+};
+
+function validateAdvancedType(type: AdvancedSearchOptions["type"] | undefined): void {
+  if (!type) {
+    return;
+  }
+
+  if (DEEP_SEARCH_TYPES.includes(type as (typeof DEEP_SEARCH_TYPES)[number])) {
+    throw new Error(
+      "web_search_advanced_exa does not support deep types. Use web_research_exa for deep-reasoning / deep-lite / deep.",
+    );
+  }
+}
 
 export async function performAdvancedSearch(
   apiKey: string,
   query: string,
-  options: {
+  options: AdvancedSearchOptions,
+): Promise<ToolPerformResult> {
+  validateAdvancedType(options.type);
+
+  const exa = new Exa(apiKey);
+
+  const searchOptions: {
     numResults?: number;
-    category?: string;
-    type?: string;
+    category?: SearchCategory;
+    type?: "keyword" | "neural" | "auto" | "hybrid" | "fast" | "instant";
     startPublishedDate?: string;
     endPublishedDate?: string;
     includeDomains?: string[];
     excludeDomains?: string[];
-    textMaxCharacters?: number;
-    enableHighlights?: boolean;
-    highlightsNumSentences?: number;
-  },
-): Promise<string> {
-  const exa = new Exa(apiKey);
-
-  const searchRequest: Record<string, unknown> = {
-    query,
-    numResults: options.numResults || 10,
     contents: {
-      text: { maxCharacters: options.textMaxCharacters || 3000 },
+      text: {
+        maxCharacters: number;
+      };
+      highlights?: {
+        numSentences?: number;
+        query: string;
+      };
+    };
+  } = {
+    numResults: options.numResults || 10,
+    category: sanitizeCategory(options.category),
+    type: options.type,
+    startPublishedDate: options.startPublishedDate,
+    endPublishedDate: options.endPublishedDate,
+    includeDomains: options.includeDomains,
+    excludeDomains: options.excludeDomains,
+    contents: {
+      text: {
+        maxCharacters: options.textMaxCharacters || 3000,
+      },
     },
   };
 
-  if (options.category) {
-    searchRequest.category = options.category;
-  }
-  if (options.type) {
-    searchRequest.type = options.type;
-  }
-  if (options.startPublishedDate) {
-    searchRequest.startPublishedDate = options.startPublishedDate;
-  }
-  if (options.endPublishedDate) {
-    searchRequest.endPublishedDate = options.endPublishedDate;
-  }
-  if (options.includeDomains && options.includeDomains.length > 0) {
-    searchRequest.includeDomains = options.includeDomains;
-  }
-  if (options.excludeDomains && options.excludeDomains.length > 0) {
-    searchRequest.excludeDomains = options.excludeDomains;
-  }
   if (options.enableHighlights) {
-    const existingContents = searchRequest.contents as Record<string, unknown>;
-    searchRequest.contents = {
-      ...existingContents,
+    searchOptions.contents = {
+      ...searchOptions.contents,
       highlights: {
-        highlightsPerUrl: options.highlightsNumSentences || 3,
+        numSentences: options.highlightsNumSentences || 3,
+        query,
       },
     };
   }
 
-  const response = await exa.request<ExaSearchResponse>("/search", "POST", searchRequest);
+  const result: SearchResponse<{
+    text: TextContentsOptions;
+    highlights?: HighlightsContentsOptions;
+  }> = await exa.search(query, searchOptions);
 
-  if (!response?.results || response.results.length === 0) {
-    return "No search results found. Please try a different query.";
+  if (!result?.results || result.results.length === 0) {
+    return {
+      text: "No search results found. Please try a different query.",
+      details: { tool: "web_search_advanced_exa" },
+    };
   }
 
-  return formatSearchResults(response.results);
+  return {
+    text: formatSearchResults(result.results as AdvancedResult[]),
+    details: {
+      tool: "web_search_advanced_exa",
+      ...toMetadata(result),
+    },
+  };
 }

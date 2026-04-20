@@ -2,29 +2,75 @@
  * Exa web fetch — reads webpage content as clean text.
  */
 
+import type { ContentsOptions, SearchResponse, SearchResult } from "exa-js";
 import { Exa } from "exa-js";
-import type { CrawlResult } from "./formatters.js";
-import { formatCrawlResults } from "./formatters.js";
+import type { ToolPerformResult } from "./formatters.js";
+import { formatCrawlResults, toMetadata } from "./formatters.js";
 
 export const DEFAULT_MAX_CHARACTERS = 3000;
 
-export async function performWebFetch(apiKey: string, urls: string[], maxCharacters: number): Promise<string> {
+type FetchOptions = {
+  maxCharacters?: number;
+  highlights?: boolean;
+  summary?: {
+    query?: string;
+  };
+  maxAgeHours?: number;
+};
+
+type FetchedResult = SearchResult<{
+  text: ContentsOptions["text"];
+  highlights: ContentsOptions["highlights"];
+  summary: ContentsOptions["summary"];
+  subpages: number;
+}>;
+
+export async function performWebFetch(
+  apiKey: string,
+  urls: string[],
+  options: FetchOptions = {},
+): Promise<ToolPerformResult> {
   const exa = new Exa(apiKey);
 
-  const crawlRequest = {
-    ids: urls,
-    contents: {
-      text: {
-        maxCharacters,
-      },
+  const contents: ContentsOptions = {
+    text: {
+      maxCharacters: options.maxCharacters || DEFAULT_MAX_CHARACTERS,
     },
   };
 
-  const response = await exa.request<{ results?: CrawlResult[] }>("/contents", "POST", crawlRequest);
-
-  if (!response?.results || response.results.length === 0) {
-    return "No content found for the requested URLs.";
+  if (options.highlights) {
+    contents.highlights = true;
   }
 
-  return formatCrawlResults(response.results);
+  if (options.summary?.query) {
+    contents.summary = {
+      query: options.summary.query,
+    };
+  }
+
+  if (typeof options.maxAgeHours === "number") {
+    contents.maxAgeHours = options.maxAgeHours;
+  }
+
+  const result: SearchResponse<{
+    text: ContentsOptions["text"];
+    highlights: ContentsOptions["highlights"];
+    summary: ContentsOptions["summary"];
+    subpages: number;
+  }> = await exa.getContents(urls, contents);
+
+  if (!result?.results || result.results.length === 0) {
+    return {
+      text: "No content found for the requested URLs.",
+      details: { tool: "web_fetch_exa" },
+    };
+  }
+
+  return {
+    text: formatCrawlResults(result.results as FetchedResult[]),
+    details: {
+      tool: "web_fetch_exa",
+      ...toMetadata(result),
+    },
+  };
 }
