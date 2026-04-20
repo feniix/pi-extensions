@@ -95,6 +95,27 @@ Params include `query` (required), `systemPrompt`, `text`, and `outputSchema`.
 
 Params include `url` (required), `numResults`, `excludeSourceDomain`, date filters, and domain filters.
 
+## Integration tests
+
+Live integration coverage is available for `web_search_exa`, `web_fetch_exa`, and `web_research_exa`.
+
+These tests are:
+- skipped by default
+- only enabled when you opt in manually
+- always skipped in CI
+
+Run them locally with a real API key:
+
+```bash
+EXA_API_KEY=your-key npx vitest run packages/pi-exa/__tests__/integration.test.ts -- --exa-live
+```
+
+You can also enable them with an environment variable instead of the CLI flag:
+
+```bash
+PI_EXA_LIVE=1 EXA_API_KEY=your-key npx vitest run packages/pi-exa/__tests__/integration.test.ts
+```
+
 ## Notes
 
 - `web_search_advanced_exa` and `web_research_exa` are opt-in and disabled by default.
