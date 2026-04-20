@@ -6,75 +6,73 @@ context: fork
 
 # Company Research (Exa)
 
-## Tool Restriction (Critical)
+## Tool Selection
 
-ONLY use `web_search_exa` for basic searches or `web_search_advanced_exa` if enabled with category filters. Do NOT use `web_fetch_exa` unless following up on specific URLs.
+Use the right tool based on the research depth needed:
 
-## Token Isolation (Critical)
+| Intent | Tool | Notes |
+|--------|------|-------|
+| Quick facts, founding info, one-liners | `web_answer_exa` | Fast, direct answer |
+| Discovery — find companies in a space | `web_search_advanced_exa` with `category: "company"` | Rich metadata (headcount, funding, location) |
+| Deep competitive analysis or market mapping | `web_research_exa` | ~20s, use with `--exa-enable-research` |
+| Recent news or press coverage | `web_search_advanced_exa` with `category: "news"` | Date filters work well |
+| Follow up a URL for full details | `web_fetch_exa` | After finding a company's site |
 
-Never run Exa searches in main context. Always spawn Task agents:
-- Agent runs Exa search internally
-- Agent processes results using LLM intelligence
-- Agent returns only distilled output (compact JSON or brief markdown)
-- Main context stays clean regardless of search volume
+**Tool availability**: All tools are enabled by default. `web_research_exa` requires `--exa-enable-research` flag.
 
-## Dynamic Tuning
+## Recommended Settings
 
-No hardcoded numResults. Tune to user intent:
-- User says "a few" → 10-20
-- User says "comprehensive" → 50-100
-- User specifies number → match it
-- Ambiguous? Ask: "How many companies would you like?"
+- **Quick facts** (`web_answer_exa`):
+  ```json
+  { "query": "When was Anthropic founded, who are the founders, and how much funding have they raised?" }
+  ```
+- **Company discovery** (`web_search_advanced_exa`):
+  ```json
+  { "query": "AI infrastructure startups San Francisco", "category": "company", "numResults": 20 }
+  ```
+- **Deep analysis** (`web_research_exa`):
+  ```json
+  { "query": "Competitive analysis of cloud GPU providers: CoreWeave vs Lambda Labs vs RunPod", "type": "deep-reasoning" }
+  ```
 
-## Query Variation
+## Query Writing Patterns
 
 Exa returns different results for different phrasings. For coverage:
 - Generate 2-3 query variations
 - Run in parallel if using Task agents
 - Merge and deduplicate
 
-## Categories (with web_search_advanced_exa)
-
-Use appropriate `category` depending on what you need:
-- `company` → homepages, rich metadata (headcount, location, funding, revenue)
-- `news` → press coverage, announcements
-- `people` → LinkedIn profiles (public data)
-- No category (`type: "auto"`) → general web results, deep dives, broader context
-
-Start with `category: "company"` for discovery, then use other categories or no category for deeper research.
-
-### Category-Specific Filter Restrictions
+## Category Filter Restrictions
 
 When using `category: "company"`, these parameters cause 400 errors:
 - `includeDomains` / `excludeDomains`
 - `startPublishedDate` / `endPublishedDate`
 - `startCrawlDate` / `endCrawlDate`
 
-When searching without a category (or with `news`), domain and date filters work fine.
+When searching with `category: "news"` or without a category, domain and date filters work fine.
 
-## Browser Fallback
+## Output Format
 
-Auto-fallback to Claude in Chrome when:
-- Exa returns insufficient results
-- Content is auth-gated
-- Dynamic pages need JavaScript
+Return:
+1. Results (structured list; one company per row)
+2. Sources (URLs; 1-line relevance each)
+3. Notes (uncertainty/conflicts)
 
 ## Examples
 
 ### Discovery: find companies in a space
 ```
-web_search_exa {
-  "query": "AI infrastructure startups San Francisco",
-  "numResults": 20
-}
-```
-
-### With advanced search (if enabled)
-```
 web_search_advanced_exa {
   "query": "AI infrastructure startups San Francisco",
   "category": "company",
   "numResults": 20
+}
+```
+
+### Quick facts
+```
+web_answer_exa {
+  "query": "What does Perplexity AI do, who are their main competitors, and how much revenue do they generate?"
 }
 ```
 
@@ -88,9 +86,10 @@ web_search_advanced_exa {
 }
 ```
 
-## Output Format
-
-Return:
-1) Results (structured list; one company per row)
-2) Sources (URLs; 1-line relevance each)
-3) Notes (uncertainty/conflicts)
+### Deep competitive analysis
+```
+web_research_exa {
+  "query": "Compare the business models, pricing, and market position of Snowflake vs Databricks vs BigQuery",
+  "type": "deep-reasoning"
+}
+```

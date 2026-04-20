@@ -6,32 +6,56 @@ context: fork
 
 # Financial Report Search (Exa)
 
-## Tool Restriction (Critical)
+## Tool Selection
 
-ONLY use `web_search_exa` for basic searches or `web_search_advanced_exa` with `category: "financial report"` if enabled. Do NOT use `web_fetch_exa` unless following up on specific URLs.
+Use the right tool based on the research depth:
 
-## Token Isolation (Critical)
+| Intent | Tool | Notes |
+|--------|------|-------|
+| Find filings for a company | `web_search_advanced_exa` with `category: "financial report"` | SEC filings, earnings, annual reports |
+| Financial analysis or comparison | `web_research_exa` | ~20s, use with `--exa-enable-research` |
+| Quick answer about a metric | `web_answer_exa` | Revenue, market cap, etc. |
+| Read a specific filing | `web_fetch_exa` | After finding a URL |
 
-Never run Exa searches in main context. Always spawn Task agents:
-- Agent calls `web_search_exa` or `web_search_advanced_exa`
-- Agent merges + deduplicates results before presenting
-- Agent returns distilled output (brief markdown or compact JSON)
-- Main context stays clean regardless of search volume
+**Tool availability**: All tools are enabled by default. `web_research_exa` requires `--exa-enable-research` flag.
 
-## When to Use
+## Recommended Settings
 
-Use this category when you need:
-- SEC filings (10-K, 10-Q, 8-K, S-1)
-- Quarterly earnings reports
-- Annual reports
-- Investor presentations
-- Financial statements
+- **Find SEC filings** (`web_search_advanced_exa`):
+  ```json
+  { "query": "Anthropic S-1 filing", "category": "financial report", "includeDomains": ["sec.gov"], "numResults": 10 }
+  ```
+- **Recent earnings reports**:
+  ```json
+  { "query": "Q4 2025 earnings report technology", "category": "financial report", "startPublishedDate": "2025-10-01", "numResults": 20 }
+  ```
+- **Specific filing type**:
+  ```json
+  { "query": "10-K annual report AI companies", "category": "financial report", "includeDomains": ["sec.gov"], "startPublishedDate": "2025-01-01", "numResults": 15 }
+  ```
+- **Deep financial analysis** (`web_research_exa`):
+  ```json
+  { "query": "Financial health comparison of Anthropic vs OpenAI vs xAI based on public filings", "type": "deep-reasoning" }
+  ```
+
+## Query Writing Patterns
+
+- Include company names and filing types (10-K, 10-Q, 8-K, S-1)
+- Use fiscal periods and years for precision
+- Add "annual report" or "earnings call transcript" for broader results
 
 ## Filter Restrictions
 
-The `financial report` category has one known restriction:
+When using `category: "financial report"`:
+- `excludeText` — NOT SUPPORTED (causes 400 error)
+- Domain and date filters work normally
 
-- `excludeText` - NOT SUPPORTED (causes 400 error)
+## Output Format
+
+Return:
+1. Results (company name, filing type, date, key figures/highlights)
+2. Sources (Filing URLs)
+3. Notes (reporting period, any restatements, auditor notes)
 
 ## Examples
 
@@ -72,10 +96,3 @@ web_search_advanced_exa {
   "numResults": 10
 }
 ```
-
-## Output Format
-
-Return:
-1) Results (company name, filing type, date, key figures/highlights)
-2) Sources (Filing URLs)
-3) Notes (reporting period, any restatements, auditor notes)

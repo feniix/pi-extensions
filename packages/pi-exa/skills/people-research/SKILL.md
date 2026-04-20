@@ -6,44 +6,42 @@ context: fork
 
 # People Research (Exa)
 
-## Tool Restriction (Critical)
+## Tool Selection
 
-ONLY use `web_search_exa` for basic searches or `web_search_advanced_exa` with `category: "people"` if enabled. Do NOT use `web_fetch_exa` unless following up on specific URLs.
+Use the right tool based on the research depth:
 
-## Token Isolation (Critical)
+| Intent | Tool | Notes |
+|--------|------|-------|
+| Find profiles by role or company | `web_search_advanced_exa` with `category: "people"` | LinkedIn profiles, public bios |
+| Quick background check | `web_answer_exa` | Factual queries about a specific person |
+| Deep background research on an individual | `web_research_exa` | ~20s, use with `--exa-enable-research` |
+| Recent mentions or press | `web_search_advanced_exa` with `category: "news"` | Interviews, announcements |
+| Read a specific profile | `web_fetch_exa` | After finding a URL |
 
-Never run Exa searches in main context. Always spawn Task agents:
-- Agent runs Exa search internally
-- Agent processes results using LLM intelligence
-- Agent returns only distilled output (compact JSON or brief markdown)
-- Main context stays clean regardless of search volume
+**Tool availability**: All tools are enabled by default. `web_research_exa` requires `--exa-enable-research` flag.
 
-## Dynamic Tuning
+## Recommended Settings
 
-No hardcoded numResults. Tune to user intent:
-- User says "a few" → 10-20
-- User says "comprehensive" → 50-100
-- User specifies number → match it
-- Ambiguous? Ask: "How many profiles would you like?"
+- **Profile discovery** (`web_search_advanced_exa`):
+  ```json
+  { "query": "VP Engineering AI infrastructure San Francisco", "category": "people", "numResults": 20 }
+  ```
+- **Quick bio** (`web_answer_exa`):
+  ```json
+  { "query": "What is Dario Amodei's background and current role at Anthropic?" }
+  ```
+- **Deep research** (`web_research_exa`):
+  ```json
+  { "query": "Professional background, notable work, and contributions of Andrej Karpathy", "type": "deep-reasoning" }
+  ```
 
-## Query Variation
+## Query Writing Patterns
 
-Exa returns different results for different phrasings. For coverage:
-- Generate 2-3 query variations
-- Run in parallel if using Task agents
-- Merge and deduplicate
+- Include company names, titles, or specific domains to focus results
+- Use "LinkedIn profile" or "bio" in the query when you want profile-focused results
+- For historical figures, include dates or organizations for precision
 
-## Categories (with web_search_advanced_exa)
-
-Use appropriate `category` depending on what you need:
-- `people` → LinkedIn profiles, public bios (primary for discovery)
-- `news` → press mentions, interviews, speaker bios
-- `personal site` → personal blogs, portfolio sites
-- No category (`type: "auto"`) → general web results, broader context
-
-Start with `category: "people"` for profile discovery, then use other categories or no category for deeper research.
-
-### Category-Specific Filter Restrictions
+## Category Filter Restrictions
 
 When using `category: "people"`, these parameters cause errors:
 - `startPublishedDate` / `endPublishedDate`
@@ -51,24 +49,16 @@ When using `category: "people"`, these parameters cause errors:
 - `excludeDomains`
 - `includeDomains` — **LinkedIn domains only** (e.g., "linkedin.com")
 
-## Browser Fallback
+## Output Format
 
-Auto-fallback to Claude in Chrome when:
-- Exa returns insufficient results
-- Content is auth-gated
-- Dynamic pages need JavaScript
+Return:
+1. Results (name, title, company, location if available)
+2. Sources (Profile URLs)
+3. Notes (profile completeness, verification status)
 
 ## Examples
 
 ### Discovery: find people by role
-```
-web_search_exa {
-  "query": "VP Engineering AI infrastructure San Francisco",
-  "numResults": 20
-}
-```
-
-### With advanced search (if enabled)
 ```
 web_search_advanced_exa {
   "query": "machine learning engineer San Francisco",
@@ -77,27 +67,27 @@ web_search_advanced_exa {
 }
 ```
 
-### Deep dive: research a specific person
+### Quick factual background
 ```
-web_search_exa {
-  "query": "Dario Amodei Anthropic CEO background",
-  "numResults": 15
+web_answer_exa {
+  "query": "What is Sam Altman's background and current role at OpenAI?"
+}
+```
+
+### Deep dive on a specific person
+```
+web_research_exa {
+  "query": "Yoshua Bengio: academic contributions, current research focus, and industry impact",
+  "type": "deep-reasoning"
 }
 ```
 
 ### News mentions
 ```
 web_search_advanced_exa {
-  "query": "Dario Amodei interview",
+  "query": "Dario Amodei interview 2024",
   "category": "news",
   "numResults": 10,
   "startPublishedDate": "2024-01-01"
 }
 ```
-
-## Output Format
-
-Return:
-1) Results (name, title, company, location if available)
-2) Sources (Profile URLs)
-3) Notes (profile completeness, verification status)
