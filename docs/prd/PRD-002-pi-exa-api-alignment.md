@@ -5,7 +5,7 @@ status: Draft
 owner: "Sebastian Otaegui"
 issue: "N/A"
 date: 2026-04-20
-version: "1.0"
+version: "1.3"
 ---
 
 # PRD: pi-exa Full Exa API Alignment
@@ -16,7 +16,7 @@ version: "1.0"
 
 The `@feniix/pi-exa` extension (v2.1.0) currently exposes a subset of the Exa API through three tools: `web_search_exa`, `web_fetch_exa`, and `web_search_advanced_exa`. A research session comparing the live Exa API against the extension revealed significant gaps:
 
-- **Deep search modes are inaccessible.** The Exa API offers `deep-reasoning`, `deep-lite`, and `deep` search types that produce synthesized, grounded output. Deep-reasoning is Exa's recommended replacement for the deprecated `/research/v1` endpoint (deprecated May 1, 2026). The extension has no tool for this. Meanwhile, the advanced tool is also missing the `instant` type from its documented options.
+- **Deep search modes are inaccessible.** The Exa API offers `deep-reasoning`, `deep-lite`, and `deep` search types that produce synthesized, grounded output. Deep-reasoning is Exa's recommended replacement for the deprecated `/research/v1` endpoint (deprecated May 1, 2026). The extension has no dedicated tool for deep search. The advanced tool's `type` parameter description mentions `deep` as an option (alongside `auto`, `fast`, `neural`), but even if a user passes it, there is no handling for the synthesized output (see next bullet). The advanced tool is also missing `keyword`, `hybrid`, and `instant` from its type options.
 
 - **Synthesized output is silently discarded.** Even if a user passed `type: "deep-reasoning"` through the advanced tool, the response formatter (`formatSearchResults`) only reads `results[]`. The `output.content` (synthesized answer) and `output.grounding` (per-field citations with confidence levels) fields are ignored. The main value proposition of deep-reasoning is lost.
 
@@ -100,7 +100,7 @@ The exa-js SDK (>=2.8 <3.0, already installed) has full TypeScript types for all
 ### Design for future (build with awareness)
 
 - **Response formatting is separated by tool type.** `formatSearchResults` handles link-oriented output, a new `formatResearchOutput` handles synthesized output. This keeps formatting clean and allows future tools (e.g., streaming research) to reuse formatters.
-- **`details` field structure is consistent across tools.** All tools store `{ tool, costDollars?, searchTime?, resolvedSearchType? }` in `details`, making it possible to build observability dashboards or cost tracking later.
+- **`details` field structure is consistent across tools.** All tools store `{ tool, costDollars?, searchTime?, resolvedSearchType?, ...toolSpecificKeys }` in `details`, making it possible to build observability dashboards or cost tracking later. Tool-specific keys (e.g., `parsedOutput` for research with `outputSchema`) are permitted alongside the common observability fields.
 - **Tool enablement follows existing pattern.** New tools use the same `enabledTools` / flag mechanism, so adding more tools later requires no config changes.
 
 ---
@@ -110,6 +110,8 @@ The exa-js SDK (>=2.8 <3.0, already installed) has full TypeScript types for all
 ### FR-1: Deep search tool (`web_research_exa`)
 
 A new tool that uses Exa's `/search` endpoint with deep search types (`deep-reasoning`, `deep-lite`, `deep`) to produce synthesized, grounded research output. Defaults to `deep-reasoning`. This is the primary tool for research-oriented queries that need conclusions, not just links.
+
+**Implementation note on `output` field:** The SDK types `output` as optional on `SearchResponse` (`output?: DeepSearchOutput`) because the type is shared across deep and non-deep search. At runtime, deep search types always populate `output.content` and `output.grounding` (confirmed by live testing — see §7 Assumptions). Implementation must still handle `output` being `undefined` at the type level (TypeScript will enforce this), with a graceful fallback that returns an error if the expected synthesized output is missing.
 
 **Parameters:**
 - `query` (required) — research question
@@ -170,9 +172,21 @@ Then the tool result text contains the JSON formatted as a code block followed b
 And the tool result details includes the parsed JSON object under a "parsedOutput" key
 ```
 
+```gherkin
+Given an authenticated Exa API key and the web_research_exa tool is enabled
+When the LLM calls web_research_exa with additionalQueries ["alternative phrasing", "related angle"]
+Then the request includes additionalQueries in the POST body
+And the deep search uses the additional queries to broaden source exploration
+```
+
 **Files:**
-- `packages/pi-exa/extensions/index.ts` — new tool registration, `performResearch()` function, `formatResearchOutput()` formatter
+- `packages/pi-exa/extensions/index.ts` — new tool registration
+- `packages/pi-exa/extensions/web-research.ts` — new file: `performResearch()` function
+- `packages/pi-exa/extensions/schemas.ts` — new `webResearchParams` schema
+- `packages/pi-exa/extensions/formatters.ts` — `formatResearchOutput()` formatter, research-related types
+- `packages/pi-exa/extensions/config.ts` — `researchEnabled` config key, `isResearchToolEnabled()` helper
 - `packages/pi-exa/__tests__/extension.test.ts` — tests for the new tool
+- `packages/pi-exa/__tests__/helpers.test.ts` — tests for `researchEnabled`/`isResearchToolEnabled()` enablement logic
 
 ---
 
@@ -203,7 +217,7 @@ Then the /search request includes contents.text.maxCharacters set to 500
 ```
 
 **Files:**
-- `packages/pi-exa/extensions/index.ts` — update `performWebSearch()` maxCharacters from 300 to 500
+- `packages/pi-exa/extensions/web-search.ts` — update `performWebSearch()` maxCharacters from 300 to 500
 - `packages/pi-exa/__tests__/extension.test.ts` — add test verifying the search request includes `contents.text.maxCharacters: 500`
 
 ---
@@ -246,8 +260,20 @@ When web_answer_exa begins execution
 Then onUpdate is called with a progress message "Fetching answer from Exa..."
 ```
 
+```gherkin
+Given an authenticated Exa API key
+When the LLM calls web_answer_exa with query and outputSchema { "type": "object", "properties": { "answer": { "type": "string" }, "confidence": { "type": "string" } }, "required": ["answer"] }
+Then the Exa /answer endpoint receives the outputSchema
+And the response answer is a structured object matching the schema
+```
+
+**Note on response shape:** The `/answer` endpoint returns `{ answer, citations[], requestId, costDollars }` — a different structure from `/search`'s `{ results[], output?, costDollars }`. The `formatAnswerResult()` formatter handles this distinct shape: `answer` (string or structured object) + `citations[]` (each with `url`, `title`, `publishedDate`, `author`, optional `text`).
+
 **Files:**
-- `packages/pi-exa/extensions/index.ts` — new tool registration, `performAnswer()` function, `formatAnswerResult()` formatter
+- `packages/pi-exa/extensions/index.ts` — new tool registration
+- `packages/pi-exa/extensions/web-answer.ts` — new file: `performAnswer()` function
+- `packages/pi-exa/extensions/schemas.ts` — new `webAnswerParams` schema
+- `packages/pi-exa/extensions/formatters.ts` — `formatAnswerResult()` formatter, answer-related types
 - `packages/pi-exa/__tests__/extension.test.ts` — tests for the new tool
 
 ---
@@ -258,7 +284,7 @@ A new tool that uses Exa's `/findSimilar` endpoint to find pages similar to a gi
 
 **Parameters:**
 - `url` (required) — the URL to find similar pages for
-- `numResults` (optional, default: 5) — number of similar results
+- `numResults` (optional, default: 5) — number of similar results (lower than API default of 10, consistent with `web_search_exa`)
 - `excludeSourceDomain` (optional, boolean) — exclude results from the same domain as the input URL
 - `includeDomains` / `excludeDomains` (optional) — domain filters
 - `startPublishedDate` / `endPublishedDate` (optional) — date filters
@@ -292,7 +318,9 @@ Then onUpdate is called with a progress message "Finding similar pages via Exa..
 ```
 
 **Files:**
-- `packages/pi-exa/extensions/index.ts` — new tool registration, `performFindSimilar()` function
+- `packages/pi-exa/extensions/index.ts` — new tool registration
+- `packages/pi-exa/extensions/web-find-similar.ts` — new file: `performFindSimilar()` function
+- `packages/pi-exa/extensions/schemas.ts` — new `webFindSimilarParams` schema
 - `packages/pi-exa/__tests__/extension.test.ts` — tests for the new tool
 
 ---
@@ -300,6 +328,20 @@ Then onUpdate is called with a progress message "Finding similar pages via Exa..
 ### FR-4: Enhanced content fetching
 
 Extend `web_fetch_exa` to support additional `/contents` capabilities: highlights, summaries, and freshness control.
+
+**New parameters (added to `webFetchParams` in schemas.ts):**
+- `highlights` (optional, boolean) — when `true`, includes LLM-selected relevant snippets per page. Uses the Exa SDK's `HighlightsContentsOptions` with defaults. Boolean form keeps the tool simple; the full object form (`{ query, maxCharacters }`) is available via `web_search_advanced_exa` and is not needed here.
+- `summary` (optional, object: `{ query: string }`) — LLM-generated summary of each page guided by the query string. Maps to `SummaryContentsOptions`.
+- `maxAgeHours` (optional, integer) — controls cache freshness. Positive value: use cache if newer than N hours. `0`: always livecrawl. `-1`: always use cache. Omit: livecrawl only when cache is empty.
+
+**TypeBox schemas:**
+```typescript
+highlights: Type.Optional(Type.Boolean({ description: "Include relevant highlights for each page" }))
+summary: Type.Optional(Type.Object({
+  query: Type.String({ description: "Query to guide summary generation" })
+}, { description: "Generate an LLM summary of each page" }))
+maxAgeHours: Type.Optional(Type.Integer({ description: "Cache freshness: hours (positive), 0 (always fresh), -1 (cache only)" }))
+```
 
 **Acceptance criteria:**
 
@@ -330,7 +372,9 @@ Then the behavior is identical to the current implementation (backward compatibl
 ```
 
 **Files:**
-- `packages/pi-exa/extensions/index.ts` — extend `webFetchParams` schema, update `performWebFetch()`, update `formatCrawlResults()`
+- `packages/pi-exa/extensions/schemas.ts` — extend `webFetchParams` schema with `highlights`, `summary`, `maxAgeHours`
+- `packages/pi-exa/extensions/web-fetch.ts` — update `performWebFetch()` to forward new parameters
+- `packages/pi-exa/extensions/formatters.ts` — update `formatCrawlResults()` for highlights/summary sections
 - `packages/pi-exa/__tests__/extension.test.ts` — tests for new parameters
 - `packages/pi-exa/__tests__/helpers.test.ts` — tests for enhanced formatting
 
@@ -348,7 +392,17 @@ This applies to:
 - `web_answer_exa` (new)
 - `web_find_similar_exa` (new)
 
-**Note:** Existing tests in `extension.test.ts` assert exact `details` shapes (e.g., line 287: `result.details.tool === "web_fetch_exa"`, line 309: `toEqual({ tool: "web_fetch_exa", error: "fetch exploded" })`). These tests will need updating to account for the new optional fields.
+**Note on `costDollars` shape:** The SDK's `CostDollars` type is a nested object `{ total: number, search: CostDollarsSearch, contents: CostDollarsContents }`, not a flat number. Pass the full object in `details` for observability; consumers can read `costDollars.total` for the summary value.
+
+**Note on field availability per endpoint:** Not all metadata fields are available on all response types:
+- `SearchResponse` (search, advanced, research, findSimilar, getContents): `costDollars?`, `searchTime?`, `resolvedSearchType?`
+- `AnswerResponse` (answer): `costDollars?` only — no `searchTime` or `resolvedSearchType`
+
+The "if present in Exa response" language in acceptance criteria covers this — implementations should spread whatever metadata the response contains without synthesizing missing fields.
+
+**Note on existing tests:** Tests in `extension.test.ts` assert exact `details` shapes using `toEqual()` (e.g., line 310: `result.details.tool === "web_fetch_exa"`, line 332: `toEqual({ tool: "web_fetch_exa", error: "fetch exploded" })`). These tests will need updating to account for the new optional fields.
+
+**Note on details shape with tool-specific keys:** Some tools add extra keys to `details` beyond observability metadata. For example, `web_research_exa` adds `parsedOutput` when `outputSchema` is provided (FR-1). The `details` field structure is: `{ tool: string, costDollars?: CostDollars, searchTime?: number, resolvedSearchType?: string, ...toolSpecificKeys }`.
 
 **Acceptance criteria:**
 
@@ -356,8 +410,8 @@ This applies to:
 Given any Exa tool completes successfully
 When the result is returned
 Then the details field includes the tool name
-And the details field includes costDollars (if present in Exa response)
-And the details field includes searchTime (if present in Exa response)
+And the details field includes costDollars as a nested object with total field (if present in Exa response)
+And the details field includes searchTime in milliseconds (if present in Exa response)
 And the details field includes resolvedSearchType (if present in Exa response)
 ```
 
@@ -370,11 +424,24 @@ Then the details field omits costDollars (no synthetic values)
 ```gherkin
 Given web_search_exa completes successfully with costDollars in the response
 When the result is returned
-Then the details field is { tool: "web_search_exa", costDollars: ..., searchTime: ..., resolvedSearchType: ... }
+Then the details field is { tool: "web_search_exa", costDollars: { total: ..., ... }, searchTime: ..., resolvedSearchType: ... }
+```
+
+```gherkin
+Given web_answer_exa completes successfully
+When the result is returned
+Then the details field includes costDollars (if present)
+And the details field does NOT include searchTime or resolvedSearchType (not available on /answer)
 ```
 
 **Files:**
-- `packages/pi-exa/extensions/index.ts` — update all `perform*()` functions to extract and return metadata; update all tool execute handlers to merge metadata into `details`
+- `packages/pi-exa/extensions/web-search.ts` — extract and return metadata from `performWebSearch()`
+- `packages/pi-exa/extensions/web-fetch.ts` — extract and return metadata from `performWebFetch()`
+- `packages/pi-exa/extensions/web-search-advanced.ts` — extract and return metadata from `performAdvancedSearch()`
+- `packages/pi-exa/extensions/web-research.ts` — include metadata in `performResearch()` (new tool, built with metadata from the start)
+- `packages/pi-exa/extensions/web-answer.ts` — include metadata in `performAnswer()` (new tool, built with metadata from the start)
+- `packages/pi-exa/extensions/web-find-similar.ts` — include metadata in `performFindSimilar()` (new tool, built with metadata from the start)
+- `packages/pi-exa/extensions/index.ts` — update all tool execute handlers to merge metadata into `details`
 - `packages/pi-exa/__tests__/extension.test.ts` — update existing `details` assertions, add new tests verifying metadata fields
 
 ---
@@ -407,8 +474,11 @@ And no request is sent to the Exa API
 
 **Implementation note:** Use a `Type.Union([Type.Literal("auto"), Type.Literal("fast"), Type.Literal("neural"), Type.Literal("keyword"), Type.Literal("hybrid"), Type.Literal("instant")])` enum in the TypeBox schema for the `type` param. This gives the LLM the allowed values in the schema and rejects deep types at validation. Add a runtime check in `execute()` as a safety net that returns an error directing users to `web_research_exa`.
 
+**Note on `systemPrompt`/`outputSchema`:** The SDK's `NonDeepSearchOptions` inherits `systemPrompt` and `outputSchema` from `BaseRegularSearchOptions`, but these parameters only produce meaningful output with deep search types. They are intentionally not exposed on `web_search_advanced_exa` to keep the tool focused on retrieval with filtering control.
+
 **Files:**
-- `packages/pi-exa/extensions/index.ts` — update `webSearchAdvancedParams` type schema to TypeBox enum, add runtime validation rejecting deep types
+- `packages/pi-exa/extensions/schemas.ts` — update `webSearchAdvancedParams` type schema to TypeBox enum (`auto`, `fast`, `neural`, `keyword`, `hybrid`, `instant`)
+- `packages/pi-exa/extensions/web-search-advanced.ts` — add runtime validation rejecting deep types
 - `packages/pi-exa/__tests__/extension.test.ts` — test that deep types are rejected with clear error
 
 ---
@@ -455,7 +525,7 @@ And its promptGuidelines entries each reference at least one other Exa tool for 
 
 **Files:**
 - `packages/pi-exa/extensions/index.ts` — add `promptSnippet` and `promptGuidelines` to all 6 `registerTool()` calls
-- `packages/pi-exa/__tests__/extension.test.ts` — verify promptSnippet and promptGuidelines are set on registered tools
+- `packages/pi-exa/__tests__/extension.test.ts` — verify `promptSnippet` and `promptGuidelines` are set on registered tools
 
 ---
 
@@ -552,7 +622,7 @@ And it has Recommended Settings with concrete includeDomains (sec.gov) and outpu
 | **Latency transparency** | Deep-reasoning tool description warns about ~20s latency; `onUpdate` provides progress indication |
 | **Cost transparency** | All tools include `costDollars` in `details` so users and automation can track API spend |
 | **Error messages** | Exa API errors include the HTTP status code and Exa error message for debuggability |
-| **Test coverage** | Every new tool has tests for: missing API key, aborted signal, successful execution, error handling, onUpdate callback |
+| **Test coverage** | Every new tool has tests for: missing API key, aborted signal, successful execution, error handling, onUpdate callback. Error handling for new tools follows the identical pattern as existing tools (see extension.test.ts) — no unique Gherkin is needed in FR-1/2/3 for these standard cases. |
 
 ---
 
@@ -601,6 +671,34 @@ And it has Recommended Settings with concrete includeDomains (sec.gov) and outpu
 
 **Migration scope:** All 3 existing tools (`web_search_exa` → `exa.search()`, `web_fetch_exa` → `exa.getContents()`, `web_search_advanced_exa` → `exa.search()`) plus 3 new tools (`web_research_exa` → `exa.search()`, `web_answer_exa` → `exa.answer()`, `web_find_similar_exa` → `exa.findSimilar()`).
 
+**Return type change:** The typed SDK methods return rich response objects (`SearchResponse<T>`, `AnswerResponse`) that include `costDollars`, `searchTime`, `resolvedSearchType`, and `output` fields. Currently all `perform*()` functions return `Promise<string>` — they format results into text and discard the response metadata. After D2 migration, all `perform*()` functions change to `Promise<ToolPerformResult>` so execute handlers can merge metadata into `details`.
+
+Define in `formatters.ts`:
+
+```typescript
+/** Metadata extracted from Exa API responses for observability (FR-5). */
+export interface ExaResponseMetadata {
+  costDollars?: CostDollars;       // nested: { total, search, contents }
+  searchTime?: number;             // milliseconds — search endpoints only
+  resolvedSearchType?: string;     // resolved type when "auto" is used
+}
+
+/** Return type for all perform*() functions after D2 migration. */
+export interface ToolPerformResult {
+  text: string;
+  metadata: ExaResponseMetadata;
+}
+```
+
+Execute handlers then destructure: `const { text, metadata } = await performWebSearch(...)` and spread: `details: { tool: "web_search_exa", ...metadata }`.
+
+**Implementation notes:**
+- The SDK's `search()` method is overloaded: `NonDeepSearchOptions` (type: `"keyword" | "neural" | "auto" | "hybrid" | "fast" | "instant"`) vs `DeepSearchOptions` (type: `"deep-lite" | "deep" | "deep-reasoning"`). Callers must use the correct overload — the TypeScript compiler enforces this via discriminated union on `type`.
+- `getContents(urls, contentsOptions)` takes `(string | string[], ContentsOptions?)`, NOT `{ ids, contents }` like the raw request. The SDK handles the mapping.
+- The SDK `CostDollars` type is a nested object `{ total: number, search: CostDollarsSearch, contents: CostDollarsContents }`, not a flat number. Pass the full object in `details` for observability; `costDollars.total` is the summary value.
+- `AnswerResponse` has `costDollars` but no `searchTime` or `resolvedSearchType` — those are `SearchResponse`-only fields.
+- `findSimilar` returns `SearchResponse` which includes `searchTime?` and `resolvedSearchType?` as optional fields, but they may not be populated at runtime.
+
 ### D3: Tool enablement tiers based on cost and complexity
 
 **Decision:** Tools are split into two tiers based on their cost, latency, and parameter complexity:
@@ -617,7 +715,19 @@ And it has Recommended Settings with concrete includeDomains (sec.gov) and outpu
 
 **Rationale:** `/answer` ($0.005) and `/findSimilar` (~$0.007) are the same cost tier as the existing defaults. Gating them adds friction for no safety benefit. Only `web_research_exa` warrants a flag due to higher cost, 20s latency, and complex parameters (`systemPrompt`, `outputSchema`). `web_search_advanced_exa` retains its existing flag because of its large parameter surface.
 
-**Implementation:** Update `isToolEnabledForConfig()` to return `true` for `web_answer_exa` and `web_find_similar_exa` by default (same as `web_search_exa` / `web_fetch_exa`). Add `researchEnabled` to `ExaConfig`, add `isResearchToolEnabled()` helper mirroring `isAdvancedToolEnabled()`, register `--exa-enable-research` flag. The `enabledTools` array in config continues to work as a fine-grained override.
+**Implementation:** The following changes are required in `config.ts`:
+
+1. **`isToolEnabledForConfig()`** — add explicit cases for the new tools. The current function (config.ts:231-244) hardcodes `web_search_exa` and `web_fetch_exa` as default-on, `web_search_advanced_exa` as flag-gated, and returns `false` for any unknown tool name. Without new cases, `web_answer_exa` and `web_find_similar_exa` would silently fail to register:
+   - `web_answer_exa` → return `true` (default-on)
+   - `web_find_similar_exa` → return `true` (default-on)
+   - `web_research_exa` → return `isResearchToolEnabled(pi, config)`
+2. **`ExaConfig`** — add `researchEnabled?: boolean`
+3. **`parseConfig()`** — extract `researchEnabled` from raw config (mirrors `advancedEnabled`)
+4. **`loadSettingsConfig()`** — include `researchEnabled` in the returned object (currently returns only `{ enabledTools, advancedEnabled }`, stripping other fields for security — `researchEnabled` must be added or it will be silently ignored when set in `~/.pi/agent/settings.json`)
+5. **`isResearchToolEnabled()`** — new helper mirroring `isAdvancedToolEnabled()`: checks `--exa-enable-research` flag, falls back to `config.researchEnabled ?? false`
+6. **Register `--exa-enable-research` flag** in `index.ts`
+
+The `enabledTools` array in config continues to work as a fine-grained override.
 
 ---
 
@@ -625,9 +735,18 @@ And it has Recommended Settings with concrete includeDomains (sec.gov) and outpu
 
 | File | Change type | FR | Description |
 |------|-------------|-----|-------------|
-| `packages/pi-exa/extensions/index.ts` | Modify | FR-1,1b,2,3,4,5,6,8 | Add 3 new tools, increase search maxCharacters, enhance web_fetch_exa params, add formatters, add observability metadata, update type descriptions, add `--exa-enable-research` flag and `researchEnabled` config, add promptSnippet/promptGuidelines to all tools |
-| `packages/pi-exa/__tests__/extension.test.ts` | Modify | FR-1,2,3,4,5,8 | Tests for new tools, enhanced parameters, and promptSnippet/promptGuidelines |
-| `packages/pi-exa/__tests__/helpers.test.ts` | Modify | FR-1,4,5,D3 | Tests for new formatters, enhanced formatting, and `researchEnabled`/`isResearchToolEnabled` enablement logic |
+| `packages/pi-exa/extensions/index.ts` | Modify | FR-1,2,3,5,8 | Register 3 new tools, add `--exa-enable-research` flag, add `promptSnippet`/`promptGuidelines` to all 6 tools, merge observability metadata into `details` in all execute handlers |
+| `packages/pi-exa/extensions/schemas.ts` | Modify | FR-1,2,3,4,6 | New schemas: `webResearchParams`, `webAnswerParams`, `webFindSimilarParams`; extend `webFetchParams` with `highlights`/`summary`/`maxAgeHours`; update `webSearchAdvancedParams` type enum |
+| `packages/pi-exa/extensions/config.ts` | Modify | FR-1,2,3,D3 | Add `researchEnabled` to `ExaConfig`; update `parseConfig()` and `loadSettingsConfig()` to extract it; add `isResearchToolEnabled()` helper; update `isToolEnabledForConfig()` with cases for `web_answer_exa`, `web_find_similar_exa` (default-on), and `web_research_exa` (flag-gated) |
+| `packages/pi-exa/extensions/formatters.ts` | Modify | FR-1,2,4,5,D2 | New shared types: `ExaResponseMetadata`, `ToolPerformResult`; new formatters: `formatResearchOutput()`, `formatAnswerResult()`; update `formatCrawlResults()` for highlights/summary sections; remove `ExaSearchResponse` and `SearchResult` interfaces (replaced by SDK types per D2) |
+| `packages/pi-exa/extensions/web-search.ts` | Modify | FR-1b,5 | Bump `maxCharacters` from 300 to 500; extract and return observability metadata |
+| `packages/pi-exa/extensions/web-fetch.ts` | Modify | FR-4,5 | Forward `highlights`/`summary`/`maxAgeHours` parameters; extract and return observability metadata |
+| `packages/pi-exa/extensions/web-search-advanced.ts` | Modify | FR-5,6 | Extract and return observability metadata; add runtime rejection of deep types |
+| `packages/pi-exa/extensions/web-research.ts` | Create | FR-1 | New file: `performResearch()` function for deep search types |
+| `packages/pi-exa/extensions/web-answer.ts` | Create | FR-2 | New file: `performAnswer()` function for `/answer` endpoint |
+| `packages/pi-exa/extensions/web-find-similar.ts` | Create | FR-3 | New file: `performFindSimilar()` function for `/findSimilar` endpoint |
+| `packages/pi-exa/__tests__/extension.test.ts` | Modify | FR-1,2,3,4,5,6,8,D2 | Migrate test mock from `exa.request()` to typed SDK methods (`search`, `getContents`, `answer`, `findSimilar`); tests for new tools, enhanced parameters, observability metadata, `promptSnippet`/`promptGuidelines`, deep type rejection |
+| `packages/pi-exa/__tests__/helpers.test.ts` | Modify | FR-1,4,5,D3 | Tests for new formatters, enhanced formatting, `researchEnabled`/`isResearchToolEnabled` enablement logic |
 | `packages/pi-exa/__tests__/index.test.ts` | Modify | FR-7 | Skill smoke tests (verify new tool references) |
 | `packages/pi-exa/skills/code-search/SKILL.md` | Modify | FR-7 | Rewrite as pi-native skill with tool selection, parameter guidelines, and domain-specific settings |
 | `packages/pi-exa/skills/company-research/SKILL.md` | Modify | FR-7 | Rewrite as pi-native skill with tool selection, parameter guidelines, and domain-specific settings |
@@ -636,7 +755,7 @@ And it has Recommended Settings with concrete includeDomains (sec.gov) and outpu
 | `packages/pi-exa/skills/financial-report-search/SKILL.md` | Modify | FR-7 | Rewrite as pi-native skill with tool selection, parameter guidelines, and domain-specific settings |
 | `packages/pi-exa/skills/personal-site-search/SKILL.md` | Modify | FR-7 | Rewrite as pi-native skill with tool selection, parameter guidelines, and domain-specific settings |
 | `packages/pi-exa/README.md` | Modify | FR-1,2,3,4 | Document new tools, parameters, and enablement |
-| `packages/pi-exa/package.json` | Modify | FR-1 | Version bump |
+| `packages/pi-exa/package.json` | Modify | FR-1 | Version bump to 3.0.0 — 3 new tools, `perform*()` return type change (`Promise<string>` → `Promise<ToolPerformResult>`, breaks any direct consumer of these internal functions), test mock migration from `exa.request()` to typed SDK methods |
 
 ---
 
@@ -686,7 +805,9 @@ And it has Recommended Settings with concrete includeDomains (sec.gov) and outpu
 
 ## 14. Changelog
 
-| Date | Change | Author |
-|------|--------|--------|
-| 2026-04-20 | Initial draft | Sebastian Otaegui |
-| 2026-04-20 | Revised: enablement tiers (D3 — answer/findSimilar default-on, research behind flag), FR-1 type param (deep-reasoning/deep-lite/deep), FR-2/3 full param specs, FR-6 deep type rejection, FR-7 skill rewrite scope (drop OpenClaw patterns), FR-8 promptSnippet/promptGuidelines, D2 switched to typed SDK methods, FR-1b maxCharacters bump, pricing data added | Sebastian Otaegui |
+| Date | Version | Change | Author |
+|------|---------|--------|--------|
+| 2026-04-20 | 1.0 | Initial draft | Sebastian Otaegui |
+| 2026-04-20 | 1.1 | Expanded scope: enablement tiers (D3), FR-1 deep type param, FR-2/3 full param specs, FR-6 deep type rejection, FR-7 skill rewrite scope, FR-8 promptSnippet/promptGuidelines, D2 typed SDK methods, FR-1b maxCharacters bump | Sebastian Otaegui |
+| 2026-04-20 | 1.2 | Updated file references for modular structure (refactor f14afb0). Added web-research.ts, web-answer.ts, web-find-similar.ts to file breakdown. Defined `ToolPerformResult`/`ExaResponseMetadata` return types (D2). Expanded D3 implementation with explicit `isToolEnabledForConfig()`, `loadSettingsConfig()`, `parseConfig()` changes. Added Gherkin for FR-1 `additionalQueries`, FR-2 `outputSchema`. Defined FR-4 TypeBox schemas. Clarified FR-5 metadata per endpoint and `CostDollars` nested shape. Corrected §1 problem statement re: deep types. Set version bump target 3.0.0. | Sebastian Otaegui |
+| 2026-04-20 | 1.3 | Added test mock migration scope (D2) to §9. Updated §4 details structure for tool-specific keys. Corrected version bump rationale. Added FR-1 implementation note on `output` optionality. Clarified §6 NFR error handling pattern. Documented FR-6 `systemPrompt`/`outputSchema` intentional omission from advanced search. | Sebastian Otaegui |
