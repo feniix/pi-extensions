@@ -358,6 +358,7 @@ describe("pi-notion checkNotionAuth", () => {
     const tempHome = mkdtempSync(join(tmpdir(), "pi-notion-migrate-home-"));
     const tempProject = mkdtempSync(join(tmpdir(), "pi-notion-migrate-project-"));
     const configDir = join(tempHome, ".pi", "agent", "extensions");
+    const agentDir = join(tempHome, ".pi", "agent");
 
     mkdirSync(configDir, { recursive: true });
     writeFileSync(
@@ -375,7 +376,8 @@ describe("pi-notion checkNotionAuth", () => {
       const result = mod.checkNotionAuth();
       expect(result.authenticated).toBe(true);
       expect(existsSync(join(configDir, "notion-mcp.json"))).toBe(false);
-      expect(existsSync(join(configDir, "notion-mcp-auth.json"))).toBe(true);
+      expect(existsSync(join(configDir, "notion-mcp-auth.json"))).toBe(false);
+      expect(existsSync(join(agentDir, "notion-mcp-auth.json"))).toBe(true);
     } finally {
       process.chdir(originalCwd);
       if (originalHome) process.env.HOME = originalHome;

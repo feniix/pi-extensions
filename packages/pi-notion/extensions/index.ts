@@ -19,8 +19,12 @@ function getHomeDir(): string {
   return process.env.HOME || homedir();
 }
 
+function getAgentDir(): string {
+  return join(getHomeDir(), ".pi", "agent");
+}
+
 function getConfigDir(): string {
-  return join(getHomeDir(), ".pi", "agent", "extensions");
+  return join(getAgentDir(), "extensions");
 }
 
 function resolveOptionalPath(path: string): string {
@@ -41,6 +45,10 @@ function getLegacyMcpConfigFile(): string {
   return join(getConfigDir(), "notion-mcp.json");
 }
 
+function getLegacyAuthFile(): string {
+  return join(getConfigDir(), "notion-mcp-auth.json");
+}
+
 function migrateLegacyMcpConfigFile(): string {
   const configuredPath = process.env.NOTION_MCP_AUTH_FILE;
   if (typeof configuredPath === "string" && configuredPath.trim().length > 0) {
@@ -53,17 +61,19 @@ function migrateLegacyMcpConfigFile(): string {
     return resolveOptionalPath(legacyConfiguredPath);
   }
 
-  const nextPath = join(getConfigDir(), "notion-mcp-auth.json");
-  const legacyPath = getLegacyMcpConfigFile();
+  const nextPath = join(getAgentDir(), "notion-mcp-auth.json");
+  const legacyPaths = [getLegacyAuthFile(), getLegacyMcpConfigFile()];
 
-  if (!existsSync(nextPath) && existsSync(legacyPath)) {
-    try {
-      mkdirSync(getConfigDir(), { recursive: true });
-      renameSync(legacyPath, nextPath);
-      console.warn(`[pi-notion] Migrated legacy MCP auth file from ${legacyPath} to ${nextPath}.`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[pi-notion] Failed to migrate legacy MCP auth file ${legacyPath}: ${message}`);
+  for (const legacyPath of legacyPaths) {
+    if (!existsSync(nextPath) && existsSync(legacyPath)) {
+      try {
+        mkdirSync(getAgentDir(), { recursive: true });
+        renameSync(legacyPath, nextPath);
+        console.warn(`[pi-notion] Migrated legacy MCP auth file from ${legacyPath} to ${nextPath}.`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[pi-notion] Failed to migrate legacy MCP auth file ${legacyPath}: ${message}`);
+      }
     }
   }
 

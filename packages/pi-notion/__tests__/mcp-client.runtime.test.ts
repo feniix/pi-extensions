@@ -1,5 +1,5 @@
-import { existsSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import notionMCPClientExtension, {
@@ -255,6 +255,22 @@ describe("pi-notion mcp client runtime helpers", () => {
     expect(success.content[0]?.text).toBe("done");
   });
 
+  it("uses ~/.pi/agent/notion-mcp-auth.json as the default auth file path", () => {
+    const original = process.env.NOTION_MCP_AUTH_FILE;
+    const originalLegacy = process.env.NOTION_MCP_AUTH;
+    delete process.env.NOTION_MCP_AUTH_FILE;
+    delete process.env.NOTION_MCP_AUTH;
+
+    try {
+      expect(getDefaultAuthFilePath()).toBe(join(homedir(), ".pi", "agent", "notion-mcp-auth.json"));
+    } finally {
+      if (original) process.env.NOTION_MCP_AUTH_FILE = original;
+      else delete process.env.NOTION_MCP_AUTH_FILE;
+      if (originalLegacy) process.env.NOTION_MCP_AUTH = originalLegacy;
+      else delete process.env.NOTION_MCP_AUTH;
+    }
+  });
+
   it("resolves auth file path from environment when configured", () => {
     const original = process.env.NOTION_MCP_AUTH_FILE;
     process.env.NOTION_MCP_AUTH_FILE = "~/custom-notion-auth.json";
@@ -283,6 +299,42 @@ describe("pi-notion mcp client runtime helpers", () => {
       else delete process.env.NOTION_MCP_AUTH;
       if (originalFile) process.env.NOTION_MCP_AUTH_FILE = originalFile;
       else delete process.env.NOTION_MCP_AUTH_FILE;
+    }
+  });
+
+  it("migrates the previous default auth file path under extensions", () => {
+    const originalHome = process.env.HOME;
+    const originalFile = process.env.NOTION_MCP_AUTH_FILE;
+    const originalLegacy = process.env.NOTION_MCP_AUTH;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-notion-auth-home-"));
+    const legacyDir = join(tempHome, ".pi", "agent", "extensions");
+    mkdirSync(legacyDir, { recursive: true });
+    writeFileSync(
+      join(legacyDir, "notion-mcp-auth.json"),
+      JSON.stringify({ mcpUrl: "https://mcp.notion.com/mcp", accessToken: "token-123" }),
+      "utf-8",
+    );
+    delete process.env.NOTION_MCP_AUTH_FILE;
+    delete process.env.NOTION_MCP_AUTH;
+    process.env.HOME = tempHome;
+
+    try {
+      const nextPath = join(tempHome, ".pi", "agent", "notion-mcp-auth.json");
+      expect(getDefaultAuthFilePath()).toBe(nextPath);
+      expect(existsSync(join(legacyDir, "notion-mcp-auth.json"))).toBe(false);
+      expect(existsSync(nextPath)).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(
+        `[pi-notion] Migrated legacy MCP auth file from ${join(legacyDir, "notion-mcp-auth.json")} to ${nextPath}.`,
+      );
+    } finally {
+      warnSpy.mockRestore();
+      if (originalHome) process.env.HOME = originalHome;
+      else delete process.env.HOME;
+      if (originalFile) process.env.NOTION_MCP_AUTH_FILE = originalFile;
+      else delete process.env.NOTION_MCP_AUTH_FILE;
+      if (originalLegacy) process.env.NOTION_MCP_AUTH = originalLegacy;
+      else delete process.env.NOTION_MCP_AUTH;
     }
   });
 

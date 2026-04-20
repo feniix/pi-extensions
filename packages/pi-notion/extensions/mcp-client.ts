@@ -570,18 +570,21 @@ function getDefaultAuthFilePath(): string {
     return resolveAuthFilePath(legacyConfiguredPath);
   }
 
-  const configDir = join(getHomeDir(), ".pi", "agent", "extensions");
-  const nextPath = join(configDir, "notion-mcp-auth.json");
-  const legacyPath = getLegacyAuthFilePath();
+  const agentDir = join(getHomeDir(), ".pi", "agent");
+  const legacyDir = join(agentDir, "extensions");
+  const nextPath = join(agentDir, "notion-mcp-auth.json");
+  const legacyPaths = [join(legacyDir, "notion-mcp-auth.json"), getLegacyAuthFilePath()];
 
-  if (!existsSync(nextPath) && existsSync(legacyPath)) {
-    try {
-      mkdirSync(configDir, { recursive: true });
-      renameSync(legacyPath, nextPath);
-      console.warn(`[pi-notion] Migrated legacy MCP auth file from ${legacyPath} to ${nextPath}.`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[pi-notion] Failed to migrate legacy MCP auth file ${legacyPath}: ${message}`);
+  for (const legacyPath of legacyPaths) {
+    if (!existsSync(nextPath) && existsSync(legacyPath)) {
+      try {
+        mkdirSync(agentDir, { recursive: true });
+        renameSync(legacyPath, nextPath);
+        console.warn(`[pi-notion] Migrated legacy MCP auth file from ${legacyPath} to ${nextPath}.`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[pi-notion] Failed to migrate legacy MCP auth file ${legacyPath}: ${message}`);
+      }
     }
   }
 
