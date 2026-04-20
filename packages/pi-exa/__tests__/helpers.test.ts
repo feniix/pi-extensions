@@ -44,12 +44,14 @@ describe("pi-exa parseConfig", () => {
       apiKey: "test-key",
       enabledTools: ["web_search_exa", "web_fetch_exa"],
       advancedEnabled: true,
+      researchEnabled: true,
     };
     const result = parseConfig(raw);
     expect(result).toEqual({
       apiKey: "test-key",
       enabledTools: ["web_search_exa", "web_fetch_exa"],
       advancedEnabled: true,
+      researchEnabled: true,
     });
   });
 
@@ -66,9 +68,10 @@ describe("pi-exa parseConfig", () => {
     expect(result.enabledTools).toEqual(["web_search_exa", "web_fetch_exa"]);
   });
 
-  it("defaults advancedEnabled to false", () => {
+  it("defaults advancedEnabled and researchEnabled to false", () => {
     const result = parseConfig({ advancedEnabled: "not-a-boolean" });
     expect(result.advancedEnabled).toBe(false);
+    expect(result.researchEnabled).toBe(false);
   });
 
   it("trims api key", () => {
@@ -346,12 +349,19 @@ describe("pi-exa loadConfig", () => {
   it("loads valid config file", () => {
     const base = mkdtempSync(join(tmpdir(), "pi-exa-load-valid-"));
     const configPath = join(base, "exa.json");
-    const config = { apiKey: "test-api-key", enabledTools: ["web_search_exa"] };
+    const config = {
+      apiKey: "test-api-key",
+      enabledTools: ["web_search_exa"],
+      advancedEnabled: true,
+      researchEnabled: true,
+    };
     writeFileSync(configPath, JSON.stringify(config), "utf-8");
 
     const result = loadConfig(configPath);
     expect(result?.apiKey).toBe("test-api-key");
     expect(result?.enabledTools).toContain("web_search_exa");
+    expect(result?.advancedEnabled).toBe(true);
+    expect(result?.researchEnabled).toBe(true);
   });
 
   it("returns null on invalid JSON", () => {
@@ -402,11 +412,24 @@ describe("pi-exa loadConfig", () => {
     }
   });
 
-  it("returns null when no settings or legacy config exist", async () => {
+  it("loads researchEnabled from settings files", async () => {
     const originalHome = process.env.HOME;
     const originalCwd = process.cwd();
-    const tempHome = mkdtempSync(join(tmpdir(), "pi-exa-empty-home-"));
-    const tempProject = mkdtempSync(join(tmpdir(), "pi-exa-empty-project-"));
+    const tempHome = mkdtempSync(join(tmpdir(), "pi-exa-research-home-"));
+    const tempProject = mkdtempSync(join(tmpdir(), "pi-exa-research-project-"));
+
+    mkdirSync(join(tempHome, ".pi", "agent"), { recursive: true });
+    mkdirSync(join(tempProject, ".pi"), { recursive: true });
+
+    writeFileSync(
+      join(tempHome, ".pi", "agent", "settings.json"),
+      JSON.stringify({
+        "pi-exa": {
+          researchEnabled: true,
+        },
+      }),
+      "utf-8",
+    );
 
     process.env.HOME = tempHome;
     process.chdir(tempProject);
@@ -414,7 +437,7 @@ describe("pi-exa loadConfig", () => {
 
     try {
       const mod = await import("../extensions/index.js");
-      expect(mod.loadConfig(undefined)).toBeNull();
+      expect(mod.loadConfig(undefined)?.researchEnabled).toBe(true);
     } finally {
       process.chdir(originalCwd);
       if (originalHome) process.env.HOME = originalHome;

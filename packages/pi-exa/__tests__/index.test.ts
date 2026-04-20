@@ -25,47 +25,59 @@ describe("pi-exa", () => {
       expect(pkg.dependencies).toHaveProperty("exa-js");
     });
 
-    it("should use relative Exa SDK endpoints instead of full API URLs", () => {
+    it("should use typed SDK methods", () => {
       const searchModule = readFileSync(join(__dirname, "../extensions/web-search.ts"), "utf-8");
       const fetchModule = readFileSync(join(__dirname, "../extensions/web-fetch.ts"), "utf-8");
-      expect(searchModule).toContain('exa.request<ExaSearchResponse>("/search", "POST", searchRequest)');
-      expect(fetchModule).toContain('}>("/contents", "POST", crawlRequest)');
-      expect(searchModule).not.toContain(
-        'exa.request<ExaSearchResponse>("https://api.exa.ai/search", "POST", searchRequest)',
-      );
-      expect(fetchModule).not.toContain('}>("https://api.exa.ai/contents", "POST", crawlRequest)');
+      const answerModule = readFileSync(join(__dirname, "../extensions/web-answer.ts"), "utf-8");
+      const findSimilarModule = readFileSync(join(__dirname, "../extensions/web-find-similar.ts"), "utf-8");
+
+      expect(searchModule).toContain("exa.search(");
+      expect(fetchModule).toContain("exa.getContents(");
+      expect(answerModule).toContain("exa.answer(");
+      expect(findSimilarModule).toContain("exa.findSimilar(");
     });
   });
 
   describe("skills", () => {
-    it("should have code-search skill", () => {
+    it("code-search references web search and answer tools", () => {
       const skill = readFileSync(join(__dirname, "../skills/code-search/SKILL.md"), "utf-8");
       expect(skill).toContain("web_search_exa");
+      expect(skill).toContain("web_answer_exa");
     });
 
-    it("should have company-research skill", () => {
+    it("company-research references deep and search tools", () => {
       const skill = readFileSync(join(__dirname, "../skills/company-research/SKILL.md"), "utf-8");
-      expect(skill).toContain("web_search_exa");
+      expect(skill).toContain("web_search_advanced_exa");
+      expect(skill).toContain("web_research_exa");
+      expect(skill).toContain("web_answer_exa");
     });
 
-    it("should have people-research skill", () => {
+    it("people-research references advanced and research tools", () => {
       const skill = readFileSync(join(__dirname, "../skills/people-research/SKILL.md"), "utf-8");
-      expect(skill).toContain("web_search_exa");
+      expect(skill).toContain("web_search_advanced_exa");
+      expect(skill).toContain("web_research_exa");
+      expect(skill).toContain("web_answer_exa");
     });
 
-    it("should have research-paper-search skill", () => {
+    it("research-paper-search references advanced and research tools", () => {
       const skill = readFileSync(join(__dirname, "../skills/research-paper-search/SKILL.md"), "utf-8");
-      expect(skill).toContain("web_search_exa");
+      expect(skill).toContain("web_search_advanced_exa");
+      expect(skill).toContain("web_research_exa");
+      expect(skill).toContain("web_answer_exa");
     });
 
-    it("should have financial-report-search skill", () => {
+    it("financial-report-search references all required tools", () => {
       const skill = readFileSync(join(__dirname, "../skills/financial-report-search/SKILL.md"), "utf-8");
-      expect(skill).toContain("web_search_exa");
+      expect(skill).toContain("web_search_advanced_exa");
+      expect(skill).toContain("web_research_exa");
+      expect(skill).toContain("web_answer_exa");
     });
 
-    it("should have personal-site-search skill", () => {
+    it("personal-site-search references all required tools", () => {
       const skill = readFileSync(join(__dirname, "../skills/personal-site-search/SKILL.md"), "utf-8");
-      expect(skill).toContain("web_search_exa");
+      expect(skill).toContain("web_search_advanced_exa");
+      expect(skill).toContain("web_research_exa");
+      expect(skill).toContain("web_answer_exa");
     });
   });
 });
