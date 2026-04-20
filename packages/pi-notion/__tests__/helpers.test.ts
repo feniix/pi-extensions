@@ -320,6 +320,9 @@ describe("pi-notion checkNotionAuth", () => {
   async function importCheckNotionAuthInIsolatedEnv(apiKey?: string) {
     const originalHome = process.env.HOME;
     const originalApiKey = process.env.NOTION_API_KEY;
+    const originalToken = process.env.NOTION_TOKEN;
+    const originalMcpAuthFile = process.env.NOTION_MCP_AUTH_FILE;
+    const originalLegacyMcpAuthFile = process.env.NOTION_MCP_AUTH;
     const originalCwd = process.cwd();
     const tempHome = mkdtempSync(join(tmpdir(), "pi-notion-auth-home-"));
     const tempProject = mkdtempSync(join(tmpdir(), "pi-notion-auth-project-"));
@@ -329,6 +332,9 @@ describe("pi-notion checkNotionAuth", () => {
 
     process.env.HOME = tempHome;
     process.chdir(tempProject);
+    delete process.env.NOTION_MCP_AUTH_FILE;
+    delete process.env.NOTION_MCP_AUTH;
+    delete process.env.NOTION_TOKEN;
     if (apiKey) process.env.NOTION_API_KEY = apiKey;
     else delete process.env.NOTION_API_KEY;
 
@@ -343,6 +349,12 @@ describe("pi-notion checkNotionAuth", () => {
       else delete process.env.HOME;
       if (originalApiKey) process.env.NOTION_API_KEY = originalApiKey;
       else delete process.env.NOTION_API_KEY;
+      if (originalToken) process.env.NOTION_TOKEN = originalToken;
+      else delete process.env.NOTION_TOKEN;
+      if (originalMcpAuthFile) process.env.NOTION_MCP_AUTH_FILE = originalMcpAuthFile;
+      else delete process.env.NOTION_MCP_AUTH_FILE;
+      if (originalLegacyMcpAuthFile) process.env.NOTION_MCP_AUTH = originalLegacyMcpAuthFile;
+      else delete process.env.NOTION_MCP_AUTH;
     }
   }
 
@@ -354,6 +366,9 @@ describe("pi-notion checkNotionAuth", () => {
 
   it("migrates legacy MCP auth file to the new filename", async () => {
     const originalHome = process.env.HOME;
+    const originalToken = process.env.NOTION_TOKEN;
+    const originalMcpAuthFile = process.env.NOTION_MCP_AUTH_FILE;
+    const originalLegacyMcpAuthFile = process.env.NOTION_MCP_AUTH;
     const originalCwd = process.cwd();
     const tempHome = mkdtempSync(join(tmpdir(), "pi-notion-migrate-home-"));
     const tempProject = mkdtempSync(join(tmpdir(), "pi-notion-migrate-project-"));
@@ -369,6 +384,9 @@ describe("pi-notion checkNotionAuth", () => {
 
     process.env.HOME = tempHome;
     process.chdir(tempProject);
+    delete process.env.NOTION_MCP_AUTH_FILE;
+    delete process.env.NOTION_MCP_AUTH;
+    delete process.env.NOTION_TOKEN;
     vi.resetModules();
 
     try {
@@ -382,6 +400,12 @@ describe("pi-notion checkNotionAuth", () => {
       process.chdir(originalCwd);
       if (originalHome) process.env.HOME = originalHome;
       else delete process.env.HOME;
+      if (originalToken) process.env.NOTION_TOKEN = originalToken;
+      else delete process.env.NOTION_TOKEN;
+      if (originalMcpAuthFile) process.env.NOTION_MCP_AUTH_FILE = originalMcpAuthFile;
+      else delete process.env.NOTION_MCP_AUTH_FILE;
+      if (originalLegacyMcpAuthFile) process.env.NOTION_MCP_AUTH = originalLegacyMcpAuthFile;
+      else delete process.env.NOTION_MCP_AUTH;
     }
   });
 
