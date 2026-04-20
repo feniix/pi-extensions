@@ -27,13 +27,32 @@ pi -e npm:@feniix/pi-exa
 
 You need an Exa API key from [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys).
 
-### Option 1: Environment variable
+### Recommended: environment variable
 
 ```bash
 export EXA_API_KEY="your-key"
 ```
 
-### Option 2: Settings files
+### Recommended for private overrides: explicit config file
+
+Use a private config file when you want to store an API key outside shared project settings:
+
+```json
+{
+  "apiKey": "your-key",
+  "enabledTools": ["web_search_exa", "web_fetch_exa", "web_answer_exa", "web_find_similar_exa"],
+  "advancedEnabled": false,
+  "researchEnabled": false
+}
+```
+
+Then run pi with:
+
+```bash
+pi -e npm:@feniix/pi-exa -- --exa-config-file ~/.config/pi/exa.json
+```
+
+### Shared non-secret settings
 
 Supports standard pi settings locations:
 
@@ -45,13 +64,14 @@ Example:
 ```json
 {
   "pi-exa": {
-    "apiKey": "your-key",
     "enabledTools": ["web_search_exa", "web_fetch_exa", "web_answer_exa", "web_find_similar_exa"],
     "advancedEnabled": false,
     "researchEnabled": false
   }
 }
 ```
+
+`apiKey` is accepted in settings files for compatibility, but `pi-exa` will warn when it is loaded there. Prefer `EXA_API_KEY` or `--exa-config-file` for secrets.
 
 ## CLI flags
 
@@ -75,7 +95,11 @@ Params: `urls` (required array), `maxCharacters`, `highlights`, `summary` (`quer
 
 ### web_search_advanced_exa
 
-Params include `query`, `numResults`, `category`, `type` (`auto|neural|...`, no deep types), date filters, domain filters, and content controls.
+Params include `query`, `numResults`, `category`, `type` (`auto|neural|...`, no deep types), date filters, domain filters, `textMaxCharacters`, and highlight controls.
+
+Notes:
+- Deep types are rejected here. Use `web_research_exa` for `deep-reasoning`, `deep-lite`, or `deep`.
+- Invalid categories return an error instead of silently falling back to an unfiltered search.
 
 ### web_research_exa
 
@@ -85,7 +109,7 @@ Params include:
 - `type`: `deep-reasoning | deep-lite | deep`
 - `systemPrompt`
 - `outputSchema` (`type` may be `"object"` or `"text"`, default `"object"`)
-- optional `additionalQueries`, filters, and `numResults`
+- optional `additionalQueries`, filters, `numResults`, and `textMaxCharacters`
 
 ### web_answer_exa
 
@@ -93,7 +117,7 @@ Params include `query` (required), `systemPrompt`, `text`, and `outputSchema`.
 
 ### web_find_similar_exa
 
-Params include `url` (required), `numResults`, `excludeSourceDomain`, date filters, and domain filters.
+Params include `url` (required), `numResults`, `textMaxCharacters`, `excludeSourceDomain`, date filters, and domain filters.
 
 ## Integration tests
 
