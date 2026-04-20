@@ -2,33 +2,47 @@
  * Exa web search — performs a search and returns formatted results with highlights.
  */
 
-import { Exa } from "exa-js";
-import type { ExaSearchResponse } from "./formatters.js";
-import { formatSearchResults } from "./formatters.js";
+import type { HighlightsContentsOptions, SearchResult, TextContentsOptions } from "exa-js";
+import { getExaClient } from "./exa-client.js";
+import type { ToolPerformResult } from "./formatters.js";
+import { formatSearchResults, toMetadata } from "./formatters.js";
 
 export const DEFAULT_NUM_RESULTS = 5;
 
-export async function performWebSearch(apiKey: string, query: string, numResults: number): Promise<string> {
-  const exa = new Exa(apiKey);
+const DEFAULT_MAX_CHARACTERS = 500;
 
-  const searchRequest = {
-    query,
+type SearchResultWithHighlight = SearchResult<{
+  text: TextContentsOptions;
+  highlights: HighlightsContentsOptions;
+}>;
+
+export async function performWebSearch(apiKey: string, query: string, numResults: number): Promise<ToolPerformResult> {
+  const exa = getExaClient(apiKey);
+
+  const result = await exa.search(query, {
     type: "auto",
     numResults,
     contents: {
-      highlights: { query },
-      text: { maxCharacters: 300 },
+      text: { maxCharacters: DEFAULT_MAX_CHARACTERS },
+      highlights: {
+        query,
+        numSentences: 3,
+      },
     },
-  };
+  });
 
-  // Exa SDK already prefixes requests with its configured baseURL.
-  // Pass a relative endpoint here, not a full URL, or the SDK will build
-  // an invalid URL like "https://api.exa.aihttps://api.exa.ai/search".
-  const response = await exa.request<ExaSearchResponse>("/search", "POST", searchRequest);
-
-  if (!response?.results || response.results.length === 0) {
-    return "No search results found. Please try a different query.";
+  if (!result?.results || result.results.length === 0) {
+    return {
+      text: "No search results found. Please try a different query.",
+      details: { tool: "web_search_exa" },
+    };
   }
 
-  return formatSearchResults(response.results);
+  return {
+    text: formatSearchResults(result.results as SearchResultWithHighlight[]),
+    details: {
+      tool: "web_search_exa",
+      ...toMetadata(result),
+    },
+  };
 }

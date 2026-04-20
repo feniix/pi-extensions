@@ -15,6 +15,7 @@ export interface ExaConfig {
   apiKey?: string;
   enabledTools?: string[];
   advancedEnabled?: boolean;
+  researchEnabled?: boolean;
 }
 
 export interface AuthResolution {
@@ -74,6 +75,7 @@ export function parseConfig(raw: unknown): ExaConfig {
           .filter((t) => t.length > 0)
       : undefined,
     advancedEnabled: typeof obj.advancedEnabled === "boolean" ? obj.advancedEnabled : false,
+    researchEnabled: typeof obj.researchEnabled === "boolean" ? obj.researchEnabled : false,
   };
 }
 
@@ -106,9 +108,16 @@ function loadSettingsConfig(path: string): ExaConfig | null {
       return null;
     }
     const parsedConfig = parseConfig(config);
+    if (parsedConfig.apiKey) {
+      console.warn(
+        `[pi-exa] Loaded apiKey from settings file ${path}. Prefer EXA_API_KEY or --exa-config-file for secrets.`,
+      );
+    }
     return {
       enabledTools: parsedConfig.enabledTools,
+      apiKey: parsedConfig.apiKey,
       advancedEnabled: parsedConfig.advancedEnabled,
+      researchEnabled: parsedConfig.researchEnabled,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -160,6 +169,7 @@ export function loadConfig(configPath?: string): ExaConfig | null {
     apiKey: projectConfig?.apiKey ?? globalConfig?.apiKey,
     enabledTools: projectConfig?.enabledTools ?? globalConfig?.enabledTools,
     advancedEnabled: projectConfig?.advancedEnabled ?? globalConfig?.advancedEnabled,
+    researchEnabled: projectConfig?.researchEnabled ?? globalConfig?.researchEnabled,
   };
 }
 
@@ -228,17 +238,34 @@ function isAdvancedToolEnabled(pi: ExtensionAPI, config: ExaConfig | null): bool
   return config?.advancedEnabled ?? false;
 }
 
+function isResearchToolEnabled(pi: ExtensionAPI, config: ExaConfig | null): boolean {
+  const researchFlag = pi.getFlag("--exa-enable-research");
+  if (typeof researchFlag === "boolean") {
+    return researchFlag;
+  }
+  return config?.researchEnabled ?? false;
+}
+
 export function isToolEnabledForConfig(pi: ExtensionAPI, config: ExaConfig | null, toolName: string): boolean {
   if (config?.enabledTools && Array.isArray(config.enabledTools)) {
     return config.enabledTools.includes(toolName);
   }
 
-  if (toolName === "web_search_exa" || toolName === "web_fetch_exa") {
+  if (
+    toolName === "web_search_exa" ||
+    toolName === "web_fetch_exa" ||
+    toolName === "web_answer_exa" ||
+    toolName === "web_find_similar_exa"
+  ) {
     return true;
   }
 
   if (toolName === "web_search_advanced_exa") {
     return isAdvancedToolEnabled(pi, config);
+  }
+
+  if (toolName === "web_research_exa") {
+    return isResearchToolEnabled(pi, config);
   }
 
   return false;

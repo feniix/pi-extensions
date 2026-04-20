@@ -1,81 +1,38 @@
 ---
 name: financial-report-search
-description: Search for financial reports using Exa advanced search. Near-full filter support for finding SEC filings, earnings reports, and financial documents. Use when searching for 10-K filings, quarterly earnings, or annual reports.
+description: Search financial reports using Exa. Finds SEC filings, earnings materials, and filings by company.
 context: fork
 ---
 
 # Financial Report Search (Exa)
 
-## Tool Restriction (Critical)
+## Tool Selection
 
-ONLY use `web_search_exa` for basic searches or `web_search_advanced_exa` with `category: "financial report"` if enabled. Do NOT use `web_fetch_exa` unless following up on specific URLs.
-
-## Token Isolation (Critical)
-
-Never run Exa searches in main context. Always spawn Task agents:
-- Agent calls `web_search_exa` or `web_search_advanced_exa`
-- Agent merges + deduplicates results before presenting
-- Agent returns distilled output (brief markdown or compact JSON)
-- Main context stays clean regardless of search volume
-
-## When to Use
-
-Use this category when you need:
-- SEC filings (10-K, 10-Q, 8-K, S-1)
-- Quarterly earnings reports
-- Annual reports
-- Investor presentations
-- Financial statements
+| Intent | Primary Tool | Notes |
+|---|---|---|
+| Discovery of filings / reports | `web_search_advanced_exa` with `category: "financial report"` | Use date filters and domain filters |
+| Compare filings across firms | `web_research_exa` | Use `systemPrompt` and `outputSchema` for structured output |
+| Explain one metric or line item | `web_answer_exa` | Fast direct answers with citations |
+| Read full filing text | `web_fetch_exa` | Fetch 1-3 URLs only |
 
 ## Filter Restrictions
 
-The `financial report` category has one known restriction:
+When using `web_search_advanced_exa` with `category: "financial report"`, avoid:
+- `excludeText`
 
-- `excludeText` - NOT SUPPORTED (causes 400 error)
+This option is rejected for this category by Exa and may return `400`.
 
-## Examples
+## Recommended settings
 
-### SEC filings for a company
-```
-web_search_exa {
-  "query": "Anthropic SEC filing S-1",
-  "numResults": 10
-}
-```
+- `web_search_advanced_exa`
+  - `{ "query": "10-K AI company", "category": "financial report", "startPublishedDate": "2025-01-01", "numResults": 20 }`
+- `web_search_advanced_exa` for SEC-only domain filtering
+  - `{ "includeDomains": ["sec.report", "sec.gov"], "category": "financial report" }`
+- `web_research_exa`
+  - `{ "query": "Compare risk factors and revenue trend in latest reports", "systemPrompt": "Return only evidence-backed statements", "outputSchema": { "type": "object", "properties": { "risks": { "type": "array" } } } }`
 
-### Recent earnings reports
-```
-web_search_advanced_exa {
-  "query": "Q4 2025 earnings report technology",
-  "category": "financial report",
-  "startPublishedDate": "2025-10-01",
-  "numResults": 20
-}
-```
+## Output Guidance
 
-### Specific filing type
-```
-web_search_advanced_exa {
-  "query": "10-K annual report AI companies",
-  "category": "financial report",
-  "includeDomains": ["sec.gov"],
-  "startPublishedDate": "2025-01-01",
-  "numResults": 15
-}
-```
-
-### Risk factors analysis
-```
-web_search_advanced_exa {
-  "query": "risk factors cybersecurity",
-  "category": "financial report",
-  "numResults": 10
-}
-```
-
-## Output Format
-
-Return:
-1) Results (company name, filing type, date, key figures/highlights)
-2) Sources (Filing URLs)
-3) Notes (reporting period, any restatements, auditor notes)
+1) Separate numbers from interpretations.
+2) Include source links for every numeric claim.
+3) Call out filing periods clearly.

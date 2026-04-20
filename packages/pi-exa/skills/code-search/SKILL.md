@@ -1,73 +1,36 @@
 ---
 name: code-search
-description: Code context using Exa. Finds real snippets and docs from GitHub, StackOverflow, and technical docs. Use when searching for code examples, API syntax, library documentation, or debugging help.
+description: Code context using Exa. Finds reliable code docs, snippets, API references, and debugging examples.
 context: fork
 ---
 
-# Code Context (Exa)
+# Code Search (Exa)
 
-## Tool Restriction (Critical)
+## Tool Selection
 
-ONLY use `web_search_exa`. Do NOT use other Exa tools.
+| Intent | Primary Tool | Notes |
+|---|---|---|
+| Find code examples / API syntax | `web_search_exa` | Start with query + `numResults` |
+| Need grounded short answer or explanation | `web_answer_exa` | Use `systemPrompt` + optional `outputSchema` |
+| Need deep, synthesis-style comparison across sources | `web_research_exa` | Set `systemPrompt`, pass `additionalQueries`, prefer `outputSchema` |
+| Read a page after discovery | `web_fetch_exa` | Use on 1-3 URLs from search result |
 
-## Token Isolation (Critical)
+## Query Writing
 
-Never run Exa in main context. Always spawn Task agents:
-- Agent calls `web_search_exa`
-- Agent extracts the minimum viable snippet(s) + constraints
-- Agent deduplicates near-identical results (mirrors, forks, repeated StackOverflow answers) before presenting
-- Agent returns copyable snippets + brief explanation
-- Main context stays clean regardless of search volume
+- Include **language** and **version** (e.g., `TypeScript 5`, `React 19`, `Python 3.12`).
+- Prefer short, high-signal phrasing and exact identifiers when available.
 
-## When to Use
+## Recommended Parameters
 
-Use this tool for ANY programming-related request:
-- API usage and syntax
-- SDK/library examples
-- config and setup patterns
-- framework "how to" questions
-- debugging when you need authoritative snippets
+- **web_search_exa**
+  - `{ "query": "...", "numResults": 5 }`
+- **web_answer_exa**
+  - `{ "query": "...", "systemPrompt": "Prefer official docs and short code snippets" }`
+- **web_research_exa**
+  - `{ "query": "...,", "systemPrompt": "Focus on official references and compare approaches", "outputSchema": { "type": "text" } }`
 
-## Query Writing Patterns (High Signal)
+## Output Guidance
 
-To reduce irrelevant results and cross-language noise:
-- Always include the **programming language** in the query.
-  - Example: use **"Go generics"** instead of just **"generics"**.
-- When applicable, also include **framework + version** (e.g., "Next.js 14", "React 19", "Python 3.12").
-- Include exact identifiers (function/class names, config keys, error messages) when you have them.
-
-## Output Format (Recommended)
-
-Return:
-1) Best minimal working snippet(s) (keep it copy/paste friendly)
-2) Notes on version / constraints / gotchas
-3) Sources (URLs if present in returned context)
-
-Before presenting:
-- Deduplicate similar results and keep only the best representative snippet per approach.
-
-## Examples
-
-### Find React hook patterns
-```
-web_search_exa {
-  "query": "React useState TypeScript generic types hooks",
-  "numResults": 5
-}
-```
-
-### Find Python async patterns
-```
-web_search_exa {
-  "query": "Python asyncio gather concurrent tasks example",
-  "numResults": 5
-}
-```
-
-### Debug a specific error
-```
-web_search_exa {
-  "query": "TypeError Cannot read property of undefined JavaScript fix",
-  "numResults": 5
-}
-```
+1) Return concise snippets first.
+2) Cite source URLs where decisions came from.
+3) Keep follow-up calls minimal and focused.
