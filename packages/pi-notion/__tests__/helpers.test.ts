@@ -362,10 +362,13 @@ describe("pi-notion checkNotionAuth", () => {
   }
 
   async function importCheckNotionAuthInIsolatedEnv(apiKey?: string) {
-    return withIsolatedAuthEnv(async () => {
-      const { checkNotionAuth } = await import("../extensions/index.js");
-      return checkNotionAuth();
-    }, { apiKey });
+    return withIsolatedAuthEnv(
+      async () => {
+        const { checkNotionAuth } = await import("../extensions/index.js");
+        return checkNotionAuth();
+      },
+      { apiKey },
+    );
   }
 
   it("returns not authenticated when no config exists", async () => {
