@@ -1,6 +1,6 @@
 ---
 title: "pi-exa Full Exa API Alignment"
-prd: PRD-002
+prd: PRD-005
 status: Draft
 owner: "Sebastian Otaegui"
 issue: "N/A"

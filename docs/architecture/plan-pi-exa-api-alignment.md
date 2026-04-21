@@ -1,6 +1,6 @@
 ---
 title: "pi-exa Full Exa API Alignment"
-prd: "PRD-002-pi-exa-api-alignment"
+prd: "PRD-005-pi-exa-api-alignment"
 date: 2026-04-20
 author: "Claude Code"
 status: Draft
@@ -10,13 +10,13 @@ status: Draft
 
 ## Source
 
-- **PRD**: `docs/prd/PRD-002-pi-exa-api-alignment.md` (v1.6)
+- **PRD**: `docs/prd/PRD-005-pi-exa-api-alignment.md` (v1.6)
 - **Date**: 2026-04-20
 - **Author**: Claude Code
 
 ## Architecture Overview
 
-This plan implements PRD-002: closing the gap between the Exa API surface and what pi-exa exposes. The work has two axes — **widening** (3 new tools, enhanced fetch parameters) and **deepening** (observability metadata, typed SDK methods, system prompt guidance).
+This plan implements PRD-005: closing the gap between the Exa API surface and what pi-exa exposes. The work has two axes — **widening** (3 new tools, enhanced fetch parameters) and **deepening** (observability metadata, typed SDK methods, system prompt guidance).
 
 The foundation is a migration from raw `exa.request()` calls to the exa-js SDK's typed methods (`exa.search()`, `exa.getContents()`, `exa.answer()`, `exa.findSimilar()`). This migration unlocks observability for free — the SDK's response types (`SearchResponse`, `AnswerResponse`) already carry `costDollars`, `searchTime`, and `resolvedSearchType`. A new shared return type (`ToolPerformResult`) threads metadata from `perform*()` functions through execute handlers into the tool result `details` field.
 

@@ -118,6 +118,8 @@ The extension must validate PRD, ADR, and plan frontmatter using typed rules rat
 
 Malformed or unparseable YAML frontmatter must be reported as a validation error for the affected file. Parse failures must not crash validation, silently skip the document, or degrade into misleading "missing field" warnings when the frontmatter block itself cannot be parsed.
 
+When frontmatter parsing fails, the validator should still report any filename-only issues that can be determined independently from document contents, but it must skip field-dependent checks that rely on parsed frontmatter values. In particular, the validator should not emit frontmatter number-format or filename-to-frontmatter mismatch warnings when the relevant frontmatter fields could not be parsed reliably.
+
 **Acceptance criteria:**
 
 ```gherkin
@@ -143,7 +145,7 @@ And validation continues for other documents without crashing
 
 The validator must understand and check a defined first-release set of required or high-value tables in supported documents.
 
-Unless a document-type rule explicitly says otherwise, required table validation is based on a **minimum required column set**: the required columns below must all be present, in any order that the implementation chooses to support, and additional columns are permitted. The first release must not treat extra columns as structural errors by default.
+Unless a document-type rule explicitly says otherwise, required table validation is based on a **minimum required column set**: the required columns below must all be present in any order, and additional columns are permitted. The first release must not treat extra columns as structural errors by default.
 
 **First-release table inventory:**
 - **PRD**
@@ -313,6 +315,7 @@ Then the command reports that no changes were needed
 |----------|-------------|
 | **Runtime model** | Linting and formatting must run entirely in-process with no subprocess spawning |
 | **Performance** | Single-file post-edit linting should target completion in under 250 ms for representative spec documents of up to roughly 500 lines and 5 tables, and workspace validation over a repo-scale `docs/` tree of roughly up to 25 spec documents should target completion in under 2 s on a typical local development machine |
+| **Performance verification** | Before release, measure both targets against representative local fixtures: (1) a single supported spec document of roughly 500 lines with up to 5 tables, and (2) a workspace containing roughly 25 spec documents across `docs/prd/`, `docs/adr/`, and `docs/architecture/`; record the observed durations during implementation validation |
 | **Safety** | Formatting must be limited to deterministic, low-risk transforms and must not rewrite semantic document content unexpectedly |
 | **Extensibility** | New document rules should be addable without editing unrelated parsing code |
 | **Testability** | New validation and formatting behavior must be covered by unit tests in `packages/pi-specdocs/__tests__/` |
@@ -419,7 +422,7 @@ Then the command reports that no changes were needed
 
 | Issue | Relationship |
 |-------|-------------|
-| `docs/prd/PRD-002-pi-exa-api-alignment.md` | Draft; informed discussion about deprecated tool references and current runtime constraints |
+| `docs/prd/PRD-005-pi-exa-api-alignment.md` | Draft; informed discussion about deprecated tool references and current runtime constraints |
 | `docs/adr/ADR-0005-exa-deep-search-tool-strategy.md` | Related; provides context for current Exa tool surface used by specdocs skills |
 | `docs/adr/ADR-0008-specdocs-parser-pipeline-strategy.md` | Derived from this PRD; records the preferred parser-stack strategy |
 | `docs/adr/ADR-0009-specdocs-validation-layering-strategy.md` | Derived from this PRD; records the semantic rule-layer architecture |
@@ -440,6 +443,8 @@ Then the command reports that no changes were needed
 ## 15. Verification (Appendix)
 
 1. Create malformed PRD, ADR, and plan fixtures and verify the validator reports frontmatter parse/schema issues, required section/heading issues, required table-structure issues, and plan filename issues without shelling out.
-2. Edit a spec document through pi and confirm post-tool linting still notifies immediately with the new validator.
-3. Run workspace validation over the current `docs/` tree and confirm existing valid docs do not produce false positives beyond known real issues.
-4. Run formatting against a sample malformed doc and confirm only targeted formatting changes occur.
+2. Include fixtures with syntactically invalid YAML frontmatter and confirm the validator reports a parse error, still reports filename-only issues that do not depend on parsed fields, and suppresses field-dependent frontmatter warnings for the malformed document.
+3. Edit a spec document through pi and confirm post-tool linting still notifies immediately with the new validator.
+4. Run workspace validation over the current `docs/` tree and confirm existing valid docs do not produce false positives beyond known real issues.
+5. Measure single-file and workspace validation times against representative fixtures and confirm they meet the stated performance targets.
+6. Run formatting against a sample malformed doc and confirm only targeted formatting changes occur.

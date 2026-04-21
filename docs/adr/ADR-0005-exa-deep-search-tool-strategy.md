@@ -3,7 +3,7 @@ title: "Exa Deep Search Tool Strategy"
 adr: ADR-0005
 status: Proposed
 date: 2026-04-20
-prd: "PRD-002-pi-exa-api-alignment"
+prd: "PRD-005-pi-exa-api-alignment"
 decision: "New dedicated web_research_exa tool"
 ---
 
@@ -19,7 +19,7 @@ Proposed
 
 ## Requirement Source
 
-- **PRD**: `docs/prd/PRD-002-pi-exa-api-alignment.md`
+- **PRD**: `docs/prd/PRD-005-pi-exa-api-alignment.md`
 - **Decision Point**: FR-1 (Deep-reasoning search tool) — how to expose Exa's `type: "deep-reasoning"` search mode, which has a fundamentally different parameter shape, response format, latency, and cost profile from regular search.
 
 ## Context
@@ -106,7 +106,7 @@ The `web_search_advanced_exa` tool will explicitly exclude deep search types (`d
 
 ### Neutral
 
-- All three deep types (`deep-reasoning`, `deep-lite`, `deep`) are owned by `web_research_exa`. The tool accepts a `type` parameter restricted to these three values, defaulting to `deep-reasoning` (see PRD-002 FR-1).
+- All three deep types (`deep-reasoning`, `deep-lite`, `deep`) are owned by `web_research_exa`. The tool accepts a `type` parameter restricted to these three values, defaulting to `deep-reasoning` (see PRD-005 FR-1).
 
 ## Related
 
