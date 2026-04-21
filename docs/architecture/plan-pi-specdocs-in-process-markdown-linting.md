@@ -38,6 +38,7 @@ The safest delivery path is to build the parser-backed model first, then migrate
   - normalized frontmatter serialization for formatting
 - Keep `.claude/tracker.md` parsing stable for `packages/pi-specdocs/extensions/workspace-scan.ts`; if the full parser is too heavy for config reads, keep config parsing on a dedicated helper path instead of forcing tracker files through the spec document pipeline.
 - Define a stable internal shape such as `ParsedSpecDocument` so semantic rules do not depend directly on raw parser nodes.
+- Ensure that representation can associate multiple tables with a single section so required-table validation remains correct when documents include auxiliary tables alongside required ones.
 
 **ADR Reference**: -> `ADR-0008-specdocs-parser-pipeline-strategy.md`; -> `ADR-0009-specdocs-validation-layering-strategy.md`
 
@@ -69,7 +70,7 @@ The safest delivery path is to build the parser-backed model first, then migrate
   - workspace-wide `specdocs-validate`
   - new `specdocs-format <path>` execution
 - Post-tool behavior should stay lint-only, but now include supported plan documents in addition to PRDs and ADRs, per `ADR-0010`.
-- Validation output should become richer and more structured, but still grouped into human-readable notifications with the affected file, rule type, and section/table when applicable.
+- Validation output should become richer and more structured, grouped by file when possible, while still surfacing the affected rule type and section/table when applicable.
 - Command-path validation and formatting should share the same detection logic so unsupported paths, malformed docs, and no-op results behave consistently.
 
 **ADR Reference**: -> `ADR-0010-specdocs-formatting-activation-model.md`
@@ -85,6 +86,7 @@ The safest delivery path is to build the parser-backed model first, then migrate
   - blank-line normalization around frontmatter and top-level sections
   - table padding/alignment and surrounding blank lines
   - preservation of thematic breaks rather than insertion/removal
+  - preservation of common GFM constructs such as task lists and strikethrough while whitespace is normalized
 - `specdocs-format <path>` should validate target eligibility before writing and must fail safely on unsupported paths, missing files, or documents that cannot be normalized confidently.
 - Formatter results should distinguish between rewritten files and explicit no-op outcomes.
 

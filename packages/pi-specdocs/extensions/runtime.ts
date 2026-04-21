@@ -50,6 +50,7 @@ export async function handleDocLint(
 interface ValidationIssue {
   type: "error" | "warning";
   message: string;
+  filePath?: string;
 }
 
 interface ValidationFiles {
@@ -84,8 +85,8 @@ function getValidationFiles(cwd: string): ValidationFiles {
   };
 }
 
-function toWarningIssues(messages: string[]): ValidationIssue[] {
-  return messages.map((message) => ({ type: "warning", message }));
+function toWarningIssues(messages: string[], filePath?: string): ValidationIssue[] {
+  return messages.map((message) => ({ type: "warning", message, filePath }));
 }
 
 function collectDuplicateNumberIssues(config: DuplicateDocumentIssueConfig): ValidationIssue[] {
@@ -120,20 +121,17 @@ function collectDuplicateNumberIssues(config: DuplicateDocumentIssueConfig): Val
 
 function collectFrontmatterIssues(files: ValidationFiles): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  const groups = [
+    { files: files.prdFiles, absoluteDir: files.prdDir, displayDir: PRD_DIR },
+    { files: files.adrFiles, absoluteDir: files.adrDir, displayDir: ADR_DIR },
+    { files: files.planFiles, absoluteDir: files.planDir, displayDir: PLAN_DIR },
+  ];
 
-  for (const filename of files.prdFiles) {
-    const filepath = join(files.prdDir, filename);
-    issues.push(...toWarningIssues(validateSpecFile(filepath)));
-  }
-
-  for (const filename of files.adrFiles) {
-    const filepath = join(files.adrDir, filename);
-    issues.push(...toWarningIssues(validateSpecFile(filepath)));
-  }
-
-  for (const filename of files.planFiles) {
-    const filepath = join(files.planDir, filename);
-    issues.push(...toWarningIssues(validateSpecFile(filepath)));
+  for (const group of groups) {
+    for (const filename of group.files) {
+      const filepath = join(group.absoluteDir, filename);
+      issues.push(...toWarningIssues(validateSpecFile(filepath), `${group.displayDir}/${filename}`));
+    }
   }
 
   return issues;
@@ -145,7 +143,9 @@ function filterIssuesForChangedFile(issues: ValidationIssue[], changedFilePath?:
   }
 
   const changedFilename = basename(changedFilePath);
-  return issues.filter((issue) => issue.message.includes(changedFilename));
+  return issues.filter(
+    (issue) => issue.message.includes(changedFilename) || issue.filePath?.endsWith(`/${changedFilename}`),
+  );
 }
 
 function collectDuplicateValidationIssues(files: ValidationFiles, changedFilePath?: string): ValidationIssue[] {
@@ -196,7 +196,8 @@ function collectFilenameIssues(
     .filter((filename) => !pattern.test(filename))
     .map((filename) => ({
       type: "error" as const,
-      message: `✗ ${displayDir}/${filename}: filename doesn't match ${expected} pattern`,
+      filePath: `${displayDir}/${filename}`,
+      message: `✗ filename doesn't match ${expected} pattern`,
     }));
 }
 
@@ -226,6 +227,39 @@ function collectNumberingGapIssues(files: string[], pattern: RegExp, prefix: str
   return issues;
 }
 
+function formatIssueGroup(title: string, issues: ValidationIssue[]): string[] {
+  const lines: string[] = [title];
+  const grouped = new Map<string, ValidationIssue[]>();
+  const globalIssues: ValidationIssue[] = [];
+
+  for (const issue of issues) {
+    if (!issue.filePath) {
+      globalIssues.push(issue);
+      continue;
+    }
+
+    const existing = grouped.get(issue.filePath) ?? [];
+    existing.push(issue);
+    grouped.set(issue.filePath, existing);
+  }
+
+  for (const filePath of Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b))) {
+    lines.push(`  ${filePath}`);
+    for (const issue of grouped.get(filePath) ?? []) {
+      lines.push(`    ${issue.message}`);
+    }
+  }
+
+  if (globalIssues.length > 0) {
+    lines.push("  Workspace");
+    for (const issue of globalIssues) {
+      lines.push(`    ${issue.message}`);
+    }
+  }
+
+  return lines;
+}
+
 function formatValidationIssues(issues: ValidationIssue[]): { message: string; level: "error" | "warning" | "info" } {
   if (issues.length === 0) {
     return { message: "[specdocs] Validation passed: no issues found.", level: "info" };
@@ -236,17 +270,11 @@ function formatValidationIssues(issues: ValidationIssue[]): { message: string; l
   const lines: string[] = [];
 
   if (errors.length > 0) {
-    lines.push(`Errors (${errors.length}):`);
-    for (const error of errors) {
-      lines.push(`  ${error.message}`);
-    }
+    lines.push(...formatIssueGroup(`Errors (${errors.length}):`, errors));
   }
 
   if (warnings.length > 0) {
-    lines.push(`Warnings (${warnings.length}):`);
-    for (const warning of warnings) {
-      lines.push(`  ${warning.message}`);
-    }
+    lines.push(...formatIssueGroup(`Warnings (${warnings.length}):`, warnings));
   }
 
   return {

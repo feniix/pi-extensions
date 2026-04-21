@@ -143,7 +143,7 @@ describe("pi-specdocs runtime", () => {
       "error",
     );
     expect(notify).toHaveBeenCalledWith(
-      expect.stringContaining("docs/architecture/architecture-outline.md: filename doesn't match plan-*.md pattern"),
+      expect.stringContaining("docs/architecture/architecture-outline.md\n    ✗ filename doesn't match plan-*.md pattern"),
       "error",
     );
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("PLAN"), "error");
@@ -186,6 +186,28 @@ describe("pi-specdocs runtime", () => {
     expect(message).toContain("Duplicate ADR number: ADR-0003");
     expect(message).toContain("docs/adr/ADR-0003-first.md");
     expect(message).toContain("docs/adr/ADR-0003-second.md");
+  });
+
+  it("groups workspace validation warnings by file path", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-grouped-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    writeFileSync(
+      join(base, "docs", "prd", "PRD-001-grouped.md"),
+      '---\nprd: PRD-001\ntitle: "Grouped"\nstatus: Draft\nowner: Alice\ndate: 2025-01-01\nissue: 1\nversion: 1\n---\n\n# Grouped\n\n## 1. Problem & Context\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-validate");
+    const notify = vi.fn();
+
+    await handler?.({}, { cwd: base, ui: { notify } });
+
+    const [message, level] = notify.mock.calls.at(-1) ?? [];
+    expect(level).toBe("warning");
+    expect(message).toContain("docs/prd/PRD-001-grouped.md");
+    expect(message).toContain("Missing required section: ## 2. Goals & Success Metrics");
+    expect(message).toContain("Missing required table in section File Breakdown");
   });
 
   it("warns on duplicate numbers after write/edit tool results", async () => {
