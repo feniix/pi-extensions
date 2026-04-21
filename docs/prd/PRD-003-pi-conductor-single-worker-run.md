@@ -410,22 +410,22 @@ Then unit and integration tests validate worker run behavior against real local 
 
 ## 9. File Breakdown
 
-| File | Change | Why |
-|------|--------|-----|
-| `packages/pi-conductor/extensions/runtime.ts` | Extend | Add execution support for one worker session, including executable session construction, cwd/session reuse, and run result shaping |
-| `packages/pi-conductor/extensions/conductor.ts` | Extend | Add orchestration entrypoint for worker run lifecycle |
-| `packages/pi-conductor/extensions/commands.ts` | Extend | Add `/conductor run <worker> <task>` |
-| `packages/pi-conductor/extensions/index.ts` | Extend | Register run tool and wire execution command behavior |
-| `packages/pi-conductor/extensions/types.ts` | Extend | Persist run-related runtime metadata and structured last-run state |
-| `packages/pi-conductor/extensions/storage.ts` | Extend | Update worker state across run transitions and normalize missing `lastRun` state for backward compatibility |
-| `packages/pi-conductor/extensions/status.ts` | Extend | Surface run-related state in status output |
-| `packages/pi-conductor/__tests__/commands.test.ts` | Extend | Validate command behavior, including preflight failure handling |
-| `packages/pi-conductor/__tests__/conductor.test.ts` | Extend | Validate orchestration behavior and session-lineage reuse |
-| `packages/pi-conductor/__tests__/lifecycle.test.ts` | Extend | Validate lifecycle transitions around run, including aborted/error outcomes |
-| `packages/pi-conductor/__tests__/status.test.ts` | Extend | Validate run-aware status output and last-run metadata |
-| `packages/pi-conductor/__tests__/sessions.test.ts` | Extend | Validate session-lineage reuse semantics across run execution |
-| `packages/pi-conductor/__tests__/cli-e2e.test.ts` | Extend | Optional opt-in real pi CLI coverage |
-| `packages/pi-conductor/README.md` | Update | Document the new run capability and its scope |
+| File | Change type | FR | Description |
+|------|-------------|----|-------------|
+| `packages/pi-conductor/extensions/runtime.ts` | Modify | FR-1, FR-2 | Add execution support for one worker session, including executable session construction, cwd/session reuse, and run result shaping |
+| `packages/pi-conductor/extensions/conductor.ts` | Modify | FR-1, FR-2, FR-3, FR-4 | Add orchestration entrypoint for worker run lifecycle and state transitions |
+| `packages/pi-conductor/extensions/commands.ts` | Modify | FR-1 | Add `/conductor run <worker> <task>` |
+| `packages/pi-conductor/extensions/index.ts` | Modify | FR-1 | Register run tool and wire execution command behavior |
+| `packages/pi-conductor/extensions/types.ts` | Modify | FR-3 | Persist run-related runtime metadata and structured `lastRun` state |
+| `packages/pi-conductor/extensions/storage.ts` | Modify | FR-2, FR-3, FR-4 | Update worker state across run transitions and normalize missing `lastRun` state for backward compatibility |
+| `packages/pi-conductor/extensions/status.ts` | Modify | FR-3, FR-4 | Surface run-related state in status output |
+| `packages/pi-conductor/__tests__/commands.test.ts` | Modify | FR-5 | Validate command behavior, including preflight failure handling |
+| `packages/pi-conductor/__tests__/conductor.test.ts` | Modify | FR-5 | Validate orchestration behavior and session-lineage reuse |
+| `packages/pi-conductor/__tests__/lifecycle.test.ts` | Modify | FR-5 | Validate lifecycle transitions around run, including aborted/error outcomes |
+| `packages/pi-conductor/__tests__/status.test.ts` | Modify | FR-5 | Validate run-aware status output and last-run metadata |
+| `packages/pi-conductor/__tests__/sessions.test.ts` | Modify | FR-5 | Validate session-lineage reuse semantics across run execution |
+| `packages/pi-conductor/__tests__/cli-e2e.test.ts` | Modify | FR-5 | Optional opt-in real pi CLI coverage |
+| `packages/pi-conductor/README.md` | Modify | FR-1 | Document the new run capability and its scope |
 
 ## 10. Dependencies & Constraints
 
@@ -453,7 +453,7 @@ Then unit and integration tests validate worker run behavior against real local 
 | Q2 | Should `/conductor run` implicitly update `currentTask`, or should it remain separate from task metadata? | feniix | Before implementation | **Resolved:** `/conductor run` updates `currentTask` to the executed task text before starting execution. |
 | Q3 | Is the current `SessionManager` seam enough for prompted execution, or should the implementation promote to `createAgentSession()` immediately? | feniix | During implementation spike | **Resolved:** The run path should use executable Pi agent/session APIs such as `createAgentSession()` while preserving existing worker session lineage. |
 
-## 13. Related Issues
+## 13. Related
 
 - `docs/prd/PRD-002-pi-conductor-persistent-resumable-workers.md`
 - `docs/adr/ADR-0006-agent-session-based-foreground-run-execution.md`
@@ -462,9 +462,10 @@ Then unit and integration tests validate worker run behavior against real local 
 
 ## 14. Changelog
 
-- **1.5** — Refine pass 4: replace invalid `session.messages` reference with `session.state.messages`; replace nonexistent `AgentSession.getLastAssistantText()` reference with conductor-owned final-message extraction; clarify that preflight is best-effort and prompt-time auth/provider failures must also be translated cleanly.
-- **1.4** — Refine pass 3: complete `stopReason` mapping (`length`→error, `toolUse` internal note); specify `session.messages` as stopReason accessor; add stuck-running crash-recovery note and risk; add worktree-missing Gherkin to FR-2; clarify `bindExtensions()` headless bindings.
-- **1.3** — Add cross-reference to `ADR-0006` for the foreground run execution architecture decision.
-- **1.2** — Refine pass 2: move stopReason prose out of Gherkin fence; add session.dispose() cleanup step; clarify that AgentSession handles persistence internally (do not call persistSessionFile); add sessions.test.ts to FR-5 file list; clarify finishedAt null semantics.
-- **1.1** — Refine pass: fix phantom `createAgentSessionRuntime()` API reference; make `createAgentSession({ sessionManager })` linkage explicit; specify `bindExtensions()` requirement; define run outcome detection via `stopReason`; clarify abort mechanism (signal-based, no dedicated command in v1); specify `lastRun.sessionId` source; add preflight validation guidance; note `updateWorkerTaskForRepo` lifecycle conflict; clarify stale-marking trigger points; add `sessions.test.ts` to file breakdown.
-- **1.0** — Initial draft for adding a single-worker run capability to `pi-conductor`.
+| Date | Change | Author |
+|------|--------|--------|
+| 2026-04-21 | Initial draft for adding a single-worker run capability to `pi-conductor` | feniix |
+| 2026-04-21 | Refine pass: fix phantom `createAgentSessionRuntime()` API reference; make `createAgentSession({ sessionManager })` linkage explicit; specify `bindExtensions()` requirement; define run outcome detection via `stopReason`; clarify abort mechanism and `lastRun.sessionId`; add preflight validation guidance | feniix |
+| 2026-04-21 | Refine pass 2: move stopReason prose out of Gherkin; add `session.dispose()` cleanup step; clarify AgentSession persistence behavior; add sessions test coverage note; clarify `finishedAt` null semantics | feniix |
+| 2026-04-21 | Refine pass 3 and 4: complete stopReason mapping, add stuck-running crash note, fix final-message references to `session.state.messages`, and clarify prompt-time provider/auth failure handling | feniix |
+| 2026-04-21 | Normalize File Breakdown, Related, and Changelog structure to satisfy current `pi-specdocs` PRD validation rules without changing document intent | Pi |

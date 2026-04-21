@@ -146,8 +146,8 @@ ADRs referenced by this plan:
 | ADR | Title | Status |
 |-----|-------|--------|
 | [ADR-0001](../adr/ADR-0001-sdk-first-worker-runtime.md) | SDK-first worker runtime for pi-conductor | Accepted |
-| [ADR-0002](../adr/ADR-0002-conductor-project-scoped-storage.md) | Conductor-managed project-scoped storage for pi-conductor | Proposed |
-| [ADR-0003](../adr/ADR-0003-continuity-based-worktree-reuse.md) | Continuity-based worktree reuse for pi-conductor workers | Proposed |
-| [ADR-0004](../adr/ADR-0004-minimal-conductor-local-git-gh-layer.md) | Minimal conductor-local git/gh layer for worker-aware PR flows | Proposed |
+| [ADR-0002](../adr/ADR-0002-conductor-project-scoped-storage.md) | Conductor-managed project-scoped storage for pi-conductor | Accepted |
+| [ADR-0003](../adr/ADR-0003-continuity-based-worktree-reuse.md) | Continuity-based worktree reuse for pi-conductor workers | Accepted |
+| [ADR-0004](../adr/ADR-0004-minimal-conductor-local-git-gh-layer.md) | Minimal conductor-local git/gh layer for worker-aware PR flows | Accepted |
 | [ADR-0006](../adr/ADR-0006-agent-session-based-foreground-run-execution.md) | AgentSession-based foreground run execution for pi-conductor | Proposed |
 | [ADR-0007](../adr/ADR-0007-single-worker-run-before-multi-worker-orchestration.md) | Single-worker foreground run before multi-worker orchestration | Proposed |

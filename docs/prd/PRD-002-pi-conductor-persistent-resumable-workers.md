@@ -5,84 +5,65 @@ status: Implemented
 owner: "feniix"
 issue: "N/A"
 date: 2026-04-20
-version: "1.0"
+version: "1.1"
 supersedes: "PRD-001-pi-conductor-mvp"
 ---
 
 # PRD: pi-conductor — persistent resumable workers
 
-## 1. Summary
+## 1. Problem & Context
 
-`pi-conductor` should provide a practical, durable worker orchestration layer for Pi that works today in this workspace.
+`pi-conductor` should provide a practical, durable worker orchestration layer for Pi that works in this workspace today.
 
-The shipped MVP centers on:
-- one persisted worker record per named workstream
-- one dedicated git worktree per worker
-- one persisted Pi session reference per worker
-- explicit resume, recovery, status, summary, and PR-preparation flows
-- a small runtime boundary backed by Pi SDK session APIs through `SessionManager`
-
-This PRD supersedes PRD-001 by tightening the runtime contract to match the implementation that proved useful:
-- **v1 does not yet run autonomous worker agents continuously**
-- **v1 does own worker/session continuity explicitly**
-- **v1 keeps a narrow runtime seam so a future `AgentSession` or subprocess-backed subagent backend can be added without replacing the worker model**
-
-## 2. Problem
-
-Pi supports sessions, tools, and extensions, but it does not ship with a first-class project-scoped worker orchestration package. Without `pi-conductor`, the user must manually juggle:
+Before this work, Pi had no first-class project-scoped worker orchestration package. Parallel work across one repository required manual coordination of:
 - git worktrees
-- session files
 - branch naming
-- recovery when worktrees or session references disappear
-- commit/push/PR bookkeeping per parallel line of work
+- session-file tracking
+- recovery when worktrees or session references disappeared
+- commit/push/PR bookkeeping per line of work
 
-The missing piece is not just “parallel prompts.” It is durable operational structure.
+The shipped MVP solves the orchestration and continuity problem, not the full autonomous-agent problem.
 
-## 3. Product goal
+This PRD supersedes `PRD-001-pi-conductor-mvp` by tightening the runtime contract to match the implementation that proved useful:
+- v1 does **not** yet run autonomous worker agents continuously
+- v1 does own worker/session continuity explicitly
+- v1 keeps a narrow runtime seam backed by Pi SDK session APIs through `SessionManager`
+- v1 leaves room for a future `AgentSession`- or subprocess-backed execution backend without replacing the worker model
 
-Make parallel workstreams in one repository feel explicit and recoverable.
+## 2. Goals & Success Metrics
 
-A worker should be a durable object with:
-- stable identity
-- a human-readable name
-- a dedicated worktree and branch
-- a persisted Pi session reference
-- current task metadata
-- lifecycle state
-- summary state
-- PR state
+| Goal | Metric | Target |
+|------|--------|--------|
+| Durable workers | Worker records survive restarts and can be resumed from stored metadata | 100% of healthy workers remain resumable across restarts |
+| Explicit continuity | Each worker has a stable identity, dedicated worktree, and persisted Pi session reference | 100% of workers expose this shape in stored state |
+| Actionable operator status | Status answers what the worker is, where it lives, and whether it is healthy | 100% of persisted workers can be fully described from status output |
+| Deterministic recovery | Missing worktrees or session files are surfaced as broken/recoverable rather than silently ignored | 100% of detected health failures are classified explicitly |
+| Worker-aware PR prep | Commit, push, and PR creation are supported without losing partial state | 100% of partial failures preserve worker metadata |
 
-## 4. Runtime contract
+## 3. Users & Use Cases
 
-### 4.1 Current MVP runtime
+### Primary: operator managing parallel workstreams in one repo
 
-The v1 runtime is **SessionManager-backed**.
+> As a Pi user, I want workers to be durable objects with stable identity, worktree isolation, and persisted session linkage so that I can manage parallel work safely and resume it later.
 
-That means `pi-conductor` must:
-- create a real persisted Pi session file for each worker
-- reopen that session file on resume
-- persist runtime metadata such as session id and last resumed timestamp
-- treat missing worktree/session references as recoverable health failures
-- derive summaries from the referenced session history
+**Typical use cases:**
+- create one worker per named workstream
+- resume a worker after restarting Pi or the shell
+- refresh a concise summary from session history
+- inspect health and recover missing worktree/session references
+- prepare a worker branch as a PR
 
-That means `pi-conductor` does **not yet** need to:
-- keep a live autonomous worker loop running in the background
-- continuously supervise child `pi` processes
-- implement a full multi-agent planner/reviewer hierarchy
+### Secondary: package author validating a reusable orchestration layer
 
-### 4.2 Future runtime seam
+> As the package author, I want `pi-conductor` to prove a durable worker model in a reusable Pi package rather than a one-off local script.
 
-The worker model must remain compatible with a future backend that uses either:
-- `createAgentSession()` / `AgentSessionRuntime`, or
-- spawned `pi` subprocesses / RPC-backed subagents
+## 4. Scope
 
-The current runtime boundary should therefore stay narrow and internal.
-
-## 5. In scope
+### In scope
 
 1. Deterministic project-scoped storage under `~/.pi/agent/conductor/projects/<project-key>/`
 2. Unique worker names with stable `workerId`
-3. Conductor-managed branch naming and git worktree creation
+3. Conductor-managed branch naming and dedicated git worktree creation
 4. Persisted Pi session linkage per worker
 5. Runtime metadata persisted in worker state:
    - backend
@@ -105,7 +86,7 @@ The current runtime boundary should therefore stay narrow and internal.
 9. Recovery of missing worktree and/or missing session reference
 10. Worker-aware commit / push / PR flows with partial-state persistence
 
-## 6. Out of scope
+### Out of scope
 
 - autonomous always-on worker execution
 - worker-to-worker messaging
@@ -114,7 +95,7 @@ The current runtime boundary should therefore stay narrow and internal.
 - full subagent orchestration inside `pi-conductor`
 - high-level devtools flows like `brpr`, merge automation, releases, or CI orchestration
 
-## 7. Functional requirements
+## 5. Functional Requirements
 
 ### FR-1: Worker creation
 
@@ -164,7 +145,7 @@ Conductor must support worker-aware:
 
 Failures must preserve partial state.
 
-## 8. Non-functional requirements
+## 6. Non-Functional Requirements
 
 - Headless correctness first
 - No terminal scraping
@@ -173,39 +154,106 @@ Failures must preserve partial state.
 - Runtime seam must remain replaceable
 - Existing persisted runs should be forward-compatible through normalization/defaulting where practical
 
-## 9. Acceptance summary
+## 7. Risks & Assumptions
 
-`pi-conductor` satisfies this PRD when:
-- workers are durable across restarts
-- status can fully describe a worker from stored state
-- resume is more than metadata lookup and records runtime activity
-- recovery is explicit and deterministic
-- PR prep remains worker-aware and failure-safe
+### Risks
 
-## 10. File map
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| Session/file/worktree continuity could drift from reality | Medium | High | Persist explicit metadata and reconcile health before resume |
+| Recovery logic could become implicit or destructive | Medium | High | Require explicit recovery paths and mark workers as broken/recoverable |
+| PR prep depends on local git/gh environment assumptions | High | Medium | Validate preconditions and preserve partial success state |
+| The current runtime seam may prove too narrow for future execution features | Medium | Medium | Keep the runtime boundary internal and replaceable |
 
-Primary implementation files:
-- `packages/pi-conductor/extensions/conductor.ts`
-- `packages/pi-conductor/extensions/runtime.ts`
-- `packages/pi-conductor/extensions/storage.ts`
-- `packages/pi-conductor/extensions/status.ts`
-- `packages/pi-conductor/extensions/worktrees.ts`
-- `packages/pi-conductor/extensions/git-pr.ts`
-- `packages/pi-conductor/extensions/index.ts`
+### Assumptions
 
-Primary validation files:
-- `packages/pi-conductor/__tests__/conductor.test.ts`
-- `packages/pi-conductor/__tests__/commands.test.ts`
-- `packages/pi-conductor/__tests__/lifecycle.test.ts`
-- `packages/pi-conductor/__tests__/recovery.test.ts`
-- `packages/pi-conductor/__tests__/sessions.test.ts`
-- `packages/pi-conductor/__tests__/status.test.ts`
-- `packages/pi-conductor/__tests__/storage.test.ts`
+- One persisted worker record per named workstream is sufficient for the current MVP
+- A dedicated git worktree per worker is the right isolation model for v1
+- Pi `SessionManager` is sufficient for create/resume/recover/summary flows in the current MVP
+- Full autonomous execution can be deferred to a later phase without invalidating the worker model
 
-## 11. Follow-ups
+## 8. Design Decisions
 
-Likely future work after this PRD:
-1. promote the runtime seam from `SessionManager` reopening to full `AgentSession` orchestration
-2. optionally add subprocess-backed workers for true isolated subagents
-3. add richer summary generation and worker execution commands
-4. add higher-level conductor/operator workflows once the runtime surface proves stable
+### D1: SessionManager-backed runtime in the current MVP
+
+The shipped MVP uses a `SessionManager`-backed runtime boundary. Conductor creates and reopens real persisted Pi session files, records session ids and last-resumed timestamps, and derives summaries from session history.
+
+### D2: Conductor-owned project-scoped storage
+
+Conductor stores orchestration metadata under `~/.pi/agent/conductor/projects/<project-key>/` and references Pi-managed session files rather than embedding session internals.
+
+### D3: Explicit worker continuity
+
+A worker is modeled as a durable object with:
+- stable identity
+- human-readable name
+- dedicated worktree and branch
+- persisted session linkage
+- task metadata
+- lifecycle state
+- summary state
+- PR state
+
+### D4: Minimal local git/gh helper layer
+
+PR preparation is handled by a worker-aware conductor-local git/gh layer rather than depending directly on `pi-devtools` internals.
+
+## 9. File Breakdown
+
+| File | Change type | FR | Description |
+|------|-------------|----|-------------|
+| `packages/pi-conductor/extensions/conductor.ts` | Added | FR-1, FR-2, FR-5, FR-6 | Core worker orchestration entrypoints for create, resume, recover, and PR-prep flows |
+| `packages/pi-conductor/extensions/runtime.ts` | Added | FR-1, FR-2, FR-4, FR-5 | SessionManager-backed runtime seam for worker session creation, resume, recovery, and summary generation |
+| `packages/pi-conductor/extensions/storage.ts` | Added | FR-1, FR-2, FR-3, FR-5, FR-6 | Project-scoped run persistence, worker record normalization, and state mutation helpers |
+| `packages/pi-conductor/extensions/status.ts` | Added | FR-3 | Human-readable status formatting for workers and project state |
+| `packages/pi-conductor/extensions/worktrees.ts` | Added | FR-1, FR-5 | Managed worktree creation, recreation, and cleanup helpers |
+| `packages/pi-conductor/extensions/git-pr.ts` | Added | FR-6 | Minimal worker-aware git and GitHub PR helper layer |
+| `packages/pi-conductor/extensions/index.ts` | Added | FR-1, FR-3, FR-4, FR-5, FR-6 | Command and tool registration for the conductor package |
+| `packages/pi-conductor/__tests__/conductor.test.ts` | Added | FR-1, FR-2, FR-5, FR-6 | Orchestration behavior coverage |
+| `packages/pi-conductor/__tests__/recovery.test.ts` | Added | FR-5 | Broken-state detection and recovery coverage |
+| `packages/pi-conductor/__tests__/sessions.test.ts` | Added | FR-2, FR-4 | Session linkage, resume, and summary-related coverage |
+| `packages/pi-conductor/__tests__/status.test.ts` | Added | FR-3 | Status output coverage |
+| `packages/pi-conductor/__tests__/storage.test.ts` | Added | FR-1, FR-3, FR-5 | Persistent state and normalization coverage |
+
+## 10. Dependencies & Constraints
+
+- Must fit the repo’s existing Pi package and TypeScript workspace structure
+- Depends on Pi SDK session APIs and `SessionManager`
+- Depends on git worktrees for worker isolation
+- Depends on `git` for all worker flows
+- Depends on `gh` for PR creation
+- Must remain headless-first and not rely on terminal scraping
+- Must keep runtime/session artifacts out of the git repository
+
+## 11. Rollout Plan
+
+1. Ship the package scaffold, types, storage, project-key derivation, and runtime seam
+2. Add worker creation, resume, status, and summary flows
+3. Add broken-state detection and targeted recovery
+4. Add worker-aware commit/push/PR preparation with partial-state persistence
+5. Validate the package on this workspace as the MVP proving ground
+
+## 12. Open Questions
+
+| # | Question | Owner | Due | Status |
+|---|----------|-------|-----|--------|
+| 1 | Should the runtime seam later move from SessionManager-only reopening to executable worker runs? | feniix | Later phase | Deferred to PRD-003 |
+| 2 | Should conductor eventually support subprocess-backed workers? | feniix | Later phase | Open |
+| 3 | Should higher-level operator workflows be layered on top of the current worker primitives? | feniix | Later phase | Open |
+
+## 13. Related
+
+- `docs/prd/PRD-001-pi-conductor-mvp.md` — superseded original MVP PRD
+- `docs/prd/PRD-003-pi-conductor-single-worker-run.md` — next-step draft for foreground execution
+- `docs/adr/ADR-0001-sdk-first-worker-runtime.md`
+- `docs/adr/ADR-0002-conductor-project-scoped-storage.md`
+- `docs/adr/ADR-0003-continuity-based-worktree-reuse.md`
+- `docs/adr/ADR-0004-minimal-conductor-local-git-gh-layer.md`
+- `docs/architecture/plan-pi-conductor-mvp.md`
+
+## 14. Changelog
+
+| Date | Change | Author |
+|------|--------|--------|
+| 2026-04-20 | Initial implemented PRD capturing the shipped persistent resumable workers MVP | feniix |
+| 2026-04-21 | Normalized into the canonical PRD structure required by `pi-specdocs` while preserving shipped behavior and scope | Pi |
