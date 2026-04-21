@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import type { Heading, Root, Table, TableCell } from "mdast";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -57,6 +58,7 @@ const REQUIRED_TABLE_COLUMNS: Record<string, Record<string, readonly string[]>> 
     "File Breakdown": ["File", "Change type", "FR", "Description"],
     Changelog: ["Date", "Change", "Author"],
   },
+  // ADRs intentionally have no required tables in the first release.
   PLAN: {
     "Implementation Order": ["Phase", "Component", "Dependencies", "Estimated Scope"],
     "ADR Index": ["ADR", "Title", "Status"],
@@ -226,22 +228,25 @@ function normalizeHeadingText(heading: string): string {
   return heading.replace(/^\d+\.\s+/, "").trim();
 }
 
-type MdNode = {
-  type?: string;
-  depth?: number;
-  value?: string;
-  children?: MdNode[];
-};
+const markdownParser = unified().use(remarkParse).use(remarkFrontmatter, ["yaml"]).use(remarkGfm);
 
-function extractNodeText(node: MdNode | undefined): string {
+function extractNodeText(node: { value?: string; children?: unknown[] } | undefined): string {
   if (!node) return "";
   if (typeof node.value === "string") return node.value;
   if (!Array.isArray(node.children)) return "";
-  return node.children.map((child) => extractNodeText(child)).join("");
+  return node.children.map((child) => extractNodeText(child as { value?: string; children?: unknown[] })).join("");
 }
 
-function parseMarkdownTree(body: string): MdNode {
-  return unified().use(remarkParse).use(remarkFrontmatter, ["yaml"]).use(remarkGfm).parse(body) as MdNode;
+function parseMarkdownTree(body: string): Root {
+  return markdownParser.parse(body) as Root;
+}
+
+function isHeadingNode(node: Root["children"][number]): node is Heading {
+  return node.type === "heading";
+}
+
+function isTableNode(node: Root["children"][number]): node is Table {
+  return node.type === "table";
 }
 
 interface ParsedSpecDocument {
@@ -256,25 +261,24 @@ function parseSpecDocument(filepath: string): ParsedSpecDocument {
   const frontmatter = parseFrontmatterResult(filepath);
   const body = frontmatter.content === null ? "" : frontmatter.body;
   const tree = parseMarkdownTree(body);
-  const children = Array.isArray(tree.children) ? tree.children : [];
   const headings = new Set<string>();
   const tables = new Map<string, string[][]>();
   let currentSection = "";
 
-  for (const node of children) {
-    if (node.type === "heading" && node.depth === 2) {
+  for (const node of tree.children) {
+    if (isHeadingNode(node) && node.depth === 2) {
       const headingText = extractNodeText(node).trim();
       headings.add(`## ${headingText}`);
       currentSection = normalizeHeadingText(headingText);
       continue;
     }
 
-    if (!currentSection || node.type !== "table" || !Array.isArray(node.children) || node.children.length === 0) {
+    if (!currentSection || !isTableNode(node) || node.children.length === 0) {
       continue;
     }
 
     const headerRow = node.children[0];
-    const headerCells = Array.isArray(headerRow?.children) ? headerRow.children : [];
+    const headerCells = Array.isArray(headerRow?.children) ? (headerRow.children as TableCell[]) : [];
     const sectionTables = tables.get(currentSection) ?? [];
     sectionTables.push(headerCells.map((cell) => extractNodeText(cell).trim()));
     tables.set(currentSection, sectionTables);

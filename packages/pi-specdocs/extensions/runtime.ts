@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
@@ -17,6 +17,15 @@ import {
   validateSpecFile,
 } from "./spec-validation.js";
 import { ADR_DIR, listMatchingFiles, PLAN_DIR, PRD_DIR } from "./workspace-scan.js";
+
+const formatProcessor = unified()
+  .use(remarkParse)
+  .use(remarkFrontmatter, ["yaml"])
+  .use(remarkGfm)
+  .use(remarkStringify, {
+    fences: true,
+    listItemIndent: "one",
+  });
 
 function extractFilePath(input: Record<string, unknown> | undefined): string {
   if (!input) return "";
@@ -46,9 +55,9 @@ export async function handleDocLint(
 
   const warnings = validateSpecFile(filePath);
   const validationFiles = typeof ctx.cwd === "string" ? getValidationFiles(ctx.cwd) : null;
-  const duplicateIssues = validationFiles ? collectDuplicateValidationIssues(validationFiles, filePath) : [];
+  const duplicateIssues = validationFiles ? collectDuplicateValidationIssues(validationFiles, filePath, ctx.cwd) : [];
   const architectureFilenameIssues = validationFiles
-    ? collectArchitectureFilenameIssues(validationFiles, filePath)
+    ? collectArchitectureFilenameIssues(validationFiles, filePath, ctx.cwd)
     : [];
   const messages = [
     ...warnings,
@@ -57,7 +66,7 @@ export async function handleDocLint(
   ];
 
   if (messages.length > 0) {
-    ctx.ui.notify(`[specdocs] Frontmatter warnings:\n${messages.join("\n")}`, "warning");
+    ctx.ui.notify(`[specdocs] Validation warnings:\n${messages.join("\n")}`, "warning");
   }
 }
 
@@ -151,18 +160,29 @@ function collectFrontmatterIssues(files: ValidationFiles): ValidationIssue[] {
   return issues;
 }
 
-function filterIssuesForChangedFile(issues: ValidationIssue[], changedFilePath?: string): ValidationIssue[] {
+function toRepoRelativePath(cwd: string, path: string): string {
+  const relativePath = relative(cwd, path).replace(/\\/g, "/");
+  return relativePath.startsWith("../") ? path : relativePath;
+}
+
+function filterIssuesForChangedFile(
+  issues: ValidationIssue[],
+  changedFilePath?: string,
+  cwd?: string,
+): ValidationIssue[] {
   if (!changedFilePath) {
     return issues;
   }
 
-  const changedFilename = basename(changedFilePath);
-  return issues.filter(
-    (issue) => issue.message.includes(changedFilename) || issue.filePath?.endsWith(`/${changedFilename}`),
-  );
+  const changedPath = cwd ? toRepoRelativePath(cwd, changedFilePath) : changedFilePath.replace(/\\/g, "/");
+  return issues.filter((issue) => issue.message.includes(changedPath) || issue.filePath === changedPath);
 }
 
-function collectDuplicateValidationIssues(files: ValidationFiles, changedFilePath?: string): ValidationIssue[] {
+function collectDuplicateValidationIssues(
+  files: ValidationFiles,
+  changedFilePath?: string,
+  cwd?: string,
+): ValidationIssue[] {
   const issues = [
     ...collectDuplicateNumberIssues({
       files: files.prdFiles,
@@ -180,12 +200,16 @@ function collectDuplicateValidationIssues(files: ValidationFiles, changedFilePat
     }),
   ];
 
-  return filterIssuesForChangedFile(issues, changedFilePath);
+  return filterIssuesForChangedFile(issues, changedFilePath, cwd);
 }
 
-function collectArchitectureFilenameIssues(files: ValidationFiles, changedFilePath?: string): ValidationIssue[] {
+function collectArchitectureFilenameIssues(
+  files: ValidationFiles,
+  changedFilePath?: string,
+  cwd?: string,
+): ValidationIssue[] {
   const issues = collectFilenameIssues(files.planDir, PLAN_DIR, PLAN_FILENAME_PATTERN, "plan-*.md");
-  return filterIssuesForChangedFile(issues, changedFilePath);
+  return filterIssuesForChangedFile(issues, changedFilePath, cwd);
 }
 
 function listMarkdownFiles(directory: string): string[] {
@@ -321,7 +345,8 @@ function isSupportedSpecPath(path: string): boolean {
 }
 
 function isThematicBreak(line: string): boolean {
-  return /^(?:\*\*\*|---|___)$/.test(line.trim());
+  // Accept common CommonMark thematic-break spellings; formatting canonicalizes them to `---`.
+  return /^(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/.test(line.trim());
 }
 
 function normalizeBodyLines(lines: string[]): string[] {
@@ -357,15 +382,7 @@ function normalizeBodyLines(lines: string[]): string[] {
 }
 
 async function formatSpecDocument(content: string): Promise<string> {
-  const file = await unified()
-    .use(remarkParse)
-    .use(remarkFrontmatter, ["yaml"])
-    .use(remarkGfm)
-    .use(remarkStringify, {
-      fences: true,
-      listItemIndent: "one",
-    })
-    .process(content);
+  const file = await formatProcessor.process(content);
 
   const formatted = String(file);
   const lines = formatted.split("\n");

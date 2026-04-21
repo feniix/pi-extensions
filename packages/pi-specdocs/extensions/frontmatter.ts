@@ -64,7 +64,8 @@ export function parseFrontmatterResult(filepath: string): FrontmatterParseResult
 }
 
 export function parseFrontmatter(filepath: string): Record<string, string> | null {
-  return parseFrontmatterResult(filepath).error ? null : parseFrontmatterResult(filepath).fields;
+  const result = parseFrontmatterResult(filepath);
+  return result.error ? null : result.fields;
 }
 
 export function extractFrontmatterField(filepath: string, field: string): string {

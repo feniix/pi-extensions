@@ -66,7 +66,7 @@ describe("pi-specdocs runtime", () => {
 
     await toolResult?.({ toolName: "write", input: { file_path: filePath } }, { cwd: base, ui: { notify } });
 
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Frontmatter warnings"), "warning");
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Validation warnings"), "warning");
   });
 
   it("warns on invalid architecture filename after write/edit tool results", async () => {
@@ -368,6 +368,93 @@ describe("pi-specdocs runtime", () => {
     expect(updated).toContain("[x] done");
     expect(updated).toContain("[ ] todo");
     expect(updated).toContain("~~old~~ text");
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
+  });
+
+  it("formats ADR documents in place", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-adr-"));
+    mkdirSync(join(base, "docs", "adr"), { recursive: true });
+    const filePath = join(base, "docs", "adr", "ADR-0001-test.md");
+    writeFileSync(
+      filePath,
+      '---\ntitle: "ADR"\nadr: ADR-0001\nstatus: Proposed\ndate: 2025-01-01\nprd: PRD-001-test\n---\n# ADR\n## Status\nProposed\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
+
+    const updated = readFileSync(filePath, "utf-8");
+    expect(updated).toContain("---\n\n# ADR\n\n## Status\n\nProposed\n");
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
+  });
+
+  it("formats plan documents in place", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-plan-"));
+    mkdirSync(join(base, "docs", "architecture"), { recursive: true });
+    const filePath = join(base, "docs", "architecture", "plan-test-feature.md");
+    writeFileSync(
+      filePath,
+      '---\ntitle: "Plan"\nprd: PRD-001-test-feature\ndate: 2025-01-01\nauthor: Alice\nstatus: Draft\n---\n# Plan\n## Source\nBody\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
+
+    const updated = readFileSync(filePath, "utf-8");
+    expect(updated).toContain("---\n\n# Plan\n\n## Source\n\nBody\n");
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
+  });
+
+  it("is idempotent when formatting the same document twice", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-idempotent-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    const filePath = join(base, "docs", "prd", "PRD-001-test.md");
+    writeFileSync(
+      filePath,
+      '---\ntitle: "Test"\nprd: PRD-001\nstatus: Draft\nowner: Alice\ndate: 2025-01-01\nissue: 1\nversion: 1\n---\n# Test\n## 1. Problem & Context\nBody\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
+    const onceFormatted = readFileSync(filePath, "utf-8");
+
+    notify.mockClear();
+    await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
+
+    expect(readFileSync(filePath, "utf-8")).toBe(onceFormatted);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("No formatting changes were needed"), "info");
+  });
+
+  it("preserves tables with alignment markers", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-alignment-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    const filePath = join(base, "docs", "prd", "PRD-001-test.md");
+    writeFileSync(
+      filePath,
+      '---\ntitle: "Test"\nprd: PRD-001\nstatus: Draft\nowner: Alice\ndate: 2025-01-01\nissue: 1\nversion: 1\n---\n\n# Test\n\n## 1. Problem & Context\n\n| Left | Center | Right |\n| :--- | :----: | ----: |\n| a | b | c |\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
+
+    const updated = readFileSync(filePath, "utf-8");
+    expect(updated).toMatch(/\|\s*:---\s*\|\s*:----:\s*\|\s*----:\s*\|/);
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
   });
 
