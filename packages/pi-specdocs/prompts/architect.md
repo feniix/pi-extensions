@@ -16,13 +16,12 @@ The goal is to take an ambiguous or complex feature request and produce a clear,
 
 ## Tool Strategy
 
-Use MCP tools as the primary means of investigation. Fall back to built-in tools only when the corresponding MCP server is not connected.
+Use direct repository evidence first, then external research only when it materially improves the assessment.
 
-- **serena** — primary tool for codebase investigation. Key tools:
-  - `list_dir`, `find_file`, `search_for_pattern` — navigate the project structure and find relevant files
-  - `find_symbol`, `get_symbols_overview`, `find_referencing_symbols` — trace symbol references and understand module relationships
-  - `read_file` — read full files when symbol-level tools aren't precise enough
-- **exa** (`web_search_exa`, `get_code_context_exa`) — web research on technology claims, finding code examples and documentation.
+- **Built-in file and search tools** — primary tools for codebase investigation:
+  - `read` — inspect docs, configs, and source files
+  - `bash` — use `find`, `rg`, and directory listing to map the project structure and locate relevant references
+- **exa** (`web_search_exa`, `web_search_advanced_exa`, and `web_fetch_exa` when reading a found page matters) — web research on technology claims, implementation examples, and supporting documentation.
 - **ref** (`ref_search_documentation`, `ref_read_url`) — verify referenced standards, specifications, and library documentation.
 - **sequential-thinking** (`process_thought`, `generate_summary`, `clear_history`) — work through the assessment systematically.
 
@@ -46,11 +45,11 @@ If a GitHub issue was provided, read it thoroughly (body + comments) — it ofte
 
 ### 2. Explore the Codebase
 
-Use **serena** to understand the current state before proposing anything:
+Use `read` and `bash` to understand the current state before proposing anything:
 
-1. **Orient** — `get_symbols_overview` on key directories to map the architecture
-2. **Trace** — `find_symbol` and `find_referencing_symbols` to understand the blast radius
-3. **Search** — `search_for_pattern` to find existing patterns, similar implementations, or configuration
+1. **Orient** — inspect key directories, docs, and configs to map the architecture
+2. **Trace** — read the most relevant files and search for references to understand the blast radius
+3. **Search** — use `rg` and directory listing to find similar implementations, existing patterns, or configuration
 
 Use **exa** and **ref** for external research when evaluating technology choices or comparing approaches.
 
