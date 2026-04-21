@@ -110,20 +110,22 @@ For this phase, `run` means **real prompted execution**, not just metadata mutat
 Concretely, the run path should:
 
 * open the worker’s persisted session lineage via `SessionManager.open(worker.sessionFile)` when a session file exists
-* construct an executable Pi session by passing the opened session manager to `createAgentSession({ sessionManager: SessionManager.open(sessionFile), cwd: worktreePath })` so that execution is bound to the worker’s existing lineage
-* bind extensions for headless execution via `session.bindExtensions(bindings)` before prompting, where `bindings` should be minimal non-interactive bindings derived from the `runPrintMode` pattern (no terminal UI, no interactive prompts)
+* construct an executable Pi session by passing that opened session manager to `createAgentSession({ sessionManager, cwd: worktreePath })` so that execution is bound to the worker’s existing lineage
+* call `createAgentSession(...)` first, then apply headless extension overrides to the returned session through whatever binding/configuration mechanism the Pi SDK exposes for `AgentSession` construction and setup before prompting
+* define the relevant setup surface concretely in terms of minimal non-interactive extension bindings/configuration for headless execution (for example no terminal `uiContext` and no interactive command-context actions), rather than referring to `runPrintMode` as a binding pattern
+* explicitly decide how default extension, skill, prompt-template, and context-file discovery is narrowed for worker runs, since `createAgentSession()` normally performs resource discovery and loading unless conductor overrides that behavior through custom resource loading or equivalent session-construction controls
 * execute the operator-supplied task in the foreground via `session.prompt(task)` and await its completion
-* session persistence is handled automatically by `AgentSession` (append-only writes via `sessionManager.appendMessage()` on every `message_end` event); the run path must NOT call the existing `persistSessionFile()` from `runtime.ts`, which uses a full-rewrite strategy that would conflict with AgentSession's incremental persistence
-* dispose the `AgentSession` after run completion (in a `finally` block) to release event listeners and internal state — the SDK requires `session.dispose()` when done with a session
+* session persistence is handled internally by `AgentSession` via append-only writes; the run path must NOT call the existing `persistSessionFile()` from `runtime.ts`, which uses a full-rewrite strategy that would conflict with AgentSession's incremental persistence
+* dispose the `AgentSession` after run completion (in a `finally` block) to release event listeners and internal state — the SDK requires `session.dispose()` when done with a session; the implementation must also confirm whether any loaded extension resources require teardown beyond `session.dispose()` and document that if needed
 
 For this phase, the execution environment policy should be explicit and deterministic:
 
 * worker runs should use conductor-defined session construction via `createAgentSession()` rather than relying on unspecified ambient defaults
 * the implementation should decide and document which tools are enabled for worker runs
-* the implementation should decide and document whether normal extension/context-file discovery remains enabled or is narrowed for predictability
+* the implementation should decide and document whether normal extension, skill, prompt-template, and context-file discovery remains enabled, is narrowed through custom resource loading, or is disabled for predictability
 * model selection should use the operator’s configured/default Pi model unless conductor later adds worker-specific model policy
-* preflight should make a best-effort verification of model and provider availability before constructing the agent session
-* the implementation may use `ModelRegistry` to check configured auth before calling `createAgentSession()`
+* preflight should make a best-effort verification of model and provider availability before prompting and before conductor persists the worker as `running`; that check may happen before or during session construction depending on the SDK seam used by the runtime helper
+* the implementation may use `ModelRegistry` to check configured auth before calling `createAgentSession()` when that gives a cleaner earlier eligibility signal
 * provider/model/auth failures can still occur later at prompt execution time, so the run path must also catch and translate prompt-time failures into clear run errors
 * regardless of where failure occurs, the worker must never be left in `running` state after a preflight or early execution failure
 
@@ -238,7 +240,7 @@ The minimum v1 persisted shape should be:
 ```ts
 lastRun: {
   task: string;
-  status: "success" | "error" | "aborted";
+  status: "success" | "error" | "aborted" | null;
   startedAt: string;
   finishedAt: string | null;
   errorMessage: string | null;
@@ -246,13 +248,15 @@ lastRun: {
 }
 ```
 
-`finishedAt` is populated for all terminal statuses (`success`, `error`, `aborted`). `null` indicates the run is still in progress or the process terminated before recording completion.
+`status: null` represents "run started but no terminal outcome has been recorded yet." `finishedAt` is populated for all terminal statuses (`success`, `error`, `aborted`). `null` indicates the run is still in progress or the process terminated before recording completion. In-progress detection in this phase is intentionally a compound condition: `worker.lifecycle === "running"` together with `lastRun.finishedAt === null`.
 
-`lastRun.sessionId` should capture the `AgentSession.sessionId` from the execution session (i.e., the session ID active during the run), not the worker's pre-existing `runtime.sessionId`. These may differ because `createAgentSession()` can assign a new session ID.
+`lastRun.sessionId` should capture the `AgentSession.sessionId` from the execution session (i.e., the session ID active during the run), not the worker's pre-existing `runtime.sessionId`. These may differ because `createAgentSession()` can assign a new session ID. In the normal accepted run path, `sessionId` should be populated once the execution session is constructed; `null` remains valid for backward-compatible normalization and for partial records created before an execution session ID is available.
 
 Because existing persisted workers do not yet have `lastRun`, the implementation must normalize missing `lastRun` values when reading older run records so the new feature is backward-compatible with already-persisted worker state.
 
-In this phase, abort is not exposed as a separate operator command. An aborted run is detected when the agent's final assistant message has `stopReason = "aborted"` (e.g., due to signal interruption or process termination). A dedicated `/conductor abort` command is deferred to a future phase.
+In this phase, abort is not exposed as a separate operator command. An aborted run is detected when the agent's final assistant message has `stopReason = "aborted"`, meaning the SDK-observed execution ended with an explicit aborted terminal outcome. This is different from a hard crash, forced process exit, or other interruption that prevents a terminal assistant message from being recorded at all; those cases should be treated as interrupted/stuck runs with `finishedAt: null` rather than as a persisted `aborted` outcome. A dedicated `/conductor abort` command is deferred to a future phase.
+
+When a stuck `running` worker is manually reset via `/conductor state <worker> idle` or `/conductor recover <worker>`, `lastRun` should be preserved as-is, including `finishedAt: null` and any `status: null` or partial execution metadata already recorded. The manual reset clears lifecycle state for operator recovery, but it does not retroactively invent a terminal outcome for the interrupted run.
 
 **Acceptance criteria:**
 
@@ -461,10 +465,10 @@ Then unit and integration tests validate worker run behavior against real local 
 
 ## 11. Rollout Plan
 
-1. Implement the executable session-based runtime execution seam.
-2. Add command/tool wiring for single-worker run.
-3. Add lifecycle/status/storage updates, including structured `lastRun` persistence.
-4. Add integration tests.
+1. Extend types/storage with backward-compatible `lastRun` persistence and normalization.
+2. Implement the executable session-based runtime execution seam.
+3. Add conductor lifecycle orchestration plus command/tool wiring for single-worker run.
+4. Add status updates and integration/unit coverage.
 5. Optionally add or extend opt-in CLI e2e coverage.
 6. Update README and follow-on architecture docs if implementation diverges materially.
 
@@ -488,7 +492,7 @@ Then unit and integration tests validate worker run behavior against real local 
 | Date       | Change                                                                                                                                                                                                                                                                                                          | Author |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
 | 2026-04-21 | Initial draft for adding a single-worker run capability to `pi-conductor`                                                                                                                                                                                                                                       | feniix |
-| 2026-04-21 | Refine pass: fix phantom `createAgentSessionRuntime()` API reference; make `createAgentSession({ sessionManager })` linkage explicit; specify `bindExtensions()` requirement; define run outcome detection via `stopReason`; clarify abort mechanism and `lastRun.sessionId`; add preflight validation guidance | feniix |
+| 2026-04-21 | Refine pass: fix phantom `createAgentSessionRuntime()` API reference; make `createAgentSession({ sessionManager })` linkage explicit; clarify headless binding/configuration requirements; define run outcome detection via `stopReason`; clarify abort mechanism and `lastRun.sessionId`; add preflight validation guidance | feniix |
 | 2026-04-21 | Refine pass 2: move stopReason prose out of Gherkin; add `session.dispose()` cleanup step; clarify AgentSession persistence behavior; add sessions test coverage note; clarify `finishedAt` null semantics                                                                                                      | feniix |
 | 2026-04-21 | Refine pass 3 and 4: complete stopReason mapping, add stuck-running crash note, fix final-message references to `session.state.messages`, and clarify prompt-time provider/auth failure handling                                                                                                                | feniix |
 | 2026-04-21 | Normalize File Breakdown, Related, and Changelog structure to satisfy current `pi-specdocs` PRD validation rules without changing document intent                                                                                                                                                               | Pi     |
