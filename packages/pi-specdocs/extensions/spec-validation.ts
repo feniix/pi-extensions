@@ -179,13 +179,15 @@ function collectPlanWarnings(fields: Record<string, string>, warnings: string[])
   }
 }
 
-export function validateFrontmatter(filepath: string): string[] {
+function validateFrontmatterFromResult(
+  filepath: string,
+  result: ReturnType<typeof parseFrontmatterResult>,
+): string[] {
   const config = getDocValidationConfig(filepath);
   if (!config) {
     return [];
   }
 
-  const result = parseFrontmatterResult(filepath);
   if (result.error) {
     return [`⚠ ${config.docType}: Frontmatter parse error: ${result.error}`];
   }
@@ -203,6 +205,10 @@ export function validateFrontmatter(filepath: string): string[] {
     collectPlanWarnings(fields, warnings);
   }
   return warnings;
+}
+
+export function validateFrontmatter(filepath: string): string[] {
+  return validateFrontmatterFromResult(filepath, parseFrontmatterResult(filepath));
 }
 
 function getRequiredSections(filepath: string): readonly string[] {
@@ -241,23 +247,28 @@ function parseMarkdownTree(body: string): MdNode {
   return unified().use(remarkParse).use(remarkFrontmatter, ["yaml"]).use(remarkGfm).parse(body) as MdNode;
 }
 
-function collectHeadings(body: string): string[] {
-  const tree = parseMarkdownTree(body);
-  const children = Array.isArray(tree.children) ? tree.children : [];
-  return children
-    .filter((node) => node.type === "heading" && node.depth === 2)
-    .map((node) => `## ${extractNodeText(node).trim()}`);
+interface ParsedSpecDocument {
+  filepath: string;
+  label: "PRD" | "ADR" | "PLAN" | null;
+  frontmatter: ReturnType<typeof parseFrontmatterResult>;
+  headings: Set<string>;
+  tables: Map<string, string[]>;
 }
 
-function extractSectionTables(body: string): Map<string, string[]> {
+function parseSpecDocument(filepath: string): ParsedSpecDocument {
+  const frontmatter = parseFrontmatterResult(filepath);
+  const body = frontmatter.content === null ? "" : frontmatter.body;
   const tree = parseMarkdownTree(body);
-  const tables = new Map<string, string[]>();
   const children = Array.isArray(tree.children) ? tree.children : [];
+  const headings = new Set<string>();
+  const tables = new Map<string, string[]>();
   let currentSection = "";
 
   for (const node of children) {
     if (node.type === "heading" && node.depth === 2) {
-      currentSection = normalizeHeadingText(extractNodeText(node));
+      const headingText = extractNodeText(node).trim();
+      headings.add(`## ${headingText}`);
+      currentSection = normalizeHeadingText(headingText);
       continue;
     }
 
@@ -267,42 +278,42 @@ function extractSectionTables(body: string): Map<string, string[]> {
 
     const headerRow = node.children[0];
     const headerCells = Array.isArray(headerRow?.children) ? headerRow.children : [];
-    const headers = headerCells.map((cell) => extractNodeText(cell).trim());
-    tables.set(currentSection, headers);
+    tables.set(
+      currentSection,
+      headerCells.map((cell) => extractNodeText(cell).trim()),
+    );
   }
 
-  return tables;
+  return {
+    filepath,
+    label: getDocTypeLabel(filepath),
+    frontmatter,
+    headings,
+    tables,
+  };
 }
 
-export function validateRequiredSections(filepath: string): string[] {
-  const requiredSections = getRequiredSections(filepath);
+function validateRequiredSectionsFromDocument(document: ParsedSpecDocument): string[] {
+  const requiredSections = getRequiredSections(document.filepath);
   if (requiredSections.length === 0) {
     return [];
   }
 
-  const result = parseFrontmatterResult(filepath);
-  const body = result.content === null ? "" : result.body;
-  const headings = new Set(collectHeadings(body));
-  const label = getDocTypeLabel(filepath) ?? "PRD";
-
+  const label = document.label ?? "PRD";
   return requiredSections
-    .filter((section) => !headings.has(section))
+    .filter((section) => !document.headings.has(section))
     .map((section) => `⚠ ${label}: Missing required section: ${section}`);
 }
 
-export function validateRequiredTables(filepath: string): string[] {
-  const label = getDocTypeLabel(filepath);
+function validateRequiredTablesFromDocument(document: ParsedSpecDocument): string[] {
+  const label = document.label;
   if (!label || !(label in REQUIRED_TABLE_COLUMNS)) {
     return [];
   }
 
-  const result = parseFrontmatterResult(filepath);
-  const body = result.content === null ? "" : result.body;
-  const tables = extractSectionTables(body);
   const warnings: string[] = [];
-
   for (const [section, requiredColumns] of Object.entries(REQUIRED_TABLE_COLUMNS[label])) {
-    const headers = tables.get(section);
+    const headers = document.tables.get(section);
     if (!headers) {
       warnings.push(`⚠ ${label}: Missing required table in section ${section}.`);
       continue;
@@ -315,4 +326,21 @@ export function validateRequiredTables(filepath: string): string[] {
   }
 
   return warnings;
+}
+
+export function validateRequiredSections(filepath: string): string[] {
+  return validateRequiredSectionsFromDocument(parseSpecDocument(filepath));
+}
+
+export function validateRequiredTables(filepath: string): string[] {
+  return validateRequiredTablesFromDocument(parseSpecDocument(filepath));
+}
+
+export function validateSpecFile(filepath: string): string[] {
+  const document = parseSpecDocument(filepath);
+  return [
+    ...validateFrontmatterFromResult(filepath, document.frontmatter),
+    ...validateRequiredSectionsFromDocument(document),
+    ...validateRequiredTablesFromDocument(document),
+  ];
 }

@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { extractFrontmatterField, parseFrontmatter } from "./frontmatter.js";
 import { handleDocLint, runFormat, runValidation } from "./runtime.js";
-import { ADR_FILENAME_PATTERN, isAdr, isPlan, isPrd, PLAN_FILENAME_PATTERN, PRD_FILENAME_PATTERN, validateFrontmatter, validateRequiredSections, validateRequiredTables } from "./spec-validation.js";
+import { ADR_FILENAME_PATTERN, isAdr, isPlan, isPrd, PLAN_FILENAME_PATTERN, PRD_FILENAME_PATTERN, validateFrontmatter, validateRequiredSections, validateRequiredTables, validateSpecFile } from "./spec-validation.js";
 import { formatConfig, formatSummary, listMatchingFiles, readConfig, scanWorkspace } from "./workspace-scan.js";
 
 export {
@@ -21,6 +21,7 @@ export {
   validateFrontmatter,
   validateRequiredSections,
   validateRequiredTables,
+  validateSpecFile,
 };
 
 export default function specdocs(pi: ExtensionAPI) {

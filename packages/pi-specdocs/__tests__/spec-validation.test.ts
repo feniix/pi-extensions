@@ -13,6 +13,7 @@ import {
   validateFrontmatter,
   validateRequiredSections,
   validateRequiredTables,
+  validateSpecFile,
 } from "../extensions/index.js";
 
 const VALID_PRD = `---
@@ -405,6 +406,25 @@ describe("validate required tables", () => {
 
 // --- Non-spec files ---
 
+describe("validateSpecFile", () => {
+  it("combines frontmatter, section, and table warnings in one pass", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(
+        join(dir, "docs", "architecture"),
+        "plan-test-feature.md",
+        '---\ntitle: "Plan"\nprd: "PRD-001"\nstatus: Active\n---\n\n# Plan: Test\n\n## Source\n',
+      );
+      const warnings = validateSpecFile(path);
+      expect(warnings.some((w) => w.includes("Missing required frontmatter field: date"))).toBe(true);
+      expect(warnings.some((w) => w.includes("Missing required section: ## ADR Index"))).toBe(true);
+      expect(warnings.some((w) => w.includes("Missing required table in section ADR Index"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+});
+
 describe("non-spec files", () => {
   it("returns empty warnings for non-spec files", () => {
     const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
@@ -412,6 +432,7 @@ describe("non-spec files", () => {
       const path = join(dir, "README.md");
       writeFileSync(path, "# README\n");
       expect(validateFrontmatter(path)).toEqual([]);
+      expect(validateSpecFile(path)).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true });
     }

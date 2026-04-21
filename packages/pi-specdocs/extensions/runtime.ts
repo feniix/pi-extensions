@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkStringify from "remark-stringify";
 import { unified } from "unified";
-import { ADR_FILENAME_PATTERN, isAdr, isPlan, isPrd, PLAN_FILENAME_PATTERN, PRD_FILENAME_PATTERN, validateFrontmatter, validateRequiredSections, validateRequiredTables } from "./spec-validation.js";
+import { ADR_FILENAME_PATTERN, isAdr, isPlan, isPrd, PLAN_FILENAME_PATTERN, PRD_FILENAME_PATTERN, validateSpecFile } from "./spec-validation.js";
 import { parseFrontmatterResult } from "./frontmatter.js";
 import { ADR_DIR, listMatchingFiles, PLAN_DIR, PRD_DIR } from "./workspace-scan.js";
 
@@ -32,7 +32,7 @@ export async function handleDocLint(
     return;
   }
 
-  const warnings = [...validateFrontmatter(filePath), ...validateRequiredSections(filePath), ...validateRequiredTables(filePath)];
+  const warnings = validateSpecFile(filePath);
   const validationFiles = typeof ctx.cwd === "string" ? getValidationFiles(ctx.cwd) : null;
   const duplicateIssues = validationFiles ? collectDuplicateValidationIssues(validationFiles, filePath) : [];
   const architectureFilenameIssues = validationFiles ? collectArchitectureFilenameIssues(validationFiles, filePath) : [];
@@ -123,23 +123,17 @@ function collectFrontmatterIssues(files: ValidationFiles): ValidationIssue[] {
 
   for (const filename of files.prdFiles) {
     const filepath = join(files.prdDir, filename);
-    issues.push(...toWarningIssues(validateFrontmatter(filepath)));
-    issues.push(...toWarningIssues(validateRequiredSections(filepath)));
-    issues.push(...toWarningIssues(validateRequiredTables(filepath)));
+    issues.push(...toWarningIssues(validateSpecFile(filepath)));
   }
 
   for (const filename of files.adrFiles) {
     const filepath = join(files.adrDir, filename);
-    issues.push(...toWarningIssues(validateFrontmatter(filepath)));
-    issues.push(...toWarningIssues(validateRequiredSections(filepath)));
-    issues.push(...toWarningIssues(validateRequiredTables(filepath)));
+    issues.push(...toWarningIssues(validateSpecFile(filepath)));
   }
 
   for (const filename of files.planFiles) {
     const filepath = join(files.planDir, filename);
-    issues.push(...toWarningIssues(validateFrontmatter(filepath)));
-    issues.push(...toWarningIssues(validateRequiredSections(filepath)));
-    issues.push(...toWarningIssues(validateRequiredTables(filepath)));
+    issues.push(...toWarningIssues(validateSpecFile(filepath)));
   }
 
   return issues;
