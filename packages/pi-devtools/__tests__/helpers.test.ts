@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { compareVersions, getGitContext, parseVersion } from "../extensions/git.js";
-import devtoolsExtension, { parseConventionalCommit } from "../extensions/index.js";
+import devtoolsExtension, { parseConventionalCommit, toolDefinitions } from "../extensions/index.js";
 
 const createMockPi = () =>
   ({
@@ -94,6 +94,11 @@ describe("pi-devtools helpers", () => {
 
 describe("pi-devtools extension", () => {
   describe("tool registration", () => {
+    it("exports tool definitions for centralized registration", () => {
+      expect(toolDefinitions.length).toBeGreaterThan(0);
+      expect(new Set(toolDefinitions.map((tool) => tool.name)).size).toBe(toolDefinitions.length);
+    });
+
     it("registers all tools", () => {
       const mockPi = createMockPi();
       devtoolsExtension(mockPi as unknown as ExtensionAPI);
