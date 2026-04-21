@@ -10,6 +10,8 @@ Structured spec documentation workflow for [pi](https://pi.dev/) — PRDs, ADRs,
 - **Architect Prompt** (`/architect`): End-to-end initiative planning — assess feasibility, decompose into workstreams, produce artifacts
 - **Refine Prompt** (`/refine`): Deep review of PRDs/ADRs for risks, bugs, ambiguities, errors, and inconsistencies
 - **Session Hook**: Automatically scans `docs/` on session start and displays a summary of existing spec documents
+- **Validation Command** (`specdocs-validate`): Checks spec docs for frontmatter, numbering, duplicate IDs, and plan filename issues
+- **Formatting Command** (`specdocs-format <path>`): Normalizes supported spec documents in-process without external tools
 
 ## Install
 
@@ -54,6 +56,11 @@ Deep review of a PRD or ADR. Validates against the codebase, researches external
 | PRDs | `docs/prd/` | `PRD-NNN-slug.md` (3-digit) |
 | ADRs | `docs/adr/` | `ADR-NNNN-slug.md` (4-digit) |
 | Plans | `docs/architecture/` | `plan-slug.md` |
+
+## Commands
+
+- `specdocs-validate` — validate spec documents in the workspace
+- `specdocs-format <path>` — format a PRD, ADR, or plan document in place
 
 ## Tool Integration
 

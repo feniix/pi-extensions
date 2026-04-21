@@ -1,8 +1,14 @@
-import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { ADR_FILENAME_PATTERN, isAdr, isPrd, PRD_FILENAME_PATTERN, validateFrontmatter } from "./spec-validation.js";
-import { ADR_DIR, listMatchingFiles, PRD_DIR } from "./workspace-scan.js";
+import remarkFrontmatter from "remark-frontmatter";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import remarkStringify from "remark-stringify";
+import { unified } from "unified";
+import { ADR_FILENAME_PATTERN, isAdr, isPlan, isPrd, PLAN_FILENAME_PATTERN, PRD_FILENAME_PATTERN, validateFrontmatter, validateRequiredSections, validateRequiredTables } from "./spec-validation.js";
+import { parseFrontmatterResult } from "./frontmatter.js";
+import { ADR_DIR, listMatchingFiles, PLAN_DIR, PRD_DIR } from "./workspace-scan.js";
 
 function extractFilePath(input: Record<string, unknown> | undefined): string {
   if (!input) return "";
@@ -18,13 +24,18 @@ export async function handleDocLint(
   }
 
   const filePath = extractFilePath(event.input);
-  if (!filePath || (!isPrd(filePath) && !isAdr(filePath)) || !existsSync(filePath)) {
+  if (!filePath || (!isPrd(filePath) && !isAdr(filePath) && !isPlan(filePath)) || !existsSync(filePath)) {
     return;
   }
 
-  const warnings = validateFrontmatter(filePath);
-  if (warnings.length > 0) {
-    ctx.ui.notify(`[specdocs] Frontmatter warnings:\n${warnings.join("\n")}`, "warning");
+  const warnings = [...validateFrontmatter(filePath), ...validateRequiredSections(filePath), ...validateRequiredTables(filePath)];
+  const duplicateIssues = typeof ctx.cwd === "string"
+    ? collectDuplicateValidationIssues(getValidationFiles(ctx.cwd), filePath)
+    : [];
+  const messages = [...warnings, ...duplicateIssues.map((issue) => issue.message)];
+
+  if (messages.length > 0) {
+    ctx.ui.notify(`[specdocs] Frontmatter warnings:\n${messages.join("\n")}`, "warning");
   }
 }
 
@@ -36,19 +47,32 @@ interface ValidationIssue {
 interface ValidationFiles {
   prdDir: string;
   adrDir: string;
+  planDir: string;
   prdFiles: string[];
   adrFiles: string[];
+  planFiles: string[];
+}
+
+interface DuplicateDocumentIssueConfig {
+  files: string[];
+  pattern: RegExp;
+  prefix: string;
+  width: number;
+  displayDir: string;
 }
 
 function getValidationFiles(cwd: string): ValidationFiles {
   const prdDir = join(cwd, PRD_DIR);
   const adrDir = join(cwd, ADR_DIR);
+  const planDir = join(cwd, PLAN_DIR);
 
   return {
     prdDir,
     adrDir,
+    planDir,
     prdFiles: listMatchingFiles(prdDir, PRD_FILENAME_PATTERN),
     adrFiles: listMatchingFiles(adrDir, ADR_FILENAME_PATTERN),
+    planFiles: listMatchingFiles(planDir, PLAN_FILENAME_PATTERN),
   };
 }
 
@@ -56,18 +80,87 @@ function toWarningIssues(messages: string[]): ValidationIssue[] {
   return messages.map((message) => ({ type: "warning", message }));
 }
 
+function collectDuplicateNumberIssues(config: DuplicateDocumentIssueConfig): ValidationIssue[] {
+  const grouped = new Map<number, string[]>();
+
+  for (const filename of config.files) {
+    const match = filename.match(config.pattern);
+    if (!match) {
+      continue;
+    }
+
+    const number = parseInt(match[1], 10);
+    const existing = grouped.get(number) ?? [];
+    existing.push(`${config.displayDir}/${filename}`);
+    grouped.set(number, existing);
+  }
+
+  const issues: ValidationIssue[] = [];
+  for (const [number, filenames] of grouped.entries()) {
+    if (filenames.length < 2) {
+      continue;
+    }
+
+    issues.push({
+      type: "error",
+      message: `✗ Duplicate ${config.prefix} number: ${config.prefix}-${String(number).padStart(config.width, "0")} is used by ${filenames.join(", ")}`,
+    });
+  }
+
+  return issues.sort((a, b) => a.message.localeCompare(b.message));
+}
+
 function collectFrontmatterIssues(files: ValidationFiles): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
   for (const filename of files.prdFiles) {
-    issues.push(...toWarningIssues(validateFrontmatter(join(files.prdDir, filename))));
+    const filepath = join(files.prdDir, filename);
+    issues.push(...toWarningIssues(validateFrontmatter(filepath)));
+    issues.push(...toWarningIssues(validateRequiredSections(filepath)));
+    issues.push(...toWarningIssues(validateRequiredTables(filepath)));
   }
 
   for (const filename of files.adrFiles) {
-    issues.push(...toWarningIssues(validateFrontmatter(join(files.adrDir, filename))));
+    const filepath = join(files.adrDir, filename);
+    issues.push(...toWarningIssues(validateFrontmatter(filepath)));
+    issues.push(...toWarningIssues(validateRequiredSections(filepath)));
+    issues.push(...toWarningIssues(validateRequiredTables(filepath)));
+  }
+
+  for (const filename of files.planFiles) {
+    const filepath = join(files.planDir, filename);
+    issues.push(...toWarningIssues(validateFrontmatter(filepath)));
+    issues.push(...toWarningIssues(validateRequiredSections(filepath)));
+    issues.push(...toWarningIssues(validateRequiredTables(filepath)));
   }
 
   return issues;
+}
+
+function collectDuplicateValidationIssues(files: ValidationFiles, changedFilePath?: string): ValidationIssue[] {
+  const issues = [
+    ...collectDuplicateNumberIssues({
+      files: files.prdFiles,
+      pattern: /^PRD-(\d{3})-.*\.md$/,
+      prefix: "PRD",
+      width: 3,
+      displayDir: PRD_DIR,
+    }),
+    ...collectDuplicateNumberIssues({
+      files: files.adrFiles,
+      pattern: /^ADR-(\d{4})-.*\.md$/,
+      prefix: "ADR",
+      width: 4,
+      displayDir: ADR_DIR,
+    }),
+  ];
+
+  if (!changedFilePath) {
+    return issues;
+  }
+
+  const changedFilename = basename(changedFilePath);
+  return issues.filter((issue) => issue.message.includes(changedFilename));
 }
 
 function listMarkdownFiles(directory: string): string[] {
@@ -157,9 +250,134 @@ export async function runValidation(ctx: { cwd: string } & ExtensionContext) {
     ...collectFrontmatterIssues(files),
     ...collectFilenameIssues(files.prdDir, PRD_DIR, PRD_FILENAME_PATTERN, "PRD-NNN-*.md"),
     ...collectFilenameIssues(files.adrDir, ADR_DIR, ADR_FILENAME_PATTERN, "ADR-NNNN-*.md"),
+    ...collectFilenameIssues(files.planDir, PLAN_DIR, PLAN_FILENAME_PATTERN, "plan-*.md"),
+    ...collectDuplicateValidationIssues(files),
     ...collectNumberingGapIssues(files.prdFiles, /^PRD-(\d{3})-.*\.md$/, "PRD", 3),
     ...collectNumberingGapIssues(files.adrFiles, /^ADR-(\d{4})-.*\.md$/, "ADR", 4),
   ];
   const result = formatValidationIssues(issues);
   ctx.ui.notify(result.message, result.level);
+}
+
+function resolveCommandPath(cwd: string, path: string): string {
+  return path.startsWith("/") ? path : resolve(cwd, path);
+}
+
+function isSupportedSpecPath(path: string): boolean {
+  return isPrd(path) || isAdr(path) || isPlan(path);
+}
+
+function normalizeBodyLines(lines: string[]): string[] {
+  const result: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/[\t ]+$/g, "");
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith("## ")) {
+      while (result.length > 0 && result[result.length - 1] === "") {
+        result.pop();
+      }
+      if (result.length > 0) {
+        result.push("");
+      }
+      result.push(trimmed);
+      while (i + 1 < lines.length && lines[i + 1].trim() === "") {
+        i++;
+      }
+      result.push("");
+      continue;
+    }
+
+    result.push(line);
+  }
+
+  while (result.length > 0 && result[result.length - 1] === "") {
+    result.pop();
+  }
+
+  return result;
+}
+
+async function formatSpecDocument(content: string): Promise<string> {
+  const file = await unified()
+    .use(remarkParse)
+    .use(remarkFrontmatter, ["yaml"])
+    .use(remarkGfm)
+    .use(remarkStringify, {
+      fences: true,
+      listItemIndent: "one",
+    })
+    .process(content);
+
+  const formatted = String(file);
+  const lines = formatted.split("\n");
+  if (!lines.length || lines[0].trim() !== "---") {
+    return formatted;
+  }
+
+  let closingIndex = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === "---") {
+      closingIndex = i;
+      break;
+    }
+  }
+
+  if (closingIndex === -1) {
+    return formatted;
+  }
+
+  const frontmatterLines = lines.slice(0, closingIndex + 1).map((line, index) => {
+    if (index === 0 || index === closingIndex) {
+      return "---";
+    }
+    return line.replace(/[\t ]+$/g, "");
+  });
+  const bodyLines = normalizeBodyLines(lines.slice(closingIndex + 1).filter((line, index, arr) => !(index === 0 && line.trim() === "" && arr.length > 0)));
+  return `${frontmatterLines.join("\n")}\n\n${bodyLines.join("\n")}\n`;
+}
+
+export async function runFormat(
+  args: unknown,
+  ctx: { cwd: string } & ExtensionContext,
+): Promise<void> {
+  const params = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  const rawPath = typeof params.path === "string" ? params.path : typeof params.file_path === "string" ? params.file_path : "";
+  if (!rawPath) {
+    ctx.ui.notify("[specdocs] specdocs-format requires a single path argument.", "error");
+    return;
+  }
+
+  const targetPath = resolveCommandPath(ctx.cwd, rawPath);
+  if (!existsSync(targetPath)) {
+    ctx.ui.notify(`[specdocs] Format target does not exist: ${rawPath}`, "error");
+    return;
+  }
+
+  if (!isSupportedSpecPath(targetPath)) {
+    ctx.ui.notify(`[specdocs] Format target is an unsupported spec document path: ${rawPath}`, "error");
+    return;
+  }
+
+  const parseResult = parseFrontmatterResult(targetPath);
+  if (parseResult.error) {
+    ctx.ui.notify(`[specdocs] Cannot format document with malformed frontmatter: ${parseResult.error}`, "error");
+    return;
+  }
+
+  if (parseResult.fields === null) {
+    ctx.ui.notify("[specdocs] Cannot format a spec document without YAML frontmatter.", "error");
+    return;
+  }
+
+  const original = readFileSync(targetPath, "utf-8");
+  const formatted = await formatSpecDocument(original);
+  if (formatted === original) {
+    ctx.ui.notify("[specdocs] No formatting changes were needed.", "info");
+    return;
+  }
+
+  writeFileSync(targetPath, formatted);
+  ctx.ui.notify(`[specdocs] Formatted spec document: ${rawPath}`, "info");
 }
