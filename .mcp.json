@@ -1,11 +1,11 @@
 {
   "mcpServers": {
     "exa": {
-      "command": "bunx",
-      "args": [
-        "-y",
-        "exa-mcp-server@3.2.0"
-      ],
+      "type": "http",
+      "url": "https://mcp.exa.ai/mcp?tools=web_search_exa,web_fetch_exa,web_search_advanced_exa",
+      "headers": {
+        "x-api-key": "${EXA_API_KEY}"
+      },
       "env": {
         "EXA_API_KEY": "${EXA_API_KEY}"
       }
