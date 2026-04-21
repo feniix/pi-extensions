@@ -57,7 +57,7 @@ export function analyzeCommitsTool(): ToolResult {
 
     if (tags) {
       currentVersion = tags.replace(/^v/, "");
-      commitsSince = execGit(`git log ${tags}..HEAD --format=\"%s\"`).split("\n").filter(Boolean);
+      commitsSince = execGit(`git log ${tags}..HEAD --format="%s"`).split("\n").filter(Boolean);
     } else {
       commitsSince = execGit('git log --format="%s" -n 100').split("\n").filter(Boolean);
     }

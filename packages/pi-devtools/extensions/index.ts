@@ -6,6 +6,15 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { getGitContext } from "./git.js";
+import { checkCiTool, createPrTool, mergePrTool } from "./pull-request-tools.js";
+import {
+  analyzeCommitsTool,
+  bumpVersion,
+  bumpVersionTool,
+  createReleaseTool,
+  getLatestTagTool,
+  parseConventionalCommit,
+} from "./release-tools.js";
 import {
   bumpVersionParams,
   checkCiParams,
@@ -17,15 +26,6 @@ import {
   mergePrParams,
   pushParams,
 } from "./tool-params.js";
-import { checkCiTool, createPrTool, mergePrTool } from "./pull-request-tools.js";
-import {
-  analyzeCommitsTool,
-  bumpVersion,
-  bumpVersionTool,
-  createReleaseTool,
-  getLatestTagTool,
-  parseConventionalCommit,
-} from "./release-tools.js";
 import { commitTool, createBranchTool, pushTool, repoInfoTool } from "./workflow-tools.js";
 
 export {
