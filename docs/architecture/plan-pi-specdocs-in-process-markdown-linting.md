@@ -50,12 +50,12 @@ The safest delivery path is to build the parser-backed model first, then migrate
 - Separate concerns inside the validator:
   - document classification (`PRD`, `ADR`, `Plan`)
   - schema-backed frontmatter validation
-  - filename/number alignment and numbering-gap checks
+  - filename/number alignment, duplicate-number detection, and numbering-gap checks
   - required heading checks
   - required table-shape checks
   - severity mapping for error vs warning, especially for first-release plan sections
-- Preserve current repo-specific checks already relied on in tests and runtime notifications: required fields, valid status values, number formatting, and filename matching.
-- Add plan-specific rules for `docs/architecture/plan-*.md` and direct-child filename enforcement for other markdown files in `docs/architecture/`.
+- Preserve current repo-specific checks already relied on in tests and runtime notifications: required fields, valid status values, number formatting, filename matching, and workspace-level numbering integrity.
+- Add plan-specific rules for `docs/architecture/plan-*.md`, canonical plan `prd` slug validation (`PRD-NNN-descriptive-slug`), and direct-child filename enforcement for other markdown files in `docs/architecture/`.
 
 **ADR Reference**: -> `ADR-0009-specdocs-validation-layering-strategy.md`
 
@@ -107,10 +107,10 @@ The safest delivery path is to build the parser-backed model first, then migrate
 **Purpose**: Land the parser migration safely using test-first changes and keep the package documentation aligned with the new command surface.
 
 **Key Details**:
-- Extend `packages/pi-specdocs/__tests__/spec-validation.test.ts` for schema-backed frontmatter parse failures, missing sections, required tables, and plan validation.
-- Extend `packages/pi-specdocs/__tests__/runtime.test.ts` for richer runtime reporting, plan file linting, and `specdocs-format` command behavior.
+- Extend `packages/pi-specdocs/__tests__/spec-validation.test.ts` for schema-backed frontmatter parse failures, missing sections, required tables, and per-document plan validation.
+- Add new coverage in `packages/pi-specdocs/__tests__/runtime.test.ts` for richer runtime reporting, duplicate-number collisions, plan file linting, canonical plan `prd` slug validation surfaced through workspace/runtime flows, and `specdocs-format` command behavior.
 - Extend `packages/pi-specdocs/__tests__/scanner.test.ts` so parser/frontmatter refactors do not break workspace scanning or tracker summaries.
-- Extend `packages/pi-specdocs/__tests__/index.test.ts` to verify registration of `specdocs-format`.
+- Add or update `packages/pi-specdocs/__tests__/index.test.ts` coverage to verify registration of `specdocs-format`.
 - Update `packages/pi-specdocs/README.md` to describe validation coverage and explicit formatting usage.
 
 **ADR Reference**: None — execution support work
@@ -134,7 +134,9 @@ The safest delivery path is to build the parser-backed model first, then migrate
 - Update tests first to encode the new expected behavior from the PRD.
 - Focus on failing tests for:
   - YAML parse failures vs missing fields
+  - duplicate PRD/ADR number collisions in workspace validation
   - plan inclusion in workspace validation
+  - canonical plan `prd` slug validation
   - required section detection
   - required table-shape checks
   - filename enforcement in `docs/architecture/`
@@ -154,7 +156,8 @@ The safest delivery path is to build the parser-backed model first, then migrate
 **Phase 4 — Plan detection and workspace filename enforcement**
 - Add plan classification for `docs/architecture/plan-*.md`.
 - Update workspace validation to flag direct-child markdown files in `docs/architecture/` that are not named `plan-*.md`.
-- Outcome: plan artifacts enter the validation model without yet requiring every structural rule.
+- Add canonical plan `prd` slug validation so plan frontmatter must use the required `PRD-NNN-descriptive-slug` format.
+- Outcome: plan artifacts enter the validation model with naming and source-PRD reference integrity established before broader structural rules land.
 
 **Phase 5 — Required heading and required table validation**
 - Implement heading inventories and section matching for PRDs, ADRs, and plans.
@@ -168,7 +171,7 @@ The safest delivery path is to build the parser-backed model first, then migrate
 - Outcome: end-user behavior matches the expanded validator.
 
 **Phase 7 — Explicit formatting command and normalization engine**
-- Register `specdocs-format` in `index.ts`.
+- Register `specdocs-format` in `index.ts` and add/update `index.test.ts` to verify command registration.
 - Implement target-path validation, normalization, safe rewrite, and no-op reporting in `runtime.ts` plus parser-backed serialization helpers.
 - Reuse the parser-backed document model from Phase 2 to avoid divergent formatting logic.
 - Outcome: first-release formatting ships without touching the post-tool lint flow.
@@ -211,6 +214,7 @@ The safest delivery path is to build the parser-backed model first, then migrate
 | Table validation becomes brittle because section lookup and table association are implemented heuristically | Medium | High | Use heading-scoped table discovery in the shared document model and validate minimum required columns rather than exact full-table reproduction |
 | Formatter rewrites documents in surprising ways or cannot guarantee safe normalization on malformed files | Medium | High | Keep first-release formatting intentionally narrow, preserve semantic text, reject unsafe rewrites, and ship only behind the explicit `specdocs-format` command per ADR-0010 |
 | Validation/reporting becomes noisy once section and table checks are added | Medium | Medium | Group issues by file and severity, use warnings for lower-priority first-release plan sections, and keep command/runtime messaging focused on actionable rule failures |
+| PRD and implementation plan drift causes engineers to miss newly added validation rules such as duplicate-number checks or canonical plan `prd` validation | Medium | Medium | Sync the plan whenever PRD validation scope changes, and encode the latest requirements in Phase 1 contract tests before implementation proceeds |
 | New runtime dependencies slow post-edit validation beyond the PRD targets | Low | Medium | Parse once per file, avoid repeated work in summary paths, and confirm representative performance during the final regression pass |
 
 ## Open Questions
