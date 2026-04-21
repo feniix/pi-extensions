@@ -2,8 +2,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resumeWorkerSessionRuntime } from "../extensions/runtime.js";
-import { createWorkerSessionLink } from "../extensions/sessions.js";
+import { createWorkerSessionRuntime, resumeWorkerSessionRuntime } from "../extensions/runtime.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
   if (value == null) {
@@ -32,13 +31,13 @@ describe("session linkage", () => {
   });
 
   it("creates a persisted pi session file for a worker worktree", async () => {
-    const sessionFile = requireValue(await createWorkerSessionLink(repoDir), "session file missing");
+    const sessionFile = requireValue((await createWorkerSessionRuntime(repoDir)).sessionFile, "session file missing");
     expect(sessionFile).toBeTruthy();
     expect(existsSync(sessionFile)).toBe(true);
   });
 
   it("opens an existing worker session through the runtime layer and records a resume entry", async () => {
-    const sessionFile = requireValue(await createWorkerSessionLink(repoDir), "session file missing");
+    const sessionFile = requireValue((await createWorkerSessionRuntime(repoDir)).sessionFile, "session file missing");
     const runtime = await resumeWorkerSessionRuntime(sessionFile);
 
     expect(runtime.sessionFile).toBe(sessionFile);

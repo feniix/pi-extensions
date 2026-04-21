@@ -9,6 +9,9 @@ export interface WorkerRuntimeHandle extends WorkerRuntimeState {
 }
 
 function persistSessionFile(sessionManager: SessionManager, sessionFile: string): void {
+  // Intentionally rewrites the full JSONL session file from SessionManager state.
+  // This keeps create/resume behavior consistent and preserves newly appended
+  // runtime entries such as pi-conductor resume markers.
   const header = sessionManager.getHeader();
   const entries = sessionManager.getEntries();
   mkdirSync(dirname(sessionFile), { recursive: true });
@@ -46,9 +49,13 @@ export async function resumeWorkerSessionRuntime(sessionFile: string): Promise<W
 }
 
 export async function recoverWorkerSessionRuntime(worktreePath: string): Promise<WorkerRuntimeHandle> {
+  // Recovery currently re-establishes a fresh persisted session for the worker.
+  // Keep this as a named seam so recovery can diverge from plain creation later.
   return createWorkerSessionRuntime(worktreePath);
 }
 
 export async function summarizeWorkerSessionRuntime(sessionFile: string): Promise<string> {
+  // Keep summary generation behind the runtime seam so a future backend can
+  // replace raw session-file summarization without changing conductor flows.
   return generateWorkerSummaryFromSession(sessionFile);
 }

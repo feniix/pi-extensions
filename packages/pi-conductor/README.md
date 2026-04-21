@@ -82,6 +82,8 @@ Instead, it uses a narrow Pi SDK runtime seam around persisted sessions:
 - record runtime metadata in conductor state
 - derive summaries from the worker session history
 
+In this MVP, `/conductor resume` intentionally normalizes the worker lifecycle back to `idle`. Resume currently means “reopen and relink the persisted worker session”, not “reattach to an always-running autonomous worker”.
+
 This keeps the worker model durable today while leaving room for a future `AgentSession`-managed or subprocess-backed subagent backend.
 
 ## Development

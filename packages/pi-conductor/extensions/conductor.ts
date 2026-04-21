@@ -98,6 +98,9 @@ export async function resumeWorkerForRepo(repoRoot: string, workerName: string):
   }
 
   const runtime = await resumeWorkerSessionRuntime(worker.sessionFile);
+  // Resume in the current MVP means "reopen and re-link the persisted worker
+  // session" rather than "continue an autonomous running agent". For that
+  // reason, resume intentionally normalizes the worker back to idle.
   const updatedRun = setWorkerLifecycle(
     setWorkerRuntimeState(run, worker.workerId, {
       sessionFile: runtime.sessionFile,

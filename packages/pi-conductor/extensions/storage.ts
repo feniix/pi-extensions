@@ -194,6 +194,7 @@ export function setWorkerRuntimeState(
 ): RunRecord {
   let found = false;
   const now = new Date().toISOString();
+  const { sessionFile, ...runtimeFields } = runtime;
   const workers = run.workers.map((worker) => {
     if (worker.workerId !== workerId) {
       return worker;
@@ -201,10 +202,10 @@ export function setWorkerRuntimeState(
     found = true;
     return {
       ...worker,
-      sessionFile: runtime.sessionFile === undefined ? worker.sessionFile : runtime.sessionFile,
+      sessionFile: sessionFile === undefined ? worker.sessionFile : sessionFile,
       runtime: {
         ...worker.runtime,
-        ...runtime,
+        ...runtimeFields,
       },
       updatedAt: now,
     };

@@ -133,6 +133,7 @@ Given a healthy worker with a valid session file, resume must:
 - persist the runtime session id
 - record the worker’s last resumed timestamp
 - keep the worker resumable without creating a new clone
+- normalize lifecycle to `idle` in the current MVP, because resume currently means session re-linking rather than continuation of an always-running autonomous worker
 
 ### FR-3: Status visibility
 

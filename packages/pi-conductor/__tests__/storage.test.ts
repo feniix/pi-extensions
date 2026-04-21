@@ -5,6 +5,7 @@ import {
   createWorkerRecord,
   getConductorProjectDir,
   setWorkerLifecycle,
+  setWorkerRuntimeState,
 } from "../extensions/storage.js";
 
 describe("storage helpers", () => {
@@ -55,6 +56,27 @@ describe("storage helpers", () => {
 
     const updated = setWorkerLifecycle({ ...run, workers: [worker] }, worker.workerId, "running");
     expect(updated.workers[0]?.summary.stale).toBe(true);
+  });
+
+  it("does not persist sessionFile inside worker.runtime", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: "/tmp/original-session.jsonl",
+    });
+
+    const updated = setWorkerRuntimeState({ ...run, workers: [worker] }, worker.workerId, {
+      sessionFile: "/tmp/new-session.jsonl",
+      sessionId: "session-123",
+      lastResumedAt: "2026-04-20T00:00:00.000Z",
+    });
+
+    expect(updated.workers[0]?.sessionFile).toBe("/tmp/new-session.jsonl");
+    expect(updated.workers[0]?.runtime.sessionId).toBe("session-123");
+    expect("sessionFile" in (updated.workers[0]?.runtime ?? {})).toBe(false);
   });
 
   it("adds a worker and updates the run timestamp", () => {
