@@ -10,12 +10,23 @@ function runPiConductorCommand(repoDir: string, conductorHome: string, command: 
 
   const result = spawnSync(
     piBin,
-    ["--offline", "--no-session", "--no-extensions", "-e", extensionPath, "-p", command],
+    [
+      "--offline",
+      "--no-session",
+      "--no-extensions",
+      "--model",
+      "google/gemini-2.5-flash",
+      "-e",
+      extensionPath,
+      "-p",
+      command,
+    ],
     {
       cwd: repoDir,
       encoding: "utf-8",
       env: {
         ...process.env,
+        GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? "test-key",
         PI_CONDUCTOR_HOME: conductorHome,
       },
     },
