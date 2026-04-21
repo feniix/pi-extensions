@@ -3,7 +3,7 @@ title: "pi-conductor — single-worker run capability"
 prd: "PRD-003-pi-conductor-single-worker-run"
 date: 2026-04-21
 author: "Pi"
-status: Draft
+status: Completed
 ---
 
 # Plan: pi-conductor — single-worker run capability
@@ -157,8 +157,8 @@ The safest rollout is to implement the run feature in five layers: storage/type 
 
 * **Resolved by ADR-0011:** Worker runs should use a curated minimal headless binding policy rather than broad ambient inheritance.
 * **Resolved by ADR-0011:** Runtime preflight should live in `runtime.ts` as an early eligibility check before conductor persists `running`.
-* How much `lastRun` detail should `formatRunStatus()` display inline before status becomes too verbose for multi-worker projects?
-* Should a future stale-run heuristic be time-based, heartbeat-based, or session-activity-based once foreground execution ships and operators start hitting stuck `running` states?
+* **Resolved in implementation:** `formatRunStatus()` now includes concise inline `lastRun` metadata covering active, completed, aborted, and errored runs.
+* **Deferred follow-up:** A future stale-run heuristic could be time-based, heartbeat-based, or session-activity-based once operators accumulate real stuck-`running` cases.
 
 ## ADR Index
 
@@ -166,6 +166,6 @@ Decisions made during this plan:
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [ADR-0006](../adr/ADR-0006-agent-session-based-foreground-run-execution.md) | AgentSession-based foreground run execution for pi-conductor | Proposed |
-| [ADR-0007](../adr/ADR-0007-single-worker-run-before-multi-worker-orchestration.md) | Single-worker foreground run before multi-worker orchestration | Proposed |
-| [ADR-0011](../adr/ADR-0011-conductor-run-extension-binding-and-preflight-policy.md) | Conductor worker-run extension binding and preflight policy | Proposed |
+| [ADR-0006](../adr/ADR-0006-agent-session-based-foreground-run-execution.md) | AgentSession-based foreground run execution for pi-conductor | Accepted |
+| [ADR-0007](../adr/ADR-0007-single-worker-run-before-multi-worker-orchestration.md) | Single-worker foreground run before multi-worker orchestration | Accepted |
+| [ADR-0011](../adr/ADR-0011-conductor-run-extension-binding-and-preflight-policy.md) | Conductor worker-run extension binding and preflight policy | Accepted |

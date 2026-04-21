@@ -1,7 +1,7 @@
 ---
 title: "AgentSession-based foreground run execution for pi-conductor"
 adr: ADR-0006
-status: Proposed
+status: Accepted
 date: 2026-04-21
 prd: "PRD-003-pi-conductor-single-worker-run"
 decision: "Use createAgentSession()-based foreground execution for /conductor run while preserving worker continuity through existing SessionManager-backed session lineage"
@@ -11,7 +11,7 @@ decision: "Use createAgentSession()-based foreground execution for /conductor ru
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -110,4 +110,4 @@ In v1, `/conductor run` should open the worker's persisted session lineage throu
 
 - **Plan**: `docs/architecture/plan-pi-conductor-single-worker-run.md`
 - **ADRs**: Relates to `ADR-0001`, `ADR-0002`, `ADR-0003`, `ADR-0007`, and `ADR-0011`
-- **Implementation**: `docs/prd/PRD-003-pi-conductor-single-worker-run.md`, PR #38 groundwork
+- **Implementation**: `docs/prd/PRD-003-pi-conductor-single-worker-run.md`, shipped in PR #52

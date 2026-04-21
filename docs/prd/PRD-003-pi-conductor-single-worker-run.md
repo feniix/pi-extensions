@@ -1,7 +1,7 @@
 ---
 title: "pi-conductor — single-worker run capability"
 prd: PRD-003
-status: Draft
+status: Implemented
 owner: "feniix"
 issue: "N/A"
 date: 2026-04-21
@@ -474,6 +474,9 @@ Then unit and integration tests validate worker run behavior against real local 
 
 ## 12. Open Questions
 
+All originally in-scope open questions for PRD-003 were resolved during implementation and ADR refinement. No blocking open questions remain for the shipped single-worker foreground run capability.
+
+
 | #  | Question                                                                                                                                        | Owner  | Due                         | Status                                                                                                                                                  |
 | -- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------ | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Q1 | Should post-run failure land in `blocked` or return to `idle` with separate error metadata?                                                     | feniix | Before implementation       | **Resolved:** In this phase, failed execution lands in `blocked` and also persists structured last-run error metadata.                                  |
@@ -496,3 +499,4 @@ Then unit and integration tests validate worker run behavior against real local 
 | 2026-04-21 | Refine pass 2: move stopReason prose out of Gherkin; add `session.dispose()` cleanup step; clarify AgentSession persistence behavior; add sessions test coverage note; clarify `finishedAt` null semantics                                                                                                      | feniix |
 | 2026-04-21 | Refine pass 3 and 4: complete stopReason mapping, add stuck-running crash note, fix final-message references to `session.state.messages`, and clarify prompt-time provider/auth failure handling                                                                                                                | feniix |
 | 2026-04-21 | Normalize File Breakdown, Related, and Changelog structure to satisfy current `pi-specdocs` PRD validation rules without changing document intent                                                                                                                                                               | Pi     |
+| 2026-04-21 | Mark PRD-003 implemented after shipping `/conductor run`, durable `lastRun` state, foreground execution, status/reporting, tests, and documentation                                                                                                                                                            | Pi     |

@@ -1,7 +1,7 @@
 ---
 title: "Conductor worker-run extension binding and preflight policy"
 adr: ADR-0011
-status: Proposed
+status: Accepted
 date: 2026-04-21
 prd: "PRD-003-pi-conductor-single-worker-run"
 decision: "Use a conductor-defined minimal headless binding policy with best-effort runtime-owned preflight before mutating worker state to running"
@@ -11,7 +11,7 @@ decision: "Use a conductor-defined minimal headless binding policy with best-eff
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -132,4 +132,4 @@ Initial allowlist guidance for v1:
 
 * **Plan**: `docs/architecture/plan-pi-conductor-single-worker-run.md`
 * **ADRs**: Relates to `docs/adr/ADR-0001-sdk-first-worker-runtime.md`, `docs/adr/ADR-0006-agent-session-based-foreground-run-execution.md`, and `docs/adr/ADR-0007-single-worker-run-before-multi-worker-orchestration.md`
-* **Implementation**: `docs/prd/PRD-003-pi-conductor-single-worker-run.md`, future implementation in `packages/pi-conductor/extensions/runtime.ts`, `conductor.ts`, and `index.ts`
+* **Implementation**: `docs/prd/PRD-003-pi-conductor-single-worker-run.md`, shipped in `packages/pi-conductor/extensions/runtime.ts`, `conductor.ts`, and `index.ts` via PR #52

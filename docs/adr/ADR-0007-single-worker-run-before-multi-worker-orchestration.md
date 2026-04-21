@@ -1,7 +1,7 @@
 ---
 title: "Single-worker foreground run before multi-worker orchestration"
 adr: ADR-0007
-status: Proposed
+status: Accepted
 date: 2026-04-21
 prd: "PRD-003-pi-conductor-single-worker-run"
 decision: "Add a narrow single-worker foreground run capability before introducing multi-worker concurrent execution or autonomous background workers"
@@ -11,7 +11,7 @@ decision: "Add a narrow single-worker foreground run capability before introduci
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -105,6 +105,6 @@ Chosen option: **"Add a single-worker foreground run capability first"**, becaus
 
 ## Related
 
-- **Plan**: `docs/architecture/plan-pi-conductor-mvp.md`
+- **Plan**: `docs/architecture/plan-pi-conductor-single-worker-run.md`
 - **ADRs**: Relates to `ADR-0001` (SDK-first runtime), `ADR-0006` (AgentSession-based foreground execution)
-- **Implementation**: `docs/prd/PRD-003-pi-conductor-single-worker-run.md`, PR #38 groundwork
+- **Implementation**: `docs/prd/PRD-003-pi-conductor-single-worker-run.md`, shipped in PR #52
