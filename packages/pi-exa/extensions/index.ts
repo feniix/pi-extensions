@@ -1,7 +1,7 @@
 /**
- * Exa AI MCP Extension for pi
+ * Exa AI extension for pi
  *
- * Provides Exa search tools via native TypeScript (no external MCP server required).
+ * Provides Exa search tools via native TypeScript using the Exa API directly.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";

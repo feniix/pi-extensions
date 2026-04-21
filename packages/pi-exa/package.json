@@ -1,7 +1,7 @@
 {
   "name": "@feniix/pi-exa",
-  "version": "3.1.1",
-  "description": "Exa MCP extension for pi — web search, content fetching, and advanced search via Exa AI",
+  "version": "3.2.0",
+  "description": "Exa API extension for pi — web search, content fetching, and advanced search via Exa AI",
   "keywords": [
     "pi",
     "pi-package",
@@ -10,8 +10,7 @@
     "ai",
     "exa",
     "search",
-    "websearch",
-    "mcp"
+    "websearch"
   ],
   "type": "module",
   "files": [
