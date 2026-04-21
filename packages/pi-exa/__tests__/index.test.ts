@@ -78,6 +78,14 @@ describe("pi-exa", () => {
       expect(skill).toContain("web_search_advanced_exa");
       expect(skill).toContain("web_research_exa");
       expect(skill).toContain("web_answer_exa");
+      expect(skill).toContain("web_find_similar_exa");
+    });
+
+    it("personal-site-search explains when to use find-similar vs search", () => {
+      const skill = readFileSync(join(__dirname, "../skills/personal-site-search/SKILL.md"), "utf-8");
+      expect(skill).toContain("find more like this");
+      expect(skill).toContain("web_find_similar_exa");
+      expect(skill).toContain("web_search_exa");
     });
   });
 });
