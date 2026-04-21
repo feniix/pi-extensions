@@ -1,4 +1,8 @@
 import { basename } from "node:path";
+import remarkFrontmatter from "remark-frontmatter";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 import { parseFrontmatterResult } from "./frontmatter.js";
 
 const PRD_REQUIRED_FIELDS = ["title", "prd", "status", "owner", "date", "issue", "version"] as const;
@@ -208,13 +212,6 @@ function getRequiredSections(filepath: string): readonly string[] {
   return [];
 }
 
-function collectHeadings(body: string): string[] {
-  return body
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("## "));
-}
-
 function getDocTypeLabel(filepath: string): "PRD" | "ADR" | "PLAN" | null {
   if (isPrd(filepath)) return "PRD";
   if (isAdr(filepath)) return "ADR";
@@ -223,34 +220,54 @@ function getDocTypeLabel(filepath: string): "PRD" | "ADR" | "PLAN" | null {
 }
 
 function normalizeHeadingText(heading: string): string {
-  return heading.replace(/^##\s+/, "").replace(/^\d+\.\s+/, "").trim();
+  return heading.replace(/^\d+\.\s+/, "").trim();
+}
+
+type MdNode = {
+  type?: string;
+  depth?: number;
+  value?: string;
+  children?: MdNode[];
+};
+
+function extractNodeText(node: MdNode | undefined): string {
+  if (!node) return "";
+  if (typeof node.value === "string") return node.value;
+  if (!Array.isArray(node.children)) return "";
+  return node.children.map((child) => extractNodeText(child)).join("");
+}
+
+function parseMarkdownTree(body: string): MdNode {
+  return unified().use(remarkParse).use(remarkFrontmatter, ["yaml"]).use(remarkGfm).parse(body) as MdNode;
+}
+
+function collectHeadings(body: string): string[] {
+  const tree = parseMarkdownTree(body);
+  const children = Array.isArray(tree.children) ? tree.children : [];
+  return children
+    .filter((node) => node.type === "heading" && node.depth === 2)
+    .map((node) => `## ${extractNodeText(node).trim()}`);
 }
 
 function extractSectionTables(body: string): Map<string, string[]> {
-  const lines = body.split("\n");
+  const tree = parseMarkdownTree(body);
   const tables = new Map<string, string[]>();
+  const children = Array.isArray(tree.children) ? tree.children : [];
   let currentSection = "";
 
-  for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    if (trimmed.startsWith("## ")) {
-      currentSection = normalizeHeadingText(trimmed);
+  for (const node of children) {
+    if (node.type === "heading" && node.depth === 2) {
+      currentSection = normalizeHeadingText(extractNodeText(node));
       continue;
     }
 
-    if (!currentSection || !trimmed.startsWith("|")) {
+    if (!currentSection || node.type !== "table" || !Array.isArray(node.children) || node.children.length === 0) {
       continue;
     }
 
-    const separator = lines[i + 1]?.trim() ?? "";
-    if (!separator.startsWith("|") || !separator.includes("---")) {
-      continue;
-    }
-
-    const headers = trimmed
-      .split("|")
-      .slice(1, -1)
-      .map((cell) => cell.trim());
+    const headerRow = node.children[0];
+    const headerCells = Array.isArray(headerRow?.children) ? headerRow.children : [];
+    const headers = headerCells.map((cell) => extractNodeText(cell).trim());
     tables.set(currentSection, headers);
   }
 

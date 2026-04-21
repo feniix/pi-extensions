@@ -69,6 +69,22 @@ describe("pi-specdocs runtime", () => {
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Frontmatter warnings"), "warning");
   });
 
+  it("warns on invalid architecture filename after write/edit tool results", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-lint-plan-name-"));
+    const filePath = join(base, "docs", "architecture", "architecture-outline.md");
+    mkdirSync(join(base, "docs", "architecture"), { recursive: true });
+    writeFileSync(filePath, "# Invalid plan name\n");
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const toolResult = getEventHandler(mockPi, "tool_result");
+    const notify = vi.fn();
+
+    await toolResult?.({ toolName: "write", input: { file_path: filePath } }, { cwd: base, ui: { notify } });
+
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("plan-*.md pattern"), "warning");
+  });
+
   it("runs specdocs-validate and reports errors/warnings", async () => {
     const base = mkdtempSync(join(tmpdir(), "pi-specdocs-validate-"));
     mkdirSync(join(base, "docs", "prd"), { recursive: true });
@@ -240,5 +256,43 @@ describe("pi-specdocs runtime", () => {
     const updated = readFileSync(filePath, "utf-8");
     expect(updated).toContain('---\n\n# Test\n\n## 1. Problem & Context\n\nBody\n');
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
+  });
+
+  it("formats gfm tables with normalized spacing", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-table-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    const filePath = join(base, "docs", "prd", "PRD-001-test.md");
+    writeFileSync(
+      filePath,
+      '---\ntitle: "Test"\nprd: PRD-001\nstatus: Draft\nowner: Alice\ndate: 2025-01-01\nissue: 1\nversion: 1\n---\n\n# Test\n\n## 1. Problem & Context\n\n|A|B|\n|-|-|\n|1|22|\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
+
+    const updated = readFileSync(filePath, "utf-8");
+    expect(updated).toContain('| A | B  |');
+    expect(updated).toContain('| - | -- |');
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
+  });
+
+  it("reports a clear error when specdocs-format targets malformed frontmatter", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-malformed-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    const filePath = join(base, "docs", "prd", "PRD-001-test.md");
+    writeFileSync(filePath, '---\ntitle: "Broken"\nstatus: [Draft\n---\n# Test\n');
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
+
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("malformed frontmatter"), "error");
   });
 });

@@ -15,6 +15,10 @@ function extractFilePath(input: Record<string, unknown> | undefined): string {
   return (input.file_path as string) || (input.path as string) || "";
 }
 
+function isArchitectureMarkdown(path: string): boolean {
+  return path.includes(`${PLAN_DIR}/`) && path.endsWith(".md");
+}
+
 export async function handleDocLint(
   event: { toolName: string; input?: Record<string, unknown> },
   ctx: ExtensionContext,
@@ -24,15 +28,19 @@ export async function handleDocLint(
   }
 
   const filePath = extractFilePath(event.input);
-  if (!filePath || (!isPrd(filePath) && !isAdr(filePath) && !isPlan(filePath)) || !existsSync(filePath)) {
+  if (!filePath || (!isPrd(filePath) && !isAdr(filePath) && !isPlan(filePath) && !isArchitectureMarkdown(filePath)) || !existsSync(filePath)) {
     return;
   }
 
   const warnings = [...validateFrontmatter(filePath), ...validateRequiredSections(filePath), ...validateRequiredTables(filePath)];
-  const duplicateIssues = typeof ctx.cwd === "string"
-    ? collectDuplicateValidationIssues(getValidationFiles(ctx.cwd), filePath)
-    : [];
-  const messages = [...warnings, ...duplicateIssues.map((issue) => issue.message)];
+  const validationFiles = typeof ctx.cwd === "string" ? getValidationFiles(ctx.cwd) : null;
+  const duplicateIssues = validationFiles ? collectDuplicateValidationIssues(validationFiles, filePath) : [];
+  const architectureFilenameIssues = validationFiles ? collectArchitectureFilenameIssues(validationFiles, filePath) : [];
+  const messages = [
+    ...warnings,
+    ...duplicateIssues.map((issue) => issue.message),
+    ...architectureFilenameIssues.map((issue) => issue.message),
+  ];
 
   if (messages.length > 0) {
     ctx.ui.notify(`[specdocs] Frontmatter warnings:\n${messages.join("\n")}`, "warning");
@@ -137,6 +145,15 @@ function collectFrontmatterIssues(files: ValidationFiles): ValidationIssue[] {
   return issues;
 }
 
+function filterIssuesForChangedFile(issues: ValidationIssue[], changedFilePath?: string): ValidationIssue[] {
+  if (!changedFilePath) {
+    return issues;
+  }
+
+  const changedFilename = basename(changedFilePath);
+  return issues.filter((issue) => issue.message.includes(changedFilename));
+}
+
 function collectDuplicateValidationIssues(files: ValidationFiles, changedFilePath?: string): ValidationIssue[] {
   const issues = [
     ...collectDuplicateNumberIssues({
@@ -155,12 +172,12 @@ function collectDuplicateValidationIssues(files: ValidationFiles, changedFilePat
     }),
   ];
 
-  if (!changedFilePath) {
-    return issues;
-  }
+  return filterIssuesForChangedFile(issues, changedFilePath);
+}
 
-  const changedFilename = basename(changedFilePath);
-  return issues.filter((issue) => issue.message.includes(changedFilename));
+function collectArchitectureFilenameIssues(files: ValidationFiles, changedFilePath?: string): ValidationIssue[] {
+  const issues = collectFilenameIssues(files.planDir, PLAN_DIR, PLAN_FILENAME_PATTERN, "plan-*.md");
+  return filterIssuesForChangedFile(issues, changedFilePath);
 }
 
 function listMarkdownFiles(directory: string): string[] {
