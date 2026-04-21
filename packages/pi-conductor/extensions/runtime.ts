@@ -1,8 +1,28 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
+import type { StopReason } from "@mariozechner/pi-ai";
+import {
+  AuthStorage,
+  createAgentSession,
+  createBashTool,
+  createEditTool,
+  createExtensionRuntime,
+  createFindTool,
+  createGrepTool,
+  createLsTool,
+  createReadTool,
+  createWriteTool,
+  ModelRegistry,
+  SessionManager,
+} from "@mariozechner/pi-coding-agent";
 import { generateWorkerSummaryFromSession } from "./summaries.js";
-import type { WorkerRuntimeState } from "./types.js";
+import type {
+  RuntimeRunContext,
+  RuntimeRunPreflightContext,
+  RuntimeRunResult,
+  WorkerRunStatus,
+  WorkerRuntimeState,
+} from "./types.js";
 
 export interface WorkerRuntimeHandle extends WorkerRuntimeState {
   sessionFile: string | null;
@@ -31,6 +51,148 @@ function buildRuntimeHandle(sessionManager: SessionManager, lastResumedAt: strin
     lastResumedAt,
     sessionFile,
   };
+}
+
+function createMinimalRunResourceLoader() {
+  return {
+    getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
+    getSkills: () => ({ skills: [], diagnostics: [] }),
+    getPrompts: () => ({ prompts: [], diagnostics: [] }),
+    getThemes: () => ({ themes: [], diagnostics: [] }),
+    getAgentsFiles: () => ({ agentsFiles: [] }),
+    getSystemPrompt: () =>
+      [
+        "You are a headless pi-conductor worker run.",
+        "Operate non-interactively.",
+        "Use the available coding tools to inspect and modify the repository in the current working tree.",
+        "Do not rely on slash commands, interactive UI affordances, or conductor management tools.",
+        "Be concise and finish with a short outcome summary.",
+      ].join(" "),
+    getAppendSystemPrompt: () => [],
+    extendResources: () => {},
+    reload: async () => {},
+  };
+}
+
+function getModelRegistryForRun(): ModelRegistry {
+  const authStorage = AuthStorage.create();
+  return ModelRegistry.create(authStorage);
+}
+
+export function mapStopReasonToRunOutcome(stopReason: StopReason): {
+  status: WorkerRunStatus;
+  errorMessage: string | null;
+} {
+  switch (stopReason) {
+    case "stop":
+      return { status: "success", errorMessage: null };
+    case "aborted":
+      return { status: "aborted", errorMessage: null };
+    case "error":
+      return { status: "error", errorMessage: null };
+    case "length":
+      return {
+        status: "error",
+        errorMessage:
+          "Run stopped because the model hit its output or context length limit; shorten or split the task and retry",
+      };
+    case "toolUse":
+      return {
+        status: "error",
+        errorMessage: "Run ended unexpectedly while waiting on tool execution",
+      };
+    default: {
+      const exhaustive: never = stopReason;
+      return exhaustive;
+    }
+  }
+}
+
+export function extractFinalAssistantText(messages: unknown[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index] as { role?: string; content?: unknown } | undefined;
+    if (message?.role !== "assistant") {
+      continue;
+    }
+    const content = Array.isArray(message.content) ? message.content : [];
+    const text = content
+      .flatMap((item) => {
+        const block = item as { type?: string; text?: string };
+        return block.type === "text" && typeof block.text === "string" ? [block.text.trim()] : [];
+      })
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+    return text || null;
+  }
+  return null;
+}
+
+export async function preflightWorkerRunRuntime(_input: RuntimeRunPreflightContext): Promise<void> {
+  const modelRegistry = getModelRegistryForRun();
+  if (modelRegistry.getAvailable().length === 0) {
+    throw new Error("No usable model or provider configuration is available for pi-conductor worker runs");
+  }
+}
+
+export async function runWorkerPromptRuntime(input: RuntimeRunContext): Promise<RuntimeRunResult> {
+  const sessionManager = SessionManager.open(input.sessionFile);
+  const modelRegistry = getModelRegistryForRun();
+  const authStorage = modelRegistry.authStorage;
+  const resourceLoader = createMinimalRunResourceLoader();
+  const { session } = await createAgentSession({
+    cwd: input.worktreePath,
+    sessionManager,
+    authStorage,
+    modelRegistry,
+    resourceLoader,
+    tools: [
+      createReadTool(input.worktreePath),
+      createBashTool(input.worktreePath),
+      createEditTool(input.worktreePath),
+      createWriteTool(input.worktreePath),
+      createGrepTool(input.worktreePath),
+      createFindTool(input.worktreePath),
+      createLsTool(input.worktreePath),
+    ],
+  });
+
+  try {
+    await session.bindExtensions({});
+    await input.onSessionReady?.(session.sessionId);
+
+    await session.prompt(input.task);
+
+    const finalAssistant = [...session.messages].reverse().find((message) => message.role === "assistant");
+    if (!finalAssistant || finalAssistant.role !== "assistant") {
+      return {
+        status: "error",
+        finalText: null,
+        errorMessage: "Run finished without a terminal assistant message",
+        sessionId: session.sessionId,
+      };
+    }
+
+    const mapped = mapStopReasonToRunOutcome(finalAssistant.stopReason);
+    const finalText = extractFinalAssistantText(session.messages);
+    const errorMessage = mapped.errorMessage ?? finalAssistant.errorMessage ?? null;
+
+    return {
+      status: mapped.status,
+      finalText,
+      errorMessage,
+      sessionId: session.sessionId,
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      finalText: null,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      sessionId: session.sessionId,
+    };
+  } finally {
+    session.dispose();
+  }
 }
 
 export async function createWorkerSessionRuntime(worktreePath: string): Promise<WorkerRuntimeHandle> {

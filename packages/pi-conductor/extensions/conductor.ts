@@ -10,24 +10,29 @@ import {
 import { deriveProjectKey } from "./project-key.js";
 import {
   createWorkerSessionRuntime,
+  preflightWorkerRunRuntime,
   recoverWorkerSessionRuntime,
   resumeWorkerSessionRuntime,
+  runWorkerPromptRuntime,
   summarizeWorkerSessionRuntime,
 } from "./runtime.js";
 import {
   addWorker,
   createEmptyRun,
   createWorkerRecord,
+  finishWorkerRun,
   readRun,
   removeWorker,
   setWorkerLifecycle,
   setWorkerPrState,
+  setWorkerRunSessionId,
   setWorkerRuntimeState,
   setWorkerSummary,
   setWorkerTask,
+  startWorkerRun,
   writeRun,
 } from "./storage.js";
-import type { RunRecord, WorkerLifecycleState, WorkerRecord } from "./types.js";
+import type { RunRecord, WorkerLifecycleState, WorkerRecord, WorkerRunResult } from "./types.js";
 import { createWorkerId } from "./workers.js";
 import {
   createManagedWorktree,
@@ -274,6 +279,86 @@ export function createWorkerPrForRepo(
     });
     writeRun(updatedRun);
     throw error;
+  }
+}
+
+export async function runWorkerForRepo(repoRoot: string, workerName: string, task: string): Promise<WorkerRunResult> {
+  const run = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
+  const worker = run.workers.find((entry) => entry.name === workerName);
+  if (!worker) {
+    throw new Error(`Worker named ${workerName} not found`);
+  }
+  if (worker.lifecycle === "broken") {
+    throw new Error(`Worker named ${workerName} is broken and must recover the worker first`);
+  }
+  if (worker.lifecycle === "running") {
+    throw new Error(`Worker named ${workerName} is already running and cannot accept overlapping runs`);
+  }
+  if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
+    throw new Error(`Worker named ${workerName} is missing its session file; recover the worker first`);
+  }
+  if (!worker.worktreePath || !existsSync(worker.worktreePath)) {
+    throw new Error(`Worker named ${workerName} is missing its worktree; recover the worker first`);
+  }
+
+  await preflightWorkerRunRuntime({
+    worktreePath: worker.worktreePath,
+    sessionFile: worker.sessionFile,
+  });
+
+  const runningRun = startWorkerRun(run, worker.workerId, {
+    task,
+    sessionId: null,
+  });
+  writeRun(runningRun);
+
+  let latestRun = runningRun;
+
+  try {
+    const runtimeResult = await runWorkerPromptRuntime({
+      worktreePath: worker.worktreePath,
+      sessionFile: worker.sessionFile,
+      task,
+      onSessionReady: async (sessionId) => {
+        latestRun = setWorkerRunSessionId(latestRun, worker.workerId, sessionId);
+        writeRun(latestRun);
+      },
+    });
+
+    if (
+      runtimeResult.sessionId &&
+      latestRun.workers.find((entry) => entry.workerId === worker.workerId)?.lastRun?.sessionId !==
+        runtimeResult.sessionId
+    ) {
+      latestRun = setWorkerRunSessionId(latestRun, worker.workerId, runtimeResult.sessionId);
+    }
+    const completedRun = finishWorkerRun(latestRun, worker.workerId, {
+      status: runtimeResult.status,
+      errorMessage: runtimeResult.errorMessage,
+    });
+    writeRun(completedRun);
+
+    return {
+      workerName: worker.name,
+      status: runtimeResult.status,
+      finalText: runtimeResult.finalText,
+      errorMessage: runtimeResult.errorMessage,
+      sessionId: runtimeResult.sessionId,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const completedRun = finishWorkerRun(latestRun, worker.workerId, {
+      status: "error",
+      errorMessage: message,
+    });
+    writeRun(completedRun);
+    return {
+      workerName: worker.name,
+      status: "error",
+      finalText: null,
+      errorMessage: message,
+      sessionId: null,
+    };
   }
 }
 

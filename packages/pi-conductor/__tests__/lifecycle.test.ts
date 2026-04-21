@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createWorkerForRepo,
   getOrCreateRunForRepo,
+  recoverWorkerForRepo,
   resumeWorkerForRepo,
   updateWorkerLifecycleForRepo,
 } from "../extensions/conductor.js";
@@ -51,5 +52,44 @@ describe("worker lifecycle flows", () => {
     expect(updateWorkerLifecycleForRepo(repoDir, "backend", "ready_for_pr").lifecycle).toBe("ready_for_pr");
     expect(updateWorkerLifecycleForRepo(repoDir, "backend", "done").lifecycle).toBe("done");
     expect(getOrCreateRunForRepo(repoDir).workers[0]?.lifecycle).toBe("done");
+  });
+
+  it("preserves interrupted lastRun metadata when lifecycle is manually reset or recovered", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const run = getOrCreateRunForRepo(repoDir);
+    const existingWorker = run.workers[0];
+    if (!existingWorker) {
+      throw new Error("expected worker to exist");
+    }
+    run.workers[0] = {
+      ...existingWorker,
+      lifecycle: "running",
+      lastRun: {
+        task: "half finished task",
+        status: null,
+        startedAt: "2026-04-21T00:00:00.000Z",
+        finishedAt: null,
+        errorMessage: null,
+        sessionId: "run-session-stuck",
+      },
+    };
+
+    const { writeRun } = await import("../extensions/storage.js");
+    writeRun(run);
+
+    const reset = updateWorkerLifecycleForRepo(repoDir, "backend", "idle");
+    expect(reset.lifecycle).toBe("idle");
+    expect(reset.lastRun?.finishedAt).toBeNull();
+    expect(reset.lastRun?.status).toBeNull();
+    expect(reset.lastRun?.sessionId).toBe("run-session-stuck");
+
+    if (worker.sessionFile && existsSync(worker.sessionFile)) {
+      rmSync(worker.sessionFile, { force: true });
+    }
+    const recovered = await recoverWorkerForRepo(repoDir, "backend");
+    expect(recovered.lifecycle).toBe("idle");
+    expect(recovered.lastRun?.finishedAt).toBeNull();
+    expect(recovered.lastRun?.status).toBeNull();
+    expect(recovered.lastRun?.sessionId).toBe("run-session-stuck");
   });
 });
