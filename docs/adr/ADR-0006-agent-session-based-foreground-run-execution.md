@@ -2,7 +2,7 @@
 title: "AgentSession-based foreground run execution for pi-conductor"
 adr: ADR-0006
 status: Proposed
-date: 2026-04-20
+date: 2026-04-21
 prd: "PRD-003-pi-conductor-single-worker-run"
 decision: "Use createAgentSession()-based foreground execution for /conductor run while preserving worker continuity through existing SessionManager-backed session lineage"
 ---
@@ -15,7 +15,7 @@ Proposed
 
 ## Date
 
-2026-04-20
+2026-04-21
 
 ## Requirement Source
 
@@ -83,7 +83,7 @@ Skip `createAgentSession()` as the v1 execution path and instead build foregroun
 
 Chosen option: **"Use `createAgentSession()` for foreground execution while reusing persisted lineage"**, because it best satisfies the decision drivers around real prompt execution, continuity of worker state, explicit conductor-owned lifecycle semantics, CI-safe testability, and incremental evolution from the SDK-first architecture established in `ADR-0001`.
 
-In v1, `/conductor run` should open the worker's persisted session lineage through `SessionManager.open(...)`, construct an executable session with `createAgentSession({ sessionManager, cwd })`, bind extensions for headless execution, run the task in the foreground, let `AgentSession` persist session updates incrementally, and then dispose the session cleanly.
+In v1, `/conductor run` should open the worker's persisted session lineage through `SessionManager.open(...)`, construct an executable session with `createAgentSession({ sessionManager, cwd })`, bind extensions for headless execution, run the task in the foreground, let `AgentSession` persist session updates incrementally, and then dispose the session cleanly. The extension binding and preflight policy for that execution path is governed separately by `ADR-0011`.
 
 ## Consequences
 
@@ -99,7 +99,7 @@ In v1, `/conductor run` should open the worker's persisted session lineage throu
 - Run behavior now depends on correct executable-session setup, including extension binding, model/provider preflight handling, and `session.dispose()` cleanup; mitigation is to isolate this behavior in `runtime.ts` and cover it with focused tests
 - The execution path must not reuse the older full-rewrite persistence helper, because `AgentSession` already performs append-only persistence; mitigation is to document and enforce that run execution does not call `persistSessionFile()`
 - Runtime metadata becomes slightly more nuanced because the execution session ID may not match previously persisted worker runtime session IDs; mitigation is to record explicit `lastRun.sessionId` semantics in storage and status output
-- Run outcome detection requires inspecting the raw `session.messages` array for the terminal `stopReason` on the last `AssistantMessage`, as `AgentSession` does not expose a dedicated stopReason accessor; the full `StopReason` union (`stop`, `length`, `toolUse`, `error`, `aborted`) must be exhaustively mapped to conductor run outcomes; mitigation is to define the mapping in `runtime.ts` and cover each branch with tests
+- Run outcome detection requires inspecting the session state message history (for example `session.state.messages`, or `session.agent.state.messages` if the SDK surface requires going through the agent) for the terminal `stopReason` on the last `AssistantMessage`, as `AgentSession` does not expose a dedicated stopReason accessor; the full `StopReason` union (`stop`, `length`, `toolUse`, `error`, `aborted`) must be exhaustively mapped to conductor run outcomes; mitigation is to define the mapping in `runtime.ts` and cover each branch with tests
 
 ### Neutral
 
@@ -108,6 +108,6 @@ In v1, `/conductor run` should open the worker's persisted session lineage throu
 
 ## Related
 
-- **Plan**: `docs/architecture/plan-pi-conductor-mvp.md`
-- **ADRs**: Relates to `ADR-0001`, `ADR-0002`, `ADR-0003`, and `ADR-0007`
+- **Plan**: `docs/architecture/plan-pi-conductor-single-worker-run.md`
+- **ADRs**: Relates to `ADR-0001`, `ADR-0002`, `ADR-0003`, `ADR-0007`, and `ADR-0011`
 - **Implementation**: `docs/prd/PRD-003-pi-conductor-single-worker-run.md`, PR #38 groundwork

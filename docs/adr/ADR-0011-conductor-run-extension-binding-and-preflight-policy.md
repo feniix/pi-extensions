@@ -81,12 +81,16 @@ Worker runs would load most normal project-local extensions through an allowlist
 
 Chosen option: **"Use a conductor-defined minimal headless binding policy with best-effort runtime-owned preflight before mutating worker state to running"**, because it best satisfies the decision drivers around deterministic execution, explicit lifecycle ownership, CI-safe testing, and architectural fit with the existing conductor boundaries.
 
+For terminology, this ADR uses **extension binding/configuration policy** as the umbrella term for the headless-safe runtime setup applied to worker runs. In implementation this may map to a concrete SDK type such as `ExtensionBindings`, resource-loader controls, tool allowlists, or a combination of those mechanisms.
+
 Concretely, the first implementation of `/conductor run` should:
 
 * construct execution sessions through a conductor-owned runtime helper in `runtime.ts`
 * bind a minimal non-interactive set of extensions/bindings suitable for headless worker execution
 * treat the initial worker-run surface as **default deny, explicit allowlist** for runtime-visible capabilities rather than inheriting the full ambient extension environment
 * explicitly **exclude conductor’s own orchestration and state-mutation tools** (for example worker creation, recovery, lifecycle mutation, cleanup, and PR-prep helpers) from the worker-run binding set unless a later decision intentionally allows specific ones
+* enforce that exclusion through an explicit allowlist/filtering mechanism in the worker-run session construction path — preferably by using a resource-loading/configuration path that excludes the conductor extension and narrows runtime-visible capabilities before prompt execution begins; disabling conductor tool names after session construction is an acceptable fallback if the SDK does not provide a cleaner earlier filter
+* prefer construction-time narrowing of both discovered resources and tool surface; use post-construction tool-name filtering only when the SDK cannot express the needed allowlist early enough
 * decide intentionally, rather than implicitly, whether discovered project extensions, skills, prompt templates, and context-file discovery remain enabled, narrowed, or disabled for worker runs
 * perform best-effort model/provider preflight inside that runtime layer
 * treat that runtime preflight as an **early eligibility check before `session.prompt()`**, while still relying on the SDK’s own prompt acceptance/runtime behavior for the actual prompt lifecycle
@@ -94,6 +98,11 @@ Concretely, the first implementation of `/conductor run` should:
 * still catch and translate prompt-time provider/auth failures cleanly, since preflight can only be best-effort
 
 This intentionally does **not** guarantee full parity with ambient Pi sessions in the first phase. It prioritizes explicit, reproducible worker behavior over maximum extension surface area.
+
+Initial allowlist guidance for v1:
+- include the minimum headless-safe coding surface needed for real worker execution, such as file-system and code-analysis capabilities
+- exclude interactive UI-facing capabilities, conductor self-mutation/orchestration tools, and broad ambient prompt-template or discovery behavior unless explicitly justified
+- document the concrete allowlist in the implementation path (`runtime.ts` or adjacent runtime setup code) once the SDK integration details are finalized
 
 ## Consequences
 
@@ -111,7 +120,7 @@ This intentionally does **not** guarantee full parity with ambient Pi sessions i
 * Some useful capabilities may be unavailable in the first iteration — especially project-discovered extensions, nonessential skills, prompt templates, context-file discovery paths, or other repo-local runtime features that are not explicitly allowlisted; mitigation is to treat the binding set as an explicit allowlist that can be expanded intentionally as real gaps appear
 * A best-effort preflight cannot eliminate all prompt-time failures; mitigation is to keep prompt-time error translation and post-failure lifecycle recovery explicit in conductor state, and to treat runtime preflight as an early eligibility screen rather than a guarantee of prompt success
 * The package now owns an execution-policy surface that must be documented and maintained; mitigation is to keep the first policy minimal and non-interactive rather than over-designing it up front
-* The current CLI e2e harness is not sufficient by itself to validate the binding policy, because `packages/pi-conductor/__tests__/cli-e2e.test.ts` currently runs Pi with `--no-extensions`; mitigation is to add focused runtime/unit/integration coverage for binding-policy behavior rather than relying only on the existing CLI e2e path
+* The current CLI e2e harness is not sufficient by itself to validate the binding policy, because `packages/pi-conductor/__tests__/cli-e2e.test.ts` currently runs Pi with `--no-extensions`; mitigation is to add focused runtime/unit/integration coverage for binding-policy behavior, and only add a dedicated CLI e2e variant without `--no-extensions` later if end-to-end validation of the allowlist mechanism proves necessary
 
 ### Neutral
 

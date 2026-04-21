@@ -240,6 +240,39 @@ describe("pi-specdocs runtime", () => {
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Duplicate PRD number: PRD-007"), "warning");
   });
 
+  it("accepts string-style command arguments for specdocs-format", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-string-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    const filePath = join(base, "docs", "prd", "PRD-001-test.md");
+    writeFileSync(
+      filePath,
+      '---\ntitle: "Test"\nprd: PRD-001\nstatus: Draft\nowner: Alice\ndate: 2025-01-01\nissue: 1\nversion: 1\n---\n# Test\n## 1. Problem & Context\nBody\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.("docs/prd/PRD-001-test.md", { cwd: base, ui: { notify } });
+
+    const updated = readFileSync(filePath, "utf-8");
+    expect(updated).toContain("---\n\n# Test\n\n## 1. Problem & Context\n\nBody\n");
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
+  });
+
+  it("reports a clear error when specdocs-format gets a whitespace-only string path", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-whitespace-"));
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.("   ", { cwd: base, ui: { notify } });
+
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("requires a single path argument"), "error");
+  });
+
   it("reports a clear error when specdocs-format targets a nonexistent path", async () => {
     const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-"));
     const mockPi = createMockPi();
@@ -247,7 +280,7 @@ describe("pi-specdocs runtime", () => {
     const handler = getCommandHandler(mockPi, "specdocs-format");
     const notify = vi.fn();
 
-    await handler?.({ path: "docs/prd/PRD-999-missing.md" }, { cwd: base, ui: { notify } });
+    await handler?.("docs/prd/PRD-999-missing.md", { cwd: base, ui: { notify } });
 
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("does not exist"), "error");
   });

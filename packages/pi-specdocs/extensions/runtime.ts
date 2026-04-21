@@ -340,6 +340,27 @@ function resolveCommandPath(cwd: string, path: string): string {
   return path.startsWith("/") ? path : resolve(cwd, path);
 }
 
+function extractCommandPathArg(args: unknown): string {
+  if (typeof args === "string") {
+    return args.trim();
+  }
+
+  if (!args || typeof args !== "object") {
+    return "";
+  }
+
+  const params = args as Record<string, unknown>;
+  if (typeof params.path === "string") {
+    return params.path.trim();
+  }
+
+  if (typeof params.file_path === "string") {
+    return params.file_path.trim();
+  }
+
+  return "";
+}
+
 function isSupportedSpecPath(path: string): boolean {
   return isPrd(path) || isAdr(path) || isPlan(path);
 }
@@ -415,9 +436,7 @@ async function formatSpecDocument(content: string): Promise<string> {
 }
 
 export async function runFormat(args: unknown, ctx: { cwd: string } & ExtensionContext): Promise<void> {
-  const params = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
-  const rawPath =
-    typeof params.path === "string" ? params.path : typeof params.file_path === "string" ? params.file_path : "";
+  const rawPath = extractCommandPathArg(args);
   if (!rawPath) {
     ctx.ui.notify("[specdocs] specdocs-format requires a single path argument.", "error");
     return;

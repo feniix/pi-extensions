@@ -30,7 +30,7 @@ The safest rollout is to implement the run feature in five layers: storage/type 
 
 **Key Details**:
 
-* Add a `lastRun` object to `WorkerRecord` capturing `task`, `status`, `startedAt`, `finishedAt`, `errorMessage`, and run-time `sessionId`.
+* Add a `lastRun` object to `WorkerRecord` capturing `task`, `status`, `startedAt`, `finishedAt`, `errorMessage`, and run-time `sessionId`, with `status: null` representing a run that has started but has not yet reached a terminal outcome.
 * Normalize missing `lastRun` values in `readRun()` so existing worker records created under `0.2.0` continue loading safely.
 * Add storage helpers for the run lifecycle instead of overloading `setWorkerTask()` + `setWorkerLifecycle()` in ways that pass through `idle`.
 * Preserve current summary-staleness behavior by marking summaries stale when the accepted run updates `currentTask`.
@@ -43,7 +43,7 @@ The safest rollout is to implement the run feature in five layers: storage/type 
 
 **Key Details**:
 
-* Add a dedicated runtime path in `runtime.ts` that opens `SessionManager.open(sessionFile)`, constructs `createAgentSession({ sessionManager, cwd: worktreePath })`, binds minimal non-interactive extensions, calls `session.prompt(task)`, extracts the final assistant text, maps terminal `stopReason`, and disposes the session.
+* Add a dedicated runtime path in `runtime.ts` that opens `SessionManager.open(sessionFile)`, constructs `createAgentSession({ sessionManager, cwd: worktreePath })`, applies the minimal non-interactive extension-binding/configuration policy described by ADR-0011, calls `session.prompt(task)`, extracts the final assistant text, maps terminal `stopReason`, and disposes the session.
 * Keep the existing create/resume/recover/summarize SessionManager helpers intact; execution should be a new seam rather than a rewrite of all runtime behavior.
 * Explicitly avoid `persistSessionFile()` on the execution path because `AgentSession` already performs append-only persistence.
 * Include best-effort preflight for model/provider availability before mutating worker state to `running`.
@@ -58,8 +58,8 @@ The safest rollout is to implement the run feature in five layers: storage/type 
 
 * Add a conductor-level entrypoint such as `runWorkerForRepo(repoRoot, workerName, task)` that is the single orchestrator for the feature.
 * Reject workers that are missing, `broken`, missing worktree/session files, or already marked `running`.
-* Update `currentTask` only after preflight succeeds, then atomically move the worker into `running` with `lastRun.finishedAt = null` before execution begins.
-* Normalize post-run state to `idle` on success/abort and `blocked` on error; persist `lastRun` in all terminal outcomes.
+* Update `currentTask` only after preflight succeeds, then atomically move the worker into `running` with `lastRun.status = null` and `lastRun.finishedAt = null` before execution begins.
+* Normalize post-run state to `idle` on success/abort and `blocked` on error; complete the already-initialized `lastRun` record in all terminal outcomes by filling in the final status and `finishedAt`.
 * Leave crash-mid-run handling manual for this phase; preserve the persisted `running` + `finishedAt: null` signal so `/conductor state` or `/conductor recover` can repair it.
 
 **ADR Reference**: None — orchestration policy follows the PRD and existing conductor boundaries
@@ -72,7 +72,7 @@ The safest rollout is to implement the run feature in five layers: storage/type 
 
 * Extend `/conductor` with `run <worker-name> <task>` in `commands.ts`.
 * Register a matching `conductor_run` tool in `index.ts` rather than composing lower-level tools externally.
-* Extend `status.ts` so `formatRunStatus()` displays `lastRun` metadata coherently, especially active/stuck `running` state, post-run outcomes, and run-specific session ids.
+* Extend the existing `formatRunStatus()` in `status.ts` so per-worker output includes `lastRun` metadata coherently, especially active/stuck `running` state, post-run outcomes, and run-specific session ids.
 * Keep the surface intentionally narrow: no concurrent run orchestration, no background worker management, and no automatic summary refresh.
 
 **ADR Reference**: `-> ADR-0007: Single-worker foreground run before multi-worker orchestration`
@@ -98,7 +98,7 @@ The safest rollout is to implement the run feature in five layers: storage/type 
 
 * Update `packages/pi-conductor/README.md` to explain the new `/conductor run` scope and the fact that it is synchronous foreground execution, not an always-on worker loop.
 * Keep `docs/prd/PRD-003-pi-conductor-single-worker-run.md` as the requirements source and update this plan if runtime details diverge materially during implementation.
-* If implementation settles the execution-surface policy around extension binding or model/preflight behavior in a lasting way, consider a follow-up ADR.
+* Follow `ADR-0011` for the execution-surface policy around extension binding and model/preflight behavior; update that ADR only if implementation materially diverges from the accepted direction.
 
 **ADR Reference**: None — documentation alignment work
 
@@ -109,7 +109,7 @@ The safest rollout is to implement the run feature in five layers: storage/type 
 | 1     | Run State Model and Backward-Compatible Storage     | None             | M               |
 | 2     | Executable Runtime Seam                             | Phase 1          | L               |
 | 3     | Run Orchestration and Lifecycle Transitions         | Phase 1, 2       | L               |
-| 4     | Command, Tool, and Status Surface                   | Phase 2, 3       | M               |
+| 4     | Command, Tool, and Status Surface                   | Phase 1, 2, 3    | M               |
 | 5     | Test and Opt-in CLI Coverage                        | Phase 1, 2, 3, 4 | L               |
 | 6     | Operator Documentation and Follow-on Spec Alignment | Phase 4, 5       | S               |
 
@@ -126,7 +126,7 @@ The safest rollout is to implement the run feature in five layers: storage/type 
 ### Code dependencies
 
 * `packages/pi-conductor/extensions/types.ts` and `storage.ts` must stabilize the `lastRun` model before status or orchestration code can rely on it.
-* `packages/pi-conductor/extensions/runtime.ts` depends on Pi SDK executable session APIs being available through `@mariozechner/pi-coding-agent` in this workspace.
+* `packages/pi-conductor/extensions/runtime.ts` depends on Pi SDK executable session APIs being available through `@mariozechner/pi-coding-agent` in this workspace; in practice this means adding new `createAgentSession`-level imports to `runtime.ts`, not adding a new package dependency.
 * `packages/pi-conductor/extensions/conductor.ts` depends on both storage helpers and the new runtime execution seam.
 * `packages/pi-conductor/extensions/index.ts` and `commands.ts` depend on a stable conductor entrypoint for the run workflow.
 
@@ -140,7 +140,7 @@ The safest rollout is to implement the run feature in five layers: storage/type 
 
 * Parts of Phase 5 test coverage can begin as soon as Phase 1 types/storage helpers land.
 * README updates and minor command-surface documentation can draft in parallel with late-phase test work, but should not merge until behavior is final.
-* If a new ADR is needed for extension-binding/model-preflight policy, that discussion can happen in parallel with Phases 3–4 once implementation pressure becomes concrete.
+* Any material implementation divergence from `ADR-0011` can be discussed in parallel with Phases 3–4, but the current plan assumes `ADR-0011` remains the governing policy.
 
 ## Risks and Mitigations
 
@@ -155,8 +155,8 @@ The safest rollout is to implement the run feature in five layers: storage/type 
 
 ## Open Questions
 
-* What exact minimal extension binding set should conductor use for headless worker runs: all normal repo extensions, a curated subset, or a dedicated binding policy?
-* Should runtime preflight live entirely in `runtime.ts`, or should conductor own a distinct “can this worker run now?” orchestration helper for clearer failure semantics?
+* **Resolved by ADR-0011:** Worker runs should use a curated minimal headless binding policy rather than broad ambient inheritance.
+* **Resolved by ADR-0011:** Runtime preflight should live in `runtime.ts` as an early eligibility check before conductor persists `running`.
 * How much `lastRun` detail should `formatRunStatus()` display inline before status becomes too verbose for multi-worker projects?
 * Should a future stale-run heuristic be time-based, heartbeat-based, or session-activity-based once foreground execution ships and operators start hitting stuck `running` states?
 
