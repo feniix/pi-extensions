@@ -28,7 +28,7 @@ Use the richest available input source in this order:
 3. interactive questions for anything still missing
 
 Treat the input as one of:
-- **PRD path** — read the PRD and review its Design Decisions section for ADR candidates
+- **PRD path** — read the PRD, start with its Design Decisions section, then scan functional requirements, risks, and open questions for ADR candidates
 - **Plan path** — read the implementation plan and extract candidate decisions from components, risks, and ADR tables
 - **Decision description** — evaluate the described decision directly
 - **No explicit input** — ask what decision needs to be made and why now
@@ -43,7 +43,36 @@ Make sure you understand:
 - what constraints are in play
 - which PRD, plan, issue, or initiative created the pressure for this decision
 
-If given a PRD or plan, extract candidate decisions and score them against the 4-point test before drafting. If several candidates qualify, present them clearly and let the user choose one or ask whether to create all of them.
+**Mandatory PRD/plan screening step:**
+If the input is a PRD path or plan path, do **not** draft or save an ADR immediately.
+
+First:
+1. extract candidate decisions from the document
+2. score each candidate against the 4-point test
+3. present the candidates in a table
+4. recommend which candidates qualify for standalone ADRs
+5. ask the user which candidate(s) to draft
+
+Use this table format:
+
+| Candidate | Multiple approaches | Lasting consequences | Disagreement potential | Future constraints | Recommendation |
+|-----------|---------------------|----------------------|------------------------|-------------------|----------------|
+
+Mark each criterion as `Yes` or `No`, and briefly justify borderline cases when needed.
+
+If exactly one candidate qualifies, still present it with its 4-point-test result and ask for confirmation before drafting.
+
+Only skip this screening/confirmation step if:
+- the user explicitly names the exact decision to document, or
+- the user explicitly says to draft all qualifying ADRs.
+
+A PRD or plan path by itself is not an explicit decision. The named decision must be specific enough to distinguish one candidate from other plausible ADRs in the document.
+
+For PRD or plan inputs, the first response must stop after candidate analysis and the user-choice question. Do not include draft ADR content in that first response.
+
+If no candidates qualify, do not draft an ADR. Explain why and recommend capturing the decision in the PRD or plan instead.
+
+When the input is a PRD or plan, recommendation is allowed; silent selection is not.
 
 ### 2. Gather local context
 
@@ -89,6 +118,11 @@ Use the shared document conventions to determine the next ADR number and write t
 
 `docs/adr/ADR-NNNN-slug.md`
 
+Do not save the ADR until:
+- the user selected the candidate, or
+- the user explicitly authorized drafting all qualifying candidates, or
+- the input already specified the exact decision to document.
+
 Always report the file path and summarize the recommendation.
 
 ### 6. Cross-reference carefully
@@ -109,9 +143,21 @@ If the user wants issue links, publication, or tracker context:
 
 Default to GitHub if no tracker config exists and the user does not choose otherwise.
 
+## Pre-save checklist
+
+Before drafting or saving an ADR, verify:
+- [ ] I determined whether the input was a PRD path, plan path, explicit decision description, or no explicit input
+- [ ] If it was a PRD or plan, I extracted candidate decisions
+- [ ] If it was a PRD or plan, I scored candidates with the 4-point test
+- [ ] If it was a PRD or plan, I showed the candidate list to the user in the required 4-point-test table format
+- [ ] I got confirmation on which candidate(s) to draft, unless the user explicitly requested all or named the exact decision
+
+If any box is unchecked, stop and ask the user instead of drafting.
+
 ## Workflow principles
 
 - Use the 4-point test to avoid creating ADRs for trivial implementation details
+- For PRD or plan inputs, the default first response should be candidate analysis, not a finished ADR
 - Prefer repository evidence over generic architecture folklore
 - Capture the reasoning people will forget later, not the facts that are obvious from the code
 - Be honest about trade-offs; a persuasive ADR with no downsides is usually not credible
