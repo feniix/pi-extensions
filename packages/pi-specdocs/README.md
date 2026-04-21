@@ -10,7 +10,7 @@ Structured spec documentation workflow for [pi](https://pi.dev/) — PRDs, ADRs,
 - **Architect Prompt** (`/architect`): End-to-end initiative planning — assess feasibility, decompose into workstreams, produce artifacts
 - **Refine Prompt** (`/refine`): Deep review of PRDs/ADRs for risks, bugs, ambiguities, errors, and inconsistencies
 - **Session Hook**: Automatically scans `docs/` on session start and displays a summary of existing spec documents
-- **Validation Command** (`specdocs-validate`): Checks spec docs for frontmatter, required sections/tables, numbering, duplicate IDs, and plan filename issues
+- **Validation Command** (`specdocs-validate`): Checks spec docs for typed frontmatter validity, required sections/tables, numbering, duplicate IDs, and plan filename issues
 - **Formatting Command** (`specdocs-format <path>`): Normalizes supported spec documents in-process without external tools while preserving common GFM constructs
 
 ## Install
@@ -61,6 +61,9 @@ Deep review of a PRD or ADR. Validates against the codebase, researches external
 
 - `specdocs-validate` — validate spec documents in the workspace
 - `specdocs-format <path>` — format a PRD, ADR, or plan document in place
+  - validates typed frontmatter, required headings, and required table shapes
+  - plan docs also warn on missing recommended sections such as `Risks and Mitigations` and `Open Questions`
+  - duplicate PRD/ADR numbers and invalid direct-child plan filenames are surfaced in workspace validation
   - normalizes frontmatter fences and section spacing
   - normalizes GFM table spacing/alignment
   - preserves thematic breaks, task lists, and other common GFM syntax
@@ -81,6 +84,20 @@ On session start, the extension scans `docs/prd/`, `docs/adr/`, and `docs/archit
 - Count of existing PRDs, ADRs, and plans
 - Proposed ADRs needing review
 - Draft PRDs still in progress
+
+## Performance verification
+
+A reproducible local benchmark is included for the PRD-004 validation targets.
+
+Run it from `packages/pi-specdocs/`:
+
+```bash
+npm run perf:validation
+```
+
+Latest recorded local measurement in this repo:
+- single-file validation: ~7.41 ms
+- workspace validation (25 docs): ~19.14 ms
 
 ## Requirements
 

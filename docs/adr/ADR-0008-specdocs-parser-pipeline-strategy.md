@@ -1,7 +1,7 @@
 ---
 title: "Specdocs parser pipeline strategy"
 adr: ADR-0008
-status: Proposed
+status: Accepted
 date: 2026-04-21
 prd: "PRD-004-pi-specdocs-in-process-markdown-linting"
 decision: "Use an in-process unified/remark-based parser pipeline as the preferred parser stack"
@@ -11,7 +11,7 @@ decision: "Use an in-process unified/remark-based parser pipeline as the preferr
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 

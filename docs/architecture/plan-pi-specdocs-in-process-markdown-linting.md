@@ -3,7 +3,7 @@ title: "pi-specdocs in-process markdown linting and formatting"
 prd: "PRD-004-pi-specdocs-in-process-markdown-linting"
 date: 2026-04-21
 author: "Pi"
-status: Draft
+status: Implemented
 ---
 
 # Plan: pi-specdocs in-process markdown linting and formatting
@@ -16,11 +16,11 @@ status: Draft
 
 ## Architecture Overview
 
-This work should reshape `@feniix/pi-specdocs` around a two-layer document pipeline: a shared in-process parsing layer that produces structured document data for spec artifacts, and a specdocs-specific semantic layer that validates and formats PRDs, ADRs, and plans using repository rules. That architecture is already directionally established by the PRD and the existing ADRs: use a unified/remark-style parser pipeline for Markdown structure (`ADR-0008`), keep repo-specific rules separate from parser infrastructure (`ADR-0009`), and expose formatting only through an explicit `specdocs-format` command in the first release (`ADR-0010`).
+This work reshaped `@feniix/pi-specdocs` around a two-layer document pipeline: a shared in-process parsing layer that produces structured document data for spec artifacts, and a specdocs-specific semantic layer that validates and formats PRDs, ADRs, and plans using repository rules. The implemented architecture follows the PRD and the related ADRs: a unified/remark-style parser pipeline for Markdown structure (`ADR-0008`), repo-specific rules separated from parser infrastructure (`ADR-0009`), and formatting exposed only through an explicit `specdocs-format` command in the first release (`ADR-0010`).
 
-In the current codebase, the validation path is split across `extensions/frontmatter.ts`, `extensions/spec-validation.ts`, `extensions/runtime.ts`, and `extensions/workspace-scan.ts`, with most logic built on manual line parsing and filename checks. The implementation should preserve the existing extension shape rather than introducing a new subsystem: `frontmatter.ts` becomes the parser and normalization entry point, `spec-validation.ts` becomes the semantic rule engine, `runtime.ts` remains the orchestrator for post-tool linting and commands, and `workspace-scan.ts` continues to handle lightweight workspace summaries and tracker config behavior. The key change is that those modules should stop reasoning from raw strings and instead operate on a stable parsed document representation.
+In the shipped codebase, the validation path is split across `extensions/frontmatter.ts`, `extensions/spec-validation.ts`, `extensions/runtime.ts`, and `extensions/workspace-scan.ts`, with parsing and validation now centered on parser-backed frontmatter handling, markdown AST traversal, typed/schema-backed frontmatter checks, required section and table validation, plan-specific linting, and explicit formatting. `runtime.ts` remains the orchestrator for post-tool linting and commands, while `workspace-scan.ts` continues to handle lightweight workspace summaries and tracker config behavior.
 
-The safest delivery path is to build the parser-backed model first, then migrate validation in layers, then add formatting last. Validation touches session-start summaries, `tool_result` notifications, and workspace-wide command output, so the plan favors sequencing that keeps each stage testable and shippable. The formatter should be intentionally narrow in scope and reuse the same parsed representation so that rewrite safety, no-op detection, and future extensibility all rest on the same document model instead of a second formatting-only implementation.
+The implemented delivery path followed the intended sequencing closely: parser-backed model first, validation migration next, and formatting last. Validation continues to cover session-start summaries, `tool_result` notifications, and workspace-wide command output. A local benchmark pass against representative fixtures also confirmed the PRD performance targets: single-file validation `7.41 ms` and workspace validation over 25 docs `19.14 ms`.
 
 ## Components
 
@@ -232,8 +232,8 @@ Decisions made or relied on during this plan:
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [ADR-0008](../adr/ADR-0008-specdocs-parser-pipeline-strategy.md) | Specdocs parser pipeline strategy | Proposed |
-| [ADR-0009](../adr/ADR-0009-specdocs-validation-layering-strategy.md) | Specdocs validation layering strategy | Proposed |
-| [ADR-0010](../adr/ADR-0010-specdocs-formatting-activation-model.md) | Specdocs formatting activation model | Proposed |
+| [ADR-0008](../adr/ADR-0008-specdocs-parser-pipeline-strategy.md) | Specdocs parser pipeline strategy | Accepted |
+| [ADR-0009](../adr/ADR-0009-specdocs-validation-layering-strategy.md) | Specdocs validation layering strategy | Accepted |
+| [ADR-0010](../adr/ADR-0010-specdocs-formatting-activation-model.md) | Specdocs formatting activation model | Accepted |
 
 No additional ADRs are required immediately beyond the three already created from PRD-004. If implementation uncovers a durable decision around parsed-document adapters/module boundaries or formatter serialization strategy that constrains future document types, that would be a reasonable follow-up ADR candidate.
