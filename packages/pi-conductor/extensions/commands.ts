@@ -9,6 +9,7 @@ import {
   refreshWorkerSummaryForRepo,
   removeWorkerForRepo,
   resumeWorkerForRepo,
+  runWorkerForRepo,
   updateWorkerLifecycleForRepo,
   updateWorkerTaskForRepo,
 } from "./conductor.js";
@@ -21,6 +22,7 @@ function getUsage(): string {
     "  /conductor start <worker-name>",
     "  /conductor task <worker-name> <task>",
     "  /conductor resume <worker-name>",
+    "  /conductor run <worker-name> <task>",
     "  /conductor state <worker-name> <lifecycle>",
     "  /conductor recover <worker-name>",
     "  /conductor summarize <worker-name>",
@@ -65,6 +67,16 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
     }
     const worker = await resumeWorkerForRepo(cwd, workerName);
     return `resumed worker ${worker.name}: session=${worker.sessionFile}`;
+  }
+  if (subcommand === "run") {
+    const [workerName, ...taskParts] = rest;
+    const task = taskParts.join(" ").trim();
+    if (!workerName || !task) {
+      return `${getUsage()}\n\nerror: missing worker name or task`;
+    }
+    const result = await runWorkerForRepo(cwd, workerName, task);
+    const summary = result.finalText ?? result.errorMessage ?? "Run completed without a final assistant summary";
+    return `ran worker ${result.workerName}: outcome=${result.status} result=${summary}`;
   }
   if (subcommand === "state") {
     const [workerName, lifecycle] = rest;
