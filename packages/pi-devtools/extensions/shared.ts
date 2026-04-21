@@ -15,11 +15,18 @@ export function successResult(text: string, details: Record<string, unknown>): T
   };
 }
 
-export function errorResult(prefix: string, error: unknown, details: Record<string, unknown> = {}): ToolResult {
-  const message = error instanceof Error ? error.message : String(error);
+export function errorResult(text: string, error: unknown, details: Record<string, unknown> = {}): ToolResult {
+  if (error instanceof Error) {
+    return {
+      content: [{ type: "text", text: `${text}: ${error.message}` }],
+      isError: true,
+      details: { ...details, error: error.message },
+    };
+  }
+  const code = String(error);
   return {
-    content: [{ type: "text", text: `${prefix}: ${message}` }],
+    content: [{ type: "text", text }],
     isError: true,
-    details: { ...details, error: message },
+    details: { ...details, error: code },
   };
 }
