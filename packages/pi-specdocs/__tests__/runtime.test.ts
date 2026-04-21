@@ -102,7 +102,10 @@ describe("pi-specdocs runtime", () => {
     await toolResult?.({ toolName: "write", input: { file_path: filePath } }, { cwd: base, ui: { notify } });
 
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Missing required section: ## ADR Index"), "warning");
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Missing required table in section ADR Index"), "warning");
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("Missing required table in section ADR Index"),
+      "warning",
+    );
   });
 
   it("runs specdocs-validate and reports errors/warnings", async () => {
@@ -143,7 +146,9 @@ describe("pi-specdocs runtime", () => {
       "error",
     );
     expect(notify).toHaveBeenCalledWith(
-      expect.stringContaining("docs/architecture/architecture-outline.md\n    ✗ filename doesn't match plan-*.md pattern"),
+      expect.stringContaining(
+        "docs/architecture/architecture-outline.md\n    ✗ filename doesn't match plan-*.md pattern",
+      ),
       "error",
     );
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("PLAN"), "error");
@@ -296,7 +301,7 @@ describe("pi-specdocs runtime", () => {
     await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
 
     const updated = readFileSync(filePath, "utf-8");
-    expect(updated).toContain('---\n\n# Test\n\n## 1. Problem & Context\n\nBody\n');
+    expect(updated).toContain("---\n\n# Test\n\n## 1. Problem & Context\n\nBody\n");
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
   });
 
@@ -317,8 +322,8 @@ describe("pi-specdocs runtime", () => {
     await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
 
     const updated = readFileSync(filePath, "utf-8");
-    expect(updated).toContain('| A | B  |');
-    expect(updated).toContain('| - | -- |');
+    expect(updated).toContain("| A | B  |");
+    expect(updated).toContain("| - | -- |");
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
   });
 
@@ -339,7 +344,7 @@ describe("pi-specdocs runtime", () => {
     await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
 
     const updated = readFileSync(filePath, "utf-8");
-    expect(updated).toContain('# Test\n\n---\n\n## 1. Problem & Context');
+    expect(updated).toContain("# Test\n\n---\n\n## 1. Problem & Context");
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
   });
 
@@ -360,9 +365,9 @@ describe("pi-specdocs runtime", () => {
     await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
 
     const updated = readFileSync(filePath, "utf-8");
-    expect(updated).toContain('[x] done');
-    expect(updated).toContain('[ ] todo');
-    expect(updated).toContain('~~old~~ text');
+    expect(updated).toContain("[x] done");
+    expect(updated).toContain("[ ] todo");
+    expect(updated).toContain("~~old~~ text");
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
   });
 

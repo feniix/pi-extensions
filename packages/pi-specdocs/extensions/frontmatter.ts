@@ -51,7 +51,10 @@ export function parseFrontmatterResult(filepath: string): FrontmatterParseResult
     }
 
     const fields = Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [key, value == null ? "" : String(value)]),
+      Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [
+        key,
+        value == null ? "" : String(value),
+      ]),
     );
     return { fields, error: null, content, body };
   } catch (error) {

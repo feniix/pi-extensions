@@ -6,8 +6,16 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkStringify from "remark-stringify";
 import { unified } from "unified";
-import { ADR_FILENAME_PATTERN, isAdr, isPlan, isPrd, PLAN_FILENAME_PATTERN, PRD_FILENAME_PATTERN, validateSpecFile } from "./spec-validation.js";
 import { parseFrontmatterResult } from "./frontmatter.js";
+import {
+  ADR_FILENAME_PATTERN,
+  isAdr,
+  isPlan,
+  isPrd,
+  PLAN_FILENAME_PATTERN,
+  PRD_FILENAME_PATTERN,
+  validateSpecFile,
+} from "./spec-validation.js";
 import { ADR_DIR, listMatchingFiles, PLAN_DIR, PRD_DIR } from "./workspace-scan.js";
 
 function extractFilePath(input: Record<string, unknown> | undefined): string {
@@ -28,14 +36,20 @@ export async function handleDocLint(
   }
 
   const filePath = extractFilePath(event.input);
-  if (!filePath || (!isPrd(filePath) && !isAdr(filePath) && !isPlan(filePath) && !isArchitectureMarkdown(filePath)) || !existsSync(filePath)) {
+  if (
+    !filePath ||
+    (!isPrd(filePath) && !isAdr(filePath) && !isPlan(filePath) && !isArchitectureMarkdown(filePath)) ||
+    !existsSync(filePath)
+  ) {
     return;
   }
 
   const warnings = validateSpecFile(filePath);
   const validationFiles = typeof ctx.cwd === "string" ? getValidationFiles(ctx.cwd) : null;
   const duplicateIssues = validationFiles ? collectDuplicateValidationIssues(validationFiles, filePath) : [];
-  const architectureFilenameIssues = validationFiles ? collectArchitectureFilenameIssues(validationFiles, filePath) : [];
+  const architectureFilenameIssues = validationFiles
+    ? collectArchitectureFilenameIssues(validationFiles, filePath)
+    : [];
   const messages = [
     ...warnings,
     ...duplicateIssues.map((issue) => issue.message),
@@ -377,16 +391,16 @@ async function formatSpecDocument(content: string): Promise<string> {
     }
     return line.replace(/[\t ]+$/g, "");
   });
-  const bodyLines = normalizeBodyLines(lines.slice(closingIndex + 1).filter((line, index, arr) => !(index === 0 && line.trim() === "" && arr.length > 0)));
+  const bodyLines = normalizeBodyLines(
+    lines.slice(closingIndex + 1).filter((line, index, arr) => !(index === 0 && line.trim() === "" && arr.length > 0)),
+  );
   return `${frontmatterLines.join("\n")}\n\n${bodyLines.join("\n")}\n`;
 }
 
-export async function runFormat(
-  args: unknown,
-  ctx: { cwd: string } & ExtensionContext,
-): Promise<void> {
+export async function runFormat(args: unknown, ctx: { cwd: string } & ExtensionContext): Promise<void> {
   const params = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
-  const rawPath = typeof params.path === "string" ? params.path : typeof params.file_path === "string" ? params.file_path : "";
+  const rawPath =
+    typeof params.path === "string" ? params.path : typeof params.file_path === "string" ? params.file_path : "";
   if (!rawPath) {
     ctx.ui.notify("[specdocs] specdocs-format requires a single path argument.", "error");
     return;

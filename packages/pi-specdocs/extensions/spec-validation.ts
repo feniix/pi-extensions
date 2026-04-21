@@ -179,10 +179,7 @@ function collectPlanWarnings(fields: Record<string, string>, warnings: string[])
   }
 }
 
-function validateFrontmatterFromResult(
-  filepath: string,
-  result: ReturnType<typeof parseFrontmatterResult>,
-): string[] {
+function validateFrontmatterFromResult(filepath: string, result: ReturnType<typeof parseFrontmatterResult>): string[] {
   const config = getDocValidationConfig(filepath);
   if (!config) {
     return [];
