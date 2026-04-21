@@ -10,16 +10,15 @@ Deep review of a spec document (PRD or ADR) for risks, bugs, ambiguities, errors
 
 ## Tool Strategy
 
-Use MCP tools as the primary means of investigation. Fall back to built-in tools only when the corresponding MCP server is not connected.
+Use direct repository evidence first, then external research only when it materially improves the review.
 
-- **serena** — primary tool for codebase investigation. Key tools:
-  - `list_dir`, `find_file`, `search_for_pattern` — navigate the project structure and find relevant files
-  - `find_symbol`, `get_symbols_overview`, `find_referencing_symbols` — trace symbol references and understand module relationships
-  - `read_file` — read full files when symbol-level tools aren't precise enough
-- **code-reasoning** (`code-reasoning`) — reason through complex dependency chains and architectural implications that aren't obvious from reading code alone.
-- **exa** (`web_search_exa`, `get_code_context_exa`) — web research on technology claims and known issues.
+- **Built-in file and search tools** — primary tools for codebase investigation:
+  - `read` — inspect the target document, related docs, configs, and source files
+  - `bash` — use `find`, `rg`, and directory listing to locate files, references, and implementation patterns
+- **code-reasoning** (`code_reasoning`) — reason through complex dependency chains and architectural implications that aren't obvious from direct file inspection.
+- **exa** (`web_search_exa`, `web_search_advanced_exa`, and `web_fetch_exa` when reading a found page matters) — web research on technology claims, examples, and known issues.
 - **ref** (`ref_search_documentation`, `ref_read_url`) — verify referenced standards, specifications, and library documentation.
-- **sequential-thinking** (`process_thought`, `generate_summary`, `clear_history`) — work through the review systematically.
+- **sequential-thinking** (`process_thought`, `generate_summary`, `clear_history`) — work through the review systematically when the document or dependency surface is large.
 
 ## Input
 
@@ -33,9 +32,9 @@ Read the document fully. Determine whether it's a PRD or ADR from its structure 
 
 ### 2. Research and Validate
 
-Before flagging issues, do the homework. Use **sequential-thinking** to structure your approach — identify what needs checking, work through it methodically, and track what you've verified vs what remains.
+Before flagging issues, do the homework. Use **sequential-thinking** to structure your approach when helpful — identify what needs checking, work through it methodically, and track what you've verified vs what remains.
 
-- **Codebase validation** — use **serena** to verify that file paths actually exist, that referenced modules behave as described, and that the blast radius is accurately captured. Use **code-reasoning** when you encounter complex dependency chains.
+- **Codebase validation** — use `read` and `bash` to verify that file paths actually exist, that referenced modules behave as described, and that the blast radius is accurately captured. Use **code-reasoning** when you encounter complex dependency chains.
 - **External research** — use **exa** and **ref** to validate technology claims, check for known issues with proposed approaches, and verify that referenced standards or specifications are current.
 
 ### 3. Analyze by Category
