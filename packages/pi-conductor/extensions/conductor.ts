@@ -316,7 +316,6 @@ export async function runWorkerForRepo(repoRoot: string, workerName: string, tas
   // single foreground run can durably record the execution session id before the
   // prompt completes. This path is single-session and single-threaded.
   let latestRun = runningRun;
-  let originalRuntimeError: Error | null = null;
 
   try {
     const runtimeResult = await runWorkerPromptRuntime({
@@ -350,8 +349,7 @@ export async function runWorkerForRepo(repoRoot: string, workerName: string, tas
       sessionId: runtimeResult.sessionId,
     };
   } catch (error) {
-    originalRuntimeError = error instanceof Error ? error : new Error(String(error));
-    const message = originalRuntimeError.message;
+    const message = error instanceof Error ? error.message : String(error);
 
     try {
       const completedRun = finishWorkerRun(latestRun, worker.workerId, {

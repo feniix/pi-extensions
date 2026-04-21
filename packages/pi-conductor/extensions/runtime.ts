@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { StopReason } from "@mariozechner/pi-ai";
+import type { AssistantMessage, StopReason } from "@mariozechner/pi-ai";
 import {
   AuthStorage,
   createAgentSession,
@@ -108,10 +108,16 @@ export function mapStopReasonToRunOutcome(stopReason: StopReason): {
   }
 }
 
+function isAssistantMessage(message: unknown): message is AssistantMessage {
+  return typeof message === "object" && message !== null && "role" in message && message.role === "assistant";
+}
+
 export function extractFinalAssistantText(messages: unknown[]): string | null {
   // AgentSession.messages contains a broader union than the final assistant-shaping
-  // logic actually needs here, so keep the helper intentionally loose and extract
-  // only the assistant text blocks conductor cares about for operator summaries.
+  // logic actually needs here, and it may include non-assistant or even malformed
+  // entries from conductor's point of view. Keep the helper intentionally loose
+  // and extract only the assistant text blocks conductor cares about for operator
+  // summaries.
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index] as { role?: string; content?: unknown } | undefined;
     if (message?.role !== "assistant") {
@@ -173,8 +179,8 @@ export async function runWorkerPromptRuntime(input: RuntimeRunContext): Promise<
 
     await session.prompt(input.task);
 
-    const finalAssistant = [...session.messages].reverse().find((message) => message.role === "assistant");
-    if (!finalAssistant || finalAssistant.role !== "assistant") {
+    const finalAssistant = [...session.messages].reverse().find(isAssistantMessage);
+    if (!finalAssistant) {
       return {
         status: "error",
         finalText: null,
