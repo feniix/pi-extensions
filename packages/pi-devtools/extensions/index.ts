@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { getDefaultBranch, getGitContext } from "./git.js";
+import { getGitContext } from "./git.js";
 import {
   bumpVersionParams,
   checkCiParams,
@@ -37,13 +37,13 @@ export {
   createBranchTool,
   createPrTool,
   createReleaseTool,
-  getDefaultBranch,
   getLatestTagTool,
   mergePrTool,
   parseConventionalCommit,
   pushTool,
-  repoInfoTool as getRepoInfo,
   repoInfoTool,
+  // Backwards-compat alias — existing consumers may reference getRepoInfo
+  repoInfoTool as getRepoInfo,
 };
 
 export const toolDefinitions = [
@@ -139,7 +139,7 @@ export const toolDefinitions = [
     label: "Repo Info",
     description: "Get current branch, default branch, and git status",
     parameters: emptyParams,
-    execute: async () => repoInfoTool(getDefaultBranch),
+    execute: async () => repoInfoTool(),
   },
   {
     name: "devtools_get_latest_tag",
