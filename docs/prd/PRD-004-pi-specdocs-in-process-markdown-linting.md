@@ -40,6 +40,7 @@ The desired improvement is an in-process Markdown linting and formatting layer t
 
 **Guardrails (must not regress):**
 - Existing PRD and ADR filename/frontmatter numbering checks must continue to work
+- Workspace validation must report duplicate PRD and ADR numbers as errors
 - Session-start workspace summaries must remain fast and readable
 - The extension must continue working when no docs exist
 - Validation must still work without external MCP tools or external executables
@@ -50,7 +51,7 @@ The desired improvement is an in-process Markdown linting and formatting layer t
 
 ### Primary: Spec author
 
-> As a maintainer writing or refining PRDs, ADRs, and plans, I want immediate linting and formatting feedback so that generated docs stay consistent without manual cleanup.
+> As a maintainer writing or refining PRDs, ADRs, and plans, I want immediate linting feedback and explicit on-demand formatting so that generated docs stay consistent without manual cleanup.
 
 **Preconditions:** The maintainer is editing files in `docs/prd/`, `docs/adr/`, or `docs/architecture/` via pi tools.
 
@@ -76,7 +77,7 @@ The desired improvement is an in-process Markdown linting and formatting layer t
 4. **Table-aware validation** — validate required first-release table structures for PRDs and plans, plus any additional optional table checks explicitly defined by document-type rules
 5. **Explicit section/heading validation** — validate a defined first-release set of required sections/headings for PRDs, ADRs, and plans
 6. **In-process formatting** — support safe normalization of selected document elements without subprocesses as part of the initial release
-7. **Extension integration** — wire the new parser/validator into post-tool linting and the `specdocs-validate` command
+7. **Extension integration** — wire the new parser/validator into post-tool linting and the `specdocs-validate` and `specdocs-format` commands
 
 ### Out of scope / later
 
@@ -120,6 +121,8 @@ Malformed or unparseable YAML frontmatter must be reported as a validation error
 
 When frontmatter parsing fails, the validator should still report any filename-only issues that can be determined independently from document contents, but it must skip field-dependent checks that rely on parsed frontmatter values. In particular, the validator should not emit frontmatter number-format or filename-to-frontmatter mismatch warnings when the relevant frontmatter fields could not be parsed reliably.
 
+Workspace-wide validation must also detect duplicate PRD and ADR numbers based on the canonical filename patterns (`PRD-NNN-*.md`, `ADR-NNNN-*.md`) and report those collisions as errors, since duplicate identifiers undermine numbering integrity even when each file is individually well-formed.
+
 **Acceptance criteria:**
 
 ```gherkin
@@ -136,10 +139,25 @@ Then the validator reports a frontmatter parse error for that file
 And validation continues for other documents without crashing
 ```
 
+```gherkin
+Given two PRD files whose filenames both start with "PRD-007"
+When workspace validation runs
+Then the validator reports a duplicate PRD number error
+And identifies both conflicting files
+```
+
+```gherkin
+Given two ADR files whose filenames both start with "ADR-0004"
+When workspace validation runs
+Then the validator reports a duplicate ADR number error
+And identifies both conflicting files
+```
+
 **Files:**
-- `packages/pi-specdocs/extensions/spec-validation.ts` — define schema-backed field validation
-- `packages/pi-specdocs/extensions/runtime.ts` — surface richer validation output after writes and edits
-- `packages/pi-specdocs/__tests__/spec-validation.test.ts` — extend coverage for schema-backed validation behavior
+- `packages/pi-specdocs/extensions/spec-validation.ts` — define schema-backed field validation for individual documents
+- `packages/pi-specdocs/extensions/runtime.ts` — surface richer validation output after writes and edits and perform workspace-level duplicate-number checks
+- `packages/pi-specdocs/__tests__/spec-validation.test.ts` — extend coverage for schema-backed per-document validation behavior
+- `packages/pi-specdocs/__tests__/runtime.test.ts` — cover duplicate-number detection and workspace/runtime reporting behavior
 
 ### FR-3: Validate key table structures for supported doc types
 
@@ -182,11 +200,13 @@ Implementation plans in `docs/architecture/` must be validated alongside PRDs an
 
 The validator should treat Markdown files that are direct children of `docs/architecture/` as plan artifacts for naming purposes. Files matching the existing plan naming convention `plan-*.md` should be validated as plan documents. Workspace-wide validation should report a filename error for any other `.md` file found directly under `docs/architecture/` that does not match the `plan-*.md` convention. Nested Markdown files in subdirectories under `docs/architecture/` are out of scope for first-release plan filename enforcement unless a later requirement expands the scan recursively.
 
+Session-start workspace summaries may continue to count only files matching `plan-*.md` and do not need to treat invalidly named Markdown files in `docs/architecture/` as plans for first-release summary output. However, those invalidly named files must still be surfaced by explicit workspace validation as filename errors.
+
 The first release must validate at least:
 - required plan frontmatter fields from the plan template (`title`, `prd`, `date`, `author`, `status`)
 - allowed plan `status` values: `Draft`, `Implemented`, `Archived`
 - `date` must be present and serialized as an ISO-style `YYYY-MM-DD` string
-- `prd` must be present as a non-empty string reference to the source PRD identifier or filename slug used by the plan template
+- `prd` must be present as a non-empty string using the canonical source PRD slug format `PRD-NNN-descriptive-slug` as used by the plan template
 - presence of the `Source` section
 - presence of the `Implementation Order` section and basic table structure of its table
 - presence of the `ADR Index` section and basic table structure of its table
@@ -207,6 +227,12 @@ And the validator checks required frontmatter plus Source, Implementation Order,
 Given a Markdown file in docs/architecture/ named architecture-outline.md
 When the user runs specdocs-validate
 Then the validator reports that the filename does not match the plan-*.md convention
+```
+
+```gherkin
+Given a plan document whose frontmatter contains `prd: PRD-004`
+When the user runs specdocs-validate
+Then the validator reports that the plan `prd` reference does not use the required `PRD-NNN-descriptive-slug` format
 ```
 
 **Files:**
@@ -375,11 +401,11 @@ Then the command reports that no changes were needed
 | `package-lock.json` | Modify | FR-1 | Capture runtime dependency changes for the npm workspace/root lockfile |
 | `packages/pi-specdocs/extensions/frontmatter.ts` | Modify | FR-1, FR-6 | Replace manual spec-document parsing helpers with parser-backed frontmatter utilities and serialization helpers while preserving tracker/config parsing support |
 | `packages/pi-specdocs/extensions/workspace-scan.ts` | Modify | FR-1 | Keep `.claude/tracker.md` parsing correct after the frontmatter/parser refactor |
-| `packages/pi-specdocs/extensions/spec-validation.ts` | Modify | FR-1, FR-2, FR-3, FR-4, FR-5 | Add parser-backed validation, table rules, plan validation, and required-section checks |
-| `packages/pi-specdocs/extensions/runtime.ts` | Modify | FR-2, FR-3, FR-4, FR-5, FR-6 | Surface richer validation, include plan docs in post-tool linting, and implement explicit formatting command behavior |
+| `packages/pi-specdocs/extensions/spec-validation.ts` | Modify | FR-1, FR-2, FR-3, FR-4, FR-5 | Add parser-backed per-document validation, table rules, plan validation, and required-section checks |
+| `packages/pi-specdocs/extensions/runtime.ts` | Modify | FR-2, FR-3, FR-4, FR-5, FR-6 | Surface richer validation, perform workspace-level duplicate-number and filename checks, include plan docs in post-tool linting, and implement explicit formatting command behavior |
 | `packages/pi-specdocs/extensions/index.ts` | Modify | FR-6 | Register the public `specdocs-format` command |
-| `packages/pi-specdocs/__tests__/spec-validation.test.ts` | Modify | FR-2, FR-3, FR-4, FR-5 | Add validation coverage for parser-backed metadata and structural rules |
-| `packages/pi-specdocs/__tests__/runtime.test.ts` | Modify | FR-3, FR-4, FR-6 | Verify runtime reporting, plan-file post-tool lint coverage, and explicit-format command behavior |
+| `packages/pi-specdocs/__tests__/spec-validation.test.ts` | Modify | FR-2, FR-3, FR-4, FR-5 | Add validation coverage for parser-backed per-document metadata and structural rules |
+| `packages/pi-specdocs/__tests__/runtime.test.ts` | Modify | FR-2, FR-3, FR-4, FR-6 | Verify duplicate-number detection, runtime reporting, plan-file post-tool lint coverage, and explicit-format command behavior |
 | `packages/pi-specdocs/__tests__/scanner.test.ts` | Modify | FR-1, FR-4 | Verify workspace scan and summary behavior remain correct after parser/frontmatter refactors and plan filename enforcement |
 | `packages/pi-specdocs/__tests__/index.test.ts` | Modify | FR-6 | Validate `specdocs-format` command registration |
 | `packages/pi-specdocs/README.md` | Modify | FR-6 | Document the new formatting capability and command usage |
@@ -398,9 +424,9 @@ Then the command reports that no changes were needed
 
 ## 11. Rollout Plan
 
-1. Introduce parser-backed helpers and keep current frontmatter validation behavior passing existing tests
-2. Migrate PRD and ADR validation to structured parsing and expand tests
-3. Add plan validation and table-aware rules
+1. Introduce parser-backed helpers and keep current frontmatter validation behavior passing existing tests while preserving workspace-scan compatibility
+2. Migrate PRD and ADR validation to structured parsing, expand tests, and add workspace-level duplicate-number checks
+3. Add plan validation, plan filename enforcement, and table-aware rules
 4. Add required section/heading validation for PRDs, ADRs, and plans
 5. Add scoped in-process formatting support and expose it through the dedicated `specdocs-format <path>` command
 6. Validate command behavior for unsupported paths, malformed documents, and no-op formatting outcomes
@@ -442,9 +468,10 @@ Then the command reports that no changes were needed
 
 ## 15. Verification (Appendix)
 
-1. Create malformed PRD, ADR, and plan fixtures and verify the validator reports frontmatter parse/schema issues, required section/heading issues, required table-structure issues, and plan filename issues without shelling out.
+1. Create malformed PRD, ADR, and plan fixtures and verify the validator reports frontmatter parse/schema issues, required section/heading issues, required table-structure issues, plan filename issues, and duplicate-number collisions without shelling out.
 2. Include fixtures with syntactically invalid YAML frontmatter and confirm the validator reports a parse error, still reports filename-only issues that do not depend on parsed fields, and suppresses field-dependent frontmatter warnings for the malformed document.
-3. Edit a spec document through pi and confirm post-tool linting still notifies immediately with the new validator.
-4. Run workspace validation over the current `docs/` tree and confirm existing valid docs do not produce false positives beyond known real issues.
-5. Measure single-file and workspace validation times against representative fixtures and confirm they meet the stated performance targets.
-6. Run formatting against a sample malformed doc and confirm only targeted formatting changes occur.
+3. Include fixtures with duplicate `PRD-NNN` and `ADR-NNNN` filename prefixes and confirm workspace validation reports each collision as an error that identifies all conflicting files.
+4. Edit a spec document through pi and confirm post-tool linting still notifies immediately with the new validator.
+5. Run workspace validation over the current `docs/` tree and confirm existing valid docs do not produce false positives beyond known real issues.
+6. Measure single-file and workspace validation times against representative fixtures and confirm they meet the stated performance targets.
+7. Run formatting against a sample malformed doc and confirm only targeted formatting changes occur.
