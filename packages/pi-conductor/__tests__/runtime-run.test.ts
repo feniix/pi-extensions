@@ -1,7 +1,8 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { ModelRegistry } from "@mariozechner/pi-coding-agent";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   extractFinalAssistantText,
   mapStopReasonToRunOutcome,
@@ -9,6 +10,9 @@ import {
 } from "../extensions/runtime.js";
 
 describe("worker run runtime helpers", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   it("maps Pi stop reasons to conductor run outcomes", () => {
     expect(mapStopReasonToRunOutcome("stop")).toEqual({ status: "success", errorMessage: null });
     expect(mapStopReasonToRunOutcome("aborted")).toEqual({ status: "aborted", errorMessage: null });
@@ -25,6 +29,10 @@ describe("worker run runtime helpers", () => {
   });
 
   it("validates worker context before declaring preflight success", async () => {
+    vi.spyOn(ModelRegistry, "create").mockReturnValue({
+      getAvailable: () => [{ id: "fake-model" }],
+    } as unknown as ModelRegistry);
+
     const worktreePath = mkdtempSync(join(tmpdir(), "pi-conductor-runtime-"));
     const sessionFile = join(worktreePath, "session.jsonl");
     writeFileSync(sessionFile, "{}\n", "utf-8");
