@@ -60,6 +60,7 @@ describe("recovery flows", () => {
     const recoveredSessionFile = requireValue(recovered.sessionFile, "recovered session file missing");
     expect(recovered.sessionFile).toBeTruthy();
     expect(existsSync(recoveredSessionFile)).toBe(true);
+    expect(recovered.runtime.sessionId).toBeTruthy();
     expect(recovered.lifecycle).toBe("idle");
     expect(recovered.recoverable).toBe(false);
   });
@@ -75,6 +76,7 @@ describe("recovery flows", () => {
     expect(existsSync(recoveredWorktreePath)).toBe(true);
     expect(recovered.sessionFile).toBeTruthy();
     expect(existsSync(recoveredSessionFile)).toBe(true);
+    expect(recovered.runtime.sessionId).toBeTruthy();
     expect(recovered.lifecycle).toBe("idle");
   });
 });

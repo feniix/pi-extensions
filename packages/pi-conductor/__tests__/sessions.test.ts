@@ -1,7 +1,8 @@
 import { execSync } from "node:child_process";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { resumeWorkerSessionRuntime } from "../extensions/runtime.js";
 import { createWorkerSessionLink } from "../extensions/sessions.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
@@ -34,5 +35,16 @@ describe("session linkage", () => {
     const sessionFile = requireValue(await createWorkerSessionLink(repoDir), "session file missing");
     expect(sessionFile).toBeTruthy();
     expect(existsSync(sessionFile)).toBe(true);
+  });
+
+  it("opens an existing worker session through the runtime layer and records a resume entry", async () => {
+    const sessionFile = requireValue(await createWorkerSessionLink(repoDir), "session file missing");
+    const runtime = await resumeWorkerSessionRuntime(sessionFile);
+
+    expect(runtime.sessionFile).toBe(sessionFile);
+    expect(runtime.sessionId).toBeTruthy();
+    expect(runtime.backend).toBe("session_manager");
+    expect(runtime.lastResumedAt).toBeTruthy();
+    expect(readFileSync(sessionFile, "utf-8")).toContain("pi-conductor_runtime_resume");
   });
 });

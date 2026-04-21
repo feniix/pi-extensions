@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import type { RunRecord, WorkerLifecycleState, WorkerPrState, WorkerRecord } from "./types.js";
+import type { RunRecord, WorkerLifecycleState, WorkerPrState, WorkerRecord, WorkerRuntimeState } from "./types.js";
 
 function getConductorRoot(): string {
   const override = process.env.PI_CONDUCTOR_HOME?.trim();
@@ -23,12 +23,27 @@ export function ensureDir(path: string): void {
   mkdirSync(path, { recursive: true });
 }
 
+function normalizeWorkerRecord(worker: WorkerRecord): WorkerRecord {
+  return {
+    ...worker,
+    runtime: worker.runtime ?? {
+      backend: "session_manager",
+      sessionId: null,
+      lastResumedAt: null,
+    },
+  };
+}
+
 export function readRun(projectKey: string): RunRecord | null {
   const path = getRunFile(projectKey);
   if (!existsSync(path)) {
     return null;
   }
-  return JSON.parse(readFileSync(path, "utf-8")) as RunRecord;
+  const run = JSON.parse(readFileSync(path, "utf-8")) as RunRecord;
+  return {
+    ...run,
+    workers: run.workers.map(normalizeWorkerRecord),
+  };
 }
 
 export function writeRun(run: RunRecord): void {
@@ -55,6 +70,7 @@ export function createWorkerRecord(input: {
   branch: string | null;
   worktreePath: string | null;
   sessionFile: string | null;
+  sessionId?: string | null;
 }): WorkerRecord {
   const now = new Date().toISOString();
   return {
@@ -63,6 +79,11 @@ export function createWorkerRecord(input: {
     branch: input.branch,
     worktreePath: input.worktreePath,
     sessionFile: input.sessionFile,
+    runtime: {
+      backend: "session_manager",
+      sessionId: input.sessionId ?? null,
+      lastResumedAt: null,
+    },
     currentTask: null,
     lifecycle: "idle",
     recoverable: false,
@@ -166,6 +187,38 @@ export function removeWorker(run: RunRecord, workerId: string): RunRecord {
   };
 }
 
+export function setWorkerRuntimeState(
+  run: RunRecord,
+  workerId: string,
+  runtime: Partial<WorkerRuntimeState> & { sessionFile?: string | null },
+): RunRecord {
+  let found = false;
+  const now = new Date().toISOString();
+  const workers = run.workers.map((worker) => {
+    if (worker.workerId !== workerId) {
+      return worker;
+    }
+    found = true;
+    return {
+      ...worker,
+      sessionFile: runtime.sessionFile === undefined ? worker.sessionFile : runtime.sessionFile,
+      runtime: {
+        ...worker.runtime,
+        ...runtime,
+      },
+      updatedAt: now,
+    };
+  });
+  if (!found) {
+    throw new Error(`Worker ${workerId} not found`);
+  }
+  return {
+    ...run,
+    workers,
+    updatedAt: now,
+  };
+}
+
 export function setWorkerPrState(run: RunRecord, workerId: string, pr: Partial<WorkerPrState>): RunRecord {
   let found = false;
   const now = new Date().toISOString();
@@ -204,6 +257,10 @@ export function setWorkerLifecycle(run: RunRecord, workerId: string, lifecycle: 
     return {
       ...worker,
       lifecycle,
+      summary: {
+        ...worker.summary,
+        stale: worker.summary.text !== null && worker.lifecycle !== lifecycle ? true : worker.summary.stale,
+      },
       updatedAt: now,
     };
   });

@@ -63,7 +63,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
     if (!workerName) {
       return `${getUsage()}\n\nerror: missing worker name`;
     }
-    const worker = resumeWorkerForRepo(cwd, workerName);
+    const worker = await resumeWorkerForRepo(cwd, workerName);
     return `resumed worker ${worker.name}: session=${worker.sessionFile}`;
   }
   if (subcommand === "state") {
@@ -87,7 +87,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
     if (!workerName) {
       return `${getUsage()}\n\nerror: missing worker name`;
     }
-    const worker = refreshWorkerSummaryForRepo(cwd, workerName);
+    const worker = await refreshWorkerSummaryForRepo(cwd, workerName);
     return `refreshed summary for ${worker.name}: ${worker.summary.text}`;
   }
   if (subcommand === "cleanup") {

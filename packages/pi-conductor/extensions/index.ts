@@ -146,7 +146,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
       name: Type.String({ description: "Worker name" }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const worker = refreshWorkerSummaryForRepo(ctx.cwd, params.name);
+      const worker = await refreshWorkerSummaryForRepo(ctx.cwd, params.name);
       return {
         content: [{ type: "text", text: `refreshed summary for ${worker.name}: ${worker.summary.text}` }],
         details: { workerId: worker.workerId, summary: worker.summary },
@@ -178,7 +178,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
       name: Type.String({ description: "Worker name" }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const worker = resumeWorkerForRepo(ctx.cwd, params.name);
+      const worker = await resumeWorkerForRepo(ctx.cwd, params.name);
       return {
         content: [{ type: "text", text: `resumed worker ${worker.name}: session=${worker.sessionFile}` }],
         details: { workerId: worker.workerId, sessionFile: worker.sessionFile, worktreePath: worker.worktreePath },

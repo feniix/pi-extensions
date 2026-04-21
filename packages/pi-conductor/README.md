@@ -4,12 +4,14 @@ Long-lived multi-session worker orchestration for Pi.
 
 ## Status
 
-MVP implementation for the `pi-extensions` workspace, based on:
-- `docs/prd/PRD-001-pi-conductor-mvp.md`
+Implemented MVP for the `pi-extensions` workspace, based on:
+- `docs/prd/PRD-002-pi-conductor-persistent-resumable-workers.md`
 - `docs/adr/ADR-0001-sdk-first-worker-runtime.md`
 - `docs/adr/ADR-0002-conductor-project-scoped-storage.md`
 - `docs/adr/ADR-0003-continuity-based-worktree-reuse.md`
 - `docs/adr/ADR-0004-minimal-conductor-local-git-gh-layer.md`
+
+PRD-001 remains in the repo as the original design document and is now superseded.
 
 ## Current capabilities
 
@@ -19,10 +21,13 @@ MVP implementation for the `pi-extensions` workspace, based on:
 - one worker record per named workstream
 - worker git worktree creation and recovery
 - real persisted Pi session linkage
+- a SessionManager-backed runtime boundary for worker creation, resume, recovery, and summary refresh
+- persisted runtime metadata (`sessionId`, `lastResumedAt`, backend)
 - explicit worker resume against persisted worktree/session metadata
 - task updates and session-derived summaries
 - lifecycle controls for `idle`, `running`, `blocked`, `ready_for_pr`, and `done`
 - health-aware status output distinguishing healthy, stale, and broken workers
+- status output that includes worktree path, session file, and runtime metadata
 - broken-state detection and targeted recovery
 - targeted worker cleanup
 - minimal PR preparation flow:
@@ -66,6 +71,18 @@ Registered tools:
 - `conductor_commit`
 - `conductor_push`
 - `conductor_pr_create`
+
+## Runtime model
+
+The current MVP does **not** supervise always-on autonomous worker agents.
+
+Instead, it uses a narrow Pi SDK runtime seam around persisted sessions:
+- create a worker session when a worker is created
+- reopen that session on `/conductor resume`
+- record runtime metadata in conductor state
+- derive summaries from the worker session history
+
+This keeps the worker model durable today while leaving room for a future `AgentSession`-managed or subprocess-backed subagent backend.
 
 ## Development
 

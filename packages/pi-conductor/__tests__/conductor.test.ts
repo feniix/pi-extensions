@@ -56,10 +56,13 @@ describe("conductor service", () => {
     expect(existsSync(worktreePath)).toBe(true);
     expect(worker.sessionFile).toBeTruthy();
     expect(existsSync(sessionFile)).toBe(true);
+    expect(worker.runtime.backend).toBe("session_manager");
+    expect(worker.runtime.sessionId).toBeTruthy();
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers).toHaveLength(1);
     expect(run.workers[0]?.name).toBe("backend");
     expect(run.workers[0]?.sessionFile).toBeTruthy();
+    expect(run.workers[0]?.runtime.sessionId).toBeTruthy();
   });
 });
