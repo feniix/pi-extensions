@@ -1,14 +1,67 @@
 import { basename } from "node:path";
-import { parseFrontmatter } from "./frontmatter.js";
+import { parseFrontmatterResult } from "./frontmatter.js";
 
 const PRD_REQUIRED_FIELDS = ["title", "prd", "status", "owner", "date", "issue", "version"] as const;
 const ADR_REQUIRED_FIELDS = ["title", "adr", "status", "date", "prd"] as const;
+const PLAN_REQUIRED_FIELDS = ["title", "prd", "date", "author", "status"] as const;
 
 const PRD_VALID_STATUSES = ["Draft", "Implemented", "Superseded", "Archived"] as const;
 const ADR_VALID_STATUSES = ["Proposed", "Accepted", "Deprecated", "Superseded"] as const;
+const PLAN_VALID_STATUSES = ["Draft", "Implemented", "Archived"] as const;
+
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const PLAN_PRD_PATTERN = /^PRD-\d{3}-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+const PRD_REQUIRED_SECTIONS = [
+  "## 1. Problem & Context",
+  "## 2. Goals & Success Metrics",
+  "## 3. Users & Use Cases",
+  "## 4. Scope",
+  "## 5. Functional Requirements",
+  "## 6. Non-Functional Requirements",
+  "## 7. Risks & Assumptions",
+  "## 8. Design Decisions",
+  "## 9. File Breakdown",
+  "## 10. Dependencies & Constraints",
+  "## 11. Rollout Plan",
+  "## 12. Open Questions",
+  "## 13. Related",
+  "## 14. Changelog",
+] as const;
+const ADR_REQUIRED_SECTIONS = [
+  "## Status",
+  "## Date",
+  "## Requirement Source",
+  "## Context",
+  "## Decision Drivers",
+  "## Considered Options",
+  "## Decision",
+  "## Consequences",
+  "## Related",
+] as const;
+const PLAN_REQUIRED_SECTIONS = [
+  "## Source",
+  "## Architecture Overview",
+  "## Components",
+  "## Implementation Order",
+  "## ADR Index",
+] as const;
+
+const REQUIRED_TABLE_COLUMNS: Record<string, Record<string, readonly string[]>> = {
+  PRD: {
+    "Open Questions": ["#", "Question", "Owner", "Due", "Status"],
+    "File Breakdown": ["File", "Change type", "FR", "Description"],
+    Changelog: ["Date", "Change", "Author"],
+  },
+  PLAN: {
+    "Implementation Order": ["Phase", "Component", "Dependencies", "Estimated Scope"],
+    "ADR Index": ["ADR", "Title", "Status"],
+  },
+};
 
 export const PRD_FILENAME_PATTERN = /^PRD-\d{3}-.*\.md$/;
 export const ADR_FILENAME_PATTERN = /^ADR-\d{4}-.*\.md$/;
+export const PLAN_FILENAME_PATTERN = /^plan-.*\.md$/;
 
 export function isPrd(path: string): boolean {
   return path.includes("docs/prd/PRD-");
@@ -18,13 +71,17 @@ export function isAdr(path: string): boolean {
   return path.includes("docs/adr/ADR-");
 }
 
+export function isPlan(path: string): boolean {
+  return path.includes("docs/architecture/plan-");
+}
+
 interface DocValidationConfig {
-  docType: "PRD" | "ADR";
+  docType: "PRD" | "ADR" | "PLAN";
   requiredFields: readonly string[];
   validStatuses: readonly string[];
-  numberPattern: RegExp;
-  numberField: "prd" | "adr";
-  expectedNumberFormat: string;
+  numberPattern?: RegExp;
+  numberField?: "prd" | "adr";
+  expectedNumberFormat?: string;
 }
 
 function getDocValidationConfig(filepath: string): DocValidationConfig | null {
@@ -50,6 +107,14 @@ function getDocValidationConfig(filepath: string): DocValidationConfig | null {
     };
   }
 
+  if (isPlan(filepath)) {
+    return {
+      docType: "PLAN",
+      requiredFields: PLAN_REQUIRED_FIELDS,
+      validStatuses: PLAN_VALID_STATUSES,
+    };
+  }
+
   return null;
 }
 
@@ -71,6 +136,10 @@ function collectNumberWarnings(
   filename: string,
   warnings: string[],
 ): void {
+  if (!config.numberField || !config.numberPattern || !config.expectedNumberFormat) {
+    return;
+  }
+
   const numberValue = fields[config.numberField] ?? "";
   if (!numberValue) {
     return;
@@ -94,13 +163,30 @@ function collectStatusWarnings(fields: Record<string, string>, config: DocValida
   }
 }
 
+function collectPlanWarnings(fields: Record<string, string>, warnings: string[]): void {
+  const date = fields.date ?? "";
+  if (date && !ISO_DATE_PATTERN.test(date)) {
+    warnings.push("⚠ PLAN: date must use ISO format YYYY-MM-DD.");
+  }
+
+  const prd = fields.prd ?? "";
+  if (prd && !PLAN_PRD_PATTERN.test(prd)) {
+    warnings.push("⚠ PLAN: prd must use the format PRD-NNN-descriptive-slug.");
+  }
+}
+
 export function validateFrontmatter(filepath: string): string[] {
   const config = getDocValidationConfig(filepath);
   if (!config) {
     return [];
   }
 
-  const fields = parseFrontmatter(filepath);
+  const result = parseFrontmatterResult(filepath);
+  if (result.error) {
+    return [`⚠ ${config.docType}: Frontmatter parse error: ${result.error}`];
+  }
+
+  const fields = result.fields;
   if (fields === null) {
     return [`⚠ ${config.docType}: No YAML frontmatter found.`];
   }
@@ -109,5 +195,107 @@ export function validateFrontmatter(filepath: string): string[] {
   collectMissingFieldWarnings(fields, config, warnings);
   collectNumberWarnings(fields, config, basename(filepath), warnings);
   collectStatusWarnings(fields, config, warnings);
+  if (config.docType === "PLAN") {
+    collectPlanWarnings(fields, warnings);
+  }
+  return warnings;
+}
+
+function getRequiredSections(filepath: string): readonly string[] {
+  if (isPrd(filepath)) return PRD_REQUIRED_SECTIONS;
+  if (isAdr(filepath)) return ADR_REQUIRED_SECTIONS;
+  if (isPlan(filepath)) return PLAN_REQUIRED_SECTIONS;
+  return [];
+}
+
+function collectHeadings(body: string): string[] {
+  return body
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("## "));
+}
+
+function getDocTypeLabel(filepath: string): "PRD" | "ADR" | "PLAN" | null {
+  if (isPrd(filepath)) return "PRD";
+  if (isAdr(filepath)) return "ADR";
+  if (isPlan(filepath)) return "PLAN";
+  return null;
+}
+
+function normalizeHeadingText(heading: string): string {
+  return heading.replace(/^##\s+/, "").replace(/^\d+\.\s+/, "").trim();
+}
+
+function extractSectionTables(body: string): Map<string, string[]> {
+  const lines = body.split("\n");
+  const tables = new Map<string, string[]>();
+  let currentSection = "";
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith("## ")) {
+      currentSection = normalizeHeadingText(trimmed);
+      continue;
+    }
+
+    if (!currentSection || !trimmed.startsWith("|")) {
+      continue;
+    }
+
+    const separator = lines[i + 1]?.trim() ?? "";
+    if (!separator.startsWith("|") || !separator.includes("---")) {
+      continue;
+    }
+
+    const headers = trimmed
+      .split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim());
+    tables.set(currentSection, headers);
+  }
+
+  return tables;
+}
+
+export function validateRequiredSections(filepath: string): string[] {
+  const requiredSections = getRequiredSections(filepath);
+  if (requiredSections.length === 0) {
+    return [];
+  }
+
+  const result = parseFrontmatterResult(filepath);
+  const body = result.content === null ? "" : result.body;
+  const headings = new Set(collectHeadings(body));
+  const label = getDocTypeLabel(filepath) ?? "PRD";
+
+  return requiredSections
+    .filter((section) => !headings.has(section))
+    .map((section) => `⚠ ${label}: Missing required section: ${section}`);
+}
+
+export function validateRequiredTables(filepath: string): string[] {
+  const label = getDocTypeLabel(filepath);
+  if (!label || !(label in REQUIRED_TABLE_COLUMNS)) {
+    return [];
+  }
+
+  const result = parseFrontmatterResult(filepath);
+  const body = result.content === null ? "" : result.body;
+  const tables = extractSectionTables(body);
+  const warnings: string[] = [];
+
+  for (const [section, requiredColumns] of Object.entries(REQUIRED_TABLE_COLUMNS[label])) {
+    const headers = tables.get(section);
+    if (!headers) {
+      warnings.push(`⚠ ${label}: Missing required table in section ${section}.`);
+      continue;
+    }
+
+    const missingColumns = requiredColumns.filter((column) => !headers.includes(column));
+    if (missingColumns.length > 0) {
+      warnings.push(`⚠ ${label}: Table ${section} is missing required columns: ${missingColumns.join(", ")}.`);
+    }
+  }
+
   return warnings;
 }
