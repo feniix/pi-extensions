@@ -123,7 +123,11 @@ Do not save the ADR until:
 - the user explicitly authorized drafting all qualifying candidates, or
 - the input already specified the exact decision to document.
 
-Always report the file path and summarize the recommendation.
+After saving:
+- run `specdocs-validate` so structural/frontmatter issues are surfaced immediately
+- if formatting cleanup is needed, run `specdocs-format <path>` explicitly on the saved ADR
+
+Always report the file path, summarize the recommendation, and mention any validation/formatting follow-up you performed.
 
 ### 6. Cross-reference carefully
 

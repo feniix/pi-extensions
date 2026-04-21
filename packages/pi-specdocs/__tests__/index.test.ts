@@ -40,6 +40,18 @@ describe("pi-specdocs", () => {
     );
   });
 
+  it("registers specdocs-format command", () => {
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+
+    expect(mockPi.registerCommand).toHaveBeenCalledWith(
+      "specdocs-format",
+      expect.objectContaining({
+        description: expect.stringContaining("format"),
+      }),
+    );
+  });
+
   it("does not register any tools", () => {
     const mockPi = createMockPi();
     specdocs(mockPi as unknown as ExtensionAPI);

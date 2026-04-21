@@ -93,7 +93,12 @@ Use the shared document conventions to determine the next PRD number and write t
 
 `docs/prd/PRD-NNN-slug.md`
 
-Always save the local artifact first and report the file path.
+Always save the local artifact first.
+
+After saving:
+- run `specdocs-validate` so structural/frontmatter issues are caught immediately
+- if spacing or table formatting needs normalization, run `specdocs-format <path>` explicitly on the saved PRD
+- report the final file path and any validation/formatting follow-up you performed
 
 ### 6. Publish intentionally
 

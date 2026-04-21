@@ -35,7 +35,7 @@ The desired improvement is an in-process Markdown linting and formatting layer t
 | **Robust parsing** | Spec documents are parsed through a real Markdown + frontmatter pipeline instead of manual line parsing | 100% of PRD, ADR, and plan validation paths use the new parser |
 | **Broader validation** | Validation covers frontmatter, explicitly defined required sections/headings, and required table structures for supported document types | PRDs, ADRs, and plans all receive the structural validation explicitly defined for their document type in this PRD |
 | **In-process operation** | No subprocess spawning for linting or formatting | 0 shell-outs required for document lint/format flows |
-| **Actionable author feedback** | Validation output identifies the file and precise issue type | Warnings/errors are grouped and human-readable in extension notifications/command output |
+| **Actionable author feedback** | Validation output identifies the file and precise issue type | Warnings/errors are grouped by file when possible and remain human-readable in extension notifications/command output |
 | **Required normalization** | Formatting pass rewrites at least frontmatter layout and table/section spacing safely | Autofix support for a scoped initial set of formatting rules ships in the first release |
 
 **Guardrails (must not regress):**
@@ -302,6 +302,7 @@ Canonical normalization rules for the first release must be limited to the follo
 - exactly one blank line surrounds top-level section headings
 - existing thematic breaks written as standalone `---` lines between major sections may be normalized for surrounding blank lines, but must be preserved rather than removed or inserted opportunistically in the first release
 - Markdown tables may be re-padded for consistent pipe alignment and surrounding blank lines, but cell content must not be rewritten semantically
+- Common GFM constructs such as thematic breaks, task lists, and strikethrough must be preserved semantically during formatting even if their whitespace is normalized
 - formatting must not rename headings, reorder sections, alter prose text, or change frontmatter field values
 
 **Acceptance criteria:**

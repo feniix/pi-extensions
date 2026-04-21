@@ -91,6 +91,10 @@ After user approval, produce artifacts in this order:
 
 Cross-reference between all artifacts. PRDs should reference relevant ADRs. ADRs should link back to the PRD that motivated them.
 
+After saving each artifact:
+- run `specdocs-validate` so structural/frontmatter issues are surfaced immediately
+- if formatting cleanup is needed, run `specdocs-format <path>` explicitly on that artifact before moving on
+
 **Checkpoint after each artifact** — briefly confirm with the user before moving to the next one. Don't produce everything in a single uninterruptible run.
 
 ### 5. Present the Roadmap

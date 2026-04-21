@@ -96,10 +96,17 @@ Write the plan to:
 
 `docs/architecture/plan-slug.md`
 
+Implementation plans are first-class validated spec documents, so keep the canonical `plan-*.md` naming convention.
+
+After saving:
+- run `specdocs-validate` so plan frontmatter, required sections, required tables, and filename issues are caught immediately
+- if formatting cleanup is needed, run `specdocs-format <path>` explicitly on the saved plan
+
 Always report the file path and summarize:
 - the architecture shape
 - the implementation order
 - the main dependencies or risk hotspots
+- any validation/formatting follow-up you performed
 
 ### 7. Cross-reference
 

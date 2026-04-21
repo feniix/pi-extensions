@@ -1,7 +1,18 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { extractFrontmatterField, parseFrontmatter } from "./frontmatter.js";
-import { handleDocLint, runValidation } from "./runtime.js";
-import { ADR_FILENAME_PATTERN, isAdr, isPrd, PRD_FILENAME_PATTERN, validateFrontmatter } from "./spec-validation.js";
+import { handleDocLint, runFormat, runValidation } from "./runtime.js";
+import {
+  ADR_FILENAME_PATTERN,
+  isAdr,
+  isPlan,
+  isPrd,
+  PLAN_FILENAME_PATTERN,
+  PRD_FILENAME_PATTERN,
+  validateFrontmatter,
+  validateRequiredSections,
+  validateRequiredTables,
+  validateSpecFile,
+} from "./spec-validation.js";
 import { formatConfig, formatSummary, listMatchingFiles, readConfig, scanWorkspace } from "./workspace-scan.js";
 
 export {
@@ -10,13 +21,18 @@ export {
   formatConfig,
   formatSummary,
   isAdr,
+  isPlan,
   isPrd,
   listMatchingFiles,
+  PLAN_FILENAME_PATTERN,
   PRD_FILENAME_PATTERN,
   parseFrontmatter,
   readConfig,
   scanWorkspace,
   validateFrontmatter,
+  validateRequiredSections,
+  validateRequiredTables,
+  validateSpecFile,
 };
 
 export default function specdocs(pi: ExtensionAPI) {
@@ -40,6 +56,13 @@ export default function specdocs(pi: ExtensionAPI) {
       "(specdocs plugin) Validate all spec documents for frontmatter completeness, naming conventions, and cross-references",
     handler: async (_args, ctx) => {
       await runValidation(ctx);
+    },
+  });
+
+  pi.registerCommand("specdocs-format", {
+    description: "(specdocs plugin) format a spec document in-process without spawning external tools",
+    handler: async (args, ctx) => {
+      await runFormat(args, ctx);
     },
   });
 }

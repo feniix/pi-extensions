@@ -6,7 +6,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isAdr, isPrd, parseFrontmatter, validateFrontmatter } from "../extensions/index.js";
+import {
+  isAdr,
+  isPrd,
+  parseFrontmatter,
+  validateFrontmatter,
+  validateRequiredSections,
+  validateRequiredTables,
+  validateSpecFile,
+} from "../extensions/index.js";
 
 const VALID_PRD = `---
 title: "Test PRD"
@@ -30,6 +38,17 @@ prd: "PRD-001-test"
 ---
 
 # Test ADR
+`;
+
+const VALID_PLAN = `---
+title: "Test Plan"
+prd: "PRD-001-test-feature"
+date: 2026-04-14
+author: "Test User"
+status: Draft
+---
+
+# Plan: Test Plan
 `;
 
 function writeTempDoc(directory: string, filename: string, content: string): string {
@@ -81,6 +100,17 @@ describe("parseFrontmatter", () => {
 
   it("returns null for nonexistent file", () => {
     expect(parseFrontmatter("/nonexistent/file.md")).toBeNull();
+  });
+
+  it("returns null for malformed yaml frontmatter", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = join(dir, "test.md");
+      writeFileSync(path, '---\ntitle: "Broken"\nstatus: [Draft\n---\n');
+      expect(parseFrontmatter(path)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
   });
 });
 
@@ -180,6 +210,21 @@ describe("validate PRD", () => {
       rmSync(dir, { recursive: true });
     }
   });
+
+  it("reports malformed yaml frontmatter as a parse error", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(
+        join(dir, "docs", "prd"),
+        "PRD-001-test.md",
+        '---\ntitle: "Broken"\nstatus: [Draft\nowner: Test\n---\n# Test\n',
+      );
+      const warnings = validateFrontmatter(path);
+      expect(warnings.some((w) => w.includes("Frontmatter parse error"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
 });
 
 // --- ADR validation ---
@@ -232,7 +277,167 @@ describe("validate ADR", () => {
   });
 });
 
+// --- Plan validation ---
+
+describe("validate Plan", () => {
+  it("returns no warnings for valid plan", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(join(dir, "docs", "architecture"), "plan-test-feature.md", VALID_PLAN);
+      expect(validateFrontmatter(path)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  it("reports missing author field", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const content = VALID_PLAN.replace('author: "Test User"\n', "");
+      const path = writeTempDoc(join(dir, "docs", "architecture"), "plan-test-feature.md", content);
+      const warnings = validateFrontmatter(path);
+      expect(warnings.some((w) => w.includes("author"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  it("reports invalid plan status", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const content = VALID_PLAN.replace("status: Draft", "status: Active");
+      const path = writeTempDoc(join(dir, "docs", "architecture"), "plan-test-feature.md", content);
+      const warnings = validateFrontmatter(path);
+      expect(warnings.some((w) => w.includes("Active"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  it("reports non-canonical plan prd format", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const content = VALID_PLAN.replace('prd: "PRD-001-test-feature"', 'prd: "PRD-001"');
+      const path = writeTempDoc(join(dir, "docs", "architecture"), "plan-test-feature.md", content);
+      const warnings = validateFrontmatter(path);
+      expect(warnings.some((w) => w.includes("PRD-NNN-descriptive-slug"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+});
+
+// --- Required section validation ---
+
+describe("validate required sections", () => {
+  it("reports missing required PRD sections", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(join(dir, "docs", "prd"), "PRD-001-test.md", `${VALID_PRD}\n## 1. Problem & Context\n`);
+      const warnings = validateRequiredSections(path);
+      expect(warnings.some((w) => w.includes("## 2. Goals & Success Metrics"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  it("reports missing required ADR sections", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(join(dir, "docs", "adr"), "ADR-0001-test.md", `${VALID_ADR}\n## Status\nProposed\n`);
+      const warnings = validateRequiredSections(path);
+      expect(warnings.some((w) => w.includes("## Decision"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  it("reports missing required plan sections", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(
+        join(dir, "docs", "architecture"),
+        "plan-test-feature.md",
+        `${VALID_PLAN}\n## Source\n\n## Architecture Overview\n`,
+      );
+      const warnings = validateRequiredSections(path);
+      expect(warnings.some((w) => w.includes("## ADR Index"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+});
+
+// --- Required table validation ---
+
+describe("validate required tables", () => {
+  it("reports missing required PRD table columns", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(
+        join(dir, "docs", "prd"),
+        "PRD-001-test.md",
+        `${VALID_PRD}\n## 12. Open Questions\n| # | Question | Owner | Due |\n|---|---|---|---|\n| Q1 | Test? | Alice | Soon |\n`,
+      );
+      const warnings = validateRequiredTables(path);
+      expect(warnings.some((w) => w.includes("Open Questions"))).toBe(true);
+      expect(warnings.some((w) => w.includes("Status"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  it("accepts a required table when another table also appears in the same section", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(
+        join(dir, "docs", "prd"),
+        "PRD-001-test.md",
+        `${VALID_PRD}\n## 9. File Breakdown\n| File | Change type | FR | Description |\n|---|---|---|---|\n| a.ts | Modify | FR-1 | Test |\n\n## 12. Open Questions\n| # | Question | Owner | Due | Status |\n|---|---|---|---|---|\n| Q1 | Test? | Alice | Soon | Open |\n\n| Note | Value |\n|---|---|\n| Summary | Keep |\n\n## 14. Changelog\n| Date | Change | Author |\n|---|---|---|\n| 2026-04-21 | Added test | Pi |\n`,
+      );
+      expect(validateRequiredTables(path)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  it("reports missing required plan table columns", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(
+        join(dir, "docs", "architecture"),
+        "plan-test-feature.md",
+        `${VALID_PLAN}\n## Implementation Order\n| Phase | Component | Estimated Scope |\n|---|---|---|\n| 1 | Parser | M |\n`,
+      );
+      const warnings = validateRequiredTables(path);
+      expect(warnings.some((w) => w.includes("Implementation Order"))).toBe(true);
+      expect(warnings.some((w) => w.includes("Dependencies"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+});
+
 // --- Non-spec files ---
+
+describe("validateSpecFile", () => {
+  it("combines frontmatter, section, and table warnings in one pass", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(
+        join(dir, "docs", "architecture"),
+        "plan-test-feature.md",
+        '---\ntitle: "Plan"\nprd: "PRD-001"\nstatus: Active\n---\n\n# Plan: Test\n\n## Source\n',
+      );
+      const warnings = validateSpecFile(path);
+      expect(warnings.some((w) => w.includes("Missing required frontmatter field: date"))).toBe(true);
+      expect(warnings.some((w) => w.includes("Missing required section: ## ADR Index"))).toBe(true);
+      expect(warnings.some((w) => w.includes("Missing required table in section ADR Index"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+});
 
 describe("non-spec files", () => {
   it("returns empty warnings for non-spec files", () => {
@@ -241,6 +446,7 @@ describe("non-spec files", () => {
       const path = join(dir, "README.md");
       writeFileSync(path, "# README\n");
       expect(validateFrontmatter(path)).toEqual([]);
+      expect(validateSpecFile(path)).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true });
     }
