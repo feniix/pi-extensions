@@ -312,7 +312,11 @@ export async function runWorkerForRepo(repoRoot: string, workerName: string, tas
   });
   writeRun(runningRun);
 
+  // latestRun is intentionally captured by the onSessionReady callback so the
+  // single foreground run can durably record the execution session id before the
+  // prompt completes. This path is single-session and single-threaded.
   let latestRun = runningRun;
+  let originalRuntimeError: Error | null = null;
 
   try {
     const runtimeResult = await runWorkerPromptRuntime({
@@ -346,12 +350,21 @@ export async function runWorkerForRepo(repoRoot: string, workerName: string, tas
       sessionId: runtimeResult.sessionId,
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const completedRun = finishWorkerRun(latestRun, worker.workerId, {
-      status: "error",
-      errorMessage: message,
-    });
-    writeRun(completedRun);
+    originalRuntimeError = error instanceof Error ? error : new Error(String(error));
+    const message = originalRuntimeError.message;
+
+    try {
+      const completedRun = finishWorkerRun(latestRun, worker.workerId, {
+        status: "error",
+        errorMessage: message,
+      });
+      writeRun(completedRun);
+    } catch (persistenceError) {
+      const persistenceMessage =
+        persistenceError instanceof Error ? persistenceError.message : String(persistenceError);
+      throw new Error(`${message} (Additionally failed to persist worker run error state: ${persistenceMessage})`);
+    }
+
     return {
       workerName: worker.name,
       status: "error",

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { StopReason } from "@mariozechner/pi-ai";
 import {
@@ -109,6 +109,9 @@ export function mapStopReasonToRunOutcome(stopReason: StopReason): {
 }
 
 export function extractFinalAssistantText(messages: unknown[]): string | null {
+  // AgentSession.messages contains a broader union than the final assistant-shaping
+  // logic actually needs here, so keep the helper intentionally loose and extract
+  // only the assistant text blocks conductor cares about for operator summaries.
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index] as { role?: string; content?: unknown } | undefined;
     if (message?.role !== "assistant") {
@@ -128,7 +131,14 @@ export function extractFinalAssistantText(messages: unknown[]): string | null {
   return null;
 }
 
-export async function preflightWorkerRunRuntime(_input: RuntimeRunPreflightContext): Promise<void> {
+export async function preflightWorkerRunRuntime(input: RuntimeRunPreflightContext): Promise<void> {
+  if (!input.worktreePath || !existsSync(input.worktreePath)) {
+    throw new Error("Worker worktree is not available for a foreground run");
+  }
+  if (!input.sessionFile || !existsSync(input.sessionFile)) {
+    throw new Error("Worker session file is not available for a foreground run");
+  }
+
   const modelRegistry = getModelRegistryForRun();
   if (modelRegistry.getAvailable().length === 0) {
     throw new Error("No usable model or provider configuration is available for pi-conductor worker runs");

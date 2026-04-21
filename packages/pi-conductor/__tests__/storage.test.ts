@@ -10,6 +10,7 @@ import {
   getConductorProjectDir,
   readRun,
   setWorkerLifecycle,
+  setWorkerRunSessionId,
   setWorkerRuntimeState,
   startWorkerRun,
 } from "../extensions/storage.js";
@@ -74,17 +75,14 @@ describe("storage helpers", () => {
 
     mkdirSync(run.storageDir, { recursive: true });
     const path = join(run.storageDir, "run.json");
+    const legacyWorker = JSON.parse(JSON.stringify(worker)) as Record<string, unknown>;
+    delete legacyWorker.lastRun;
     writeFileSync(
       path,
       `${JSON.stringify(
         {
           ...run,
-          workers: [
-            JSON.parse(JSON.stringify(worker, (_key, value) => (value === null ? null : value))) as Record<
-              string,
-              unknown
-            >,
-          ].map(({ lastRun: _lastRun, ...legacyWorker }) => legacyWorker),
+          workers: [legacyWorker],
         },
         null,
         2,
@@ -140,6 +138,21 @@ describe("storage helpers", () => {
       sessionId: "run-session-1",
     });
     expect(updated.workers[0]?.lastRun?.startedAt).toBeTruthy();
+  });
+
+  it("requires an active run before attaching a run session id", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: "/tmp/session.jsonl",
+    });
+
+    expect(() => setWorkerRunSessionId({ ...run, workers: [worker] }, worker.workerId, "run-session-1")).toThrow(
+      /does not have an active lastRun/i,
+    );
   });
 
   it("completes a run with success, aborted, and error lifecycle semantics", () => {

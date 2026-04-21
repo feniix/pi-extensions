@@ -302,26 +302,32 @@ export function startWorkerRun(
 
 export function setWorkerRunSessionId(run: RunRecord, workerId: string, sessionId: string): RunRecord {
   let found = false;
+  let workerHadLastRun = true;
   const now = new Date().toISOString();
   const workers = run.workers.map((worker) => {
     if (worker.workerId !== workerId) {
       return worker;
     }
     found = true;
+    if (!worker.lastRun) {
+      workerHadLastRun = false;
+      return worker;
+    }
     return {
       ...worker,
-      lastRun: worker.lastRun
-        ? {
-            ...worker.lastRun,
-            sessionId,
-          }
-        : worker.lastRun,
+      lastRun: {
+        ...worker.lastRun,
+        sessionId,
+      },
       updatedAt: now,
     };
   });
 
   if (!found) {
     throw new Error(`Worker ${workerId} not found`);
+  }
+  if (!workerHadLastRun) {
+    throw new Error(`Worker ${workerId} does not have an active lastRun to attach a session id to`);
   }
 
   return {
