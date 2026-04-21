@@ -571,13 +571,7 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_find_similar_exa");
-    const result = await tool.execute(
-      "call",
-      { url: "https://example.com" },
-      undefined,
-      undefined,
-      undefined as never,
-    );
+    const result = await tool.execute("call", { url: "https://example.com" }, undefined, undefined, undefined as never);
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Exa similar search error: similar down");
