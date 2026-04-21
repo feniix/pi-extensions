@@ -85,6 +85,26 @@ describe("pi-specdocs runtime", () => {
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("plan-*.md pattern"), "warning");
   });
 
+  it("warns on missing required sections and tables for a plan after write/edit tool results", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-lint-plan-structure-"));
+    const filePath = join(base, "docs", "architecture", "plan-test-feature.md");
+    mkdirSync(join(base, "docs", "architecture"), { recursive: true });
+    writeFileSync(
+      filePath,
+      '---\ntitle: "Plan"\nprd: "PRD-001-test-feature"\ndate: 2025-01-01\nauthor: "Alice"\nstatus: Draft\n---\n\n# Plan: Test\n\n## Source\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const toolResult = getEventHandler(mockPi, "tool_result");
+    const notify = vi.fn();
+
+    await toolResult?.({ toolName: "write", input: { file_path: filePath } }, { cwd: base, ui: { notify } });
+
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Missing required section: ## ADR Index"), "warning");
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Missing required table in section ADR Index"), "warning");
+  });
+
   it("runs specdocs-validate and reports errors/warnings", async () => {
     const base = mkdtempSync(join(tmpdir(), "pi-specdocs-validate-"));
     mkdirSync(join(base, "docs", "prd"), { recursive: true });
