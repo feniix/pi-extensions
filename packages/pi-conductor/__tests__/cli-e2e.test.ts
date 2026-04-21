@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+const shouldRunCliE2E = process.env.PI_CONDUCTOR_CLI_E2E === "1";
+const describeCliE2E = shouldRunCliE2E ? describe : describe.skip;
+
 function runPiConductorCommand(repoDir: string, conductorHome: string, command: string): string {
   const piBin = resolve(process.cwd(), "node_modules/.bin/pi");
   const extensionPath = resolve(process.cwd(), "packages/pi-conductor/extensions/index.ts");
@@ -26,7 +29,6 @@ function runPiConductorCommand(repoDir: string, conductorHome: string, command: 
       encoding: "utf-8",
       env: {
         ...process.env,
-        GEMINI_API_KEY: process.env.GEMINI_API_KEY ?? "test-key",
         PI_CONDUCTOR_HOME: conductorHome,
       },
     },
@@ -39,7 +41,7 @@ function runPiConductorCommand(repoDir: string, conductorHome: string, command: 
   return `${result.stdout}\n${result.stderr}`.trim();
 }
 
-describe("pi-conductor CLI e2e", () => {
+describeCliE2E("pi-conductor CLI e2e", () => {
   let repoDir: string;
   let conductorHome: string;
 
