@@ -46,7 +46,7 @@ export function parseFrontmatterResult(filepath: string): FrontmatterParseResult
   const body = lines.slice(closingIndex + 1).join("\n");
 
   try {
-    const parsed = YAML.parse(yamlText);
+    const parsed = YAML.parse(yamlText, { schema: "core" });
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return { fields: {}, rawFields: {}, error: null, content, body };
     }

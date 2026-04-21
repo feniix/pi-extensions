@@ -195,6 +195,9 @@ describe("pi-specdocs performance", () => {
     tempDirs.push(base);
     const { singleFile, allFiles } = createWorkspaceFixture(base);
 
+    // This first single-file measurement intentionally includes cold per-file
+    // costs (read + initial parse for that file), making it a conservative
+    // ceiling check rather than a pure steady-state number.
     const singleStart = performance.now();
     validateSpecFile(singleFile);
     const singleDurationMs = performance.now() - singleStart;

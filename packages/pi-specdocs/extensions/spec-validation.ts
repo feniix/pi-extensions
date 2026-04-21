@@ -82,7 +82,6 @@ type FrontmatterFieldType = "string" | "stringOrNumber";
 
 interface FrontmatterFieldSchema {
   type: FrontmatterFieldType;
-  required?: boolean;
 }
 
 interface DocValidationConfig {
@@ -99,13 +98,13 @@ function getDocValidationConfig(filepath: string): DocValidationConfig | null {
     return {
       docType: "PRD",
       fieldSchemas: {
-        title: { type: "string", required: true },
-        prd: { type: "string", required: true },
-        status: { type: "string", required: true },
-        owner: { type: "string", required: true },
-        date: { type: "string", required: true },
-        issue: { type: "stringOrNumber", required: true },
-        version: { type: "stringOrNumber", required: true },
+        title: { type: "string" },
+        prd: { type: "string" },
+        status: { type: "string" },
+        owner: { type: "string" },
+        date: { type: "string" },
+        issue: { type: "stringOrNumber" },
+        version: { type: "stringOrNumber" },
       },
       validStatuses: PRD_VALID_STATUSES,
       numberPattern: /^PRD-\d{3}$/,
@@ -118,11 +117,11 @@ function getDocValidationConfig(filepath: string): DocValidationConfig | null {
     return {
       docType: "ADR",
       fieldSchemas: {
-        title: { type: "string", required: true },
-        adr: { type: "string", required: true },
-        status: { type: "string", required: true },
-        date: { type: "string", required: true },
-        prd: { type: "string", required: true },
+        title: { type: "string" },
+        adr: { type: "string" },
+        status: { type: "string" },
+        date: { type: "string" },
+        prd: { type: "string" },
       },
       validStatuses: ADR_VALID_STATUSES,
       numberPattern: /^ADR-\d{4}$/,
@@ -135,11 +134,11 @@ function getDocValidationConfig(filepath: string): DocValidationConfig | null {
     return {
       docType: "PLAN",
       fieldSchemas: {
-        title: { type: "string", required: true },
-        prd: { type: "string", required: true },
-        date: { type: "string", required: true },
-        author: { type: "string", required: true },
-        status: { type: "string", required: true },
+        title: { type: "string" },
+        prd: { type: "string" },
+        date: { type: "string" },
+        author: { type: "string" },
+        status: { type: "string" },
       },
       validStatuses: PLAN_VALID_STATUSES,
     };
@@ -174,9 +173,7 @@ function validateSchemaFields(
   for (const [field, schema] of Object.entries(config.fieldSchemas)) {
     const rawValue = rawFields[field];
     if (rawValue == null || rawValue === "") {
-      if (schema.required) {
-        warnings.push(`⚠ ${config.docType}: Missing required frontmatter field: ${field}`);
-      }
+      warnings.push(`⚠ ${config.docType}: Missing required frontmatter field: ${field}`);
       continue;
     }
 
@@ -247,7 +244,7 @@ function validateFrontmatterFromResult(filepath: string, result: ReturnType<type
     return [`⚠ ${config.docType}: Frontmatter parse error: ${result.error}`];
   }
 
-  if (result.fields === null || result.rawFields === null) {
+  if (result.rawFields === null) {
     return [`⚠ ${config.docType}: No YAML frontmatter found.`];
   }
 
