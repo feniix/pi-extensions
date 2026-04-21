@@ -225,6 +225,24 @@ describe("validate PRD", () => {
       rmSync(dir, { recursive: true });
     }
   });
+
+  it("reports typed field validation errors for invalid frontmatter field types", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(
+        join(dir, "docs", "prd"),
+        "PRD-001-test.md",
+        '---\ntitle:\n  nested: nope\nprd: PRD-001\nstatus: Draft\nowner: [Alice]\ndate: 2026-04-14\nissue: 1\nversion: "1.0"\n---\n# Test\n',
+      );
+      const warnings = validateFrontmatter(path);
+      expect(warnings.some((w) => w.includes("Field 'title' must be a string"))).toBe(true);
+      expect(warnings.some((w) => w.includes("Field 'owner' must be a string"))).toBe(true);
+      expect(warnings.some((w) => w.includes("Missing required frontmatter field: title"))).toBe(false);
+      expect(warnings.some((w) => w.includes("Missing required frontmatter field: owner"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
 });
 
 // --- ADR validation ---
@@ -362,6 +380,22 @@ describe("validate required sections", () => {
       );
       const warnings = validateRequiredSections(path);
       expect(warnings.some((w) => w.includes("## ADR Index"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  it("reports missing recommended plan sections as warnings", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(
+        join(dir, "docs", "architecture"),
+        "plan-test-feature.md",
+        `${VALID_PLAN}\n## Source\n\n## Architecture Overview\n\n## Components\n\n## Implementation Order\n\n## ADR Index\n`,
+      );
+      const warnings = validateRequiredSections(path);
+      expect(warnings.some((w) => w.includes("Missing recommended section: ## Risks and Mitigations"))).toBe(true);
+      expect(warnings.some((w) => w.includes("Missing recommended section: ## Open Questions"))).toBe(true);
     } finally {
       rmSync(dir, { recursive: true });
     }
