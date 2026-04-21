@@ -20,6 +20,11 @@ const SEARCH_CATEGORIES = [
 
 type SearchCategory = (typeof SEARCH_CATEGORIES)[number];
 
+// Categories with restricted filter support per Exa API docs.
+const RESTRICTED_CATEGORIES: readonly SearchCategory[] = ["company", "people"];
+// The "people" category only accepts LinkedIn domains for includeDomains.
+const LINKEDIN_DOMAINS = new Set(["linkedin.com", "www.linkedin.com"]);
+
 type AdvancedResult = SearchResult<{
   text: TextContentsOptions;
   highlights?: HighlightsContentsOptions;
@@ -50,6 +55,32 @@ type AdvancedSearchOptions = {
   highlightsNumSentences?: number;
 };
 
+function validateCategoryFilters(category: SearchCategory | undefined, options: AdvancedSearchOptions): void {
+  if (!category || !RESTRICTED_CATEGORIES.includes(category)) {
+    return;
+  }
+
+  const unsupported: string[] = [];
+  if (options.startPublishedDate) unsupported.push("startPublishedDate");
+  if (options.endPublishedDate) unsupported.push("endPublishedDate");
+  if (options.excludeDomains && options.excludeDomains.length > 0) unsupported.push("excludeDomains");
+
+  if (unsupported.length > 0) {
+    throw new Error(
+      `Category "${category}" does not support: ${unsupported.join(", ")}. These filters are not available for the "${category}" category.`,
+    );
+  }
+
+  if (category === "people" && options.includeDomains && options.includeDomains.length > 0) {
+    const nonLinkedIn = options.includeDomains.filter((d) => !LINKEDIN_DOMAINS.has(d));
+    if (nonLinkedIn.length > 0) {
+      throw new Error(
+        `Category "people" only accepts LinkedIn domains for includeDomains. Invalid: ${nonLinkedIn.join(", ")}.`,
+      );
+    }
+  }
+}
+
 function validateAdvancedType(type: AdvancedSearchOptions["type"] | undefined): void {
   if (!type) {
     return;
@@ -68,6 +99,8 @@ export async function performAdvancedSearch(
   options: AdvancedSearchOptions,
 ): Promise<ToolPerformResult> {
   validateAdvancedType(options.type);
+  const category = validateCategory(options.category);
+  validateCategoryFilters(category, options);
 
   const exa = getExaClient(apiKey);
 
@@ -90,7 +123,7 @@ export async function performAdvancedSearch(
     };
   } = {
     numResults: options.numResults || 10,
-    category: validateCategory(options.category),
+    category,
     type: options.type,
     startPublishedDate: options.startPublishedDate,
     endPublishedDate: options.endPublishedDate,

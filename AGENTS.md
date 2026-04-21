@@ -41,7 +41,7 @@ Local package testing:
 - Changes to shared files such as `package.json`, `package-lock.json`, `tsconfig.json`, `vitest.config.ts`, `biome.json`, or `.github/workflows/**` should be treated as affecting all packages.
 - Each package must keep its `tsconfig.json` aligned by extending the shared root `tsconfig.json`; do not introduce divergent compiler options in individual package configs unless the repo-wide config is intentionally updated.
 - Coverage thresholds are enforced in `vitest.config.ts` at: lines 70, statements 70, functions 70, branches 60.
-- For `packages/pi-conductor/`, follow **test-first development**: write or update the failing test first, then implement the minimal code needed to make it pass.
+- Follow **test-first development**: write or update the failing test first, then implement the minimal code needed to make it pass.
 
 ## Commit & Pull Request Guidelines
 - Commit messages follow Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`.

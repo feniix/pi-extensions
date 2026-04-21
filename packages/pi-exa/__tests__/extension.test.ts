@@ -532,6 +532,51 @@ describe("pi-exa extension", () => {
     expect(result.content[0].text).toContain("Exa search error: search down");
   });
 
+  it("returns an error when advanced search SDK calls fail", async () => {
+    mockSearch.mockRejectedValue(new Error("advanced down"));
+
+    const mockPi = createMockPi({ "--exa-enable-advanced": true, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    const result = await tool.execute("call", { query: "test" }, undefined, undefined, undefined as never);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Exa advanced search error: advanced down");
+  });
+
+  it("returns an error when fetch SDK calls fail", async () => {
+    mockGetContents.mockRejectedValue(new Error("fetch down"));
+
+    const mockPi = createMockPi({ "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_fetch_exa");
+    const result = await tool.execute(
+      "call",
+      { urls: ["https://example.com"] },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Exa fetch error: fetch down");
+  });
+
+  it("returns an error when find-similar SDK calls fail", async () => {
+    mockFindSimilar.mockRejectedValue(new Error("similar down"));
+
+    const mockPi = createMockPi({ "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_find_similar_exa");
+    const result = await tool.execute("call", { url: "https://example.com" }, undefined, undefined, undefined as never);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Exa similar search error: similar down");
+  });
+
   it("returns an error when research SDK calls fail", async () => {
     mockSearch.mockRejectedValue(new Error("research down"));
 
@@ -556,6 +601,114 @@ describe("pi-exa extension", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Exa answer error: answer down");
+  });
+
+  it("returns an error when company category is combined with startPublishedDate", async () => {
+    const mockPi = createMockPi({ "--exa-enable-advanced": true, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    const result = await tool.execute(
+      "call",
+      { query: "acme corp", category: "company", startPublishedDate: "2024-01-01" },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Category "company" does not support: startPublishedDate');
+  });
+
+  it("returns an error when company category is combined with excludeDomains", async () => {
+    const mockPi = createMockPi({ "--exa-enable-advanced": true, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    const result = await tool.execute(
+      "call",
+      { query: "acme corp", category: "company", excludeDomains: ["crunchbase.com"] },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Category "company" does not support: excludeDomains');
+  });
+
+  it("returns an error when people category is combined with endPublishedDate", async () => {
+    const mockPi = createMockPi({ "--exa-enable-advanced": true, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    const result = await tool.execute(
+      "call",
+      { query: "John Doe engineer", category: "people", endPublishedDate: "2024-12-31" },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Category "people" does not support: endPublishedDate');
+  });
+
+  it("returns an error when people category is combined with non-LinkedIn includeDomains", async () => {
+    const mockPi = createMockPi({ "--exa-enable-advanced": true, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    const result = await tool.execute(
+      "call",
+      { query: "John Doe engineer", category: "people", includeDomains: ["twitter.com", "example.com"] },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Category "people" only accepts LinkedIn domains');
+    expect(result.content[0].text).toContain("twitter.com");
+  });
+
+  it("allows people category with LinkedIn includeDomains", async () => {
+    mockSearch.mockResolvedValue(defaultSearchResponse);
+
+    const mockPi = createMockPi({ "--exa-enable-advanced": true, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    const result = await tool.execute(
+      "call",
+      { query: "John Doe engineer", category: "people", includeDomains: ["linkedin.com"] },
+      { aborted: false } as AbortSignal,
+      vi.fn(),
+      undefined as never,
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(mockSearch).toHaveBeenCalledWith(
+      "John Doe engineer",
+      expect.objectContaining({ category: "people", includeDomains: ["linkedin.com"] }),
+    );
+  });
+
+  it("returns an error when research receives an invalid outputSchema type", async () => {
+    const mockPi = createMockPi({ "--exa-enable-research": true, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_research_exa");
+    const result = await tool.execute(
+      "call",
+      { query: "AI trends", outputSchema: { type: "array", items: { type: "string" } } },
+      undefined,
+      undefined,
+      undefined as never,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('outputSchema.type must be either "object" or "text"');
   });
 
   it("returns cancelled result when signal is aborted", async () => {
