@@ -69,6 +69,11 @@ describe("runConductorCommand", () => {
     await runConductorCommand(repoDir, "start backend");
     const text = await runConductorCommand(repoDir, "resume backend");
     expect(text).toContain("resumed worker backend");
+    expect(text).toContain("session=");
+
+    const status = await runConductorCommand(repoDir, "status");
+    expect(status).toContain("runtime=session_manager");
+    expect(status).toContain("lastResumedAt=");
   });
 
   it("updates a worker lifecycle through the state subcommand", async () => {

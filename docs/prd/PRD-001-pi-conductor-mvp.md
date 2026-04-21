@@ -1,17 +1,19 @@
 ---
 title: "pi-conductor — long-lived multi-session worker orchestration for Pi"
 prd: PRD-001
-status: Implemented
+status: Superseded
 owner: "feniix"
 issue: "N/A"
 date: 2026-04-18
-version: "1.2"
-supersededBy: "PRD-002"
+version: "1.3"
+supersededBy: "PRD-002-pi-conductor-persistent-resumable-workers"
 ---
 
 # PRD: pi-conductor — long-lived multi-session worker orchestration for Pi
 
 > Superseded by `docs/prd/PRD-002-pi-conductor-persistent-resumable-workers.md`.
+>
+> Historical note: PRD-001 captured the original SDK-first ambition for a fully managed worker runtime. The implementation shipped in v0.1.x validated the orchestration model first: project-scoped worker records, worktrees, persisted Pi session references, recovery, and PR flows. PRD-002 narrows and clarifies the runtime contract around the SessionManager-backed boundary that now exists in the package.
 
 ---
 

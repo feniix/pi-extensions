@@ -3,8 +3,8 @@ title: "SDK-first worker runtime for pi-conductor"
 adr: ADR-0001
 status: Accepted
 date: 2026-04-18
-prd: "PRD-001-pi-conductor-mvp"
-decision: "Use an SDK-first worker runtime, with room for a future process-backed backend"
+prd: "PRD-002-pi-conductor-persistent-resumable-workers"
+decision: "Use a SessionManager-backed SDK runtime boundary in v1, with room for future AgentSession- or process-backed backends"
 ---
 
 # ADR-0001: SDK-first worker runtime for pi-conductor
@@ -19,7 +19,7 @@ Accepted
 
 ## Requirement Source
 
-- **PRD**: `docs/prd/PRD-001-pi-conductor-mvp.md`
+- **PRD**: `docs/prd/PRD-002-pi-conductor-persistent-resumable-workers.md`
 - **Decision Point**: Section 8, Decision D1; FR-2, FR-5, FR-6; NFR Architecture
 
 ## Context
@@ -42,7 +42,7 @@ The main architectural choice is whether workers are managed directly through Pi
 
 ### Option 1: SDK-first worker runtime
 
-`pi-conductor` creates and manages workers directly through Pi SDK session APIs.
+`pi-conductor` manages workers through Pi SDK session APIs, with the v1 implementation centered on `SessionManager` rather than a fully prompt-driven `AgentSession` runtime.
 
 - Good, because session lifecycle, prompting, and resume behavior can be modeled explicitly in conductor-owned code
 - Good, because it aligns with the PRD’s headless-first requirement and avoids coupling correctness to terminal behavior
@@ -68,7 +68,7 @@ Workers are treated primarily as terminal sessions, with conductor steering them
 
 ## Decision
 
-Chosen option: **"SDK-first worker runtime"**, because it best satisfies the decision drivers around headless correctness, resumability, explicit lifecycle control, and testability. The design will preserve a runtime boundary so a future process-backed backend can be added if needed.
+Chosen option: **"SDK-first worker runtime"**, implemented in v1 as a narrow `SessionManager`-backed runtime boundary. This best satisfies the decision drivers around headless correctness, resumability, explicit lifecycle control, and testability while preserving a seam for a future `AgentSession`-managed or process-backed backend.
 
 ## Consequences
 
@@ -76,16 +76,17 @@ Chosen option: **"SDK-first worker runtime"**, because it best satisfies the dec
 
 - Conductor can own worker lifecycle semantics directly
 - Status, summary, resume, and recovery behavior can be modeled without terminal coupling
-- The MVP stays aligned with the Pi SDK capabilities already documented in Pi examples
+- The MVP stays aligned with Pi SDK session APIs already documented in Pi examples
+- The v1 runtime stays small enough to normalize persisted worker state and evolve safely
 
 ### Negative
 
-- Some real-world worker behaviors may be harder to validate than with full process supervision; mitigation is to keep the runtime boundary narrow and add a process-backed backend later if SDK limitations appear
+- V1 does not yet provide always-on autonomous worker execution; mitigation is to keep the runtime boundary narrow and add an `AgentSession`-managed or process-backed backend later
 - Future tmux integration will need an adapter layer rather than being the native runtime from day one
 
 ### Neutral
 
-- The team will still need to decide how to represent runtime state and session references in storage
+- Runtime metadata and session references are now persisted explicitly in worker state
 - Future process-backed execution remains possible, but is not the default v1 path
 
 ## Related

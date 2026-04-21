@@ -14,12 +14,19 @@ export interface WorkerPrState {
   prCreationAttempted: boolean;
 }
 
+export interface WorkerRuntimeState {
+  backend: "session_manager";
+  sessionId: string | null;
+  lastResumedAt: string | null;
+}
+
 export interface WorkerRecord {
   workerId: string;
   name: string;
   branch: string | null;
   worktreePath: string | null;
   sessionFile: string | null;
+  runtime: WorkerRuntimeState;
   currentTask: string | null;
   lifecycle: WorkerLifecycleState;
   recoverable: boolean;

@@ -30,7 +30,11 @@ export function formatRunStatus(run: RunRecord): string {
         `recoverable=${worker.recoverable} ` +
         `task=${worker.currentTask ?? "none"} ` +
         `branch=${worker.branch ?? "none"} ` +
+        `worktree=${worker.worktreePath ?? "none"} ` +
         `session=${worker.sessionFile ?? "none"} ` +
+        `runtime=${worker.runtime.backend} ` +
+        `sessionId=${worker.runtime.sessionId ?? "none"} ` +
+        `lastResumedAt=${worker.runtime.lastResumedAt ?? "none"} ` +
         `pr=${worker.pr.url ?? "none"} ` +
         `commit=${worker.pr.commitSucceeded} ` +
         `push=${worker.pr.pushSucceeded} ` +

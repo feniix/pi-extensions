@@ -37,10 +37,12 @@ describe("worker lifecycle flows", () => {
 
   it("resumes a healthy worker using its persisted worktree and session linkage", async () => {
     const created = await createWorkerForRepo(repoDir, "backend");
-    const resumed = resumeWorkerForRepo(repoDir, "backend");
+    const resumed = await resumeWorkerForRepo(repoDir, "backend");
     expect(resumed.workerId).toBe(created.workerId);
     expect(resumed.worktreePath).toBe(created.worktreePath);
     expect(resumed.sessionFile).toBe(created.sessionFile);
+    expect(resumed.runtime.sessionId).toBe(created.runtime.sessionId);
+    expect(resumed.runtime.lastResumedAt).toBeTruthy();
   });
 
   it("updates a worker lifecycle to blocked, ready_for_pr, and done", async () => {

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { addWorker, createEmptyRun, createWorkerRecord, getConductorProjectDir } from "../extensions/storage.js";
+import {
+  addWorker,
+  createEmptyRun,
+  createWorkerRecord,
+  getConductorProjectDir,
+  setWorkerLifecycle,
+  setWorkerRuntimeState,
+} from "../extensions/storage.js";
 
 describe("storage helpers", () => {
   it("creates an empty run", () => {
@@ -30,6 +37,46 @@ describe("storage helpers", () => {
     expect(worker.recoverable).toBe(false);
     expect(worker.summary.stale).toBe(false);
     expect(worker.pr.prCreationAttempted).toBe(false);
+    expect(worker.runtime.backend).toBe("session_manager");
+    expect(worker.runtime.sessionId).toBeNull();
+    expect(worker.runtime.lastResumedAt).toBeNull();
+  });
+
+  it("marks an existing summary stale when the worker lifecycle changes", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: null,
+    });
+    worker.summary.text = "Half done";
+    worker.summary.updatedAt = new Date().toISOString();
+
+    const updated = setWorkerLifecycle({ ...run, workers: [worker] }, worker.workerId, "running");
+    expect(updated.workers[0]?.summary.stale).toBe(true);
+  });
+
+  it("does not persist sessionFile inside worker.runtime", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: "/tmp/original-session.jsonl",
+    });
+
+    const updated = setWorkerRuntimeState({ ...run, workers: [worker] }, worker.workerId, {
+      sessionFile: "/tmp/new-session.jsonl",
+      sessionId: "session-123",
+      lastResumedAt: "2026-04-20T00:00:00.000Z",
+    });
+
+    expect(updated.workers[0]?.sessionFile).toBe("/tmp/new-session.jsonl");
+    expect(updated.workers[0]?.runtime.sessionId).toBe("session-123");
+    expect("sessionFile" in (updated.workers[0]?.runtime ?? {})).toBe(false);
   });
 
   it("adds a worker and updates the run timestamp", () => {

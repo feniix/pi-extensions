@@ -8,7 +8,12 @@ import {
   validatePushPreconditions,
 } from "./git-pr.js";
 import { deriveProjectKey } from "./project-key.js";
-import { createWorkerSessionLink } from "./sessions.js";
+import {
+  createWorkerSessionRuntime,
+  recoverWorkerSessionRuntime,
+  resumeWorkerSessionRuntime,
+  summarizeWorkerSessionRuntime,
+} from "./runtime.js";
 import {
   addWorker,
   createEmptyRun,
@@ -17,11 +22,11 @@ import {
   removeWorker,
   setWorkerLifecycle,
   setWorkerPrState,
+  setWorkerRuntimeState,
   setWorkerSummary,
   setWorkerTask,
   writeRun,
 } from "./storage.js";
-import { generateWorkerSummaryFromSession } from "./summaries.js";
 import type { RunRecord, WorkerLifecycleState, WorkerRecord } from "./types.js";
 import { createWorkerId } from "./workers.js";
 import {
@@ -50,13 +55,14 @@ export async function createWorkerForRepo(repoRoot: string, workerName: string):
     workerId,
     workerName,
   });
-  const sessionFile = await createWorkerSessionLink(worktree.worktreePath);
+  const runtime = await createWorkerSessionRuntime(worktree.worktreePath);
   const worker = createWorkerRecord({
     workerId,
     name: workerName,
     branch: worktree.branch,
     worktreePath: worktree.worktreePath,
-    sessionFile,
+    sessionFile: runtime.sessionFile,
+    sessionId: runtime.sessionId,
   });
   const updatedRun = addWorker(run, worker);
   writeRun(updatedRun);
@@ -78,7 +84,7 @@ export function updateWorkerTaskForRepo(repoRoot: string, workerName: string, ta
   return updatedWorker;
 }
 
-export function resumeWorkerForRepo(repoRoot: string, workerName: string): WorkerRecord {
+export async function resumeWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
   const run = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
   const worker = run.workers.find((entry) => entry.name === workerName);
   if (!worker) {
@@ -87,7 +93,25 @@ export function resumeWorkerForRepo(repoRoot: string, workerName: string): Worke
   if (worker.lifecycle === "broken") {
     throw new Error(`Worker named ${workerName} is broken and must be recovered before resume`);
   }
-  return worker;
+  if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
+    throw new Error(`Worker named ${workerName} does not have a valid session file`);
+  }
+
+  const runtime = await resumeWorkerSessionRuntime(worker.sessionFile);
+  // Resume in the current MVP means "reopen and re-link the persisted worker
+  // session" rather than "continue an autonomous running agent". For that
+  // reason, resume intentionally normalizes the worker back to idle.
+  const updatedRun = setWorkerLifecycle(
+    setWorkerRuntimeState(run, worker.workerId, {
+      sessionFile: runtime.sessionFile,
+      sessionId: runtime.sessionId,
+      lastResumedAt: runtime.lastResumedAt,
+    }),
+    worker.workerId,
+    "idle",
+  );
+  writeRun(updatedRun);
+  return updatedRun.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
 }
 
 export function updateWorkerLifecycleForRepo(
@@ -133,7 +157,7 @@ export function reconcileWorkerHealth(run: RunRecord): RunRecord {
   };
 }
 
-export function refreshWorkerSummaryForRepo(repoRoot: string, workerName: string): WorkerRecord {
+export async function refreshWorkerSummaryForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
   const run = getOrCreateRunForRepo(repoRoot);
   const worker = run.workers.find((entry) => entry.name === workerName);
   if (!worker) {
@@ -142,7 +166,7 @@ export function refreshWorkerSummaryForRepo(repoRoot: string, workerName: string
   if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
     throw new Error(`Worker named ${workerName} does not have a valid session file`);
   }
-  const summaryText = generateWorkerSummaryFromSession(worker.sessionFile);
+  const summaryText = await summarizeWorkerSessionRuntime(worker.sessionFile);
   const updatedRun = setWorkerSummary(run, worker.workerId, summaryText);
   writeRun(updatedRun);
   const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
@@ -271,9 +295,9 @@ export async function recoverWorkerForRepo(repoRoot: string, workerName: string)
     }).worktreePath;
   }
 
-  let sessionFile = worker.sessionFile;
-  if (!sessionFile || !existsSync(sessionFile)) {
-    sessionFile = await createWorkerSessionLink(worktreePath);
+  let runtime = null;
+  if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
+    runtime = await recoverWorkerSessionRuntime(worktreePath);
   }
 
   const workers = run.workers.map((entry) =>
@@ -281,7 +305,12 @@ export async function recoverWorkerForRepo(repoRoot: string, workerName: string)
       ? {
           ...entry,
           worktreePath,
-          sessionFile,
+          sessionFile: runtime?.sessionFile ?? entry.sessionFile,
+          runtime: {
+            ...entry.runtime,
+            sessionId: runtime?.sessionId ?? entry.runtime.sessionId,
+            lastResumedAt: runtime?.lastResumedAt ?? entry.runtime.lastResumedAt,
+          },
           lifecycle: "idle" as const,
           recoverable: false,
           updatedAt: new Date().toISOString(),
