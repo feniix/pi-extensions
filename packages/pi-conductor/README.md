@@ -4,12 +4,16 @@ Long-lived multi-session worker orchestration for Pi.
 
 ## Status
 
-Implemented MVP for the `pi-extensions` workspace, based on:
+Implemented for the `pi-extensions` workspace, based on:
 - `docs/prd/PRD-002-pi-conductor-persistent-resumable-workers.md`
+- `docs/prd/PRD-003-pi-conductor-single-worker-run.md`
 - `docs/adr/ADR-0001-sdk-first-worker-runtime.md`
 - `docs/adr/ADR-0002-conductor-project-scoped-storage.md`
 - `docs/adr/ADR-0003-continuity-based-worktree-reuse.md`
 - `docs/adr/ADR-0004-minimal-conductor-local-git-gh-layer.md`
+- `docs/adr/ADR-0006-agent-session-based-foreground-run-execution.md`
+- `docs/adr/ADR-0007-single-worker-run-before-multi-worker-orchestration.md`
+- `docs/adr/ADR-0011-conductor-run-extension-binding-and-preflight-policy.md`
 
 PRD-001 remains in the repo as the original design document and is now superseded.
 
@@ -22,12 +26,14 @@ PRD-001 remains in the repo as the original design document and is now supersede
 - worker git worktree creation and recovery
 - real persisted Pi session linkage
 - a SessionManager-backed runtime boundary for worker creation, resume, recovery, and summary refresh
+- AgentSession-based foreground worker execution through `/conductor run <worker-name> <task>`
 - persisted runtime metadata (`sessionId`, `lastResumedAt`, backend)
+- persisted per-worker `lastRun` metadata for started/completed/error/aborted runs
 - explicit worker resume against persisted worktree/session metadata
-- task updates and session-derived summaries
+- task updates, run-aware task mutation, and session-derived summaries
 - lifecycle controls for `idle`, `running`, `blocked`, `ready_for_pr`, and `done`
 - health-aware status output distinguishing healthy, stale, and broken workers
-- status output that includes worktree path, session file, and runtime metadata
+- status output that includes worktree path, session file, runtime metadata, and last-run state
 - broken-state detection and targeted recovery
 - targeted worker cleanup
 - minimal PR preparation flow:
@@ -46,6 +52,7 @@ Primary operator UX is the `/conductor` command group:
 /conductor start <worker-name>
 /conductor task <worker-name> <task>
 /conductor resume <worker-name>
+/conductor run <worker-name> <task>
 /conductor state <worker-name> <lifecycle>
 /conductor summarize <worker-name>
 /conductor recover <worker-name>
@@ -67,6 +74,7 @@ Registered tools:
 - `conductor_summary_refresh`
 - `conductor_cleanup`
 - `conductor_resume`
+- `conductor_run`
 - `conductor_lifecycle_update`
 - `conductor_commit`
 - `conductor_push`
@@ -74,17 +82,26 @@ Registered tools:
 
 ## Runtime model
 
-The current MVP does **not** supervise always-on autonomous worker agents.
+`pi-conductor` does **not** supervise always-on autonomous worker agents.
 
 Instead, it uses a narrow Pi SDK runtime seam around persisted sessions:
 - create a worker session when a worker is created
 - reopen that session on `/conductor resume`
-- record runtime metadata in conductor state
+- run one foreground task in the existing worker session lineage via `/conductor run`
+- record runtime metadata and last-run outcome in conductor state
 - derive summaries from the worker session history
 
-In this MVP, `/conductor resume` intentionally normalizes the worker lifecycle back to `idle`. Resume currently means “reopen and relink the persisted worker session”, not “reattach to an always-running autonomous worker”.
+`/conductor run` is intentionally synchronous foreground execution. It runs one task in one existing worker, waits for completion, persists the outcome, and returns. It is not a background scheduler, daemon, or multi-worker orchestrator.
 
-This keeps the worker model durable today while leaving room for a future `AgentSession`-managed or subprocess-backed subagent backend.
+Worker runs use a curated non-interactive execution surface rather than broad ambient inheritance. The run path performs best-effort model/provider preflight before the worker is persisted as `running`, reuses the worker worktree and session file, and records:
+- `success`
+- `error`
+- `aborted`
+- or an intentionally preserved in-progress/stuck signal when a process dies mid-run (`lifecycle=running` with `lastRun.finishedAt=null`)
+
+In this package, `/conductor resume` still intentionally normalizes the worker lifecycle back to `idle`. Resume means “reopen and relink the persisted worker session”, not “reattach to an always-running autonomous worker”.
+
+This keeps the worker model durable today while leaving room for future multi-worker or subprocess-backed backends.
 
 ## Development
 
