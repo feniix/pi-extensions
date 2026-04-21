@@ -119,20 +119,12 @@ export function analyzeCommitsTool(): ToolResult {
 export function bumpVersionTool(newVersion: string, file = "package.json"): ToolResult {
   try {
     if (!existsSync(file)) {
-      return {
-        content: [{ type: "text", text: `File not found: ${file}` }],
-        isError: true,
-        details: { error: "file_not_found" },
-      };
+      return errorResult(`File not found: ${file}`, "file_not_found");
     }
 
     const pkg = JSON.parse(readFileSync(file, "utf-8"));
     if (typeof pkg.version !== "string") {
-      return {
-        content: [{ type: "text", text: `No version field found in ${file}` }],
-        isError: true,
-        details: { error: "no_version_field" },
-      };
+      return errorResult(`No version field found in ${file}`, "no_version_field");
     }
 
     const oldVersion = pkg.version;

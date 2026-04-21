@@ -25,11 +25,7 @@ export function commitTool(message: string, files?: string[], noVerify = false):
   try {
     const branch = execGit("git branch --show-current");
     if (!branch) {
-      return {
-        content: [{ type: "text", text: "Not on a branch (detached HEAD state)" }],
-        isError: true,
-        details: { error: "detached_head" },
-      };
+      return errorResult("Not on a branch (detached HEAD state)", "detached_head");
     }
 
     if (files && files.length > 0) {
@@ -42,11 +38,7 @@ export function commitTool(message: string, files?: string[], noVerify = false):
 
     const stagedAfter = execGit("git diff --cached --name-only").split("\n").filter(Boolean);
     if (stagedAfter.length === 0) {
-      return {
-        content: [{ type: "text", text: "No files staged. Please stage files first or pass specific files." }],
-        isError: true,
-        details: { error: "no_files_staged" },
-      };
+      return errorResult("No files staged. Please stage files first or pass specific files.", "no_files_staged");
     }
 
     const verifyFlag = noVerify ? "--no-verify" : "";
@@ -108,18 +100,14 @@ function formatRepoInfo(branch: string, defaultBranch: string, status: RepoStatu
   return `Repository Info:\n- Current branch: ${branch}\n- Default branch: ${defaultBranch}\n- Has changes: ${hasRepoChanges(status)}\n- Staged: ${status.staged.length}\n- Modified: ${status.modified.length}\n- Untracked: ${status.untracked.length}`;
 }
 
-export function repoInfoTool(resolveDefaultBranch: () => string = getDefaultBranch): ToolResult {
+export function repoInfoTool(): ToolResult {
   try {
     const branch = execGit("git branch --show-current");
     if (!branch) {
-      return {
-        content: [{ type: "text", text: "Not on a branch (detached HEAD state)" }],
-        isError: true,
-        details: { error: "detached_head" },
-      };
+      return errorResult("Not on a branch (detached HEAD state)", "detached_head");
     }
 
-    const defaultBranch = resolveDefaultBranch();
+    const defaultBranch = getDefaultBranch();
     const status = parseRepoStatus(execGit("git status --porcelain"));
     return successResult(formatRepoInfo(branch, defaultBranch, status), {
       branch,

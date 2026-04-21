@@ -113,20 +113,12 @@ export function mergePrTool(
   try {
     const num = prNumber ?? detectCurrentPrNumber();
     if (!num) {
-      return {
-        content: [{ type: "text", text: "No PR number provided and could not detect current PR." }],
-        isError: true,
-        details: { error: "no_pr_found" },
-      };
+      return errorResult("No PR number provided and could not detect current PR.", "no_pr_found");
     }
 
     const prData = getPullRequestInfo(num);
     if (prData.state !== "OPEN") {
-      return {
-        content: [{ type: "text", text: `PR #${num} is not open (state: ${prData.state})` }],
-        isError: true,
-        details: { error: "pr_not_open", state: prData.state },
-      };
+      return errorResult(`PR #${num} is not open (state: ${prData.state})`, "pr_not_open", { state: prData.state });
     }
 
     execGh(buildMergeCommand(num, squash, deleteBranch, commitTitle, commitMessage));
