@@ -445,7 +445,7 @@ export async function runFormat(args: unknown, ctx: { cwd: string } & ExtensionC
     return;
   }
 
-  const original = readFileSync(targetPath, "utf-8");
+  const original = parseResult.content ?? readFileSync(targetPath, "utf-8");
   const formatted = await formatSpecDocument(original);
   if (formatted === original) {
     ctx.ui.notify("[specdocs] No formatting changes were needed.", "info");
