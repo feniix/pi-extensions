@@ -31,7 +31,7 @@ context: fork
   - `{ "query": "Rust async architecture", "category": "personal site", "excludeDomains": ["medium.com", "substack.com"], "numResults": 15 }`
 - `web_find_similar_exa`
   - `{ "url": "https://example.dev/posts/rust-async-architecture", "excludeSourceDomain": true, "numResults": 8 }`
-- `web_research_exa`
+- `web_research_exa` *(requires `--exa-enable-research`)*
   - `{ "query": "Compare recommendations from practitioner blogs", "systemPrompt": "Prioritize dated posts, independent authors, and call out opinion vs facts", "outputSchema": { "type": "text" } }`
 
 ## Query Writing

@@ -80,7 +80,7 @@ export default function exaExtension(pi: ExtensionAPI) {
       label: "Exa Web Search",
       description:
         "Search the web for any topic and get clean, ready-to-use content. Best for lookup and current information queries.",
-      promptSnippet: "Quick web search with highlights for lookups and discovery.",
+      promptSnippet: "Quick web search for lookups, discovery, and current pages.",
       promptGuidelines: [
         "Use web_search_exa for quick lookups and finding pages; use web_answer_exa for direct factual questions with citations.",
         "Use web_search_exa for simple searches; use web_search_advanced_exa when you need category, domain, or date filters.",

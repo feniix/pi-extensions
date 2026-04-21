@@ -750,6 +750,8 @@ describe("pi-exa extension", () => {
     const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
     expect(tools).toHaveLength(6);
 
+    const exaToolNamePattern = /web_(search|fetch|search_advanced|research|answer|find_similar)_exa/g;
+
     for (const tool of tools) {
       expect(tool.promptSnippet).toBeTypeOf("string");
       expect(tool.promptSnippet.length).toBeLessThan(100);
@@ -757,7 +759,8 @@ describe("pi-exa extension", () => {
       expect(tool.promptGuidelines).toBeInstanceOf(Array);
       expect(tool.promptGuidelines.length).toBeGreaterThan(0);
       for (const guideline of tool.promptGuidelines) {
-        expect(guideline).toMatch(/web_(search|fetch|search_advanced|research|answer|find_similar)_exa/);
+        const matches = [...guideline.matchAll(exaToolNamePattern)].map((match) => match[0]);
+        expect(new Set(matches).size).toBeGreaterThanOrEqual(2);
       }
     }
   });
