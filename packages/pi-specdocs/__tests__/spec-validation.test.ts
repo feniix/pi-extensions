@@ -387,6 +387,20 @@ describe("validate required tables", () => {
     }
   });
 
+  it("accepts a required table when another table also appears in the same section", () => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const path = writeTempDoc(
+        join(dir, "docs", "prd"),
+        "PRD-001-test.md",
+        `${VALID_PRD}\n## 9. File Breakdown\n| File | Change type | FR | Description |\n|---|---|---|---|\n| a.ts | Modify | FR-1 | Test |\n\n## 12. Open Questions\n| # | Question | Owner | Due | Status |\n|---|---|---|---|---|\n| Q1 | Test? | Alice | Soon | Open |\n\n| Note | Value |\n|---|---|\n| Summary | Keep |\n\n## 14. Changelog\n| Date | Change | Author |\n|---|---|---|\n| 2026-04-21 | Added test | Pi |\n`,
+      );
+      expect(validateRequiredTables(path)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
   it("reports missing required plan table columns", () => {
     const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
     try {

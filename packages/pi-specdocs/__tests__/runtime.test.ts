@@ -300,6 +300,50 @@ describe("pi-specdocs runtime", () => {
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
   });
 
+  it("preserves thematic breaks while normalizing surrounding spacing", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-break-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    const filePath = join(base, "docs", "prd", "PRD-001-test.md");
+    writeFileSync(
+      filePath,
+      '---\ntitle: "Test"\nprd: PRD-001\nstatus: Draft\nowner: Alice\ndate: 2025-01-01\nissue: 1\nversion: 1\n---\n# Test\n---\n## 1. Problem & Context\nBody\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
+
+    const updated = readFileSync(filePath, "utf-8");
+    expect(updated).toContain('# Test\n\n---\n\n## 1. Problem & Context');
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
+  });
+
+  it("preserves gfm task list and strikethrough content", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-gfm-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    const filePath = join(base, "docs", "prd", "PRD-001-test.md");
+    writeFileSync(
+      filePath,
+      '---\ntitle: "Test"\nprd: PRD-001\nstatus: Draft\nowner: Alice\ndate: 2025-01-01\nissue: 1\nversion: 1\n---\n\n# Test\n\n## 1. Problem & Context\n- [x] done\n- [ ] todo\n~~old~~ text\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.({ path: filePath }, { cwd: base, ui: { notify } });
+
+    const updated = readFileSync(filePath, "utf-8");
+    expect(updated).toContain('[x] done');
+    expect(updated).toContain('[ ] todo');
+    expect(updated).toContain('~~old~~ text');
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
+  });
+
   it("reports a clear error when specdocs-format targets malformed frontmatter", async () => {
     const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-malformed-"));
     mkdirSync(join(base, "docs", "prd"), { recursive: true });

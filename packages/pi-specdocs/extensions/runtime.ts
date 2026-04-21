@@ -278,6 +278,10 @@ function isSupportedSpecPath(path: string): boolean {
   return isPrd(path) || isAdr(path) || isPlan(path);
 }
 
+function isThematicBreak(line: string): boolean {
+  return /^(?:\*\*\*|---|___)$/.test(line.trim());
+}
+
 function normalizeBodyLines(lines: string[]): string[] {
   const result: string[] = [];
 
@@ -285,14 +289,14 @@ function normalizeBodyLines(lines: string[]): string[] {
     const line = lines[i].replace(/[\t ]+$/g, "");
     const trimmed = line.trim();
 
-    if (trimmed.startsWith("## ")) {
+    if (trimmed.startsWith("## ") || isThematicBreak(trimmed)) {
       while (result.length > 0 && result[result.length - 1] === "") {
         result.pop();
       }
       if (result.length > 0) {
         result.push("");
       }
-      result.push(trimmed);
+      result.push(isThematicBreak(trimmed) ? "---" : trimmed);
       while (i + 1 < lines.length && lines[i + 1].trim() === "") {
         i++;
       }

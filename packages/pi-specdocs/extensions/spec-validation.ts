@@ -252,7 +252,7 @@ interface ParsedSpecDocument {
   label: "PRD" | "ADR" | "PLAN" | null;
   frontmatter: ReturnType<typeof parseFrontmatterResult>;
   headings: Set<string>;
-  tables: Map<string, string[]>;
+  tables: Map<string, string[][]>;
 }
 
 function parseSpecDocument(filepath: string): ParsedSpecDocument {
@@ -261,7 +261,7 @@ function parseSpecDocument(filepath: string): ParsedSpecDocument {
   const tree = parseMarkdownTree(body);
   const children = Array.isArray(tree.children) ? tree.children : [];
   const headings = new Set<string>();
-  const tables = new Map<string, string[]>();
+  const tables = new Map<string, string[][]>();
   let currentSection = "";
 
   for (const node of children) {
@@ -278,10 +278,9 @@ function parseSpecDocument(filepath: string): ParsedSpecDocument {
 
     const headerRow = node.children[0];
     const headerCells = Array.isArray(headerRow?.children) ? headerRow.children : [];
-    tables.set(
-      currentSection,
-      headerCells.map((cell) => extractNodeText(cell).trim()),
-    );
+    const sectionTables = tables.get(currentSection) ?? [];
+    sectionTables.push(headerCells.map((cell) => extractNodeText(cell).trim()));
+    tables.set(currentSection, sectionTables);
   }
 
   return {
@@ -313,14 +312,16 @@ function validateRequiredTablesFromDocument(document: ParsedSpecDocument): strin
 
   const warnings: string[] = [];
   for (const [section, requiredColumns] of Object.entries(REQUIRED_TABLE_COLUMNS[label])) {
-    const headers = document.tables.get(section);
-    if (!headers) {
+    const sectionTables = document.tables.get(section);
+    if (!sectionTables || sectionTables.length === 0) {
       warnings.push(`⚠ ${label}: Missing required table in section ${section}.`);
       continue;
     }
 
-    const missingColumns = requiredColumns.filter((column) => !headers.includes(column));
-    if (missingColumns.length > 0) {
+    const matchingTable = sectionTables.find((headers) => requiredColumns.every((column) => headers.includes(column)));
+    if (!matchingTable) {
+      const combinedHeaders = Array.from(new Set(sectionTables.flat()));
+      const missingColumns = requiredColumns.filter((column) => !combinedHeaders.includes(column));
       warnings.push(`⚠ ${label}: Table ${section} is missing required columns: ${missingColumns.join(", ")}.`);
     }
   }
