@@ -1,7 +1,7 @@
 ---
 title: "Specdocs formatting activation model"
 adr: ADR-0010
-status: Proposed
+status: Accepted
 date: 2026-04-21
 prd: "PRD-004-pi-specdocs-in-process-markdown-linting"
 decision: "Ship formatting as an explicit specdocs-format command and keep post-tool behavior lint-only in the first release"
@@ -11,7 +11,7 @@ decision: "Ship formatting as an explicit specdocs-format command and keep post-
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 

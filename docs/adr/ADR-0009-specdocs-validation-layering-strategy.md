@@ -1,7 +1,7 @@
 ---
 title: "Specdocs validation layering strategy"
 adr: ADR-0009
-status: Proposed
+status: Accepted
 date: 2026-04-21
 prd: "PRD-004-pi-specdocs-in-process-markdown-linting"
 decision: "Keep specdocs-specific validation and formatting rules as a separate layer on top of shared parsed document data"
@@ -11,7 +11,7 @@ decision: "Keep specdocs-specific validation and formatting rules as a separate 
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 

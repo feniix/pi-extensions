@@ -6,10 +6,6 @@ import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { parseFrontmatterResult } from "./frontmatter.js";
 
-const PRD_REQUIRED_FIELDS = ["title", "prd", "status", "owner", "date", "issue", "version"] as const;
-const ADR_REQUIRED_FIELDS = ["title", "adr", "status", "date", "prd"] as const;
-const PLAN_REQUIRED_FIELDS = ["title", "prd", "date", "author", "status"] as const;
-
 const PRD_VALID_STATUSES = ["Draft", "Implemented", "Superseded", "Archived"] as const;
 const ADR_VALID_STATUSES = ["Proposed", "Accepted", "Deprecated", "Superseded"] as const;
 const PLAN_VALID_STATUSES = ["Draft", "Implemented", "Archived"] as const;
@@ -51,6 +47,7 @@ const PLAN_REQUIRED_SECTIONS = [
   "## Implementation Order",
   "## ADR Index",
 ] as const;
+const PLAN_RECOMMENDED_WARNING_SECTIONS = ["## Risks and Mitigations", "## Open Questions"] as const;
 
 const REQUIRED_TABLE_COLUMNS: Record<string, Record<string, readonly string[]>> = {
   PRD: {
@@ -81,9 +78,15 @@ export function isPlan(path: string): boolean {
   return path.includes("docs/architecture/plan-");
 }
 
+type FrontmatterFieldType = "string" | "stringOrNumber";
+
+interface FrontmatterFieldSchema {
+  type: FrontmatterFieldType;
+}
+
 interface DocValidationConfig {
   docType: "PRD" | "ADR" | "PLAN";
-  requiredFields: readonly string[];
+  fieldSchemas: Record<string, FrontmatterFieldSchema>;
   validStatuses: readonly string[];
   numberPattern?: RegExp;
   numberField?: "prd" | "adr";
@@ -94,7 +97,15 @@ function getDocValidationConfig(filepath: string): DocValidationConfig | null {
   if (isPrd(filepath)) {
     return {
       docType: "PRD",
-      requiredFields: PRD_REQUIRED_FIELDS,
+      fieldSchemas: {
+        title: { type: "string" },
+        prd: { type: "string" },
+        status: { type: "string" },
+        owner: { type: "string" },
+        date: { type: "string" },
+        issue: { type: "stringOrNumber" },
+        version: { type: "stringOrNumber" },
+      },
       validStatuses: PRD_VALID_STATUSES,
       numberPattern: /^PRD-\d{3}$/,
       numberField: "prd",
@@ -105,7 +116,13 @@ function getDocValidationConfig(filepath: string): DocValidationConfig | null {
   if (isAdr(filepath)) {
     return {
       docType: "ADR",
-      requiredFields: ADR_REQUIRED_FIELDS,
+      fieldSchemas: {
+        title: { type: "string" },
+        adr: { type: "string" },
+        status: { type: "string" },
+        date: { type: "string" },
+        prd: { type: "string" },
+      },
       validStatuses: ADR_VALID_STATUSES,
       numberPattern: /^ADR-\d{4}$/,
       numberField: "adr",
@@ -116,7 +133,13 @@ function getDocValidationConfig(filepath: string): DocValidationConfig | null {
   if (isPlan(filepath)) {
     return {
       docType: "PLAN",
-      requiredFields: PLAN_REQUIRED_FIELDS,
+      fieldSchemas: {
+        title: { type: "string" },
+        prd: { type: "string" },
+        date: { type: "string" },
+        author: { type: "string" },
+        status: { type: "string" },
+      },
       validStatuses: PLAN_VALID_STATUSES,
     };
   }
@@ -124,16 +147,64 @@ function getDocValidationConfig(filepath: string): DocValidationConfig | null {
   return null;
 }
 
-function collectMissingFieldWarnings(
-  fields: Record<string, string>,
-  config: DocValidationConfig,
-  warnings: string[],
-): void {
-  for (const field of config.requiredFields) {
-    if (!fields[field]) {
-      warnings.push(`⚠ ${config.docType}: Missing required frontmatter field: ${field}`);
-    }
+function normalizeFieldValue(value: unknown, type: FrontmatterFieldType): string | null {
+  if (type === "string") {
+    return typeof value === "string" ? value : null;
   }
+
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value);
+  }
+
+  return null;
+}
+
+function formatFieldType(type: FrontmatterFieldType): string {
+  return type === "stringOrNumber" ? "a string or number" : "a string";
+}
+
+function describeInvalidValue(value: unknown): string {
+  if (typeof value === "boolean") {
+    return "a boolean";
+  }
+  if (typeof value === "number") {
+    return "a number";
+  }
+  if (Array.isArray(value)) {
+    return "an array";
+  }
+  if (value && typeof value === "object") {
+    return "an object";
+  }
+  return `a ${typeof value}`;
+}
+
+function validateSchemaFields(
+  rawFields: Record<string, unknown>,
+  config: DocValidationConfig,
+): { normalizedFields: Record<string, string>; warnings: string[] } {
+  const warnings: string[] = [];
+  const normalizedFields: Record<string, string> = {};
+
+  for (const [field, schema] of Object.entries(config.fieldSchemas)) {
+    const rawValue = rawFields[field];
+    if (rawValue == null || rawValue === "") {
+      warnings.push(`⚠ ${config.docType}: Missing required frontmatter field: ${field}`);
+      continue;
+    }
+
+    const normalized = normalizeFieldValue(rawValue, schema.type);
+    if (normalized === null) {
+      warnings.push(
+        `⚠ ${config.docType}: Field '${field}' must be ${formatFieldType(schema.type)}, not ${describeInvalidValue(rawValue)}.`,
+      );
+      continue;
+    }
+
+    normalizedFields[field] = normalized;
+  }
+
+  return { normalizedFields, warnings };
 }
 
 function collectNumberWarnings(
@@ -191,17 +262,15 @@ function validateFrontmatterFromResult(filepath: string, result: ReturnType<type
     return [`⚠ ${config.docType}: Frontmatter parse error: ${result.error}`];
   }
 
-  const fields = result.fields;
-  if (fields === null) {
+  if (result.rawFields === null) {
     return [`⚠ ${config.docType}: No YAML frontmatter found.`];
   }
 
-  const warnings: string[] = [];
-  collectMissingFieldWarnings(fields, config, warnings);
-  collectNumberWarnings(fields, config, basename(filepath), warnings);
-  collectStatusWarnings(fields, config, warnings);
+  const { normalizedFields, warnings } = validateSchemaFields(result.rawFields, config);
+  collectNumberWarnings(normalizedFields, config, basename(filepath), warnings);
+  collectStatusWarnings(normalizedFields, config, warnings);
   if (config.docType === "PLAN") {
-    collectPlanWarnings(fields, warnings);
+    collectPlanWarnings(normalizedFields, warnings);
   }
   return warnings;
 }
@@ -295,14 +364,19 @@ function parseSpecDocument(filepath: string): ParsedSpecDocument {
 
 function validateRequiredSectionsFromDocument(document: ParsedSpecDocument): string[] {
   const requiredSections = getRequiredSections(document.filepath);
-  if (requiredSections.length === 0) {
-    return [];
+  const label = document.label ?? "PRD";
+  const missingRequiredSections = requiredSections.filter((section) => !document.headings.has(section));
+  const warnings = missingRequiredSections.map((section) => `⚠ ${label}: Missing required section: ${section}`);
+
+  if (document.label === "PLAN" && missingRequiredSections.length === 0) {
+    warnings.push(
+      ...PLAN_RECOMMENDED_WARNING_SECTIONS.filter((section) => !document.headings.has(section)).map(
+        (section) => `⚠ PLAN: Missing recommended section: ${section}`,
+      ),
+    );
   }
 
-  const label = document.label ?? "PRD";
-  return requiredSections
-    .filter((section) => !document.headings.has(section))
-    .map((section) => `⚠ ${label}: Missing required section: ${section}`);
+  return warnings;
 }
 
 function validateRequiredTablesFromDocument(document: ParsedSpecDocument): string[] {

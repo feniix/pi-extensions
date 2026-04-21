@@ -1,11 +1,11 @@
 ---
 title: "pi-specdocs in-process markdown linting and formatting"
 prd: PRD-004
-status: Draft
+status: Implemented
 owner: "Sebastian Otaegui"
 issue: "N/A"
 date: 2026-04-21
-version: "1.0"
+version: "1.1"
 ---
 
 # PRD: pi-specdocs in-process markdown linting and formatting
@@ -449,7 +449,7 @@ Then the command reports that no changes were needed
 
 | Issue | Relationship |
 |-------|-------------|
-| `docs/prd/PRD-005-pi-exa-api-alignment.md` | Draft; informed discussion about deprecated tool references and current runtime constraints |
+| `docs/prd/PRD-005-pi-exa-api-alignment.md` | Implemented; informed discussion about deprecated tool references and current runtime constraints |
 | `docs/adr/ADR-0005-exa-deep-search-tool-strategy.md` | Related; provides context for current Exa tool surface used by specdocs skills |
 | `docs/adr/ADR-0008-specdocs-parser-pipeline-strategy.md` | Derived from this PRD; records the preferred parser-stack strategy |
 | `docs/adr/ADR-0009-specdocs-validation-layering-strategy.md` | Derived from this PRD; records the semantic rule-layer architecture |
@@ -464,6 +464,7 @@ Then the command reports that no changes were needed
 | 2026-04-21 | Initial draft | Sebastian Otaegui |
 | 2026-04-21 | Refined requirements, clarified scope/edge cases, and added explicit ADR references for parser strategy, validation layering, and formatting activation | Sebastian Otaegui |
 | 2026-04-21 | Aligned cross-document references and implementation-ready decisions after iterative review passes | Sebastian Otaegui |
+| 2026-04-21 | Marked implemented after landing parser-backed validation, typed/schema-backed frontmatter checks, plan linting, explicit formatting, and recorded local performance measurements | Sebastian Otaegui |
 
 ---
 
@@ -474,5 +475,5 @@ Then the command reports that no changes were needed
 3. Include fixtures with duplicate `PRD-NNN` and `ADR-NNNN` filename prefixes and confirm workspace validation reports each collision as an error that identifies all conflicting files.
 4. Edit a spec document through pi and confirm post-tool linting still notifies immediately with the new validator.
 5. Run workspace validation over the current `docs/` tree and confirm existing valid docs do not produce false positives beyond known real issues.
-6. Measure single-file and workspace validation times against representative fixtures and confirm they meet the stated performance targets.
+6. Measure single-file and workspace validation times against representative fixtures and confirm they meet the stated performance targets. Latest recorded local benchmark from `PI_SPECDOCS_BENCH=1 npx vitest run packages/pi-specdocs/__tests__/performance.test.ts --reporter=verbose`: single-file validation `7.41 ms`, workspace validation over 25 docs `19.14 ms`.
 7. Run formatting against a sample malformed doc and confirm only targeted formatting changes occur.

@@ -3,6 +3,7 @@ import YAML from "yaml";
 
 export interface FrontmatterParseResult {
   fields: Record<string, string> | null;
+  rawFields: Record<string, unknown> | null;
   error: string | null;
   content: string | null;
   body: string;
@@ -21,12 +22,12 @@ function readDocument(filepath: string): string | null {
 export function parseFrontmatterResult(filepath: string): FrontmatterParseResult {
   const content = readDocument(filepath);
   if (content === null) {
-    return { fields: null, error: null, content: null, body: "" };
+    return { fields: null, rawFields: null, error: null, content: null, body: "" };
   }
 
   const lines = content.split("\n");
   if (!lines.length || lines[0].trim() !== "---") {
-    return { fields: null, error: null, content, body: content };
+    return { fields: null, rawFields: null, error: null, content, body: content };
   }
 
   let closingIndex = -1;
@@ -38,28 +39,26 @@ export function parseFrontmatterResult(filepath: string): FrontmatterParseResult
   }
 
   if (closingIndex === -1) {
-    return { fields: null, error: "Unterminated YAML frontmatter.", content, body: "" };
+    return { fields: null, rawFields: null, error: "Unterminated YAML frontmatter.", content, body: "" };
   }
 
   const yamlText = lines.slice(1, closingIndex).join("\n");
   const body = lines.slice(closingIndex + 1).join("\n");
 
   try {
-    const parsed = YAML.parse(yamlText);
+    const parsed = YAML.parse(yamlText, { schema: "core" });
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return { fields: {}, error: null, content, body };
+      return { fields: {}, rawFields: {}, error: null, content, body };
     }
 
+    const rawFields = parsed as Record<string, unknown>;
     const fields = Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [
-        key,
-        value == null ? "" : String(value),
-      ]),
+      Object.entries(rawFields).map(([key, value]) => [key, value == null ? "" : String(value)]),
     );
-    return { fields, error: null, content, body };
+    return { fields, rawFields, error: null, content, body };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { fields: null, error: message, content, body };
+    return { fields: null, rawFields: null, error: message, content, body };
   }
 }
 

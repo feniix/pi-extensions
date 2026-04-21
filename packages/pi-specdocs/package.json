@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-specdocs",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Structured spec documentation — PRDs, ADRs, and implementation plans with cross-referencing",
   "keywords": [
     "pi",
@@ -15,6 +15,9 @@
     "specs"
   ],
   "type": "module",
+  "scripts": {
+    "perf:validation": "PI_SPECDOCS_BENCH=1 vitest run __tests__/performance.test.ts --reporter=verbose"
+  },
   "files": [
     "extensions/",
     "skills/",
