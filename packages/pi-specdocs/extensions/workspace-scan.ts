@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { extractFrontmatterField } from "./frontmatter.js";
+import { extractFrontmatterField, parseFrontmatter } from "./frontmatter.js";
 
 export const CONFIG_PATH = ".claude/tracker.md";
 export const PRD_DIR = "docs/prd";
@@ -25,37 +25,7 @@ export interface ScanResult {
 
 export function readConfig(cwd: string): TrackerConfig {
   const configPath = join(cwd, CONFIG_PATH);
-  if (!existsSync(configPath)) {
-    return {};
-  }
-
-  try {
-    const content = readFileSync(configPath, "utf-8");
-    const lines = content.split("\n");
-
-    if (lines.length === 0 || lines[0].trim() !== "---") {
-      return {};
-    }
-
-    const config: TrackerConfig = {};
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i].trim() === "---") {
-        break;
-      }
-      if (lines[i].includes(":")) {
-        const colonIdx = lines[i].indexOf(":");
-        const key = lines[i].slice(0, colonIdx).trim();
-        const value = lines[i]
-          .slice(colonIdx + 1)
-          .trim()
-          .replace(/^["']|["']$/g, "");
-        config[key] = value;
-      }
-    }
-    return config;
-  } catch {
-    return {};
-  }
+  return parseFrontmatter(configPath) ?? {};
 }
 
 function resolveTracker(config: TrackerConfig): { tracker: "github" | "linear"; warning?: string } {

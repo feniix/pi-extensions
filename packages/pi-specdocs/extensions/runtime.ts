@@ -2,7 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { ADR_FILENAME_PATTERN, isAdr, isPrd, PRD_FILENAME_PATTERN, validateFrontmatter } from "./spec-validation.js";
-import { ADR_DIR, listMatchingFiles, PLAN_DIR, PRD_DIR } from "./workspace-scan.js";
+import { ADR_DIR, listMatchingFiles, PRD_DIR } from "./workspace-scan.js";
 
 function extractFilePath(input: Record<string, unknown> | undefined): string {
   if (!input) return "";
@@ -43,8 +43,6 @@ interface ValidationFiles {
 function getValidationFiles(cwd: string): ValidationFiles {
   const prdDir = join(cwd, PRD_DIR);
   const adrDir = join(cwd, ADR_DIR);
-  const planDir = join(cwd, PLAN_DIR);
-  void listMatchingFiles(planDir, /^plan-.*\.md$/);
 
   return {
     prdDir,
