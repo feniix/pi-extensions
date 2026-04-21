@@ -3,7 +3,7 @@ title: "pi-exa Full Exa API Alignment"
 prd: "PRD-005-pi-exa-api-alignment"
 date: 2026-04-20
 author: "Claude Code"
-status: Draft
+status: Implemented
 ---
 
 # Plan: pi-exa Full Exa API Alignment
@@ -16,11 +16,11 @@ status: Draft
 
 ## Architecture Overview
 
-This plan implements PRD-005: closing the gap between the Exa API surface and what pi-exa exposes. The work has two axes — **widening** (3 new tools, enhanced fetch parameters) and **deepening** (observability metadata, typed SDK methods, system prompt guidance).
+This plan implemented PRD-005: closing the gap between the Exa API surface and what pi-exa exposes. The work had two axes — **widening** (3 new tools, enhanced fetch parameters) and **deepening** (observability metadata, typed SDK methods, system prompt guidance).
 
 The foundation is a migration from raw `exa.request()` calls to the exa-js SDK's typed methods (`exa.search()`, `exa.getContents()`, `exa.answer()`, `exa.findSimilar()`). This migration unlocks observability for free — the SDK's response types (`SearchResponse`, `AnswerResponse`) already carry `costDollars`, `searchTime`, and `resolvedSearchType`. A new shared return type (`ToolPerformResult`) threads metadata from `perform*()` functions through execute handlers into the tool result `details` field.
 
-On top of this foundation, three new tools are added (`web_research_exa`, `web_answer_exa`, `web_find_similar_exa`), the existing fetch tool gains `highlights`/`summary`/`maxAgeHours`, the advanced search tool gets strict type enforcement, all tools get `promptSnippet`/`promptGuidelines` for LLM routing, and all six skills are rewritten as pi-native. The work is structured so that each phase produces a working, testable increment.
+On top of this foundation, three new tools were added (`web_research_exa`, `web_answer_exa`, `web_find_similar_exa`), the existing fetch tool gained `highlights`/`summary`/`maxAgeHours`, the advanced search tool got strict type enforcement, all tools got `promptSnippet`/`promptGuidelines` for LLM routing, and all six skills were rewritten as pi-native. The plan is retained as the implementation record for the shipped work.
 
 ## Components
 
@@ -260,4 +260,4 @@ Decisions related to this plan:
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| [ADR-0005](../adr/ADR-0005-exa-deep-search-tool-strategy.md) | Exa Deep Search Tool Strategy | Proposed |
+| [ADR-0005](../adr/ADR-0005-exa-deep-search-tool-strategy.md) | Exa Deep Search Tool Strategy | Accepted |

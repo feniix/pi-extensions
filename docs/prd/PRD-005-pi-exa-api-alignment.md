@@ -1,14 +1,16 @@
 ---
 title: "pi-exa Full Exa API Alignment"
 prd: PRD-005
-status: Draft
+status: Implemented
 owner: "Sebastian Otaegui"
 issue: "N/A"
 date: 2026-04-20
-version: "1.6"
+version: "1.7"
 ---
 
 # PRD: pi-exa Full Exa API Alignment
+
+> Status update: Implemented in `packages/pi-exa/`. This document now serves as the shipped requirements record for the Exa API alignment work.
 
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: "Exa Deep Search Tool Strategy"
 adr: ADR-0005
-status: Proposed
+status: Accepted
 date: 2026-04-20
 prd: "PRD-005-pi-exa-api-alignment"
 decision: "New dedicated web_research_exa tool"
@@ -11,7 +11,7 @@ decision: "New dedicated web_research_exa tool"
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 
@@ -110,6 +110,6 @@ The `web_search_advanced_exa` tool will explicitly exclude deep search types (`d
 
 ## Related
 
-- **Plan**: N/A (implementation plan to be generated via `/plan-prd`)
+- **Plan**: `docs/architecture/plan-pi-exa-api-alignment.md`
 - **ADRs**: N/A
-- **Implementation**: `packages/pi-exa/extensions/index.ts` — new tool registration
+- **Implementation**: `packages/pi-exa/extensions/index.ts` and `packages/pi-exa/skills/` — shipped tool routing and skill guidance
