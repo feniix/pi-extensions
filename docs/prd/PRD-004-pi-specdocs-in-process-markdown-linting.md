@@ -1,0 +1,383 @@
+---
+title: "pi-specdocs in-process markdown linting and formatting"
+prd: PRD-004
+status: Draft
+owner: "Sebastian Otaegui"
+issue: "N/A"
+date: 2026-04-21
+version: "1.0"
+---
+
+# PRD: pi-specdocs in-process markdown linting and formatting
+
+---
+
+## 1. Problem & Context
+
+`@feniix/pi-specdocs` currently validates spec documents with a small set of custom checks implemented in the extension. That covers important repo-specific rules such as PRD/ADR numbering, required frontmatter fields, and status validation, but it leaves several gaps:
+
+- Markdown is parsed with lightweight string logic rather than a real Markdown parser
+- YAML frontmatter is hand-parsed rather than validated with a robust parser and schema
+- tables are not structurally validated or normalized
+- implementation plans in `docs/architecture/` are not linted with the same rigor as PRDs and ADRs
+- the extension can warn, but it cannot improve document formatting in-process
+
+This becomes more important as `pi-specdocs` evolves from a simple session helper into a document authoring workflow. The package now owns templates, skills, and extension logic that encourage frequent generation and editing of spec documents. As a result, document quality problems are likely to show up in the same places repeatedly: malformed frontmatter, inconsistent headings, weak or broken tables, and spec artifacts that are syntactically valid Markdown but hard to review and maintain.
+
+The desired improvement is an in-process Markdown linting and formatting layer that runs inside the existing extension without spawning subprocesses. It should preserve the current repo-specific rules while adding robust Markdown, frontmatter, and table-aware validation plus required normalization/formatting support.
+
+---
+
+## 2. Goals & Success Metrics
+
+| Goal | Metric | Target |
+|------|--------|--------|
+| **Robust parsing** | Spec documents are parsed through a real Markdown + frontmatter pipeline instead of manual line parsing | 100% of PRD, ADR, and plan validation paths use the new parser |
+| **Broader validation** | Validation covers frontmatter, required sections/headings, and required table structures for supported document types | PRDs, ADRs, and plans all receive structural validation |
+| **In-process operation** | No subprocess spawning for linting or formatting | 0 shell-outs required for document lint/format flows |
+| **Actionable author feedback** | Validation output identifies the file and precise issue type | Warnings/errors are grouped and human-readable in extension notifications/command output |
+| **Required normalization** | Formatting pass rewrites at least frontmatter layout and table/section spacing safely | Autofix support for a scoped initial set of formatting rules ships in the first release |
+
+**Guardrails (must not regress):**
+- Existing PRD and ADR filename/frontmatter numbering checks must continue to work
+- Session-start workspace summaries must remain fast and readable
+- The extension must continue working when no docs exist
+- Validation must still work without external MCP tools or external executables
+
+---
+
+## 3. Users & Use Cases
+
+### Primary: Spec author
+
+> As a maintainer writing or refining PRDs, ADRs, and plans, I want immediate linting and formatting feedback so that generated docs stay consistent without manual cleanup.
+
+**Preconditions:** The maintainer is editing files in `docs/prd/`, `docs/adr/`, or `docs/architecture/` via pi tools.
+
+### Secondary: Extension maintainer
+
+> As the maintainer of `pi-specdocs`, I want validation to be implemented through a real parser pipeline so that new document rules can be added safely without brittle string parsing.
+
+**Preconditions:** The maintainer is updating the extension code and needs a predictable place to add semantic document rules.
+
+### Future: Team contributor
+
+> As a contributor consuming specdocs outputs, I want tables, headings, and frontmatter to be consistently structured so that the documents are easy to scan and review.
+
+---
+
+## 4. Scope
+
+### In scope
+
+1. **In-process Markdown parsing** — introduce a parser pipeline for Markdown, GFM tables, and YAML frontmatter
+2. **Schema-backed frontmatter validation** — replace hand-parsed metadata checks with robust parsing plus typed validation
+3. **Plan validation support** — extend document linting to implementation plans in `docs/architecture/` using an objective filename rule
+4. **Table-aware validation** — validate required first-release table structures for PRDs and plans, plus any additional optional table checks explicitly defined by document-type rules
+5. **In-process formatting** — support safe normalization of selected document elements without subprocesses as part of the initial release
+6. **Extension integration** — wire the new parser/validator into post-tool linting and the `specdocs-validate` command
+
+### Out of scope / later
+
+| What | Why | Tracked in |
+|------|-----|------------|
+| Full prose/style linting for every Markdown convention | High noise risk; should follow after structural validation proves useful | N/A |
+| Automatic mutation of every adjacent cross-reference document | Separate workflow concern from linting core | N/A |
+| General-purpose Markdown formatting for non-spec docs | This work is specific to specdocs artifacts | N/A |
+
+### Design for future (build with awareness)
+
+The validator should be structured as a reusable document-analysis layer with document-type-specific rules on top. That means parsing once into a shared representation, then applying PRD-, ADR-, and plan-specific validators. Formatting should follow the same pattern: a small set of safe transforms now, with room to add richer fixes later without rewriting the whole pipeline.
+
+---
+
+## 5. Functional Requirements
+
+### FR-1: Parse spec documents with a real Markdown + frontmatter pipeline
+
+The extension must parse PRDs, ADRs, and plans with a proper in-process Markdown parser that understands YAML frontmatter and GFM tables. This refactor must not break non-document frontmatter-style config parsing such as `.claude/tracker.md`; tracker/config parsing should either remain on a dedicated helper path or be explicitly preserved by a separate parser utility.
+
+**Acceptance criteria:**
+
+```gherkin
+Given a PRD file with YAML frontmatter, headings, and Markdown tables
+When the specdocs validator reads the file
+Then it parses the document through an in-process Markdown pipeline
+And the validator can inspect frontmatter and table structure without manual line splitting
+```
+
+**Files:**
+- `packages/pi-specdocs/extensions/frontmatter.ts` — replace lightweight parsing or turn it into parser-backed frontmatter helpers
+- `packages/pi-specdocs/extensions/spec-validation.ts` — consume structured metadata and document nodes
+- `packages/pi-specdocs/package.json` — add parser dependencies required at runtime
+
+### FR-2: Validate frontmatter with typed rules
+
+The extension must validate PRD, ADR, and plan frontmatter using typed rules rather than string heuristics alone.
+
+Malformed or unparseable YAML frontmatter must be reported as a validation error for the affected file. Parse failures must not crash validation, silently skip the document, or degrade into misleading "missing field" warnings when the frontmatter block itself cannot be parsed.
+
+**Acceptance criteria:**
+
+```gherkin
+Given a PRD with a missing owner field and an invalid status value
+When validation runs
+Then the output reports both issues clearly
+And the validator still checks that the frontmatter number matches the filename
+```
+
+```gherkin
+Given a PRD whose YAML frontmatter is syntactically invalid
+When validation runs
+Then the validator reports a frontmatter parse error for that file
+And validation continues for other documents without crashing
+```
+
+**Files:**
+- `packages/pi-specdocs/extensions/spec-validation.ts` — define schema-backed field validation
+- `packages/pi-specdocs/extensions/runtime.ts` — surface richer validation output after writes and edits
+- `packages/pi-specdocs/__tests__/spec-validation.test.ts` — extend coverage for schema-backed validation behavior
+
+### FR-3: Validate key table structures for supported doc types
+
+The validator must understand and check a defined first-release set of required or high-value tables in supported documents.
+
+**First-release table inventory:**
+- **PRD**
+  - `Open Questions` — required columns: `#`, `Question`, `Owner`, `Due`, `Status`
+  - `File Breakdown` — required columns: `File`, `Change type`, `FR`, `Description`
+  - `Changelog` — required columns: `Date`, `Change`, `Author`
+- **ADR**
+  - No required tables in the first release; if tables are present, they may be reformatted but are not structurally required for validity
+- **Plan**
+  - `Implementation Order` — required columns: `Phase`, `Component`, `Dependencies`, `Estimated Scope`
+  - `ADR Index` — required columns: `ADR`, `Title`, `Status`
+
+**Severity policy:**
+- Missing or structurally invalid required tables for PRDs and plans should be reported as validation issues for the affected section
+- For plan documents, the first release may classify incomplete lower-priority sections as warnings as defined in FR-4
+
+**Acceptance criteria:**
+
+```gherkin
+Given a PRD whose Open Questions table is missing the Status column
+When validation runs
+Then the validator reports that the table shape is invalid
+And identifies the affected file and section
+```
+
+**Files:**
+- `packages/pi-specdocs/extensions/spec-validation.ts` — add table-aware validators
+- `packages/pi-specdocs/extensions/runtime.ts` — include table issues in validation reporting
+- `packages/pi-specdocs/__tests__/runtime.test.ts` — cover tool-result reporting for structural table issues
+
+### FR-4: Support implementation plan linting
+
+Implementation plans in `docs/architecture/` must be validated alongside PRDs and ADRs using plan-specific rules.
+
+The validator should treat Markdown files that are direct children of `docs/architecture/` as plan artifacts for naming purposes. Files matching the existing plan naming convention `plan-*.md` should be validated as plan documents. Workspace-wide validation should report a filename error for any other `.md` file found directly under `docs/architecture/` that does not match the `plan-*.md` convention. Nested Markdown files in subdirectories under `docs/architecture/` are out of scope for first-release plan filename enforcement unless a later requirement expands the scan recursively.
+
+The first release must validate at least:
+- required plan frontmatter fields from the plan template (`title`, `prd`, `date`, `author`, `status`)
+- allowed plan `status` values: `Draft`, `Implemented`, `Archived`
+- `date` must be present and serialized as an ISO-style `YYYY-MM-DD` string
+- `prd` must be present as a non-empty string reference to the source PRD identifier or filename slug used by the plan template
+- presence of the `Source` section
+- presence of the `Implementation Order` section and basic table structure of its table
+- presence of the `ADR Index` section and basic table structure of its table
+
+The first release may report less central plan sections such as `Architecture Overview`, `Components`, `Risks and Mitigations`, and `Open Questions` as warnings rather than hard errors if their structure is incomplete.
+
+**Acceptance criteria:**
+
+```gherkin
+Given a plan document in docs/architecture/
+When the user runs specdocs-validate
+Then the plan is included in validation
+And missing required plan structure is reported as a warning or error
+And the validator checks required frontmatter plus Source, Implementation Order, and ADR Index in the first release
+```
+
+```gherkin
+Given a Markdown file in docs/architecture/ named architecture-outline.md
+When the user runs specdocs-validate
+Then the validator reports that the filename does not match the plan-*.md convention
+```
+
+**Files:**
+- `packages/pi-specdocs/extensions/spec-validation.ts` — add plan detection and validation rules
+- `packages/pi-specdocs/extensions/runtime.ts` — include plan files in workspace-wide validation
+- `packages/pi-specdocs/__tests__/runtime.test.ts` — add plan validation coverage
+
+### FR-5: Provide safe in-process formatting/normalization
+
+The extension must support a scoped set of automatic formatting improvements performed entirely in-process as part of the initial release.
+
+The initial product surface is a dedicated formatting command, for example `specdocs-format`, that rewrites target specdocs files on explicit user request. The first release must not perform automatic document rewrites on `tool_result`; post-tool behavior remains lint-and-notify only. In the first release, the command accepts one explicit file path per invocation and only formats PRD, ADR, or plan documents. This first-release activation model is recorded in `docs/adr/ADR-0010-specdocs-formatting-activation-model.md`.
+
+If the target path does not exist, is not a supported spec document path, or contains malformed content that the formatter cannot safely normalize, the command must fail safely with a human-readable message and must not partially rewrite the file. If the file is already normalized, the command should report a no-op outcome rather than rewriting it unnecessarily.
+
+**Acceptance criteria:**
+
+```gherkin
+Given a spec document with valid content but inconsistent frontmatter spacing and malformed table spacing
+When the formatter runs
+Then it rewrites the document in place without spawning a subprocess
+And preserves the document's semantic content
+```
+
+```gherkin
+Given the user runs the formatter on a nonexistent path or unsupported Markdown file
+When the formatter validates the target
+Then it reports a clear error
+And does not rewrite any files
+```
+
+```gherkin
+Given the user runs the formatter on an already-normalized supported spec document
+When formatting completes
+Then the command reports that no changes were needed
+```
+
+**Files:**
+- `packages/pi-specdocs/extensions/runtime.ts` — expose formatting entry points or command integration
+- `packages/pi-specdocs/extensions/frontmatter.ts` — normalize frontmatter serialization
+- `packages/pi-specdocs/__tests__/index.test.ts` — cover any new command registration if formatting is exposed via command
+
+---
+
+## 6. Non-Functional Requirements
+
+| Category | Requirement |
+|----------|-------------|
+| **Runtime model** | Linting and formatting must run entirely in-process with no subprocess spawning |
+| **Performance** | Single-file post-edit linting should target completion in under 250 ms for representative spec documents of up to roughly 500 lines and 5 tables, and workspace validation over a repo-scale `docs/` tree of roughly up to 25 spec documents should target completion in under 2 s on a typical local development machine |
+| **Safety** | Formatting must be limited to deterministic, low-risk transforms and must not rewrite semantic document content unexpectedly |
+| **Extensibility** | New document rules should be addable without editing unrelated parsing code |
+| **Testability** | New validation and formatting behavior must be covered by unit tests in `packages/pi-specdocs/__tests__/` |
+
+---
+
+## 7. Risks & Assumptions
+
+### Risks
+
+| Risk | Severity | Likelihood | Mitigation |
+|------|----------|------------|------------|
+| Parser integration rewrites too much of the existing validation path at once | Medium | Medium | Introduce parser-backed helpers first, then migrate rules incrementally behind existing test coverage |
+| Autofix changes documents in surprising ways | High | Medium | Limit initial formatting scope to frontmatter normalization and safe table/spacing fixes; keep semantic edits out of scope |
+| Table rules become too rigid for real-world docs | Medium | Medium | Validate only known high-value tables and report issues as warnings where strictness is uncertain |
+| New dependencies increase maintenance burden | Medium | Low | Choose a small, well-supported parser stack and isolate it behind helper modules |
+
+### Assumptions
+
+- The existing extension remains the right place for specdocs linting and validation behavior
+- PRDs, ADRs, and plans will continue to be stored under `docs/prd/`, `docs/adr/`, and `docs/architecture/`
+- A Markdown AST pipeline is acceptable as a runtime dependency for `@feniix/pi-specdocs`
+
+---
+
+## 8. Design Decisions
+
+### D1: Use an in-process Markdown AST pipeline instead of CLI-based linting
+
+**Options considered:**
+1. **In-process Markdown AST pipeline** — more implementation work, but fully compatible with the requirement to avoid subprocesses and easier to extend semantically
+2. **Spawn a CLI linter/formatter** — faster initial integration, but violates the in-process requirement and is harder to tailor to specdocs semantics
+
+**Decision:** Use an in-process Markdown parser and validation pipeline.
+
+**Rationale:** The current requirement explicitly rejects subprocess spawning, and specdocs needs semantic document rules that generic CLI linting cannot fully express.
+
+**Future path:** The same pipeline can later support richer autofix, section validation, and cross-reference checks.
+
+### D2: Keep repo-specific rules alongside generic Markdown parsing
+
+**Options considered:**
+1. **Replace custom validation entirely with generic Markdown rules** — simpler on paper, but loses project semantics
+2. **Layer specdocs-specific rules on top of robust parsing** — preserves current behavior while improving structure awareness
+
+**Decision:** Keep custom PRD/ADR/plan rules, but run them on structured parsed content.
+
+**Rationale:** Numbering, tracker-aware references, and spec section expectations are package-specific and should remain first-class behavior.
+
+---
+
+## 9. File Breakdown
+
+| File | Change type | FR | Description |
+|------|-------------|-----|-------------|
+| `packages/pi-specdocs/package.json` | Modify | FR-1 | Add parser/linting dependencies needed at runtime |
+| `package-lock.json` | Modify | FR-1 | Capture runtime dependency changes for the npm workspace/root lockfile |
+| `packages/pi-specdocs/extensions/frontmatter.ts` | Modify | FR-1, FR-5 | Replace manual spec-document parsing helpers with parser-backed frontmatter utilities and serialization helpers while preserving tracker/config parsing support |
+| `packages/pi-specdocs/extensions/workspace-scan.ts` | Modify | FR-1 | Keep `.claude/tracker.md` parsing correct after the frontmatter/parser refactor |
+| `packages/pi-specdocs/extensions/spec-validation.ts` | Modify | FR-1, FR-2, FR-3, FR-4 | Add parser-backed validation, table rules, and plan validation |
+| `packages/pi-specdocs/extensions/runtime.ts` | Modify | FR-2, FR-3, FR-4, FR-5 | Surface richer validation and required formatting command behavior |
+| `packages/pi-specdocs/extensions/index.ts` | Modify | FR-5 | Register the public formatting command |
+| `packages/pi-specdocs/__tests__/spec-validation.test.ts` | Modify | FR-2, FR-3, FR-4 | Add validation coverage for parser-backed metadata and structural rules |
+| `packages/pi-specdocs/__tests__/runtime.test.ts` | Modify | FR-3, FR-4, FR-5 | Verify runtime reporting plus explicit-format command behavior as applicable |
+| `packages/pi-specdocs/__tests__/scanner.test.ts` | Modify | FR-1, FR-4 | Verify workspace scan and summary behavior remain correct after parser/frontmatter refactors and plan filename enforcement |
+| `packages/pi-specdocs/__tests__/index.test.ts` | Modify | FR-5 | Validate formatting command registration |
+| `packages/pi-specdocs/README.md` | Modify | FR-5 | Document the new formatting capability if it changes user-facing authoring workflow |
+
+---
+
+## 10. Dependencies & Constraints
+
+- The implementation must use in-process JavaScript/TypeScript libraries rather than external CLIs
+- Any runtime dependency must be installable as a production dependency because pi packages use production installs at runtime
+- Formatting must preserve existing Markdown semantics and frontmatter content
+- Validation should continue to work even when no external research or MCP tools are configured
+- Validation and formatting output must identify the affected file, issue type, and section when applicable so both post-tool notifications and command output are actionable
+
+---
+
+## 11. Rollout Plan
+
+1. Introduce parser-backed helpers and keep current frontmatter validation behavior passing existing tests
+2. Migrate PRD and ADR validation to structured parsing and expand tests
+3. Add plan validation and table-aware rules
+4. Add scoped in-process formatting support and expose it through a dedicated formatting command
+5. Validate command behavior for unsupported paths, malformed documents, and no-op formatting outcomes
+6. Update README and, only if the user-facing authoring workflow changes materially, follow up with prompt/skill guidance updates
+
+---
+
+## 12. Open Questions
+
+| # | Question | Owner | Due | Status |
+|---|----------|-------|-----|--------|
+| Q1 | Which parser stack should be adopted first: unified/remark-based, gray-matter plus targeted Markdown parsing, or another in-process option? | Sebastian Otaegui | Before implementation starts | **Resolved:** Prefer a unified/remark-based pipeline first; if implementation complexity or performance is unacceptable during the spike, fall back to gray-matter plus targeted Markdown parsing with equivalent validation behavior |
+| Q2 | Should extension-internal autofix be explored after the dedicated formatting command ships and proves safe in real usage? | Sebastian Otaegui | After initial release | Open |
+| Q3 | Which additional plan sections should move from warnings to hard validation after the first release? | Sebastian Otaegui | After Phase 3 | Open |
+
+---
+
+## 13. Related
+
+| Issue | Relationship |
+|-------|-------------|
+| `docs/prd/PRD-002-pi-exa-api-alignment.md` | Completed; informed discussion about deprecated tool references and current runtime constraints |
+| `docs/adr/ADR-0005-exa-deep-search-tool-strategy.md` | Related; provides context for current Exa tool surface used by specdocs skills |
+| `docs/adr/ADR-0008-specdocs-parser-pipeline-strategy.md` | Derived from this PRD; records the preferred parser-stack strategy |
+| `docs/adr/ADR-0009-specdocs-validation-layering-strategy.md` | Derived from this PRD; records the semantic rule-layer architecture |
+| `docs/adr/ADR-0010-specdocs-formatting-activation-model.md` | Derived from this PRD; records the first-release formatting activation model |
+
+---
+
+## 14. Changelog
+
+| Date | Change | Author |
+|------|--------|--------|
+| 2026-04-21 | Initial draft | Sebastian Otaegui |
+| 2026-04-21 | Refined requirements, clarified scope/edge cases, and added explicit ADR references for parser strategy, validation layering, and formatting activation | Sebastian Otaegui |
+| 2026-04-21 | Aligned cross-document references and implementation-ready decisions after iterative review passes | Sebastian Otaegui |
+
+---
+
+## 15. Verification (Appendix)
+
+1. Create malformed PRD, ADR, and plan fixtures and verify the validator reports frontmatter parse/schema issues, required section/heading issues, required table-structure issues, and plan filename issues without shelling out.
+2. Edit a spec document through pi and confirm post-tool linting still notifies immediately with the new validator.
+3. Run workspace validation over the current `docs/` tree and confirm existing valid docs do not produce false positives beyond known real issues.
+4. Run formatting against a sample malformed doc and confirm only targeted formatting changes occur.
