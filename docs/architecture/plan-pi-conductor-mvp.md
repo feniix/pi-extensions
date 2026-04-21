@@ -1,17 +1,17 @@
 ---
 title: "pi-conductor — long-lived multi-session worker orchestration for Pi"
-prd: "PRD-001-pi-conductor-mvp"
-date: 2026-04-18
+prd: "PRD-002-pi-conductor-persistent-resumable-workers"
+date: 2026-04-20
 author: "feniix"
-status: Draft
+status: Implemented
 ---
 
 # Plan: pi-conductor — long-lived multi-session worker orchestration for Pi
 
 ## Source
 
-- **PRD**: `docs/prd/PRD-001-pi-conductor-mvp.md`
-- **Date**: 2026-04-18
+- **PRD**: `docs/prd/PRD-002-pi-conductor-persistent-resumable-workers.md`
+- **Date**: 2026-04-20
 - **Author**: feniix
 
 ## Architecture Overview
@@ -65,10 +65,10 @@ The first implementation slice should optimize for end-to-end usefulness rather 
 **Purpose**: Own the creation, linkage, resumption, and summarization of real Pi worker sessions.
 
 **Key Details**:
-- Use SDK-managed sessions as the default runtime model
-- Create real session linkage from day one, but keep the first runtime slice shallow enough to prove the model before deep optimization
-- Preserve a narrow runtime boundary so a future process-backed backend remains possible
-- Summary generation and status updates should be runtime-aware but presentation-independent
+- Use a SessionManager-backed SDK runtime boundary as the shipped v1 model
+- Persist real session linkage, session id, and last-resumed metadata from day one
+- Preserve a narrow runtime boundary so a future `AgentSession`-managed or process-backed backend remains possible
+- Summary generation and status updates remain runtime-aware but presentation-independent
 
 **ADR Reference**: `-> ADR-0001: SDK-first worker runtime for pi-conductor`
 
@@ -115,7 +115,7 @@ The first implementation slice should optimize for end-to-end usefulness rather 
 | 1 | Storage and Project Key | None | M |
 | 2 | Worker and Lifecycle Model | Phase 1 | M |
 | 3 | Worktree Manager | Phase 1, 2 | M |
-| 4 | SDK Worker Runtime | Phase 1, 2, 3 | L |
+| 4 | SDK Worker Runtime | Phase 1, 2, 3 | Implemented as SessionManager-backed MVP |
 | 5 | Command and Tool Surface (first usable slice) | Phase 1, 2, 3, 4 | M |
 | 6 | Recovery and Cleanup Flow | Phase 1, 2, 3, 4, 5 | M |
 | 7 | PR Preparation Layer | Phase 1, 2, 3, 4, 5 | M |
