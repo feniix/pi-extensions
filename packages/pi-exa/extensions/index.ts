@@ -80,10 +80,12 @@ export default function exaExtension(pi: ExtensionAPI) {
       label: "Exa Web Search",
       description:
         "Search the web for any topic and get clean, ready-to-use content. Best for lookup and current information queries.",
-      promptSnippet: "Search web and return concise results using web_search_exa",
+      promptSnippet: "Quick web search with highlights for lookups and discovery.",
       promptGuidelines: [
-        "Use web_search_exa for quick lookup and current facts.",
-        "Use web_search_exa before web_search_advanced_exa unless you need category/date/filter control.",
+        "Use web_search_exa for quick lookups and finding pages; use web_answer_exa for direct factual questions with citations.",
+        "Use web_search_exa for simple searches; use web_search_advanced_exa when you need category, domain, or date filters.",
+        "Use web_search_exa to discover candidate URLs; use web_fetch_exa to read a known page in full.",
+        "Use web_search_exa for retrieval; use web_research_exa for comparisons, synthesis, and recommendations.",
       ],
       parameters: webSearchParams,
       async execute(_toolCallId, params, signal, onUpdate, _ctx) {
@@ -130,10 +132,11 @@ export default function exaExtension(pi: ExtensionAPI) {
       name: "web_fetch_exa",
       label: "Exa Web Fetch",
       description: "Read a webpage's full content as clean markdown. Best for extracting full content from known URLs.",
-      promptSnippet: "Fetch URLs with web_fetch_exa when you need full page text",
+      promptSnippet: "Read known URLs as clean page text with optional summaries.",
       promptGuidelines: [
-        "Use web_fetch_exa for content extraction after discovering URLs.",
-        "Enable highlights/summary only when extra context is needed.",
+        "Use web_fetch_exa after web_search_exa or web_search_advanced_exa when snippets are not enough.",
+        "Use web_fetch_exa to read a known URL in full; use web_answer_exa when the user only needs a concise cited answer.",
+        "Use web_fetch_exa to inspect returned pages; use web_find_similar_exa when you want more pages like a source URL.",
       ],
       parameters: webFetchParams,
       async execute(_toolCallId, params, signal, onUpdate, _ctx) {
@@ -185,10 +188,11 @@ export default function exaExtension(pi: ExtensionAPI) {
       label: "Exa Advanced Search",
       description:
         "Advanced web search with full Exa API control including category filters, domain restrictions, date ranges, highlights, and summaries.",
-      promptSnippet: "Use web_search_advanced_exa for filters, categories, and deep tuning",
+      promptSnippet: "Advanced search with category, domain, and date filters.",
       promptGuidelines: [
-        "Prefer web_search_advanced_exa for non-deep query constraints (category, domains, dates).",
-        "Use web_search_exa for simpler lookups.",
+        "Use web_search_advanced_exa when you need category, domain, or date filters; use web_search_exa for simpler lookups.",
+        "Use web_search_advanced_exa for retrieval with constraints; use web_research_exa for deep synthesis and comparisons.",
+        "Use web_search_advanced_exa to find filtered result sets; use web_fetch_exa to read the selected URLs.",
       ],
       parameters: webSearchAdvancedParams,
       async execute(_toolCallId, params, signal, onUpdate, _ctx) {
@@ -245,11 +249,11 @@ export default function exaExtension(pi: ExtensionAPI) {
       name: "web_research_exa",
       label: "Exa Deep Research",
       description: "Deep-reasoning Exa search with synthesized, grounded output for complex research topics.",
-      promptSnippet: "Run deep research questions with web_research_exa",
+      promptSnippet: "Deep research with grounded synthesis; higher cost and latency.",
       promptGuidelines: [
-        "Use web_research_exa for synthesis-oriented questions, comparisons, and recommendations.",
-        "Provide a systemPrompt and use structured outputSchema when you need downstream automation.",
-        "Prefer web_search_exa for quick fact lookup.",
+        "Use web_research_exa for conclusions, comparisons, and recommendations; use web_search_exa for simple lookups.",
+        "Use web_research_exa for open-ended synthesis; use web_answer_exa for direct questions needing a concise cited answer.",
+        "Use web_research_exa when a systemPrompt or outputSchema is needed; use web_search_advanced_exa for filtered retrieval only.",
       ],
       parameters: webResearchParams,
       async execute(_toolCallId, params, signal, onUpdate, _ctx) {
@@ -307,10 +311,11 @@ export default function exaExtension(pi: ExtensionAPI) {
       name: "web_answer_exa",
       label: "Exa Answer",
       description: "Get a grounded answer with source citations and optional structured output.",
-      promptSnippet: "Answer direct questions with web_answer_exa",
+      promptSnippet: "Grounded answers with citations for direct questions.",
       promptGuidelines: [
-        "Use web_answer_exa for direct, answer-style prompts needing grounded citations.",
-        "Use outputSchema for machine-consumable structured responses.",
+        "Use web_answer_exa for direct factual questions with sources; use web_research_exa for broader synthesis and comparisons.",
+        "Use web_answer_exa when the user wants a concise answer; use web_search_exa when you first need to discover candidate pages.",
+        "Use web_answer_exa for a cited response; use web_fetch_exa when you need the full source text.",
       ],
       parameters: webAnswerParams,
       async execute(_toolCallId, params, signal, onUpdate, _ctx) {
@@ -361,10 +366,11 @@ export default function exaExtension(pi: ExtensionAPI) {
       name: "web_find_similar_exa",
       label: "Exa Similar Pages",
       description: "Find web pages similar to a given URL.",
-      promptSnippet: "Find similar pages with web_find_similar_exa",
+      promptSnippet: "Find pages similar to a known source URL.",
       promptGuidelines: [
-        "Use web_find_similar_exa for recommendations once a source URL is known.",
-        "Pair with web_fetch_exa for deeper inspection of any returned URLs.",
+        "Use web_find_similar_exa when you have a good page and want more like it; use web_search_exa for keyword-based discovery.",
+        "Use web_find_similar_exa to expand from a source URL; use web_search_advanced_exa when you need explicit category, domain, or date filters.",
+        "Use web_find_similar_exa to discover related pages; use web_fetch_exa to inspect the returned URLs in full.",
       ],
       parameters: webFindSimilarParams,
       async execute(_toolCallId, params, signal, onUpdate, _ctx) {

@@ -732,6 +732,56 @@ describe("pi-exa extension", () => {
     );
   });
 
+  it("adds cross-tool prompt guidance for all registered tools", () => {
+    const configPath = writeTempConfig({
+      enabledTools: [
+        "web_search_exa",
+        "web_fetch_exa",
+        "web_search_advanced_exa",
+        "web_research_exa",
+        "web_answer_exa",
+        "web_find_similar_exa",
+      ],
+      researchEnabled: true,
+    });
+    const mockPi = createMockPi({ "--exa-config-file": configPath });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
+    expect(tools).toHaveLength(6);
+
+    for (const tool of tools) {
+      expect(tool.promptSnippet).toBeTypeOf("string");
+      expect(tool.promptSnippet.length).toBeLessThan(100);
+      expect(tool.promptSnippet).not.toContain("\n");
+      expect(tool.promptGuidelines).toBeInstanceOf(Array);
+      expect(tool.promptGuidelines.length).toBeGreaterThan(0);
+      for (const guideline of tool.promptGuidelines) {
+        expect(guideline).toMatch(/web_(search|fetch|search_advanced|research|answer|find_similar)_exa/);
+      }
+    }
+  });
+
+  it("routes web_search_exa and web_research_exa with explicit cross-tool wording", () => {
+    const mockPi = createMockPi({ "--exa-enable-research": true });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const searchTool = getRegisteredTool(mockPi, "web_search_exa");
+    const researchTool = getRegisteredTool(mockPi, "web_research_exa");
+
+    expect(searchTool.promptGuidelines).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("web_answer_exa"),
+        expect.stringContaining("web_research_exa"),
+        expect.stringContaining("web_fetch_exa"),
+      ]),
+    );
+    expect(researchTool.promptSnippet).toMatch(/cost|latency|higher/);
+    expect(researchTool.promptGuidelines).toEqual(
+      expect.arrayContaining([expect.stringMatching(/simple lookups.*web_search_exa|web_search_exa.*simple lookups/)]),
+    );
+  });
+
   it("returns missing key errors when authentication is absent", async () => {
     const mockPi = createMockPi();
     exaExtension(mockPi as unknown as ExtensionAPI);
