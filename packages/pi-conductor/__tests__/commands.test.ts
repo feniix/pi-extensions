@@ -56,9 +56,9 @@ describe("runConductorCommand", () => {
     expect(status).toContain("task=implement status command");
   });
 
-  it("shows an error for run without a worker name or task", async () => {
+  it("shows an error for run without a task", async () => {
     const text = await runConductorCommand(repoDir, "run backend");
-    expect(text).toContain("error: missing worker name or task");
+    expect(text).toContain("error: missing task");
   });
 
   it("refreshes a worker summary from its session", async () => {

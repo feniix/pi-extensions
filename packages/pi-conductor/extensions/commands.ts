@@ -71,8 +71,11 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
   if (subcommand === "run") {
     const [workerName, ...taskParts] = rest;
     const task = taskParts.join(" ").trim();
-    if (!workerName || !task) {
-      return `${getUsage()}\n\nerror: missing worker name or task`;
+    if (!workerName) {
+      return `${getUsage()}\n\nerror: missing worker name`;
+    }
+    if (!task) {
+      return `${getUsage()}\n\nerror: missing task`;
     }
     const result = await runWorkerForRepo(cwd, workerName, task);
     const summary = result.finalText ?? result.errorMessage ?? "Run completed without a final assistant summary";
