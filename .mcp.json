@@ -11,11 +11,11 @@
       }
     },
     "ref": {
-      "command": "bunx",
-      "args": [
-        "-y",
-        "ref-tools-mcp@3.0.3"
-      ],
+      "type": "http",
+      "url": "https://api.ref.tools/mcp",
+      "headers": {
+        "x-ref-api-key": "${REF_API_KEY}"
+      },
       "env": {
         "REF_API_KEY": "${REF_API_KEY}"
       }
