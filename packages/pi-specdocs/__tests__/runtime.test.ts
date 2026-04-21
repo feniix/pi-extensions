@@ -261,6 +261,18 @@ describe("pi-specdocs runtime", () => {
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Formatted spec document"), "info");
   });
 
+  it("reports a clear error when specdocs-format gets a whitespace-only string path", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-whitespace-"));
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.("   ", { cwd: base, ui: { notify } });
+
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("requires a single path argument"), "error");
+  });
+
   it("reports a clear error when specdocs-format targets a nonexistent path", async () => {
     const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-"));
     const mockPi = createMockPi();
