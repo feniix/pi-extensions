@@ -185,9 +185,10 @@ describe("pi-specdocs performance", () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
-    for (const dir of tempDirs.splice(0)) {
+    for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });
     }
+    tempDirs.length = 0;
   });
 
   it.skipIf(!runBenchmarks)("measures single-file and workspace validation targets", () => {

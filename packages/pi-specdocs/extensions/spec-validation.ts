@@ -163,6 +163,22 @@ function formatFieldType(type: FrontmatterFieldType): string {
   return type === "stringOrNumber" ? "a string or number" : "a string";
 }
 
+function describeInvalidValue(value: unknown): string {
+  if (typeof value === "boolean") {
+    return "a boolean";
+  }
+  if (typeof value === "number") {
+    return "a number";
+  }
+  if (Array.isArray(value)) {
+    return "an array";
+  }
+  if (value && typeof value === "object") {
+    return "an object";
+  }
+  return `a ${typeof value}`;
+}
+
 function validateSchemaFields(
   rawFields: Record<string, unknown>,
   config: DocValidationConfig,
@@ -179,7 +195,9 @@ function validateSchemaFields(
 
     const normalized = normalizeFieldValue(rawValue, schema.type);
     if (normalized === null) {
-      warnings.push(`⚠ ${config.docType}: Field '${field}' must be ${formatFieldType(schema.type)}.`);
+      warnings.push(
+        `⚠ ${config.docType}: Field '${field}' must be ${formatFieldType(schema.type)}, not ${describeInvalidValue(rawValue)}.`,
+      );
       continue;
     }
 
@@ -347,11 +365,10 @@ function parseSpecDocument(filepath: string): ParsedSpecDocument {
 function validateRequiredSectionsFromDocument(document: ParsedSpecDocument): string[] {
   const requiredSections = getRequiredSections(document.filepath);
   const label = document.label ?? "PRD";
-  const warnings = requiredSections
-    .filter((section) => !document.headings.has(section))
-    .map((section) => `⚠ ${label}: Missing required section: ${section}`);
+  const missingRequiredSections = requiredSections.filter((section) => !document.headings.has(section));
+  const warnings = missingRequiredSections.map((section) => `⚠ ${label}: Missing required section: ${section}`);
 
-  if (document.label === "PLAN") {
+  if (document.label === "PLAN" && missingRequiredSections.length === 0) {
     warnings.push(
       ...PLAN_RECOMMENDED_WARNING_SECTIONS.filter((section) => !document.headings.has(section)).map(
         (section) => `⚠ PLAN: Missing recommended section: ${section}`,
