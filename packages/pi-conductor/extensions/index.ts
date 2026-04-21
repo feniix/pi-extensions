@@ -14,6 +14,7 @@ import {
   refreshWorkerSummaryForRepo,
   removeWorkerForRepo,
   resumeWorkerForRepo,
+  runWorkerForRepo,
   updateWorkerLifecycleForRepo,
   updateWorkerTaskForRepo,
 } from "./conductor.js";
@@ -182,6 +183,32 @@ export default function conductorExtension(pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: `resumed worker ${worker.name}: session=${worker.sessionFile}` }],
         details: { workerId: worker.workerId, sessionFile: worker.sessionFile, worktreePath: worker.worktreePath },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_run",
+    label: "Conductor Run",
+    description: "Run one foreground task in a named pi-conductor worker",
+    parameters: Type.Object({
+      name: Type.String({ description: "Worker name" }),
+      task: Type.String({ description: "Task text" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = await runWorkerForRepo(ctx.cwd, params.name, params.task);
+      const summary = result.finalText ?? result.errorMessage ?? "Run completed without a final assistant summary";
+      return {
+        content: [
+          { type: "text", text: `ran worker ${result.workerName}: outcome=${result.status} result=${summary}` },
+        ],
+        details: {
+          workerName: result.workerName,
+          status: result.status,
+          finalText: result.finalText,
+          errorMessage: result.errorMessage,
+          sessionId: result.sessionId,
+        },
       };
     },
   });

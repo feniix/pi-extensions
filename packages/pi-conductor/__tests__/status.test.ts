@@ -10,7 +10,7 @@ describe("formatRunStatus", () => {
     expect(text).toContain("workers: 0");
   });
 
-  it("includes task, session, pr, and summary staleness details", () => {
+  it("includes task, session, pr, summary, and run details", () => {
     const run = createEmptyRun("abc", "/tmp/repo");
     const worker = createWorkerRecord({
       workerId: "worker-1",
@@ -29,6 +29,14 @@ describe("formatRunStatus", () => {
     worker.pr.commitSucceeded = true;
     worker.pr.pushSucceeded = true;
     worker.pr.prCreationAttempted = true;
+    worker.lastRun = {
+      task: "implement status command",
+      status: "success",
+      startedAt: "2026-04-20T01:00:00.000Z",
+      finishedAt: "2026-04-20T01:05:00.000Z",
+      errorMessage: null,
+      sessionId: "run-session-123",
+    };
 
     const text = formatRunStatus({ ...run, workers: [worker] });
     expect(text).toContain("health=stale");
@@ -44,5 +52,33 @@ describe("formatRunStatus", () => {
     expect(text).toContain("prAttempted=true");
     expect(text).toContain("recoverable=false");
     expect(text).toContain("summary=stale: Half done");
+    expect(text).toContain("lastRun=success");
+    expect(text).toContain("runSessionId=run-session-123");
+    expect(text).toContain("runStartedAt=2026-04-20T01:00:00.000Z");
+    expect(text).toContain("runFinishedAt=2026-04-20T01:05:00.000Z");
+  });
+
+  it("shows active running runs distinctly", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: "/tmp/session.jsonl",
+    });
+    worker.lifecycle = "running";
+    worker.lastRun = {
+      task: "ship feature",
+      status: null,
+      startedAt: "2026-04-20T02:00:00.000Z",
+      finishedAt: null,
+      errorMessage: null,
+      sessionId: "run-session-456",
+    };
+
+    const text = formatRunStatus({ ...run, workers: [worker] });
+    expect(text).toContain("lastRun=running");
+    expect(text).toContain("runFinishedAt=none");
   });
 });

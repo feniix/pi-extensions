@@ -11,6 +11,24 @@ function getWorkerHealth(worker: WorkerRecord): "healthy" | "stale" | "broken" {
   return "healthy";
 }
 
+function formatLastRunStatus(worker: WorkerRecord): string {
+  if (!worker.lastRun) {
+    return "lastRun=none";
+  }
+
+  const status =
+    worker.lastRun.status ??
+    (worker.lifecycle === "running" && worker.lastRun.finishedAt === null ? "running" : "unknown");
+  return [
+    `lastRun=${status}`,
+    `runTask=${worker.lastRun.task}`,
+    `runSessionId=${worker.lastRun.sessionId ?? "none"}`,
+    `runStartedAt=${worker.lastRun.startedAt}`,
+    `runFinishedAt=${worker.lastRun.finishedAt ?? "none"}`,
+    `runError=${worker.lastRun.errorMessage ?? "none"}`,
+  ].join(" ");
+}
+
 export function formatRunStatus(run: RunRecord): string {
   const lines = [
     `projectKey: ${run.projectKey}`,
@@ -39,7 +57,8 @@ export function formatRunStatus(run: RunRecord): string {
         `commit=${worker.pr.commitSucceeded} ` +
         `push=${worker.pr.pushSucceeded} ` +
         `prAttempted=${worker.pr.prCreationAttempted} ` +
-        `summary=${summary}`,
+        `summary=${summary} ` +
+        `${formatLastRunStatus(worker)}`,
     );
   }
 

@@ -1,4 +1,5 @@
 export type WorkerLifecycleState = "idle" | "running" | "blocked" | "ready_for_pr" | "done" | "broken";
+export type WorkerRunStatus = "success" | "error" | "aborted";
 
 export interface WorkerSummary {
   text: string | null;
@@ -20,6 +21,15 @@ export interface WorkerRuntimeState {
   lastResumedAt: string | null;
 }
 
+export interface WorkerLastRun {
+  task: string;
+  status: WorkerRunStatus | null;
+  startedAt: string;
+  finishedAt: string | null;
+  errorMessage: string | null;
+  sessionId: string | null;
+}
+
 export interface WorkerRecord {
   workerId: string;
   name: string;
@@ -30,6 +40,7 @@ export interface WorkerRecord {
   currentTask: string | null;
   lifecycle: WorkerLifecycleState;
   recoverable: boolean;
+  lastRun: WorkerLastRun | null;
   summary: WorkerSummary;
   pr: WorkerPrState;
   createdAt: string;
@@ -43,4 +54,31 @@ export interface RunRecord {
   workers: WorkerRecord[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface WorkerRunResult {
+  workerName: string;
+  status: WorkerRunStatus;
+  finalText: string | null;
+  errorMessage: string | null;
+  sessionId: string | null;
+}
+
+export interface RuntimeRunResult {
+  status: WorkerRunStatus;
+  finalText: string | null;
+  errorMessage: string | null;
+  sessionId: string | null;
+}
+
+export interface RuntimeRunContext {
+  worktreePath: string;
+  sessionFile: string;
+  task: string;
+  onSessionReady?: (sessionId: string) => void | Promise<void>;
+}
+
+export interface RuntimeRunPreflightContext {
+  worktreePath: string;
+  sessionFile: string;
 }

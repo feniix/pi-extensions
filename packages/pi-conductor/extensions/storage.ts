@@ -1,7 +1,15 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import type { RunRecord, WorkerLifecycleState, WorkerPrState, WorkerRecord, WorkerRuntimeState } from "./types.js";
+import type {
+  RunRecord,
+  WorkerLastRun,
+  WorkerLifecycleState,
+  WorkerPrState,
+  WorkerRecord,
+  WorkerRunStatus,
+  WorkerRuntimeState,
+} from "./types.js";
 
 function getConductorRoot(): string {
   const override = process.env.PI_CONDUCTOR_HOME?.trim();
@@ -31,6 +39,7 @@ function normalizeWorkerRecord(worker: WorkerRecord): WorkerRecord {
       sessionId: null,
       lastResumedAt: null,
     },
+    lastRun: worker.lastRun ?? null,
   };
 }
 
@@ -87,6 +96,7 @@ export function createWorkerRecord(input: {
     currentTask: null,
     lifecycle: "idle",
     recoverable: false,
+    lastRun: null,
     summary: {
       text: null,
       updatedAt: null,
@@ -240,6 +250,125 @@ export function setWorkerPrState(run: RunRecord, workerId: string, pr: Partial<W
   if (!found) {
     throw new Error(`Worker ${workerId} not found`);
   }
+  return {
+    ...run,
+    workers,
+    updatedAt: now,
+  };
+}
+
+export function startWorkerRun(
+  run: RunRecord,
+  workerId: string,
+  input: { task: string; sessionId: string | null },
+): RunRecord {
+  let found = false;
+  const now = new Date().toISOString();
+  const workers = run.workers.map((worker) => {
+    if (worker.workerId !== workerId) {
+      return worker;
+    }
+    found = true;
+    return {
+      ...worker,
+      currentTask: input.task,
+      lifecycle: "running" as const,
+      lastRun: {
+        task: input.task,
+        status: null,
+        startedAt: now,
+        finishedAt: null,
+        errorMessage: null,
+        sessionId: input.sessionId,
+      },
+      summary: {
+        ...worker.summary,
+        stale: worker.summary.text !== null ? true : worker.summary.stale,
+      },
+      updatedAt: now,
+    };
+  });
+
+  if (!found) {
+    throw new Error(`Worker ${workerId} not found`);
+  }
+
+  return {
+    ...run,
+    workers,
+    updatedAt: now,
+  };
+}
+
+export function setWorkerRunSessionId(run: RunRecord, workerId: string, sessionId: string): RunRecord {
+  let found = false;
+  let workerHadLastRun = true;
+  const now = new Date().toISOString();
+  const workers = run.workers.map((worker) => {
+    if (worker.workerId !== workerId) {
+      return worker;
+    }
+    found = true;
+    if (!worker.lastRun) {
+      workerHadLastRun = false;
+      return worker;
+    }
+    return {
+      ...worker,
+      lastRun: {
+        ...worker.lastRun,
+        sessionId,
+      },
+      updatedAt: now,
+    };
+  });
+
+  if (!found) {
+    throw new Error(`Worker ${workerId} not found`);
+  }
+  if (!workerHadLastRun) {
+    throw new Error(`Worker ${workerId} does not have an active lastRun to attach a session id to`);
+  }
+
+  return {
+    ...run,
+    workers,
+    updatedAt: now,
+  };
+}
+
+export function finishWorkerRun(
+  run: RunRecord,
+  workerId: string,
+  input: { status: WorkerRunStatus; errorMessage?: string | null },
+): RunRecord {
+  let found = false;
+  const now = new Date().toISOString();
+  const workers = run.workers.map((worker) => {
+    if (worker.workerId !== workerId) {
+      return worker;
+    }
+    found = true;
+    const lastRun: WorkerLastRun = {
+      task: worker.lastRun?.task ?? worker.currentTask ?? "(unknown task)",
+      status: input.status,
+      startedAt: worker.lastRun?.startedAt ?? now,
+      finishedAt: now,
+      errorMessage: input.errorMessage ?? null,
+      sessionId: worker.lastRun?.sessionId ?? null,
+    };
+    return {
+      ...worker,
+      lifecycle: input.status === "error" ? ("blocked" as const) : ("idle" as const),
+      lastRun,
+      updatedAt: now,
+    };
+  });
+
+  if (!found) {
+    throw new Error(`Worker ${workerId} not found`);
+  }
+
   return {
     ...run,
     workers,
