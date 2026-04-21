@@ -20,7 +20,7 @@ Proposed
 ## Requirement Source
 
 - **PRD**: `docs/prd/PRD-004-pi-specdocs-in-process-markdown-linting.md`
-- **Decision Point**: FR-1 through FR-4, D1, and Q1 — choosing the parser-stack strategy for PRD, ADR, and plan linting/formatting
+- **Decision Point**: FR-1 through FR-6, D1, and Q1 — choosing the parser-stack strategy for PRD, ADR, and plan linting/formatting
 
 ## Context
 

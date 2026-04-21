@@ -20,7 +20,7 @@ Proposed
 ## Requirement Source
 
 - **PRD**: `docs/prd/PRD-004-pi-specdocs-in-process-markdown-linting.md`
-- **Decision Point**: D2 plus FR-2 through FR-4 — whether specdocs should rely mostly on generic Markdown rules or preserve a dedicated repo-specific rule layer
+- **Decision Point**: D2 plus FR-2 through FR-5 — whether specdocs should rely mostly on generic Markdown rules or preserve a dedicated repo-specific rule layer
 
 ## Context
 

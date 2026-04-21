@@ -20,7 +20,7 @@ Proposed
 ## Requirement Source
 
 - **PRD**: `docs/prd/PRD-004-pi-specdocs-in-process-markdown-linting.md`
-- **Decision Point**: FR-5 and related risks — how formatting should be activated in the first release
+- **Decision Point**: FR-6 and related risks — how formatting should be activated in the first release
 
 ## Context
 
