@@ -4,665 +4,29 @@
  * Provides Git workflow tools, PR operations, and release automation.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
-
-import { execGh, execGit, getDefaultBranch, getGitContext } from "./git.js";
-
-// =============================================================================
-// Types
-// =============================================================================
-
-interface ToolResult {
-  content: Array<{ type: "text"; text: string }>;
-  details: Record<string, unknown>;
-  isError?: boolean;
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-function parseConventionalCommit(message: string): { type: string; scope?: string; breaking: boolean } {
-  const match = message.match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/);
-  if (!match) {
-    return { type: "other", breaking: false };
-  }
-  return {
-    type: match[1].toLowerCase(),
-    scope: match[2],
-    breaking: !!match[3] || message.includes("BREAKING CHANGE"),
-  };
-}
-
-function bumpVersion(version: string, type: "major" | "minor" | "patch"): string {
-  const parts = version.replace(/^v/, "").split(".").map(Number);
-  if (parts.length !== 3 || parts.some(Number.isNaN)) {
-    throw new Error(`Invalid version format: ${version}`);
-  }
-
-  const [major, minor, patch] = parts;
-  switch (type) {
-    case "major":
-      return `${major + 1}.0.0`;
-    case "minor":
-      return `${major}.${minor + 1}.0`;
-    case "patch":
-      return `${major}.${minor}.${patch + 1}`;
-  }
-}
-
-// =============================================================================
-// Tool Parameters
-// =============================================================================
-
-const createBranchParams = Type.Object({
-  branchName: Type.String({ description: "Name of the branch to create (e.g., feature/add-login)" }),
-  switchBranch: Type.Optional(Type.Boolean({ description: "Whether to switch to the new branch (default: true)" })),
-});
-
-const commitParams = Type.Object({
-  message: Type.String({ description: "Commit message (conventional format: type: description)" }),
-  files: Type.Optional(Type.Array(Type.String(), { description: "Specific files to commit (default: all staged)" })),
-  noVerify: Type.Optional(Type.Boolean({ description: "Skip pre-commit hooks (default: false)" })),
-});
-
-const pushParams = Type.Object({
-  branch: Type.Optional(Type.String({ description: "Branch to push (default: current)" })),
-  setUpstream: Type.Optional(Type.Boolean({ description: "Set upstream tracking (default: true)" })),
-});
-
-const createPrParams = Type.Object({
-  title: Type.String({ description: "PR title" }),
-  body: Type.Optional(Type.String({ description: "PR body/description" })),
-  base: Type.Optional(Type.String({ description: "Target branch (default: default branch)" })),
-  draft: Type.Optional(Type.Boolean({ description: "Create as draft PR (default: false)" })),
-  assignees: Type.Optional(Type.Array(Type.String(), { description: "Assignees (GitHub usernames)" })),
-});
-
-const mergePrParams = Type.Object({
-  prNumber: Type.Optional(Type.Integer({ description: "PR number (default: current branch PR)" })),
-  squash: Type.Optional(Type.Boolean({ description: "Squash merge (default: false)" })),
-  deleteBranch: Type.Optional(Type.Boolean({ description: "Delete source branch after merge (default: true)" })),
-  commitTitle: Type.Optional(Type.String({ description: "Title for the squash commit" })),
-  commitMessage: Type.Optional(Type.String({ description: "Message for the squash commit" })),
-});
-
-const checkCiParams = Type.Object({
-  prNumber: Type.Optional(Type.Integer({ description: "PR number (default: current branch PR)" })),
-  branch: Type.Optional(Type.String({ description: "Branch to check (default: current)" })),
-});
-
-const bumpVersionParams = Type.Object({
-  newVersion: Type.String({ description: "New version (e.g., 1.2.3)" }),
-  file: Type.Optional(Type.String({ description: "File to update (default: package.json)" })),
-});
-
-const createReleaseParams = Type.Object({
-  tag: Type.String({ description: "Version tag (e.g., v1.2.3)" }),
-  title: Type.String({ description: "Release title" }),
-  body: Type.Optional(Type.String({ description: "Release notes/changelog" })),
-  draft: Type.Optional(Type.Boolean({ description: "Create as draft (default: false)" })),
-  prerelease: Type.Optional(Type.Boolean({ description: "Mark as prerelease (default: false)" })),
-});
-
-// =============================================================================
-// Tool Implementations
-// =============================================================================
-
-function createBranchTool(branchName: string, switchBranch = true): ToolResult {
-  try {
-    if (switchBranch) {
-      execGit(`git checkout -b ${shellQuote(branchName)}`);
-      return {
-        content: [{ type: "text", text: `Created and switched to branch: ${branchName}` }],
-        details: { branch: branchName, switched: true },
-      };
-    }
-
-    execGit(`git branch ${shellQuote(branchName)}`);
-    return {
-      content: [{ type: "text", text: `Created branch: ${branchName}` }],
-      details: { branch: branchName, switched: false },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Failed to create branch: ${message}` }],
-      isError: true,
-      details: { error: message },
-    };
-  }
-}
-
-function commitTool(message: string, files?: string[], noVerify = false): ToolResult {
-  try {
-    // Get current status
-    const branch = execGit("git branch --show-current");
-    if (!branch) {
-      return {
-        content: [{ type: "text", text: "Not on a branch (detached HEAD state)" }],
-        isError: true,
-        details: { error: "detached_head" },
-      };
-    }
-
-    // Stage files
-    if (files && files.length > 0) {
-      for (const file of files) {
-        execGit(`git add -- ${shellQuote(file)}`);
-      }
-    } else {
-      execGit("git add -A");
-    }
-
-    // Verify staged files
-    const stagedAfter = execGit("git diff --cached --name-only").split("\n").filter(Boolean);
-
-    if (stagedAfter.length === 0) {
-      return {
-        content: [{ type: "text", text: "No files staged. Please stage files first or pass specific files." }],
-        isError: true,
-        details: { error: "no_files_staged" },
-      };
-    }
-
-    // Commit
-    const verifyFlag = noVerify ? "--no-verify" : "";
-    execGit(`git commit ${verifyFlag} -m ${shellQuote(message)}`);
-
-    return {
-      content: [{ type: "text", text: `Committed: ${message}\n\nFiles staged: ${stagedAfter.length}` }],
-      details: { message, stagedFiles: stagedAfter },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Commit failed: ${message}` }],
-      isError: true,
-      details: { error: message },
-    };
-  }
-}
-
-function pushTool(branch?: string, setUpstream = true): ToolResult {
-  try {
-    const currentBranch = branch || execGit("git branch --show-current");
-    const upstreamFlag = setUpstream ? "-u" : "";
-
-    execGit(`git push ${upstreamFlag} origin ${shellQuote(currentBranch)}`);
-
-    return {
-      content: [{ type: "text", text: `Pushed ${currentBranch} to origin` }],
-      details: { branch: currentBranch },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Push failed: ${message}` }],
-      isError: true,
-      details: { error: message },
-    };
-  }
-}
-
-function createPrTool(title: string, body?: string, base?: string, draft = false, assignees?: string[]): ToolResult {
-  try {
-    const defaultBranch = getDefaultBranch();
-    const targetBase = base || defaultBranch;
-    const headBranch = execGit("git branch --show-current");
-
-    let command = `gh pr create --title ${shellQuote(title)} --base ${shellQuote(targetBase)}`;
-
-    if (body) {
-      command += ` --body ${shellQuote(body)}`;
-    }
-
-    if (draft) {
-      command += " --draft";
-    }
-
-    if (assignees && assignees.length > 0) {
-      command += ` --assignee ${shellQuote(assignees.join(","))}`;
-    }
-
-    const prUrl = execGh(command);
-
-    return {
-      content: [
-        { type: "text", text: `Created PR: ${prUrl}\n\nTitle: ${title}\nBase: ${targetBase} <-- ${headBranch}` },
-      ],
-      details: { prUrl, title, base: targetBase, head: headBranch },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Failed to create PR: ${message}` }],
-      isError: true,
-      details: { error: message },
-    };
-  }
-}
-
-type PullRequestInfo = {
-  title?: string;
-  url?: string;
-  state?: string;
-};
-
-function detectCurrentPrNumber(): number | undefined {
-  const branch = execGit("git branch --show-current");
-  const prs = execGh(`gh pr list --head ${shellQuote(branch)} --state open --json number,title`);
-  if (!prs) {
-    return undefined;
-  }
-
-  const parsed = JSON.parse(prs) as Array<{ number?: number }>;
-  const prNumber = parsed[0]?.number;
-  return typeof prNumber === "number" ? prNumber : undefined;
-}
-
-function getPullRequestInfo(prNumber: number): PullRequestInfo {
-  return JSON.parse(execGh(`gh pr view ${prNumber} --json title,url,state`)) as PullRequestInfo;
-}
-
-function buildMergeCommand(
-  prNumber: number,
-  squash: boolean,
-  deleteBranch: boolean,
-  commitTitle?: string,
-  commitMessage?: string,
-): string {
-  const commandParts = [`gh pr merge ${prNumber}`, squash ? "--squash" : "--merge"];
-
-  if (squash && commitTitle) {
-    commandParts.push(`--title ${shellQuote(commitTitle)}`);
-  }
-  if (squash && commitMessage) {
-    commandParts.push(`--body ${shellQuote(commitMessage)}`);
-  }
-  if (deleteBranch) {
-    commandParts.push("--delete-branch");
-  }
-
-  return commandParts.join(" ");
-}
-
-function formatMergeResult(
-  prNumber: number,
-  squash: boolean,
-  deleteBranch: boolean,
-  prData: PullRequestInfo,
-): ToolResult {
-  const mergeType = squash ? "squash-merged" : "merged";
-  const mergeLabel = `${mergeType.charAt(0).toUpperCase() + mergeType.slice(1)} PR #${prNumber}`;
-  const titleSuffix = prData.title ? `: ${prData.title}` : "";
-  const urlSuffix = prData.url ? `\n${prData.url}` : "";
-
-  return {
-    content: [{ type: "text", text: `${mergeLabel}${titleSuffix}${urlSuffix}` }],
-    details: { prNumber, mergeType, deletedBranch: deleteBranch },
-  };
-}
-
-function mergePrTool(
-  prNumber?: number,
-  squash = false,
-  deleteBranch = true,
-  commitTitle?: string,
-  commitMessage?: string,
-): ToolResult {
-  try {
-    const num = prNumber ?? detectCurrentPrNumber();
-    if (!num) {
-      return {
-        content: [{ type: "text", text: "No PR number provided and could not detect current PR." }],
-        isError: true,
-        details: { error: "no_pr_found" },
-      };
-    }
-
-    const prData = getPullRequestInfo(num);
-    if (prData.state !== "OPEN") {
-      return {
-        content: [{ type: "text", text: `PR #${num} is not open (state: ${prData.state})` }],
-        isError: true,
-        details: { error: "pr_not_open", state: prData.state },
-      };
-    }
-
-    execGh(buildMergeCommand(num, squash, deleteBranch, commitTitle, commitMessage));
-    return formatMergeResult(num, squash, deleteBranch, prData);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Failed to merge PR: ${message}` }],
-      isError: true,
-      details: { error: message },
-    };
-  }
-}
-
-type CiCheck = {
-  name?: string;
-  state?: string;
-  link?: string;
-  workflow?: string;
-  workflowName?: string;
-  status?: string;
-  conclusion?: string;
-  url?: string;
-};
-
-function getCiCheckCommand(prNumber?: number, branch?: string): string {
-  if (prNumber) {
-    return `gh pr checks ${prNumber} --json name,state,link,workflow`;
-  }
-
-  const targetBranch = branch ?? execGit("git branch --show-current");
-  return `gh run list --branch ${shellQuote(targetBranch)} --limit 5 --json workflowName,status,conclusion,url`;
-}
-
-function formatCiCheck(check: CiCheck): string {
-  const status = check.conclusion ?? check.state ?? check.status ?? "unknown";
-  const name = check.name ?? check.workflowName ?? check.workflow ?? "Unknown workflow";
-  const link = check.link ?? check.url;
-  return `- ${name}: ${status}${link ? ` (${link})` : ""}`;
-}
-
-function checkCiTool(prNumber?: number, branch?: string): ToolResult {
-  try {
-    const checks = execGh(getCiCheckCommand(prNumber, branch));
-    if (!checks) {
-      return {
-        content: [{ type: "text", text: "No CI runs found for this PR/branch." }],
-        details: { checks: [] },
-      };
-    }
-
-    const parsedChecks = JSON.parse(checks) as CiCheck[];
-    if (!Array.isArray(parsedChecks) || parsedChecks.length === 0) {
-      return {
-        content: [{ type: "text", text: "No CI runs found for this PR/branch." }],
-        details: { checks: [] },
-      };
-    }
-
-    const checkSummary = parsedChecks.map(formatCiCheck).join("\n");
-    return {
-      content: [{ type: "text", text: `CI Status:\n${checkSummary}` }],
-      details: { checks: parsedChecks },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Failed to check CI: ${message}` }],
-      isError: true,
-      details: { error: message },
-    };
-  }
-}
-
-type RepoStatus = {
-  staged: string[];
-  modified: string[];
-  untracked: string[];
-};
-
-function parseRepoStatus(statusOutput: string): RepoStatus {
-  return statusOutput
-    .split("\n")
-    .filter(Boolean)
-    .reduce<RepoStatus>(
-      (status, line) => {
-        const indexStatus = line[0];
-        const workTreeStatus = line[1];
-        const file = line.slice(3);
-
-        if (indexStatus === "?" && workTreeStatus === "?") {
-          status.untracked.push(file);
-          return status;
-        }
-
-        if (indexStatus !== " " && indexStatus !== "?") {
-          status.staged.push(file);
-        }
-        if (workTreeStatus !== " " && workTreeStatus !== "?") {
-          status.modified.push(file);
-        }
-        return status;
-      },
-      { staged: [], modified: [], untracked: [] },
-    );
-}
-
-function hasRepoChanges(status: RepoStatus): boolean {
-  return status.staged.length > 0 || status.modified.length > 0 || status.untracked.length > 0;
-}
-
-function formatRepoInfo(branch: string, defaultBranch: string, status: RepoStatus): string {
-  return `Repository Info:\n- Current branch: ${branch}\n- Default branch: ${defaultBranch}\n- Has changes: ${hasRepoChanges(status)}\n- Staged: ${status.staged.length}\n- Modified: ${status.modified.length}\n- Untracked: ${status.untracked.length}`;
-}
-
-function repoInfoTool(): ToolResult {
-  try {
-    const branch = execGit("git branch --show-current");
-    if (!branch) {
-      return {
-        content: [{ type: "text", text: "Not on a branch (detached HEAD state)" }],
-        isError: true,
-        details: { error: "detached_head" },
-      };
-    }
-
-    const defaultBranch = getDefaultBranch();
-    const status = parseRepoStatus(execGit("git status --porcelain"));
-    return {
-      content: [{ type: "text", text: formatRepoInfo(branch, defaultBranch, status) }],
-      details: {
-        branch,
-        defaultBranch,
-        hasChanges: hasRepoChanges(status),
-        staged: status.staged,
-        modified: status.modified,
-        untracked: status.untracked,
-      },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Failed to get repo info: ${message}` }],
-      isError: true,
-      details: { error: message },
-    };
-  }
-}
-
-// =============================================================================
-// Release Tools
-// =============================================================================
-
-function getLatestTagTool(): ToolResult {
-  try {
-    const tags = execGit("git tag -l 'v*' 'V*' | sort -rV | head -1");
-
-    if (!tags) {
-      return {
-        content: [{ type: "text", text: "No version tags found." }],
-        details: { tag: null },
-      };
-    }
-
-    const commitCount = execGit(`git log ${tags}..HEAD --oneline | wc -l`).trim();
-
-    return {
-      content: [{ type: "text", text: `Latest tag: ${tags}\nCommits since: ${commitCount}` }],
-      details: { tag: tags, commitsSince: parseInt(commitCount, 10) },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Failed to get latest tag: ${message}` }],
-      isError: true,
-      details: { error: message },
-    };
-  }
-}
-
-function analyzeCommitsTool(): ToolResult {
-  try {
-    const tags = execGit("git tag -l 'v*' 'V*' | sort -rV | head -1");
-
-    let commitsSince: string[];
-    let currentVersion = "0.0.0";
-
-    if (tags) {
-      currentVersion = tags.replace(/^v/, "");
-      commitsSince = execGit(`git log ${tags}..HEAD --format="%s"`).split("\n").filter(Boolean);
-    } else {
-      commitsSince = execGit(`git log --format="%s" -n 100`).split("\n").filter(Boolean);
-    }
-
-    if (commitsSince.length === 0) {
-      return {
-        content: [{ type: "text", text: "No commits to analyze." }],
-        details: { type: "patch", commits: [], currentVersion, newVersion: currentVersion },
-      };
-    }
-
-    // Analyze commit types
-    const commitAnalysis = commitsSince.map((msg) => ({
-      message: msg,
-      ...parseConventionalCommit(msg),
-    }));
-
-    let bumpType: "major" | "minor" | "patch" = "patch";
-
-    for (const commit of commitAnalysis) {
-      if (commit.breaking || commit.type.endsWith("!")) {
-        bumpType = "major";
-        break;
-      }
-      if (commit.type === "feat") {
-        bumpType = "minor";
-      }
-    }
-
-    const newVersion = bumpVersion(currentVersion, bumpType);
-
-    // Group commits by type
-    const grouped = commitAnalysis.reduce(
-      (acc, c) => {
-        const key = c.type === "feat" ? "features" : c.type === "fix" ? "fixes" : "other";
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(c.message);
-        return acc;
-      },
-      {} as Record<string, string[]>,
-    );
-
-    const summary = Object.entries(grouped)
-      .map(
-        ([type, msgs]) =>
-          `### ${type.charAt(0).toUpperCase() + type.slice(1)}\n${msgs.map((m) => `- ${m}`).join("\n")}`,
-      )
-      .join("\n\n");
-
-    return {
-      content: [
-        {
-          type: "text",
-          text: `Commit Analysis:\n\n${summary}\n\n**Version:** ${currentVersion} → ${newVersion} (${bumpType} bump)`,
-        },
-      ],
-      details: { type: bumpType, commits: commitAnalysis, currentVersion, newVersion },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Failed to analyze commits: ${message}` }],
-      isError: true,
-      details: { error: message },
-    };
-  }
-}
-
-function bumpVersionTool(newVersion: string, file = "package.json"): ToolResult {
-  try {
-    if (!existsSync(file)) {
-      return {
-        content: [{ type: "text", text: `File not found: ${file}` }],
-        isError: true,
-        details: { error: "file_not_found" },
-      };
-    }
-
-    const content = readFileSync(file, "utf-8");
-    const pkg = JSON.parse(content);
-
-    if (typeof pkg.version !== "string") {
-      return {
-        content: [{ type: "text", text: `No version field found in ${file}` }],
-        isError: true,
-        details: { error: "no_version_field" },
-      };
-    }
-
-    const oldVersion = pkg.version;
-    pkg.version = newVersion;
-
-    writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`, "utf-8");
-
-    return {
-      content: [{ type: "text", text: `Updated ${file}: ${oldVersion} → ${newVersion}` }],
-      details: { oldVersion, newVersion, file },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Failed to update version: ${message}` }],
-      isError: true,
-      details: { error: message },
-    };
-  }
-}
-
-function createReleaseTool(tag: string, title: string, body?: string, draft = false, prerelease = false): ToolResult {
-  try {
-    let command = `gh release create ${shellQuote(tag)} --title ${shellQuote(title)}`;
-
-    if (body) {
-      command += ` --notes ${shellQuote(body)}`;
-    }
-
-    if (draft) {
-      command += " --draft";
-    }
-
-    if (prerelease) {
-      command += " --prerelease";
-    }
-
-    const releaseUrl = execGh(command);
-
-    return {
-      content: [{ type: "text", text: `Created release: ${releaseUrl}\n\nTag: ${tag}\nTitle: ${title}` }],
-      details: { tag, title, releaseUrl },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Failed to create release: ${message}` }],
-      isError: true,
-      details: { error: message },
-    };
-  }
-}
-
-// =============================================================================
-// Exports
-// =============================================================================
+import { getDefaultBranch, getGitContext } from "./git.js";
+import {
+  bumpVersionParams,
+  checkCiParams,
+  commitParams,
+  createBranchParams,
+  createPrParams,
+  createReleaseParams,
+  emptyParams,
+  mergePrParams,
+  pushParams,
+} from "./tool-params.js";
+import { checkCiTool, createPrTool, mergePrTool } from "./pull-request-tools.js";
+import {
+  analyzeCommitsTool,
+  bumpVersion,
+  bumpVersionTool,
+  createReleaseTool,
+  getLatestTagTool,
+  parseConventionalCommit,
+} from "./release-tools.js";
+import { commitTool, createBranchTool, pushTool, repoInfoTool } from "./workflow-tools.js";
 
 export {
   analyzeCommitsTool,
@@ -673,86 +37,62 @@ export {
   createBranchTool,
   createPrTool,
   createReleaseTool,
-  execGh,
-  execGit,
   getDefaultBranch,
   getLatestTagTool,
   mergePrTool,
   parseConventionalCommit,
   pushTool,
-  repoInfoTool,
   repoInfoTool as getRepoInfo,
-  shellQuote,
+  repoInfoTool,
 };
 
-// =============================================================================
-// Extension Entry Point
-// =============================================================================
-
-export default function devtoolsExtension(pi: ExtensionAPI) {
-  // SessionStart: print git context
-  pi.on("session_start", async () => {
-    const context = getGitContext();
-    if (context) {
-      console.log(context);
-    }
-  });
-
-  // Register devtools_create_branch
-  pi.registerTool({
+export const toolDefinitions = [
+  {
     name: "devtools_create_branch",
     label: "Create Branch",
     description: "Create a new git branch and optionally switch to it",
     parameters: createBranchParams,
-    async execute(_toolCallId, params) {
+    execute: async (_toolCallId: string, params: unknown) => {
       const { branchName, switchBranch = true } = params as { branchName: string; switchBranch?: boolean };
       return createBranchTool(branchName, switchBranch);
     },
-  });
-
-  // Register devtools_commit
-  pi.registerTool({
+  },
+  {
     name: "devtools_commit",
     label: "Git Commit",
     description: "Stage files and create a commit with conventional format",
     parameters: commitParams,
-    async execute(_toolCallId, params) {
+    execute: async (_toolCallId: string, params: unknown) => {
       const { message, files, noVerify = false } = params as { message: string; files?: string[]; noVerify?: boolean };
       return commitTool(message, files, noVerify);
     },
-  });
-
-  // Register devtools_push
-  pi.registerTool({
+  },
+  {
     name: "devtools_push",
     label: "Git Push",
     description: "Push branch to remote with upstream tracking",
     parameters: pushParams,
-    async execute(_toolCallId, params) {
+    execute: async (_toolCallId: string, params: unknown) => {
       const { branch, setUpstream = true } = params as { branch?: string; setUpstream?: boolean };
       return pushTool(branch, setUpstream);
     },
-  });
-
-  // Register devtools_create_pr
-  pi.registerTool({
+  },
+  {
     name: "devtools_create_pr",
     label: "Create PR",
     description: "Create a GitHub pull request",
     parameters: createPrParams,
-    async execute(_toolCallId, params) {
+    execute: async (_toolCallId: string, params: unknown) => {
       const typed = params as { title: string; body?: string; base?: string; draft?: boolean; assignees?: string[] };
       return createPrTool(typed.title, typed.body, typed.base, typed.draft, typed.assignees);
     },
-  });
-
-  // Register devtools_merge_pr
-  pi.registerTool({
+  },
+  {
     name: "devtools_merge_pr",
     label: "Merge PR",
     description: "Merge a pull request (optionally delete source branch)",
     parameters: mergePrParams,
-    async execute(_toolCallId, params) {
+    execute: async (_toolCallId: string, params: unknown) => {
       const typed = params as {
         prNumber?: number;
         squash?: boolean;
@@ -768,15 +108,13 @@ export default function devtoolsExtension(pi: ExtensionAPI) {
         typed.commitMessage,
       );
     },
-  });
-
-  // Register devtools_squash_merge_pr
-  pi.registerTool({
+  },
+  {
     name: "devtools_squash_merge_pr",
     label: "Squash Merge PR",
     description: "Squash-merge a pull request (optionally delete source branch)",
     parameters: mergePrParams,
-    async execute(_toolCallId, params) {
+    execute: async (_toolCallId: string, params: unknown) => {
       const typed = params as {
         prNumber?: number;
         deleteBranch?: boolean;
@@ -785,74 +123,69 @@ export default function devtoolsExtension(pi: ExtensionAPI) {
       };
       return mergePrTool(typed.prNumber, true, typed.deleteBranch ?? true, typed.commitTitle, typed.commitMessage);
     },
-  });
-
-  // Register devtools_check_ci
-  pi.registerTool({
+  },
+  {
     name: "devtools_check_ci",
     label: "Check CI",
     description: "Check GitHub Actions CI status for a PR or branch",
     parameters: checkCiParams,
-    async execute(_toolCallId, params) {
+    execute: async (_toolCallId: string, params: unknown) => {
       const { prNumber, branch } = params as { prNumber?: number; branch?: string };
       return checkCiTool(prNumber, branch);
     },
-  });
-
-  // Register devtools_get_repo_info
-  pi.registerTool({
+  },
+  {
     name: "devtools_get_repo_info",
     label: "Repo Info",
     description: "Get current branch, default branch, and git status",
-    parameters: Type.Object({}),
-    async execute() {
-      return repoInfoTool();
-    },
-  });
-
-  // Register devtools_get_latest_tag
-  pi.registerTool({
+    parameters: emptyParams,
+    execute: async () => repoInfoTool(getDefaultBranch),
+  },
+  {
     name: "devtools_get_latest_tag",
     label: "Latest Tag",
     description: "Get the latest version tag from git",
-    parameters: Type.Object({}),
-    async execute() {
-      return getLatestTagTool();
-    },
-  });
-
-  // Register devtools_analyze_commits
-  pi.registerTool({
+    parameters: emptyParams,
+    execute: async () => getLatestTagTool(),
+  },
+  {
     name: "devtools_analyze_commits",
     label: "Analyze Commits",
     description: "Analyze commits since last tag to determine version bump type",
-    parameters: Type.Object({}),
-    async execute() {
-      return analyzeCommitsTool();
-    },
-  });
-
-  // Register devtools_bump_version
-  pi.registerTool({
+    parameters: emptyParams,
+    execute: async () => analyzeCommitsTool(),
+  },
+  {
     name: "devtools_bump_version",
     label: "Bump Version",
     description: "Update version in package.json",
     parameters: bumpVersionParams,
-    async execute(_toolCallId, params) {
+    execute: async (_toolCallId: string, params: unknown) => {
       const { newVersion, file = "package.json" } = params as { newVersion: string; file?: string };
       return bumpVersionTool(newVersion, file);
     },
-  });
-
-  // Register devtools_create_release
-  pi.registerTool({
+  },
+  {
     name: "devtools_create_release",
     label: "Create Release",
     description: "Create a GitHub release with changelog",
     parameters: createReleaseParams,
-    async execute(_toolCallId, params) {
+    execute: async (_toolCallId: string, params: unknown) => {
       const typed = params as { tag: string; title: string; body?: string; draft?: boolean; prerelease?: boolean };
       return createReleaseTool(typed.tag, typed.title, typed.body, typed.draft, typed.prerelease);
     },
+  },
+] as const;
+
+export default function devtoolsExtension(pi: ExtensionAPI) {
+  pi.on("session_start", async () => {
+    const context = getGitContext();
+    if (context) {
+      console.log(context);
+    }
   });
+
+  for (const tool of toolDefinitions) {
+    pi.registerTool(tool);
+  }
 }
