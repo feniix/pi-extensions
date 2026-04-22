@@ -124,8 +124,9 @@ Do not save the ADR until:
 - the input already specified the exact decision to document.
 
 After saving:
-- run `specdocs-validate` so structural/frontmatter issues are surfaced immediately
-- if formatting cleanup is needed, run `specdocs-format <path>` explicitly on the saved ADR
+- ask the user to run the pi slash command `/specdocs-validate` so structural/frontmatter issues are surfaced immediately
+- if formatting cleanup is needed, ask the user to run the pi slash command `/specdocs-format docs/adr/ADR-NNNN-slug.md` on the saved ADR
+- do not treat `specdocs-validate` or `specdocs-format` as bash executables or check PATH for them; they are pi extension commands
 
 Always report the file path, summarize the recommendation, and mention any validation/formatting follow-up you performed.
 

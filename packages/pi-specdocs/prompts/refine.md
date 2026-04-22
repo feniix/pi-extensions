@@ -35,8 +35,9 @@ Read the document fully. Determine whether it's a PRD or ADR from its structure 
 Before flagging issues, do the homework. Use **sequential-thinking** to structure your approach when helpful — identify what needs checking, work through it methodically, and track what you've verified vs what remains.
 
 Start with structural validation when the target is a supported spec document:
-- run `specdocs-validate` to capture frontmatter, numbering, required section, required table, and plan filename issues as a baseline
-- if the document clearly has formatting drift, mention that `specdocs-format <path>` is the explicit normalization path rather than treating formatting cleanup as implicit
+- ask the user to run the pi slash command `/specdocs-validate` to capture frontmatter, numbering, required section, required table, and plan filename issues as a baseline
+- if the document clearly has formatting drift, mention that `/specdocs-format <real-path>` is the explicit normalization path rather than treating formatting cleanup as implicit
+- do not treat `specdocs-validate` or `specdocs-format` as bash executables or check PATH for them; they are pi extension commands
 
 Then continue with deeper review work:
 - **Codebase validation** — use `read` and `bash` to verify that file paths actually exist, that referenced modules behave as described, and that the blast radius is accurately captured. Use **code-reasoning** when you encounter complex dependency chains.

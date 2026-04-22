@@ -99,8 +99,9 @@ Write the plan to:
 Implementation plans are first-class validated spec documents, so keep the canonical `plan-*.md` naming convention.
 
 After saving:
-- run `specdocs-validate` so plan frontmatter, required sections, required tables, and filename issues are caught immediately
-- if formatting cleanup is needed, run `specdocs-format <path>` explicitly on the saved plan
+- ask the user to run the pi slash command `/specdocs-validate` so plan frontmatter, required sections, required tables, and filename issues are caught immediately
+- if formatting cleanup is needed, ask the user to run the pi slash command `/specdocs-format docs/architecture/plan-slug.md` on the saved plan
+- do not treat `specdocs-validate` or `specdocs-format` as bash executables or check PATH for them; they are pi extension commands
 
 Always report the file path and summarize:
 - the architecture shape

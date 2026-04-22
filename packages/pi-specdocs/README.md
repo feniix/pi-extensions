@@ -59,6 +59,8 @@ Deep review of a PRD or ADR. Validates against the codebase, researches external
 
 ## Commands
 
+These are **pi slash commands**, not shell executables on PATH. Invoke them inside pi as `/specdocs-validate` and `/specdocs-format <path>`.
+
 - `specdocs-validate` — validate spec documents in the workspace
 - `specdocs-format <path>` — format a PRD, ADR, or plan document in place
   - validates typed frontmatter, required headings, and required table shapes

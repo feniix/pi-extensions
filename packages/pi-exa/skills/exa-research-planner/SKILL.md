@@ -245,6 +245,10 @@ Good uses:
 - alternate terminology
 - explicit comparison variants
 
+Keep `additionalQueries` short and high-signal. The current `web_research_exa` schema allows **at most 5 items**, so prefer the best alternate phrasings rather than exhaustive coverage.
+
+Do not exceed 5 entries in `additionalQueries`. If you have more candidates, keep the strongest 3–5 and fold the rest into the main `query` or `systemPrompt`.
+
 Example:
 
 ```json
@@ -306,9 +310,13 @@ Use:
 }
 ```
 
+Prefer text output unless the user clearly benefits from structured downstream consumption, because structured schemas are easier to make invalid and require more careful drafting.
+
 Use structured output only when it will clearly help comparison or downstream use.
 Keep schemas simple and shallow.
 Do not manually add citation or confidence fields.
+
+If `outputSchema` contains array fields, each array must include an explicit `items` definition. For simple lists, use `"items": { "type": "string" }`.
 
 Example:
 
@@ -317,13 +325,26 @@ Example:
   "outputSchema": {
     "type": "object",
     "properties": {
-      "options": { "type": "array" },
+      "options": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
       "recommendation": { "type": "string" },
-      "risks": { "type": "array" }
+      "risks": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
     }
   }
 }
 ```
+
+### Tool schema pitfalls
+
+When drafting `web_research_exa` payloads:
+- `additionalQueries` may contain **at most 5 entries**
+- any array in `outputSchema` must define `items`
+- if you do not need structured output, prefer `{ "type": "text" }` to reduce schema errors
 
 ## Default Draft Template
 
