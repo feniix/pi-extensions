@@ -3,7 +3,7 @@ title: "pi-conductor — single-worker run capability"
 prd: "PRD-003-pi-conductor-single-worker-run"
 date: 2026-04-21
 author: "Pi"
-status: Completed
+status: Implemented
 ---
 
 # Plan: pi-conductor — single-worker run capability
