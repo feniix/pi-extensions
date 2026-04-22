@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-specdocs",
-  "version": "2.3.2",
+  "version": "2.4.0",
   "description": "Structured spec documentation — PRDs, ADRs, and implementation plans with cross-referencing",
   "keywords": [
     "pi",
