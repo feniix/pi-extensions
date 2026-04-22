@@ -62,13 +62,33 @@ Deep review of a PRD or ADR. Validates against the codebase, researches external
 These are **pi slash commands**, not shell executables on PATH. Invoke them inside pi as `/specdocs-validate` and `/specdocs-format <path>`.
 
 - `specdocs-validate` — validate spec documents in the workspace
-- `specdocs-format <path>` — format a PRD, ADR, or plan document in place
+- `specdocs-format <path>` — format one or more PRD, ADR, or plan documents in place
+  - accepts plain paths, `@path/file.md` references, multiple paths, and simple `*` globs such as `@docs/adr/ADR-*.md`
   - validates typed frontmatter, required headings, and required table shapes
   - plan docs also warn on missing recommended sections such as `Risks and Mitigations` and `Open Questions`
   - duplicate PRD/ADR numbers and invalid direct-child plan filenames are surfaced in workspace validation
   - normalizes frontmatter fences and section spacing
   - normalizes GFM table spacing/alignment
   - preserves thematic breaks, task lists, and other common GFM syntax
+
+## Tools
+
+These tools are available to the LLM during a pi session and are the preferred execution path when the model should validate or format documents itself:
+
+- `specdocs_validate` — validate the current workspace's spec documents
+- `specdocs_format` — format one or more spec documents in place
+  - accepts `path`, `file_path`, or `paths`
+  - supports plain paths, `@path/file.md`, multiple files, and simple `*` globs
+  - validates typed frontmatter, required headings, and required table shapes
+  - plan docs also warn on missing recommended sections such as `Risks and Mitigations` and `Open Questions`
+  - duplicate PRD/ADR numbers and invalid direct-child plan filenames are surfaced in workspace validation
+  - normalizes frontmatter fences and section spacing
+  - normalizes GFM table spacing/alignment
+  - preserves thematic breaks, task lists, and other common GFM syntax
+
+In short:
+- use `specdocs_validate` / `specdocs_format` for LLM tool execution
+- use `/specdocs-validate` / `/specdocs-format ...` for manual interactive invocation inside pi
 
 ## Tool Integration
 

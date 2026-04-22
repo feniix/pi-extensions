@@ -96,9 +96,10 @@ Use the shared document conventions to determine the next PRD number and write t
 Always save the local artifact first.
 
 After saving:
-- ask the user to run the pi slash command `/specdocs-validate` so structural/frontmatter issues are caught immediately
-- if spacing or table formatting needs normalization, ask the user to run the pi slash command `/specdocs-format docs/prd/PRD-NNN-slug.md` on the saved PRD
-- do not treat `specdocs-validate` or `specdocs-format` as bash executables or check PATH for them; they are pi extension commands
+- run `specdocs_validate` when available so structural/frontmatter issues are caught immediately
+- if spacing or table formatting needs normalization, run `specdocs_format` on the saved PRD when available
+- for manual user guidance, the equivalent pi slash commands are `/specdocs-validate` and `/specdocs-format docs/prd/PRD-NNN-slug.md`
+- do not treat `specdocs-validate` or `specdocs-format` as bash executables or check PATH for them; they are pi extension capabilities
 - report the final file path and any validation/formatting follow-up you performed
 
 ### 6. Publish intentionally

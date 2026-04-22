@@ -92,9 +92,10 @@ After user approval, produce artifacts in this order:
 Cross-reference between all artifacts. PRDs should reference relevant ADRs. ADRs should link back to the PRD that motivated them.
 
 After saving each artifact:
-- ask the user to run the pi slash command `/specdocs-validate` so structural/frontmatter issues are surfaced immediately
-- if formatting cleanup is needed, ask the user to run `/specdocs-format <real-path>` explicitly on that artifact before moving on
-- do not treat `specdocs-validate` or `specdocs-format` as bash executables or check PATH for them; they are pi extension commands
+- run `specdocs_validate` when available so structural/frontmatter issues are surfaced immediately
+- if formatting cleanup is needed, run `specdocs_format` on that artifact when available before moving on
+- for manual user guidance, the equivalent pi slash commands are `/specdocs-validate` and `/specdocs-format <real-path>`
+- do not treat `specdocs-validate` or `specdocs-format` as bash executables or check PATH for them; they are pi extension capabilities
 
 **Checkpoint after each artifact** — briefly confirm with the user before moving to the next one. Don't produce everything in a single uninterruptible run.
 
