@@ -23,28 +23,31 @@ Pi is intentionally minimal and extensible, but it does not ship with a first-cl
 
 This is now worth addressing for three reasons:
 
-- **Personal workflow need:** the primary user wants to run multiple workers on the same project at the same time without multiple full clones, constant branch switching, or losing conversational state.
-- **Product validation:** this is a good test of whether Pi’s SDK and session model can support long-lived orchestration cleanly.
-- **Reusable package opportunity:** if the model works well, it should become a publishable Pi package in this repo under `packages/pi-conductor`.
+* **Personal workflow need:** the primary user wants to run multiple workers on the same project at the same time without multiple full clones, constant branch switching, or losing conversational state.
+* **Product validation:** this is a good test of whether Pi’s SDK and session model can support long-lived orchestration cleanly.
+* **Reusable package opportunity:** if the model works well, it should become a publishable Pi package in this repo under `packages/pi-conductor`.
 
 The target v1 is deliberately narrower than “full agent teams.” It focuses on:
-- one worker per git worktree
-- resumable worker sessions
-- explicit task assignment and updates
-- operational status/progress
-- one branch / one PR per worker in normal v1 usage
-- no iTerm2 automation, no worker-to-worker messaging, no automatic merge
+
+* one worker per git worktree
+* resumable worker sessions
+* explicit task assignment and updates
+* operational status/progress
+* one branch / one PR per worker in normal v1 usage
+* no iTerm2 automation, no worker-to-worker messaging, no automatic merge
 
 The codebase already provides useful precedent:
-- package structure under `packages/*`
-- extension-based Pi packages
-- `@feniix/pi-devtools` for branch/PR operations and environment assumptions
-- Pi SDK support for persistent sessions and runtime-controlled prompting
+
+* package structure under `packages/*`
+* extension-based Pi packages
+* `@feniix/pi-devtools` for branch/PR operations and environment assumptions
+* Pi SDK support for persistent sessions and runtime-controlled prompting
 
 External Pi-related research also informed this PRD:
-- `pi-agent-teams` for lifecycle/task concepts
-- `pi-side-agents` for worktree-centric multi-worker execution
-- `pi-collaborating-agents` for future coordination ideas, though not for v1 scope
+
+* `pi-agent-teams` for lifecycle/task concepts
+* `pi-side-agents` for worktree-centric multi-worker execution
+* `pi-collaborating-agents` for future coordination ideas, though not for v1 scope
 
 This makes the initiative feasible, but it requires a coherent product model for worker identity, storage, runtime ownership, branch/worktree lifecycle, session-reference lifecycle, and operator UX.
 
@@ -52,21 +55,22 @@ This makes the initiative feasible, but it requires a coherent product model for
 
 ## 2. Goals & Success Metrics
 
-| Goal | Metric | Target |
-|------|--------|--------|
-| **Start isolated workers quickly** | Human starts 2 workers from the same repo without any manual `git worktree` commands | 2 workers can be created through conductor-only commands/tools in one flow |
-| **Support true resumption** | Worker can be resumed after conductor restart or shell restart without losing branch/worktree/session linkage | 100% of persisted workers retain enough metadata to resume correctly |
-| **Make tasking explicit and low-ceremony** | Assigning or updating a worker’s current task requires exactly one conductor command or one conductor tool call | 100% of task mutations meet this constraint |
-| **Provide actionable progress visibility** | Status output includes worker id, worker name, branch, worktree path, session reference, task, lifecycle state, summary, and PR reference when present | 100% of persisted workers expose this shape |
-| **Produce one PR per worker flow** | A ready worker can complete commit, push, and PR creation without manual git or gh commands | 100% of ready workers can complete conductor-managed PR preparation when prerequisites are met |
-| **Ship as a clean Pi package** | Package follows workspace conventions and has tests and README | `packages/pi-conductor` conforms to current repo package patterns |
+| Goal                                       | Metric                                                                                                                                                 | Target                                                                                         |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| **Start isolated workers quickly**         | Human starts 2 workers from the same repo without any manual `git worktree` commands                                                                   | 2 workers can be created through conductor-only commands/tools in one flow                     |
+| **Support true resumption**                | Worker can be resumed after conductor restart or shell restart without losing branch/worktree/session linkage                                          | 100% of persisted workers retain enough metadata to resume correctly                           |
+| **Make tasking explicit and low-ceremony** | Assigning or updating a worker’s current task requires exactly one conductor command or one conductor tool call                                        | 100% of task mutations meet this constraint                                                    |
+| **Provide actionable progress visibility** | Status output includes worker id, worker name, branch, worktree path, session reference, task, lifecycle state, summary, and PR reference when present | 100% of persisted workers expose this shape                                                    |
+| **Produce one PR per worker flow**         | A ready worker can complete commit, push, and PR creation without manual git or gh commands                                                            | 100% of ready workers can complete conductor-managed PR preparation when prerequisites are met |
+| **Ship as a clean Pi package**             | Package follows workspace conventions and has tests and README                                                                                         | `packages/pi-conductor` conforms to current repo package patterns                              |
 
 **Guardrails (must not regress):**
-- The package must remain usable without tmux.
-- Worker orchestration state must not depend on terminal scraping.
-- v1 must not require committing runtime/session artifacts to the repo.
-- The design must leave room for a future tmux adapter without making tmux a core dependency.
-- Failure to create a PR must not corrupt worker/session/worktree metadata.
+
+* The package must remain usable without tmux.
+* Worker orchestration state must not depend on terminal scraping.
+* v1 must not require committing runtime/session artifacts to the repo.
+* The design must leave room for a future tmux adapter without making tmux a core dependency.
+* Failure to create a PR must not corrupt worker/session/worktree metadata.
 
 ---
 
@@ -105,31 +109,33 @@ This makes the initiative feasible, but it requires a coherent product model for
 
 ### Out of scope / later
 
-| What | Why | Tracked in |
-|------|-----|------------|
-| iTerm2 automation | macOS-specific and brittle; not needed to prove orchestration model | Untracked follow-up |
-| Agent-to-agent messaging | Adds protocol and coordination complexity beyond v1 needs | Untracked follow-up |
-| Autonomous planner/reviewer hierarchies | Major scope expansion and not needed for explicit operator-led workflow | Untracked follow-up |
-| GUI/TUI dashboard beyond basic status | UX-heavy and not required to validate core engine | Untracked follow-up |
-| Automatic merge | High-trust operation; PR creation is sufficient for v1 | Untracked follow-up |
-| Windows support | Unix-first target for v1 | Untracked follow-up |
-| Exact parity with Claude agent teams or any existing tool | Product should be Pi-native and borrow ideas selectively | Untracked follow-up |
+| What                                                      | Why                                                                     | Tracked in          |
+| --------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------- |
+| iTerm2 automation                                         | macOS-specific and brittle; not needed to prove orchestration model     | Untracked follow-up |
+| Agent-to-agent messaging                                  | Adds protocol and coordination complexity beyond v1 needs               | Untracked follow-up |
+| Autonomous planner/reviewer hierarchies                   | Major scope expansion and not needed for explicit operator-led workflow | Untracked follow-up |
+| GUI/TUI dashboard beyond basic status                     | UX-heavy and not required to validate core engine                       | Untracked follow-up |
+| Automatic merge                                           | High-trust operation; PR creation is sufficient for v1                  | Untracked follow-up |
+| Windows support                                           | Unix-first target for v1                                                | Untracked follow-up |
+| Exact parity with Claude agent teams or any existing tool | Product should be Pi-native and borrow ideas selectively                | Untracked follow-up |
 
 ### Design for future (build with awareness)
 
 The core model should anticipate:
-- a future **tmux adapter package** that surfaces worker sessions
-- possible future **alternate worker runtimes** beyond SDK-first
-- possible future **auto-assignment** or queueing
-- possible future **multi-PR lifetime per worker identity**
+
+* a future **tmux adapter package** that surfaces worker sessions
+* possible future **alternate worker runtimes** beyond SDK-first
+* possible future **auto-assignment** or queueing
+* possible future **multi-PR lifetime per worker identity**
 
 Future-readiness in code should mean narrow interfaces and clear state ownership, not speculative features.
 
 Concretely, v1 should:
-- keep worker runtime behind a small internal runtime boundary
-- keep storage independent from Pi’s internal session directory layout
-- keep presentation separate from worker correctness/state
-- keep worker ids stable even if user-facing names evolve later
+
+* keep worker runtime behind a small internal runtime boundary
+* keep storage independent from Pi’s internal session directory layout
+* keep presentation separate from worker correctness/state
+* keep worker ids stable even if user-facing names evolve later
 
 ---
 
@@ -140,10 +146,11 @@ Concretely, v1 should:
 The package must create a worker backed by a dedicated git worktree and branch, with conductor-owned metadata linking the worker to its project, branch, worktree path, and Pi session reference.
 
 Each worker has:
-- a stable internal `workerId`
-- a user-facing `name`
-- exactly one active worktree in v1
-- exactly one active branch in v1 practice
+
+* a stable internal `workerId`
+* a user-facing `name`
+* exactly one active worktree in v1
+* exactly one active branch in v1 practice
 
 Worker names must be unique within a project. Stable ids are immutable and remain the storage key even if user-facing naming behavior changes later.
 
@@ -156,10 +163,11 @@ Branch names must be deterministic and conductor-owned, following a convention l
 `conductor/<worker-name>` or `conductor/<worker-id>-<slug>`
 
 When a branch name is derived from a user-facing worker name, conductor must normalize it into a valid git branch slug by:
-- lowercasing
-- converting whitespace to `-`
-- replacing or removing characters invalid in git refs
-- collapsing repeated separators where practical
+
+* lowercasing
+* converting whitespace to `-`
+* replacing or removing characters invalid in git refs
+* collapsing repeated separators where practical
 
 If normalization would produce an ambiguous or empty slug, conductor must fall back to a `workerId`-based branch component.
 
@@ -180,20 +188,22 @@ Then conductor rejects the request
 ```
 
 **Files:**
-- `packages/pi-conductor/extensions/index.ts` — register commands/tools
-- `packages/pi-conductor/extensions/worktrees.ts` — create and validate worker worktrees
-- `packages/pi-conductor/extensions/types.ts` — worker and run state types
-- `packages/pi-conductor/extensions/storage.ts` — persist worker metadata
-- `packages/pi-conductor/extensions/project-key.ts` — derive stable project key
+
+* `packages/pi-conductor/extensions/index.ts` — register commands/tools
+* `packages/pi-conductor/extensions/worktrees.ts` — create and validate worker worktrees
+* `packages/pi-conductor/extensions/types.ts` — worker and run state types
+* `packages/pi-conductor/extensions/storage.ts` — persist worker metadata
+* `packages/pi-conductor/extensions/project-key.ts` — derive stable project key
 
 ### FR-2: Resume a worker as a continuation of the same thread of work
 
 A worker must be resumable across conductor restarts. Worktree reuse must be continuity-based: when resuming the same worker/session/branch thread, reuse the existing worktree; otherwise prefer a new worktree for materially different work.
 
 For v1, “materially different work” means any of:
-- the prior PR/branch lifecycle is complete or intentionally closed
-- the user intends to start a new independent task stream rather than continue the existing one
-- the current worktree/branch state is ambiguous or unsafe to reuse
+
+* the prior PR/branch lifecycle is complete or intentionally closed
+* the user intends to start a new independent task stream rather than continue the existing one
+* the current worktree/branch state is ambiguous or unsafe to reuse
 
 If a worker’s branch has already been merged or closed out, conductor must not silently resume that worker as if nothing happened.
 
@@ -202,9 +212,10 @@ If a worker’s branch has already been merged or closed out, conductor must not
 A worker normally retains one Pi session reference across resumptions. Resuming a healthy worker must continue using the existing referenced session.
 
 Recovery may explicitly replace the worker’s session reference only when:
-- the old session file is missing
-- the old session file is unreadable or invalid
-- the operator explicitly chooses recovery that starts a new session lineage
+
+* the old session file is missing
+* the old session file is unreadable or invalid
+* the operator explicitly chooses recovery that starts a new session lineage
 
 If a session reference is replaced, conductor must persist that replacement explicitly in worker metadata.
 
@@ -234,10 +245,11 @@ Then conductor does not pretend the old session still exists
 ```
 
 **Files:**
-- `packages/pi-conductor/extensions/runtime.ts` — worker runtime and resume logic
-- `packages/pi-conductor/extensions/storage.ts` — lookup and hydrate persisted state
-- `packages/pi-conductor/extensions/types.ts` — lifecycle state definitions
-- `packages/pi-conductor/extensions/worktrees.ts` — continuity and recovery checks
+
+* `packages/pi-conductor/extensions/runtime.ts` — worker runtime and resume logic
+* `packages/pi-conductor/extensions/storage.ts` — lookup and hydrate persisted state
+* `packages/pi-conductor/extensions/types.ts` — lifecycle state definitions
+* `packages/pi-conductor/extensions/worktrees.ts` — continuity and recovery checks
 
 ### FR-3: Assign and update the current task per worker
 
@@ -261,33 +273,35 @@ Then the new task replaces the prior current task
 ```
 
 **Files:**
-- `packages/pi-conductor/extensions/commands.ts` — human-facing task commands
-- `packages/pi-conductor/extensions/tools.ts` — task mutation tools
-- `packages/pi-conductor/extensions/storage.ts` — persist task state
+
+* `packages/pi-conductor/extensions/commands.ts` — human-facing task commands
+* `packages/pi-conductor/extensions/tools.ts` — task mutation tools
+* `packages/pi-conductor/extensions/storage.ts` — persist task state
 
 ### FR-4: Show practical worker status and progress
 
 The package must expose useful operational status for each worker, including:
-- worker id
-- worker name
-- branch
-- worktree path
-- session reference
-- current task
-- lifecycle state
-- last summary
-- summary freshness indicator
-- PR reference if present
-- recoverability metadata when broken
+
+* worker id
+* worker name
+* branch
+* worktree path
+* session reference
+* current task
+* lifecycle state
+* last summary
+* summary freshness indicator
+* PR reference if present
+* recoverability metadata when broken
 
 The canonical v1 lifecycle states are:
 
-- `idle`
-- `running`
-- `blocked`
-- `ready_for_pr`
-- `done`
-- `broken`
+* `idle`
+* `running`
+* `blocked`
+* `ready_for_pr`
+* `done`
+* `broken`
 
 `broken` means the persisted worker cannot currently be resumed safely without operator action.
 
@@ -295,18 +309,19 @@ The canonical v1 lifecycle states are:
 
 The canonical v1 transitions are:
 
-- worker created successfully → `idle`
-- task assigned or task updated while no run is active → remains `idle`
-- worker actively executing prompted work or summary generation → `running`
-- operator or worker surfaces an explicit blocker that prevents progress → `blocked`
-- operator decides the worker branch is ready for commit/push/PR → `ready_for_pr`
-- worker work is intentionally concluded for v1 purposes → `done`
-- missing/invalid worktree or session reference without safe automatic continuation → `broken`
+* worker created successfully → `idle`
+* task assigned or task updated while no run is active → remains `idle`
+* worker actively executing prompted work or summary generation → `running`
+* operator or worker surfaces an explicit blocker that prevents progress → `blocked`
+* operator decides the worker branch is ready for commit/push/PR → `ready_for_pr`
+* worker work is intentionally concluded for v1 purposes → `done`
+* missing/invalid worktree or session reference without safe automatic continuation → `broken`
 
 Additional rules:
-- PR creation failure does **not** automatically set `done`; the worker typically remains `ready_for_pr` or becomes `blocked`, depending on failure mode.
-- A `broken` worker may include `recoverable: true` metadata when a deterministic recovery path exists.
-- `recoverable` is metadata, not a separate lifecycle state.
+
+* PR creation failure does **not** automatically set `done`; the worker typically remains `ready_for_pr` or becomes `blocked`, depending on failure mode.
+* A `broken` worker may include `recoverable: true` metadata when a deterministic recovery path exists.
+* `recoverable` is metadata, not a separate lifecycle state.
 
 **Acceptance criteria:**
 
@@ -336,19 +351,21 @@ Then the worker is shown with lifecycle state "broken"
 ```
 
 **Files:**
-- `packages/pi-conductor/extensions/status.ts` — status formatting and summaries
-- `packages/pi-conductor/extensions/storage.ts` — read worker state
-- `packages/pi-conductor/extensions/index.ts` — command/tool wiring
-- `packages/pi-conductor/extensions/types.ts` — status enums and display types
+
+* `packages/pi-conductor/extensions/status.ts` — status formatting and summaries
+* `packages/pi-conductor/extensions/storage.ts` — read worker state
+* `packages/pi-conductor/extensions/index.ts` — command/tool wiring
+* `packages/pi-conductor/extensions/types.ts` — status enums and display types
 
 ### FR-5: Support worker summary generation
 
 The package must support requesting a concise progress summary from a worker and persisting that summary in conductor state.
 
 A summary becomes stale when:
-- the worker receives a new task update after the summary was created
-- the worker has produced new activity after the last summary timestamp
-- the worker has entered a new lifecycle phase after the summary was recorded
+
+* the worker receives a new task update after the summary was created
+* the worker has produced new activity after the last summary timestamp
+* the worker has entered a new lifecycle phase after the summary was recorded
 
 Staleness only affects display semantics; it does not delete the summary.
 
@@ -368,34 +385,38 @@ Then the summary is still visible
 ```
 
 **Files:**
-- `packages/pi-conductor/extensions/runtime.ts` — prompt worker for summary
-- `packages/pi-conductor/extensions/status.ts` — display summary and staleness
-- `packages/pi-conductor/extensions/storage.ts` — persist summary metadata
+
+* `packages/pi-conductor/extensions/runtime.ts` — prompt worker for summary
+* `packages/pi-conductor/extensions/status.ts` — display summary and staleness
+* `packages/pi-conductor/extensions/storage.ts` — persist summary metadata
 
 ### FR-6: Prepare a worker branch as a PR
 
 The package must support the full v1 PR preparation flow for a worker: commit, push, and PR creation. Review and merge remain outside v1 scope.
 
 For v1, `pi-conductor` should shell out through a **minimal conductor-local git/gh helper layer**, not depend on `@feniix/pi-devtools` internals as a code dependency. It may borrow conventions and behavior from `pi-devtools`, but it should only implement the worker-aware primitives needed for:
-- branch/base-branch resolution
-- commit
-- push
-- PR creation
+
+* branch/base-branch resolution
+* commit
+* push
+* PR creation
 
 It should **not** reimplement higher-level devtools workflows such as `brpr`, `md`, `smd`, release, CI, or version-management features.
 
 PR flow prerequisites:
-- worker branch exists
-- worker worktree is valid
-- git remote is configured
-- `gh` is installed for PR creation
-- `gh` is authenticated
-- user has provided commit message / PR title inputs, or conductor has enough explicit inputs to construct them
+
+* worker branch exists
+* worker worktree is valid
+* git remote is configured
+* `gh` is installed for PR creation
+* `gh` is authenticated
+* user has provided commit message / PR title inputs, or conductor has enough explicit inputs to construct them
 
 PR creation failures must not corrupt worker metadata. Partial success must be reflected clearly:
-- commit succeeded
-- push succeeded
-- PR creation failed
+
+* commit succeeded
+* push succeeded
+* PR creation failed
 
 **Acceptance criteria:**
 
@@ -426,19 +447,21 @@ Then conductor records that commit succeeded
 ```
 
 **Files:**
-- `packages/pi-conductor/extensions/pr.ts` — PR flow orchestration
-- `packages/pi-conductor/extensions/git.ts` — git/gh helper wrappers
-- `packages/pi-conductor/extensions/runtime.ts` — worker context resolution
-- `packages/pi-conductor/extensions/storage.ts` — persist PR metadata and partial state
+
+* `packages/pi-conductor/extensions/pr.ts` — PR flow orchestration
+* `packages/pi-conductor/extensions/git.ts` — git/gh helper wrappers
+* `packages/pi-conductor/extensions/runtime.ts` — worker context resolution
+* `packages/pi-conductor/extensions/storage.ts` — persist PR metadata and partial state
 
 ### FR-7: Recover from failed or abandoned worker setup
 
 The package must provide a recovery path for partially-created workers, stale worktrees, and abandoned metadata.
 
 Recovery and cleanup semantics:
-- `broken` is the lifecycle state
-- `recoverable` indicates whether a deterministic repair path is available
-- `stale` is descriptive metadata for old or abandoned records and is not a lifecycle state
+
+* `broken` is the lifecycle state
+* `recoverable` indicates whether a deterministic repair path is available
+* `stale` is descriptive metadata for old or abandoned records and is not a lifecycle state
 
 **Acceptance criteria:**
 
@@ -455,32 +478,34 @@ Then conductor removes the stale record
 ```
 
 **Files:**
-- `packages/pi-conductor/extensions/storage.ts` — stale state inspection and cleanup
-- `packages/pi-conductor/extensions/worktrees.ts` — worktree cleanup helpers
-- `packages/pi-conductor/extensions/commands.ts` — operator cleanup commands
+
+* `packages/pi-conductor/extensions/storage.ts` — stale state inspection and cleanup
+* `packages/pi-conductor/extensions/worktrees.ts` — worktree cleanup helpers
+* `packages/pi-conductor/extensions/commands.ts` — operator cleanup commands
 
 ---
 
 ## 6. Non-Functional Requirements
 
-| Category | Requirement |
-|----------|-------------|
-| **Architecture** | V1 is SDK/headless-first and must not depend on tmux or terminal scraping for correctness |
-| **Storage** | Conductor metadata must live in a conductor-owned, project-scoped namespace under `~/.pi/agent/conductor/projects/<project-key>/` |
-| **State ownership** | Conductor owns orchestration metadata; Pi continues to own session internals and session file format |
-| **Safety** | Worktree reuse must be conservative and continuity-based, not aggressively automatic |
-| **Safety** | PR creation failures must be recoverable and must not corrupt worker lifecycle metadata |
-| **Usability** | V1 human-facing command surface should remain within 4–6 top-level command groups |
-| **Usability** | The minimum human-facing command set for v1 should cover: worker start, worker status, task assignment/update, summary request, PR preparation, and cleanup/recovery |
-| **Portability** | V1 targets macOS and Linux only |
-| **Testability** | Core state, worktree selection, resume logic, cleanup logic, project-key derivation, and status formatting must be unit-testable without requiring a live GUI terminal surface |
-| **Operational clarity** | Status output must distinguish healthy, stale, and broken workers without requiring filesystem inspection by the user |
+| Category                | Requirement                                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Architecture**        | V1 is SDK/headless-first and must not depend on tmux or terminal scraping for correctness                                                                                      |
+| **Storage**             | Conductor metadata must live in a conductor-owned, project-scoped namespace under `~/.pi/agent/conductor/projects/<project-key>/`                                              |
+| **State ownership**     | Conductor owns orchestration metadata; Pi continues to own session internals and session file format                                                                           |
+| **Safety**              | Worktree reuse must be conservative and continuity-based, not aggressively automatic                                                                                           |
+| **Safety**              | PR creation failures must be recoverable and must not corrupt worker lifecycle metadata                                                                                        |
+| **Usability**           | V1 human-facing command surface should remain within 4–6 top-level command groups                                                                                              |
+| **Usability**           | The minimum human-facing command set for v1 should cover: worker start, worker status, task assignment/update, summary request, PR preparation, and cleanup/recovery           |
+| **Portability**         | V1 targets macOS and Linux only                                                                                                                                                |
+| **Testability**         | Core state, worktree selection, resume logic, cleanup logic, project-key derivation, and status formatting must be unit-testable without requiring a live GUI terminal surface |
+| **Operational clarity** | Status output must distinguish healthy, stale, and broken workers without requiring filesystem inspection by the user                                                          |
 
 ### Command/tool contract
 
 The intended v1 split is:
-- **Commands** for human operators: start, status, task mutation, summarize, pr, cleanup/recover
-- **Tools** for lower-level orchestration primitives and model-callable flows
+
+* **Commands** for human operators: start, status, task mutation, summarize, pr, cleanup/recover
+* **Tools** for lower-level orchestration primitives and model-callable flows
 
 Implementation may rename the exact commands, but it must preserve this contract and remain within the command-surface limit above.
 
@@ -492,22 +517,22 @@ For this limit, a “top-level command group” means a primary operator entry s
 
 ### Risks
 
-| Risk | Severity | Likelihood | Mitigation |
-|------|----------|------------|------------|
-| SDK-managed multi-worker orchestration may expose edge cases not seen in single-session usage | High | Medium | Isolate runtime layer early and keep future process-backed runtime possible |
-| Pi default session storage may be awkward for worktree-heavy worker layouts | Medium | Medium | Store conductor metadata separately and reference session files rather than coupling to Pi session directory internals |
-| Worktree reuse may lead to stale or confusing state | High | Medium | Reuse only on explicit continuation; otherwise prefer new worker/worktree |
-| Operator UX may become too ceremonial | High | Medium | Keep commands minimal and task model simple; optimize for personal workflow first |
-| PR flow may fail due to environment assumptions (`gh`, auth, git config, remote state) | High | High | Validate preconditions before PR flow, record partial progress safely, and surface actionable errors |
-| Cleanup/recovery behavior may accidentally remove useful state | High | Low | Require deterministic classification of worker state and scope cleanup to a single targeted worker unless user explicitly requests broader cleanup |
+| Risk                                                                                          | Severity | Likelihood | Mitigation                                                                                                                                         |
+| --------------------------------------------------------------------------------------------- | -------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SDK-managed multi-worker orchestration may expose edge cases not seen in single-session usage | High     | Medium     | Isolate runtime layer early and keep future process-backed runtime possible                                                                        |
+| Pi default session storage may be awkward for worktree-heavy worker layouts                   | Medium   | Medium     | Store conductor metadata separately and reference session files rather than coupling to Pi session directory internals                             |
+| Worktree reuse may lead to stale or confusing state                                           | High     | Medium     | Reuse only on explicit continuation; otherwise prefer new worker/worktree                                                                          |
+| Operator UX may become too ceremonial                                                         | High     | Medium     | Keep commands minimal and task model simple; optimize for personal workflow first                                                                  |
+| PR flow may fail due to environment assumptions (`gh`, auth, git config, remote state)        | High     | High       | Validate preconditions before PR flow, record partial progress safely, and surface actionable errors                                               |
+| Cleanup/recovery behavior may accidentally remove useful state                                | High     | Low        | Require deterministic classification of worker state and scope cleanup to a single targeted worker unless user explicitly requests broader cleanup |
 
 ### Assumptions
 
-- Workers are project-bound and one worker corresponds to one git worktree in v1.
-- Users are comfortable with explicit worker/task control rather than autonomous delegation.
-- A single current task per worker is sufficient for v1.
-- PR creation, not merge automation, is the right endpoint for v1 workflow completion.
-- New workers should default to the current checked-out branch unless the operator explicitly chooses otherwise.
+* Workers are project-bound and one worker corresponds to one git worktree in v1.
+* Users are comfortable with explicit worker/task control rather than autonomous delegation.
+* A single current task per worker is sufficient for v1.
+* PR creation, not merge automation, is the right endpoint for v1 workflow completion.
+* New workers should default to the current checked-out branch unless the operator explicitly chooses otherwise.
 
 ---
 
@@ -516,6 +541,7 @@ For this limit, a “top-level command group” means a primary operator entry s
 ### D1: SDK-first runtime with future backend flexibility
 
 **Options considered:**
+
 1. SDK-managed sessions — cleaner state ownership, better fit for headless orchestration
 2. Process/RPC-managed workers — closer to CLI supervision, better fit for some terminal surfaces later
 
@@ -528,6 +554,7 @@ For this limit, a “top-level command group” means a primary operator entry s
 ### D2: Conductor-managed project-scoped storage
 
 **Options considered:**
+
 1. Repo-local state — strong locality but adds repo artifacts and `.gitignore` burden
 2. Pi session bucket reuse — convenient but overly coupled to Pi’s internal session layout
 3. Conductor-owned global project namespace — clean ownership and no committed runtime files
@@ -539,6 +566,7 @@ For this limit, a “top-level command group” means a primary operator entry s
 ### D3: Continuity-based conservative worktree reuse
 
 **Options considered:**
+
 1. Always fresh worktrees — safest but poor fit for long-lived workers
 2. Aggressive reuse — efficient but risky
 3. Reuse only when resuming the same thread of work
@@ -550,6 +578,7 @@ For this limit, a “top-level command group” means a primary operator entry s
 ### D4: PR flow owns a minimal worker-aware git/gh layer
 
 **Options considered:**
+
 1. Depend on `@feniix/pi-devtools` internals directly — less duplication, but tighter package coupling
 2. Implement a conductor-local worker-aware git/gh layer — more isolated and tailored to worker worktrees
 3. Require users to run PR steps manually — lower build scope, but fails v1 success criteria
@@ -559,45 +588,47 @@ For this limit, a “top-level command group” means a primary operator entry s
 **Rationale:** `pi-conductor` needs worker-aware behavior tied to a specific worktree, branch, and worker lifecycle. That context is core to conductor and should not depend on another package’s internal implementation details.
 
 **Scope of this local layer:** only the primitives needed for:
-- branch/base-branch resolution
-- git execution in a worker worktree
-- commit
-- push
-- PR creation
+
+* branch/base-branch resolution
+* git execution in a worker worktree
+* commit
+* push
+* PR creation
 
 **Explicitly out of scope for this layer:** reimplementing higher-level devtools workflows or commands such as:
-- `brpr`
-- `md`
-- `smd`
-- release automation
-- CI helpers
-- versioning/tag utilities
+
+* `brpr`
+* `md`
+* `smd`
+* release automation
+* CI helpers
+* versioning/tag utilities
 
 ---
 
 ## 9. File Breakdown
 
-| File | Change type | FR | Description |
-|------|-------------|-----|-------------|
-| `packages/pi-conductor/package.json` | New | FR-1 | Package metadata and Pi package declaration |
-| `packages/pi-conductor/README.md` | New | FR-1, FR-6 | User-facing install, requirements, and usage documentation |
-| `packages/pi-conductor/extensions/index.ts` | New | FR-1, FR-4 | Extension entrypoint; registers commands/tools |
-| `packages/pi-conductor/extensions/types.ts` | New | FR-1, FR-2, FR-4, FR-7 | Run, worker, task, status, and storage types |
-| `packages/pi-conductor/extensions/storage.ts` | New | FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7 | Persist and load conductor metadata, cleanup state |
-| `packages/pi-conductor/extensions/project-key.ts` | New | FR-1 | Derive stable project key for storage namespace |
-| `packages/pi-conductor/extensions/worktrees.ts` | New | FR-1, FR-2, FR-7 | Create, validate, reuse, and clean up worker worktrees |
-| `packages/pi-conductor/extensions/runtime.ts` | New | FR-2, FR-5, FR-6 | Worker runtime, resume, and summary orchestration |
-| `packages/pi-conductor/extensions/commands.ts` | New | FR-3, FR-4, FR-7 | Human-facing command handlers |
-| `packages/pi-conductor/extensions/tools.ts` | New | FR-3, FR-4 | Tool definitions for worker/task/status operations |
-| `packages/pi-conductor/extensions/status.ts` | New | FR-4, FR-5 | Status formatting, lifecycle display, summary staleness |
-| `packages/pi-conductor/extensions/pr.ts` | New | FR-6 | PR flow orchestration |
-| `packages/pi-conductor/extensions/git.ts` | New | FR-6 | Conductor-local git/gh helper wrappers |
-| `packages/pi-conductor/__tests__/index.test.ts` | New | FR-1, FR-4 | Extension wiring tests |
-| `packages/pi-conductor/__tests__/storage.test.ts` | New | FR-1, FR-2, FR-3, FR-7 | Storage and cleanup behavior tests |
-| `packages/pi-conductor/__tests__/worktrees.test.ts` | New | FR-1, FR-2, FR-7 | Worktree lifecycle tests |
-| `packages/pi-conductor/__tests__/status.test.ts` | New | FR-4, FR-5 | Status and summary tests |
-| `packages/pi-conductor/__tests__/pr.test.ts` | New | FR-6 | PR flow tests and failure-path tests |
-| `packages/pi-conductor/__tests__/project-key.test.ts` | New | FR-1 | Project-key derivation stability and determinism tests |
+| File                                                  | Change type | FR                                       | Description                                                |
+| ----------------------------------------------------- | ----------- | ---------------------------------------- | ---------------------------------------------------------- |
+| `packages/pi-conductor/package.json`                  | New         | FR-1                                     | Package metadata and Pi package declaration                |
+| `packages/pi-conductor/README.md`                     | New         | FR-1, FR-6                               | User-facing install, requirements, and usage documentation |
+| `packages/pi-conductor/extensions/index.ts`           | New         | FR-1, FR-4                               | Extension entrypoint; registers commands/tools             |
+| `packages/pi-conductor/extensions/types.ts`           | New         | FR-1, FR-2, FR-4, FR-7                   | Run, worker, task, status, and storage types               |
+| `packages/pi-conductor/extensions/storage.ts`         | New         | FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7 | Persist and load conductor metadata, cleanup state         |
+| `packages/pi-conductor/extensions/project-key.ts`     | New         | FR-1                                     | Derive stable project key for storage namespace            |
+| `packages/pi-conductor/extensions/worktrees.ts`       | New         | FR-1, FR-2, FR-7                         | Create, validate, reuse, and clean up worker worktrees     |
+| `packages/pi-conductor/extensions/runtime.ts`         | New         | FR-2, FR-5, FR-6                         | Worker runtime, resume, and summary orchestration          |
+| `packages/pi-conductor/extensions/commands.ts`        | New         | FR-3, FR-4, FR-7                         | Human-facing command handlers                              |
+| `packages/pi-conductor/extensions/tools.ts`           | New         | FR-3, FR-4                               | Tool definitions for worker/task/status operations         |
+| `packages/pi-conductor/extensions/status.ts`          | New         | FR-4, FR-5                               | Status formatting, lifecycle display, summary staleness    |
+| `packages/pi-conductor/extensions/pr.ts`              | New         | FR-6                                     | PR flow orchestration                                      |
+| `packages/pi-conductor/extensions/git.ts`             | New         | FR-6                                     | Conductor-local git/gh helper wrappers                     |
+| `packages/pi-conductor/__tests__/index.test.ts`       | New         | FR-1, FR-4                               | Extension wiring tests                                     |
+| `packages/pi-conductor/__tests__/storage.test.ts`     | New         | FR-1, FR-2, FR-3, FR-7                   | Storage and cleanup behavior tests                         |
+| `packages/pi-conductor/__tests__/worktrees.test.ts`   | New         | FR-1, FR-2, FR-7                         | Worktree lifecycle tests                                   |
+| `packages/pi-conductor/__tests__/status.test.ts`      | New         | FR-4, FR-5                               | Status and summary tests                                   |
+| `packages/pi-conductor/__tests__/pr.test.ts`          | New         | FR-6                                     | PR flow tests and failure-path tests                       |
+| `packages/pi-conductor/__tests__/project-key.test.ts` | New         | FR-1                                     | Project-key derivation stability and determinism tests     |
 
 This is the expected initial decomposition, not a promise that implementation must preserve exactly these boundaries if a simpler structure proves better.
 
@@ -605,16 +636,16 @@ This is the expected initial decomposition, not a promise that implementation mu
 
 ## 10. Dependencies & Constraints
 
-- Must fit the repo’s existing package layout and TypeScript test conventions.
-- Must work with Pi extension APIs and Pi SDK session capabilities.
-- Git worktrees are a hard dependency for the worker isolation model.
-- `git` is required for all worker flows.
-- `gh` is required for PR creation flows.
-- Conductor may be run from any directory inside the target repository; repo root must be auto-detected.
-- New workers default to the repo root’s **current checked-out branch** when safely detectable; if unavailable, conductor may fall back to the detected default branch.
-- Default branch detection should follow normal git heuristics such as remote HEAD, with a final fallback like `main`.
-- V1 should avoid introducing tmux as a required dependency.
-- PR creation assumes a configured remote and authenticated GitHub CLI.
+* Must fit the repo’s existing package layout and TypeScript test conventions.
+* Must work with Pi extension APIs and Pi SDK session capabilities.
+* Git worktrees are a hard dependency for the worker isolation model.
+* `git` is required for all worker flows.
+* `gh` is required for PR creation flows.
+* Conductor may be run from any directory inside the target repository; repo root must be auto-detected.
+* New workers default to the repo root’s **current checked-out branch** when safely detectable; if unavailable, conductor may fall back to the detected default branch.
+* Default branch detection should follow normal git heuristics such as remote HEAD, with a final fallback like `main`.
+* V1 should avoid introducing tmux as a required dependency.
+* PR creation assumes a configured remote and authenticated GitHub CLI.
 
 ---
 
@@ -632,36 +663,36 @@ This is the expected initial decomposition, not a promise that implementation mu
 
 ## 12. Open Questions
 
-| # | Question | Owner | Due | Status |
-|---|----------|-------|-----|--------|
-| Q1 | What runtime model should v1 use for worker execution? | feniix | Before implementation | **Resolved:** SDK-first architecture, with room for a process-based backend later. |
-| Q2 | Where should conductor metadata and worker state live? | feniix | Before implementation | **Resolved:** Use `~/.pi/agent/conductor/projects/<project-key>/` for conductor-owned state; worker records reference Pi session files. |
-| Q3 | Should v1 expose commands, tools, or both? | feniix | Before implementation | **Resolved:** Both, with a very small command surface. |
-| Q4 | How should worktree reuse behave? | feniix | Before implementation | **Resolved:** Reuse conservatively and only when resuming the same thread of work. |
+| #  | Question                                                                                                        | Owner  | Due                   | Status                                                                                                                                                                     |
+| -- | --------------------------------------------------------------------------------------------------------------- | ------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1 | What runtime model should v1 use for worker execution?                                                          | feniix | Before implementation | **Resolved:** SDK-first architecture, with room for a process-based backend later.                                                                                         |
+| Q2 | Where should conductor metadata and worker state live?                                                          | feniix | Before implementation | **Resolved:** Use `~/.pi/agent/conductor/projects/<project-key>/` for conductor-owned state; worker records reference Pi session files.                                    |
+| Q3 | Should v1 expose commands, tools, or both?                                                                      | feniix | Before implementation | **Resolved:** Both, with a very small command surface.                                                                                                                     |
+| Q4 | How should worktree reuse behave?                                                                               | feniix | Before implementation | **Resolved:** Reuse conservatively and only when resuming the same thread of work.                                                                                         |
 | Q5 | Should `pi-conductor` depend directly on `@feniix/pi-devtools` internals or reimplement its own git/gh helpers? | feniix | Before implementation | **Resolved:** Use a minimal conductor-local git/gh layer for worker-aware primitives only; do not reimplement higher-level devtools workflows like `brpr`, `md`, or `smd`. |
-| Q6 | What exact v1 command names should ship? | feniix | Before implementation | Open |
+| Q6 | What exact v1 command names should ship?                                                                        | feniix | Before implementation | Open                                                                                                                                                                       |
 
 ---
 
 ## 13. Related
 
-| Reference | Relationship |
-|-----------|-------------|
-| `pi-agent-teams` | Research input; informed worker lifecycle and task concepts |
-| `pi-side-agents` | Research input; informed worktree-oriented execution concepts |
-| `pi-collaborating-agents` | Research input; informed future coordination considerations |
-| `@feniix/pi-devtools` | Neighbor package; informed git/gh conventions and environment assumptions |
+| Reference                 | Relationship                                                              |
+| ------------------------- | ------------------------------------------------------------------------- |
+| `pi-agent-teams`          | Research input; informed worker lifecycle and task concepts               |
+| `pi-side-agents`          | Research input; informed worktree-oriented execution concepts             |
+| `pi-collaborating-agents` | Research input; informed future coordination considerations               |
+| `@feniix/pi-devtools`     | Neighbor package; informed git/gh conventions and environment assumptions |
 
 ---
 
 ## 14. Changelog
 
-| Date | Change | Author |
-|------|--------|--------|
-| 2026-04-18 | Initial draft | feniix |
-| 2026-04-18 | Refined storage boundary, PR dependency strategy, branch/worktree lifecycle, worker identity, status semantics, and cleanup scope | feniix |
+| Date       | Change                                                                                                                                | Author |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| 2026-04-18 | Initial draft                                                                                                                         | feniix |
+| 2026-04-18 | Refined storage boundary, PR dependency strategy, branch/worktree lifecycle, worker identity, status semantics, and cleanup scope     | feniix |
 | 2026-04-18 | Refined lifecycle transitions, session-reference lifecycle, command/tool contract, repo-root detection, and project-key test coverage | feniix |
-| 2026-04-18 | Marked PRD status as Completed after full implementation of the MVP scope and linked ADR decisions | feniix |
+| 2026-04-18 | Marked PRD status as Completed after full implementation of the MVP scope and linked ADR decisions                                    | feniix |
 
 ---
 
