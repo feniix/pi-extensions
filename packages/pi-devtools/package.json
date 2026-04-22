@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-devtools",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Devtools extension for pi — branch and PR workflow, release automation, PR feedback resolution, merge commands, with GitHub and Linear tracker support",
   "keywords": [
     "pi",
@@ -36,7 +36,7 @@
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
-    "@sinclair/typebox": "*"
+    "typebox": "*"
   },
   "repository": {
     "type": "git",

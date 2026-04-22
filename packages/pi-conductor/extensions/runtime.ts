@@ -4,14 +4,7 @@ import type { AssistantMessage, StopReason } from "@mariozechner/pi-ai";
 import {
   AuthStorage,
   createAgentSession,
-  createBashTool,
-  createEditTool,
   createExtensionRuntime,
-  createFindTool,
-  createGrepTool,
-  createLsTool,
-  createReadTool,
-  createWriteTool,
   ModelRegistry,
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
@@ -162,15 +155,7 @@ export async function runWorkerPromptRuntime(input: RuntimeRunContext): Promise<
     authStorage,
     modelRegistry,
     resourceLoader,
-    tools: [
-      createReadTool(input.worktreePath),
-      createBashTool(input.worktreePath),
-      createEditTool(input.worktreePath),
-      createWriteTool(input.worktreePath),
-      createGrepTool(input.worktreePath),
-      createFindTool(input.worktreePath),
-      createLsTool(input.worktreePath),
-    ],
+    tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
   });
 
   try {

@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { RefRuntimeSettings } from "./config.js";
 import { formatToolOutput, type McpErrorDetails, resolveEffectiveLimits, splitParams } from "./helpers.js";
 import type { RefMcpClient } from "./mcp-client.js";

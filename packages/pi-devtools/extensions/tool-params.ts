@@ -1,4 +1,4 @@
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 export const createBranchParams = Type.Object({
   branchName: Type.String({ description: "Name of the branch to create (e.g., feature/add-login)" }),

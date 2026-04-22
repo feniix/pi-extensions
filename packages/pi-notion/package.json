@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-notion",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "description": "Notion API extension for pi — read, search, and manage Notion pages, databases, and content",
   "keywords": [
     "pi",
@@ -30,7 +30,7 @@
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
-    "@sinclair/typebox": "*"
+    "typebox": "*"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.1",

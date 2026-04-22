@@ -2,7 +2,7 @@
  * TypeBox parameter schemas for Exa tools.
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 const outputSchemaType = Type.Union([Type.Literal("object"), Type.Literal("text")]);
 

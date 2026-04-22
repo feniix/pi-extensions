@@ -15,8 +15,8 @@ import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
 import { getPort as lookupPort } from "portfinder";
+import { Type } from "typebox";
 
 // =============================================================================
 // Constants

@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-code-reasoning",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Code Reasoning extension for pi — reflective problem-solving through sequential thinking with branching and revision support",
   "keywords": [
     "pi",
@@ -28,7 +28,7 @@
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
-    "@sinclair/typebox": "*"
+    "typebox": "*"
   },
   "repository": {
     "type": "git",
