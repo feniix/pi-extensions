@@ -26,6 +26,11 @@ Local package testing:
 - `npx tsc --noEmit --project packages/<package-name>/tsconfig.json` — typecheck a single package using the shared root TS config via the package wrapper tsconfig.
 - `npx vitest run packages/<package-name>/__tests__` — run tests for a single package.
 
+Workspace version bumps:
+- Use npm workspace versioning from the repo root: `npm version [<newversion> | major | minor | patch | premajor | preminor | prepatch | prerelease | from-git]`
+- Prefer targeting a single package with `--workspace` / `-w`, for example: `npm version --workspace packages/pi-specdocs minor`
+- `-w, --workspace` runs the command in the context of the configured workspace(s).
+
 ## Coding Style & Naming Conventions
 - Language: TypeScript.
 - Formatting: Biome with **2 spaces** for indentation and `lineWidth` 120.
