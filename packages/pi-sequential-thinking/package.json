@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-sequential-thinking",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Sequential Thinking MCP extension for pi — structured progressive thinking through defined stages",
   "keywords": [
     "pi",
