@@ -19,7 +19,7 @@ import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import type { AgentToolUpdateCallback, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 import {
   enforceCrossFieldRules,

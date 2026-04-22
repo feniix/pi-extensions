@@ -30,7 +30,7 @@
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
-    "@sinclair/typebox": "*"
+    "typebox": "*"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.1",

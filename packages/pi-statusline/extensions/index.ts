@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { loadStatuslinePalette } from "./config.js";
 import { buildStatusLines } from "./format.js";
 import { getGitSnapshot } from "./git.js";

@@ -30,7 +30,7 @@
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
-    "@sinclair/typebox": "*"
+    "typebox": "*"
   },
   "dependencies": {
     "exa-js": "^2.8.0"
