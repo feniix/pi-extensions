@@ -1,6 +1,6 @@
 ---
 name: exa-research-planner
-description: Plans and refines Exa research workflows before expensive execution. Use whenever the user wants to scope or sharpen a research task, compare options, explore a market or technical landscape, gather sources cheaply before deep synthesis, iterate on search criteria, or decide whether web_research_exa is even necessary. Prefer this skill even when the user does not mention Exa explicitly but is clearly asking for staged, cost-aware research planning rather than an immediate final answer.
+description: Plan and refine Exa research workflows before expensive execution. Use whenever the user wants to scope or sharpen a research task, compare options, explore a market or technical landscape, gather sources cheaply before deep synthesis, iterate on search criteria, or decide whether deep research is even necessary. Make sure to use this skill when the user is asking for staged, cost-aware research planning rather than an immediate final answer, even if they do not mention Exa or specific Exa tools explicitly.
 context: fork
 ---
 
@@ -14,16 +14,30 @@ The goal is not merely to run Exa tools. The goal is to help the user arrive at 
 
 ## Core Rules
 
+Start by checking which Exa tools are actually available in the current session. Build the workflow only from tools that exist.
+
+The point of this skill is to reduce wasted work. Prefer the lightest step that is likely to improve the brief or answer a key uncertainty.
+
+Treat tool availability in two groups:
+- **Common default tools**: `web_search_exa`, `web_fetch_exa`, `web_answer_exa`, and `web_find_similar_exa` are usually available by default, unless the session uses an explicit `enabledTools` allowlist
+- **Opt-in tools**: `web_search_advanced_exa` and `web_research_exa` are commonly unavailable unless explicitly enabled
+
+Warn clearly when a relevant tool is unavailable:
+- if `web_research_exa` is unavailable, say that deep synthesis cannot be executed in this session and fall back to planning plus cheaper discovery
+- if `web_search_advanced_exa` is unavailable, say that advanced filtering by category, domain, or date is unavailable and fall back to `web_search_exa` plus more selective query wording and fetches
+- if one of the common default tools is missing, mention it as an unusual constraint and adapt gracefully without overemphasizing it
+- only offer `web_find_similar_exa` or `web_answer_exa` when they are both available and clearly useful
+
 Do **not** call `web_research_exa` immediately unless the user clearly asks to skip planning and run it now.
 
 Prefer a staged workflow:
 1. clarify the research goal
 2. identify scope, evaluation criteria, and source preferences
 3. decide whether to do cheap discovery first
-4. if useful, run one or more rounds of cheap discovery with `web_search_exa`, `web_search_advanced_exa`, and selective `web_fetch_exa`
-5. optionally offer `web_find_similar_exa` or `web_answer_exa` only when they clearly fit the current stage
+4. if useful, run one or more rounds of cheap discovery with the available tools
+5. optionally offer `web_find_similar_exa` or `web_answer_exa` only when they clearly fit the current stage and are available
 6. summarize what was learned and refine the research brief
-7. draft a proposed `web_research_exa` payload only if deep synthesis is still needed
+7. draft a proposed `web_research_exa` payload only if deep synthesis is still needed and the tool is available, or draft it for later use if unavailable
 8. ask for confirmation before any expensive deep-research execution
 
 Cheap discovery can happen in **multiple rounds**. Use iterative low-cost searches to improve terminology, source selection, filters, and query shape before escalating.
@@ -80,18 +94,26 @@ Prefer cheap discovery first when:
 - the user wants to reduce cost
 - you need candidate sources before committing to deep synthesis
 
+Adapt the plan to the available tools.
+For example:
+- without `web_search_advanced_exa`, prefer extra rounds of `web_search_exa` and better query wording instead of filtered search
+- without `web_research_exa`, stop at planning, cheap discovery, and draft preparation rather than pretending execution is possible
+- if a normally available default tool is missing, mention it briefly and choose the nearest workable fallback
+
 When proposing a plan, explain *why this next step is the cheapest useful move*. That explanation helps the user trust the workflow and makes it easier to decide whether to continue iterating.
 
 ### Phase 3: Run cheap discovery in one or more rounds when useful
 
-Cheap discovery may use:
+Cheap discovery may use the available tools:
 - `web_search_exa` for broad discovery and terminology gathering
-- `web_search_advanced_exa` for category, domain, or date-constrained discovery
-- `web_fetch_exa` for inspecting a small number of promising URLs
-- `web_find_similar_exa` only when a clearly high-quality seed URL has already been identified
-- `web_answer_exa` only when a quick grounded answer might resolve the question cheaply or test whether deep research is even needed
+- `web_search_advanced_exa` for category, domain, or date-constrained discovery when available
+- `web_fetch_exa` for inspecting a small number of promising URLs when available
+- `web_find_similar_exa` only when a clearly high-quality seed URL has already been identified and the tool is available
+- `web_answer_exa` only when a quick grounded answer might resolve the question cheaply or test whether deep research is even needed, and the tool is available
 
-Multiple rounds are allowed and encouraged when they improve the final brief.
+If `web_search_advanced_exa` is unavailable, say so and continue with `web_search_exa`-driven discovery rather than presenting advanced filtering as an option.
+
+Multiple rounds are allowed and encouraged when they improve the final brief, but each round should have a purpose. Do not keep searching just because searching is possible.
 
 Examples of iterative cheap discovery:
 - round 1: broad search to find key vocabulary, vendors, or frameworks
@@ -144,25 +166,29 @@ Then ask for confirmation, for example:
 
 If the user appears unsure, give a recommendation rather than only asking open-ended questions. For example: `I think one more cheap pass on official docs and pricing pages will improve the final deep-research prompt. Want me to do that first?`
 
+If `web_research_exa` is unavailable, replace the execution question with a planning-oriented one such as: `I can prepare this as a polished draft and keep exploring cheaply, but I can't run deep synthesis in this session. Want me to refine the draft further or continue discovery?`
+
 ### Phase 6: Execute only after approval
 
 Only once the user explicitly confirms, call `web_research_exa` with the approved draft.
 
 ## Cost-Aware Tool Strategy
 
-Use the cheapest tool that can move the work forward.
+Use the cheapest available tool that can move the work forward.
 
 | Goal | Preferred Tool | Notes |
 |---|---|---|
-| Broad discovery, vocabulary, candidate sources | `web_search_exa` | Best first pass for cheap reconnaissance |
-| Filter by domain, category, or dates | `web_search_advanced_exa` | Use after a broad pass or when constraints are already known |
-| Inspect a few known URLs | `web_fetch_exa` | Use selectively on 1-3 promising results |
-| Expand from a strong seed URL | `web_find_similar_exa` | Offer only when a clearly high-signal source has already been found |
-| Cheap grounded answer or sub-question check | `web_answer_exa` | Offer only when a concise cited answer may avoid deeper research |
-| Deep synthesis and recommendations | `web_research_exa` | Use only when cheaper rounds are not enough |
+| Broad discovery, vocabulary, candidate sources | `web_search_exa` | Best first pass for cheap reconnaissance; normally available by default |
+| Filter by domain, category, or dates | `web_search_advanced_exa` | Use after a broad pass or when constraints are already known; warn and fall back if unavailable |
+| Inspect a few known URLs | `web_fetch_exa` | Use selectively on 1-3 promising results; normally available by default |
+| Expand from a strong seed URL | `web_find_similar_exa` | Offer only when a clearly high-signal source has already been found and the tool is available; normally available by default |
+| Cheap grounded answer or sub-question check | `web_answer_exa` | Offer only when a concise cited answer may avoid deeper research and the tool is available; normally available by default |
+| Deep synthesis and recommendations | `web_research_exa` | Use only when cheaper rounds are not enough; warn and stop at draft preparation if unavailable |
 
 When the user wants to minimize cost, prefer multiple rounds of `web_search_exa` / `web_search_advanced_exa` before escalating.
 Do not suggest `web_find_similar_exa` or `web_answer_exa` by default; offer them only when they clearly fit the current stage of the workflow.
+Focus warnings primarily on opt-in tools that are commonly missing, especially `web_search_advanced_exa` and `web_research_exa`.
+Do not suggest unavailable tools as if they can be used.
 
 ## Drafting Guidance
 
@@ -322,23 +348,26 @@ When using this skill, structure your response like this:
 A short explanation of what the overall workflow is trying to answer.
 
 ### 2. Proposed next step
-Show the cheapest useful next step:
+Show the cheapest useful next step using only available tools:
 - a draft-only refinement
 - a cheap discovery query
-- a filtered advanced search
-- a selective fetch
-- optionally a similar-source expansion when a strong seed URL exists
-- optionally a cheap grounded answer when it may resolve a narrow question
+- a filtered advanced search when `web_search_advanced_exa` is available
+- a selective fetch when `web_fetch_exa` is available
+- optionally a similar-source expansion when a strong seed URL exists and `web_find_similar_exa` is available
+- optionally a cheap grounded answer when it may resolve a narrow question and `web_answer_exa` is available
 - or a deep-research draft if the work is already mature enough
 
 ### 3. Why this step makes sense now
 Explain what uncertainty this step will reduce or what evidence it should gather.
+If a stronger opt-in tool is unavailable, explain the fallback and its limitation in one or two sentences.
+If a normally available default tool is missing, note it briefly as an unusual constraint and continue with the best available fallback.
 
 ### 4. What we learned so far
 If one or more discovery rounds already happened, summarize the main findings and how they changed the plan.
 
 ### 5. Proposed deep research draft
 When appropriate, show the candidate `web_research_exa` JSON.
+If deep research is unavailable, show the polished draft anyway and label it clearly as a draft for later execution.
 
 ### 6. Suggested refinements
 Offer 2-4 concrete improvements, such as:
@@ -354,6 +383,19 @@ Ask whether to:
 - do another cheap discovery round
 - run the deep-research draft as-is
 - broaden or narrow scope
+
+## Output Format
+
+Prefer concise, decision-oriented responses.
+
+A good default structure is:
+- **Plan:** one short paragraph
+- **Next step:** one concrete recommendation
+- **Why:** one short paragraph
+- **Draft:** JSON only when a concrete payload is useful
+- **Question:** one clear choice for the user
+
+Do not bury the user in long checklists if the situation is simple.
 
 ## Example Interaction Pattern
 
@@ -396,3 +438,4 @@ Keep this skill practical and lean:
 - avoid suggesting expensive deep research before cheap evidence-gathering has had a fair chance
 - do not force every workflow through every tool; skip steps that are not earning their keep
 - be proactive about recommending the next best move when the user seems uncertain
+- when the user already has a strong brief, move quickly from clarification to a concrete plan instead of repeating generic planning advice
