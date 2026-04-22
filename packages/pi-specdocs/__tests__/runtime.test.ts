@@ -270,7 +270,98 @@ describe("pi-specdocs runtime", () => {
 
     await handler?.("   ", { cwd: base, ui: { notify } });
 
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining("requires a single path argument"), "error");
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("requires at least one path argument"), "error");
+  });
+
+  it("accepts @-prefixed file references for specdocs-format", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-at-path-"));
+    mkdirSync(join(base, "docs", "adr"), { recursive: true });
+    const filePath = join(base, "docs", "adr", "ADR-0001-test.md");
+    writeFileSync(
+      filePath,
+      '---\ntitle: "ADR"\nadr: ADR-0001\nstatus: Proposed\ndate: 2025-01-01\nprd: PRD-001-test\n---\n# ADR\n## Status\nProposed\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.("@docs/adr/ADR-0001-test.md", { cwd: base, ui: { notify } });
+
+    const updated = readFileSync(filePath, "utf-8");
+    expect(updated).toContain("---\n\n# ADR\n\n## Status\n\nProposed\n");
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("Formatted spec document: docs/adr/ADR-0001-test.md"),
+      "info",
+    );
+  });
+
+  it("formats multiple files from a single string command", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-multi-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    mkdirSync(join(base, "docs", "adr"), { recursive: true });
+    const prdPath = join(base, "docs", "prd", "PRD-001-test.md");
+    const adrPath = join(base, "docs", "adr", "ADR-0001-test.md");
+    writeFileSync(
+      prdPath,
+      '---\ntitle: "Test"\nprd: PRD-001\nstatus: Draft\nowner: Alice\ndate: 2025-01-01\nissue: 1\nversion: 1\n---\n# Test\n## 1. Problem & Context\nBody\n',
+    );
+    writeFileSync(
+      adrPath,
+      '---\ntitle: "ADR"\nadr: ADR-0001\nstatus: Proposed\ndate: 2025-01-01\nprd: PRD-001-test\n---\n# ADR\n## Status\nProposed\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.("docs/prd/PRD-001-test.md @docs/adr/ADR-0001-test.md", { cwd: base, ui: { notify } });
+
+    expect(readFileSync(prdPath, "utf-8")).toContain("---\n\n# Test\n\n## 1. Problem & Context\n\nBody\n");
+    expect(readFileSync(adrPath, "utf-8")).toContain("---\n\n# ADR\n\n## Status\n\nProposed\n");
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("Formatted spec document: docs/prd/PRD-001-test.md"),
+      "info",
+    );
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("Formatted spec document: docs/adr/ADR-0001-test.md"),
+      "info",
+    );
+  });
+
+  it("expands simple glob patterns for specdocs-format", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-format-glob-"));
+    mkdirSync(join(base, "docs", "adr"), { recursive: true });
+    const firstPath = join(base, "docs", "adr", "ADR-0001-test.md");
+    const secondPath = join(base, "docs", "adr", "ADR-0002-test.md");
+    writeFileSync(
+      firstPath,
+      '---\ntitle: "ADR1"\nadr: ADR-0001\nstatus: Proposed\ndate: 2025-01-01\nprd: PRD-001-test\n---\n# ADR1\n## Status\nProposed\n',
+    );
+    writeFileSync(
+      secondPath,
+      '---\ntitle: "ADR2"\nadr: ADR-0002\nstatus: Proposed\ndate: 2025-01-01\nprd: PRD-001-test\n---\n# ADR2\n## Status\nProposed\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-format");
+    const notify = vi.fn();
+
+    await handler?.("@docs/adr/ADR-*.md", { cwd: base, ui: { notify } });
+
+    expect(readFileSync(firstPath, "utf-8")).toContain("---\n\n# ADR1\n\n## Status\n\nProposed\n");
+    expect(readFileSync(secondPath, "utf-8")).toContain("---\n\n# ADR2\n\n## Status\n\nProposed\n");
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("Formatted spec document: docs/adr/ADR-0001-test.md"),
+      "info",
+    );
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining("Formatted spec document: docs/adr/ADR-0002-test.md"),
+      "info",
+    );
   });
 
   it("reports a clear error when specdocs-format targets a nonexistent path", async () => {

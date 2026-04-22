@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+import { type ExtensionContext, withFileMutationQueue } from "@mariozechner/pi-coding-agent";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -321,8 +321,8 @@ function formatValidationIssues(issues: ValidationIssue[]): { message: string; l
   };
 }
 
-export async function runValidation(ctx: { cwd: string } & ExtensionContext) {
-  const files = getValidationFiles(ctx.cwd);
+export function getValidationResult(cwd: string): { message: string; level: "error" | "warning" | "info" } {
+  const files = getValidationFiles(cwd);
   const issues = [
     ...collectFrontmatterIssues(files),
     ...collectFilenameIssues(files.prdDir, PRD_DIR, PRD_FILENAME_PATTERN, "PRD-NNN-*.md"),
@@ -332,7 +332,11 @@ export async function runValidation(ctx: { cwd: string } & ExtensionContext) {
     ...collectNumberingGapIssues(files.prdFiles, /^PRD-(\d{3})-.*\.md$/, "PRD", 3),
     ...collectNumberingGapIssues(files.adrFiles, /^ADR-(\d{4})-.*\.md$/, "ADR", 4),
   ];
-  const result = formatValidationIssues(issues);
+  return formatValidationIssues(issues);
+}
+
+export async function runValidation(ctx: { cwd: string } & ExtensionContext) {
+  const result = getValidationResult(ctx.cwd);
   ctx.ui.notify(result.message, result.level);
 }
 
@@ -340,25 +344,77 @@ function resolveCommandPath(cwd: string, path: string): string {
   return path.startsWith("/") ? path : resolve(cwd, path);
 }
 
-function extractCommandPathArg(args: unknown): string {
+function splitCommandArgs(input: string): string[] {
+  const matches = input.match(/(?:"([^"]+)"|'([^']+)'|(\S+))/g) ?? [];
+  return matches.map((token) => token.replace(/^['"]|['"]$/g, "").trim()).filter((token) => token.length > 0);
+}
+
+function toCommandPath(value: string): string {
+  return value.startsWith("@") ? value.slice(1).trim() : value.trim();
+}
+
+function extractCommandPathArgs(args: unknown): string[] {
   if (typeof args === "string") {
-    return args.trim();
+    return splitCommandArgs(args)
+      .map(toCommandPath)
+      .filter((arg) => arg.length > 0);
   }
 
   if (!args || typeof args !== "object") {
-    return "";
+    return [];
   }
 
   const params = args as Record<string, unknown>;
+  const candidates: string[] = [];
+
   if (typeof params.path === "string") {
-    return params.path.trim();
+    candidates.push(params.path);
   }
 
   if (typeof params.file_path === "string") {
-    return params.file_path.trim();
+    candidates.push(params.file_path);
   }
 
-  return "";
+  if (Array.isArray(params.paths)) {
+    candidates.push(...params.paths.filter((value): value is string => typeof value === "string"));
+  }
+
+  if (Array.isArray(params.file_paths)) {
+    candidates.push(...params.file_paths.filter((value): value is string => typeof value === "string"));
+  }
+
+  return candidates.map(toCommandPath).filter((arg) => arg.length > 0);
+}
+
+function globToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`);
+}
+
+function expandCommandPath(cwd: string, rawPath: string): string[] {
+  if (!rawPath.includes("*")) {
+    return [resolveCommandPath(cwd, rawPath)];
+  }
+
+  const absolutePattern = resolveCommandPath(cwd, rawPath);
+  const searchDir = dirname(absolutePattern);
+  const matcher = globToRegExp(absolutePattern.replace(/\\/g, "/"));
+
+  if (!existsSync(searchDir)) {
+    return [];
+  }
+
+  return readdirSync(searchDir)
+    .map((entry) => join(searchDir, entry))
+    .filter((candidate) => matcher.test(candidate.replace(/\\/g, "/")))
+    .filter((candidate) => {
+      try {
+        return statSync(candidate).isFile();
+      } catch {
+        return false;
+      }
+    })
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function isSupportedSpecPath(path: string): boolean {
@@ -435,42 +491,92 @@ async function formatSpecDocument(content: string): Promise<string> {
   return `${frontmatterLines.join("\n")}\n\n${bodyLines.join("\n")}\n`;
 }
 
+export interface FormatResult {
+  level: "error" | "info";
+  message: string;
+  path?: string;
+  changed?: boolean;
+}
+
+export async function formatPaths(args: unknown, cwd: string): Promise<FormatResult[]> {
+  const rawPaths = extractCommandPathArgs(args);
+  if (rawPaths.length === 0) {
+    return [{ level: "error", message: "[specdocs] specdocs-format requires at least one path argument." }];
+  }
+
+  const targets = rawPaths.flatMap((rawPath) => {
+    const expanded = expandCommandPath(cwd, rawPath);
+    return expanded.length > 0
+      ? expanded.map((targetPath) => ({ rawPath, targetPath }))
+      : [{ rawPath, targetPath: "" }];
+  });
+
+  const results: FormatResult[] = [];
+
+  for (const { rawPath, targetPath } of targets) {
+    if (!targetPath || !existsSync(targetPath)) {
+      results.push({ level: "error", message: `[specdocs] Format target does not exist: ${rawPath}` });
+      continue;
+    }
+
+    if (!isSupportedSpecPath(targetPath)) {
+      results.push({
+        level: "error",
+        message: `[specdocs] Format target is an unsupported spec document path: ${rawPath}`,
+      });
+      continue;
+    }
+
+    const parseResult = parseFrontmatterResult(targetPath);
+    if (parseResult.error) {
+      results.push({
+        level: "error",
+        path: targetPath,
+        message: `[specdocs] Cannot format document with malformed frontmatter: ${parseResult.error}`,
+      });
+      continue;
+    }
+
+    if (parseResult.fields === null) {
+      results.push({
+        level: "error",
+        path: targetPath,
+        message: "[specdocs] Cannot format a spec document without YAML frontmatter.",
+      });
+      continue;
+    }
+
+    const original = parseResult.content ?? readFileSync(targetPath, "utf-8");
+    const formatted = await formatSpecDocument(original);
+    const displayPath = relative(cwd, targetPath).replace(/\\/g, "/") || rawPath;
+
+    if (formatted === original) {
+      results.push({
+        level: "info",
+        path: targetPath,
+        changed: false,
+        message: `[specdocs] No formatting changes were needed: ${displayPath}`,
+      });
+      continue;
+    }
+
+    await withFileMutationQueue(targetPath, async () => {
+      writeFileSync(targetPath, formatted);
+    });
+    results.push({
+      level: "info",
+      path: targetPath,
+      changed: true,
+      message: `[specdocs] Formatted spec document: ${displayPath}`,
+    });
+  }
+
+  return results;
+}
+
 export async function runFormat(args: unknown, ctx: { cwd: string } & ExtensionContext): Promise<void> {
-  const rawPath = extractCommandPathArg(args);
-  if (!rawPath) {
-    ctx.ui.notify("[specdocs] specdocs-format requires a single path argument.", "error");
-    return;
+  const results = await formatPaths(args, ctx.cwd);
+  for (const result of results) {
+    ctx.ui.notify(result.message, result.level);
   }
-
-  const targetPath = resolveCommandPath(ctx.cwd, rawPath);
-  if (!existsSync(targetPath)) {
-    ctx.ui.notify(`[specdocs] Format target does not exist: ${rawPath}`, "error");
-    return;
-  }
-
-  if (!isSupportedSpecPath(targetPath)) {
-    ctx.ui.notify(`[specdocs] Format target is an unsupported spec document path: ${rawPath}`, "error");
-    return;
-  }
-
-  const parseResult = parseFrontmatterResult(targetPath);
-  if (parseResult.error) {
-    ctx.ui.notify(`[specdocs] Cannot format document with malformed frontmatter: ${parseResult.error}`, "error");
-    return;
-  }
-
-  if (parseResult.fields === null) {
-    ctx.ui.notify("[specdocs] Cannot format a spec document without YAML frontmatter.", "error");
-    return;
-  }
-
-  const original = parseResult.content ?? readFileSync(targetPath, "utf-8");
-  const formatted = await formatSpecDocument(original);
-  if (formatted === original) {
-    ctx.ui.notify("[specdocs] No formatting changes were needed.", "info");
-    return;
-  }
-
-  writeFileSync(targetPath, formatted);
-  ctx.ui.notify(`[specdocs] Formatted spec document: ${rawPath}`, "info");
 }

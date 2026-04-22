@@ -52,10 +52,27 @@ describe("pi-specdocs", () => {
     );
   });
 
-  it("does not register any tools", () => {
+  it("registers specdocs_validate tool", () => {
     const mockPi = createMockPi();
     specdocs(mockPi as unknown as ExtensionAPI);
 
-    expect(mockPi.registerTool).not.toHaveBeenCalled();
+    expect(mockPi.registerTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "specdocs_validate",
+        description: expect.stringContaining("Validate"),
+      }),
+    );
+  });
+
+  it("registers specdocs_format tool", () => {
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+
+    expect(mockPi.registerTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "specdocs_format",
+        description: expect.stringContaining("Format"),
+      }),
+    );
   });
 });
