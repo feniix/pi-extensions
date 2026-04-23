@@ -128,5 +128,5 @@ jobs:
 
           for pkg in $(echo '${{ needs.checks.outputs.matrix }}' | jq -r '.[]'); do
             echo "Publishing $pkg"
-            npm --prefix "$pkg" publish --access public
+            (cd "$pkg" && npm publish --access public)
           done
