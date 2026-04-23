@@ -3,6 +3,10 @@ name: Release
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: read
+  id-token: write
+
 on:
   workflow_dispatch:
   push:
@@ -116,17 +120,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Configure npm auth
-        run: |
-          npm config set //registry.npmjs.org/:_authToken "${NPM_TOKEN}"
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       - name: Publish changed packages
         run: |
           set -euo pipefail
 
           for pkg in $(echo '${{ needs.checks.outputs.matrix }}' | jq -r '.[]'); do
             echo "Publishing $pkg"
-            (cd "$pkg" && npm publish --access public)
+            (cd "$pkg" && npm publish --access public --provenance)
           done
