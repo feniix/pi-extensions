@@ -69,6 +69,9 @@ jobs:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ needs.detect.outputs.matrix }}
+      has_changes: ${{ needs.detect.outputs.has_changes }}
     strategy:
       fail-fast: false
       matrix:
@@ -97,7 +100,7 @@ jobs:
 
   publish:
     needs: checks
-    if: needs.detect.outputs.has_changes == 'true'
+    if: needs.checks.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     environment: npm-release
     steps:
@@ -123,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          for pkg in $(echo '${{ needs.detect.outputs.matrix }}' | jq -r '.[]'); do
+          for pkg in $(echo '${{ needs.checks.outputs.matrix }}' | jq -r '.[]'); do
             echo "Publishing $pkg"
             npm --prefix "$pkg" publish --access public
           done
