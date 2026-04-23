@@ -145,6 +145,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   let footerRenderTimeout: ReturnType<typeof setTimeout> | null = null;
   let lastFooterRenderAt = 0;
   let currentPalette = defaultPalette;
+  let footerCwd = "";
 
   const clearFooterRenderTimeout = () => {
     if (footerRenderTimeout) {
@@ -274,6 +275,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     state = createInitialState();
     currentPalette = await loadStatuslinePalette(ctx.cwd);
+    footerCwd = ctx.cwd;
     requestFooterRender = null;
     clearFooterRenderTimeout();
     lastFooterRenderAt = 0;
@@ -288,7 +290,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
       requestFooterRender = () => tui.requestRender();
       lastFooterRenderAt = 0;
       const disposeBranchChange = footerData.onBranchChange(() => {
-        void refreshGitState(ctx.cwd).then(() => rerenderFooter(true));
+        void refreshGitState(footerCwd).then(() => rerenderFooter(true));
       });
 
       return {
@@ -300,8 +302,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
         },
         invalidate() {},
         render(width: number): string[] {
-          refreshDynamicState(ctx);
-          return buildLines(ctx.cwd, state, footerData.getGitBranch(), width, currentPalette);
+          return buildLines(footerCwd, state, footerData.getGitBranch(), width, currentPalette);
         },
       };
     });
@@ -311,6 +312,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
     clearFooterRenderTimeout();
     requestFooterRender = null;
     lastFooterRenderAt = 0;
+    footerCwd = "";
   });
 
   pi.on("input", async (event, ctx) => {

@@ -183,6 +183,60 @@ describe("pi-statusline extension runtime", () => {
     expect(requestRender).toHaveBeenCalledTimes(2);
   });
 
+  it("does not read stale session context from footer render callbacks", async () => {
+    const mockPi = createMockPi();
+    statuslineExtension(mockPi as unknown as ExtensionAPI);
+
+    const sessionStartHandler = mockPi.on.mock.calls.find(([name]) => name === "session_start")?.[1];
+    const setFooter = vi.fn();
+
+    let stale = false;
+    const ctx = {
+      hasUI: true,
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ percent: 12 }),
+      ui: { setFooter },
+      get model() {
+        if (stale) {
+          throw new Error("Extension instance is stale");
+        }
+        return { id: "opus", contextWindow: 1000000 };
+      },
+      get cwd() {
+        if (stale) {
+          throw new Error("Extension instance is stale");
+        }
+        return "/tmp/project";
+      },
+    } as unknown as {
+      hasUI: true;
+      sessionManager: { getBranch: () => [] };
+      getContextUsage: () => { percent: number };
+      ui: { setFooter: typeof setFooter };
+      model: { id: string; contextWindow: number };
+      cwd: string;
+    };
+
+    await sessionStartHandler?.({}, ctx);
+
+    const footerFactory = setFooter.mock.calls[0]?.[0];
+    const footer = footerFactory?.(
+      { requestRender: vi.fn() },
+      {},
+      {
+        getGitBranch: () => "main",
+        onBranchChange: () => vi.fn(),
+      },
+    );
+    expect(footer).toBeDefined();
+
+    stale = true;
+
+    expect(() => {
+      footer?.render(120);
+    }).not.toThrow();
+  });
+
   it("tracks activity and live token usage during tool execution", async () => {
     const mockPi = createMockPi();
     statuslineExtension(mockPi as unknown as ExtensionAPI);
