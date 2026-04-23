@@ -60,7 +60,9 @@ jobs:
           else
             MATRIX=$(printf '%s\n' "${SELECTED[@]}" | jq -R . | jq -s .)
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
-            echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+            echo 'matrix<<EOF' >> "$GITHUB_OUTPUT"
+            echo "$MATRIX" >> "$GITHUB_OUTPUT"
+            echo 'EOF' >> "$GITHUB_OUTPUT"
           fi
 
   checks:
