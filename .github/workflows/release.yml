@@ -16,7 +16,7 @@ on:
         default: false
         type: boolean
       package_filter:
-        description: "Comma-separated package paths to test (e.g. packages/pi-statusline,packages/pi-specdocs)"
+        description: "Comma-separated package names to test (e.g. pi-statusline,pi-specdocs)"
         required: false
         default: ""
         type: string
@@ -51,16 +51,31 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "$MANUAL_TARGETS" ]]; then
             while IFS=',' read -r -a RAW_PACKAGES <<< "$MANUAL_TARGETS"; do
               for RAW_PACKAGE in "${RAW_PACKAGES[@]}"; do
-                PACKAGE="$(echo "$RAW_PACKAGE" | xargs)"
+                REQUESTED="$(echo "$RAW_PACKAGE" | xargs)"
 
-                [[ -z "$PACKAGE" ]] && continue
+                [[ -z "$REQUESTED" ]] && continue
 
-                if [[ ! -f "$PACKAGE/package.json" ]]; then
-                  echo "::error::Invalid package path '$PACKAGE'. Expected a package directory with package.json"
+                PACKAGE="${REQUESTED}"
+
+                if [[ "$PACKAGE" == @* ]]; then
+                  # Convert npm package names like @feniix/pi-statusline -> pi-statusline
+                  PACKAGE="${PACKAGE##*/}"
+                fi
+
+                if [[ "$PACKAGE" == packages/* ]]; then
+                  CANDIDATE="$PACKAGE"
+                elif [[ "$PACKAGE" == pi-* ]]; then
+                  CANDIDATE="packages/$PACKAGE"
+                else
+                  CANDIDATE="packages/pi-$PACKAGE"
+                fi
+
+                if [[ ! -f "$CANDIDATE/package.json" ]]; then
+                  echo "::error::Invalid package '$REQUESTED'. Use package names like pi-statusline or paths like packages/pi-statusline"
                   exit 1
                 fi
 
-                SELECTED+=("$PACKAGE")
+                SELECTED+=("$CANDIDATE")
               done
             done
           else
