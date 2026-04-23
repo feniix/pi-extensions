@@ -99,6 +99,19 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit --project "${{ matrix.package }}/tsconfig.json"
 
+      - name: Ensure new version is not already published
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          NAME="$(jq -r '.name' "${{ matrix.package }}/package.json")"
+          VERSION="$(jq -r '.version' "${{ matrix.package }}/package.json")"
+
+          if npm view "${NAME}@${VERSION}" >/dev/null 2>&1; then
+            echo "::error::${NAME}@${VERSION} is already published. Bump version before publishing."
+            exit 1
+          fi
+
       - name: Test
         run: npm run test -- "${{ matrix.package }}"
 
