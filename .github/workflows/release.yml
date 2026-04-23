@@ -15,6 +15,11 @@ on:
         required: false
         default: false
         type: boolean
+      package_filter:
+        description: "Comma-separated package paths to test (e.g. packages/pi-statusline,packages/pi-specdocs)"
+        required: false
+        default: ""
+        type: string
   push:
     branches:
       - main
@@ -39,32 +44,51 @@ jobs:
 
           BASE=""
           HEAD="${{ github.sha }}"
-
-          if [[ "${{ github.event_name }}" == "push" ]]; then
-            BASE="${{ github.event.before }}"
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            BASE="$(git rev-parse --verify HEAD^ 2>/dev/null || true)"
-          fi
-
-          if [[ -z "$BASE" || "$BASE" == "0000000000000000000000000000000000000000" ]]; then
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-            echo 'matrix=[]' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          CHANGED_PACKAGE_FILES=$(git diff --name-only "$BASE" "$HEAD" | grep '^packages/pi-[^/][^/]*/package.json$' || true)
           SELECTED=()
 
-          while IFS= read -r FILE; do
-            [[ -z "$FILE" ]] && continue
-            PKG="$(dirname "$FILE")"
-            OLD_VERSION="$(git show "$BASE:$FILE" 2>/dev/null | jq -r '.version // empty' || echo "")"
-            NEW_VERSION="$(jq -r '.version // empty' "$FILE")"
+          MANUAL_TARGETS="${{ github.event.inputs.package_filter }}"
 
-            if [[ "$OLD_VERSION" != "$NEW_VERSION" ]]; then
-              SELECTED+=("$PKG")
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "$MANUAL_TARGETS" ]]; then
+            while IFS=',' read -r -a RAW_PACKAGES <<< "$MANUAL_TARGETS"; do
+              for RAW_PACKAGE in "${RAW_PACKAGES[@]}"; do
+                PACKAGE="$(echo "$RAW_PACKAGE" | xargs)"
+
+                [[ -z "$PACKAGE" ]] && continue
+
+                if [[ ! -f "$PACKAGE/package.json" ]]; then
+                  echo "::error::Invalid package path '$PACKAGE'. Expected a package directory with package.json"
+                  exit 1
+                fi
+
+                SELECTED+=("$PACKAGE")
+              done
+            done
+          else
+            if [[ "${{ github.event_name }}" == "push" ]]; then
+              BASE="${{ github.event.before }}"
+            elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+              BASE="$(git rev-parse --verify HEAD^ 2>/dev/null || true)"
             fi
-          done <<< "$CHANGED_PACKAGE_FILES"
+
+            if [[ -z "$BASE" || "$BASE" == "0000000000000000000000000000000000000000" ]]; then
+              echo "has_changes=false" >> "$GITHUB_OUTPUT"
+              echo 'matrix=[]' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            CHANGED_PACKAGE_FILES=$(git diff --name-only "$BASE" "$HEAD" | grep '^packages/pi-[^/][^/]*/package.json$' || true)
+
+            while IFS= read -r FILE; do
+              [[ -z "$FILE" ]] && continue
+              PKG="$(dirname "$FILE")"
+              OLD_VERSION="$(git show "$BASE:$FILE" 2>/dev/null | jq -r '.version // empty' || echo "")"
+              NEW_VERSION="$(jq -r '.version // empty' "$FILE")"
+
+              if [[ "$OLD_VERSION" != "$NEW_VERSION" ]]; then
+                SELECTED+=("$PKG")
+              fi
+            done <<< "$CHANGED_PACKAGE_FILES"
+          fi
 
           if [[ ${#SELECTED[@]} -eq 0 ]]; then
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
