@@ -30,6 +30,7 @@ jobs:
     outputs:
       has_changes: ${{ steps.detect.outputs.has_changes }}
       matrix: ${{ steps.detect.outputs.matrix }}
+      reason: ${{ steps.detect.outputs.reason }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -45,6 +46,7 @@ jobs:
           BASE=""
           HEAD="${{ github.sha }}"
           SELECTED=()
+          REASON=""
 
           MANUAL_TARGETS="${{ github.event.inputs.package_filter }}"
 
@@ -78,6 +80,10 @@ jobs:
 
               SELECTED+=("$CANDIDATE")
             done
+
+            if [[ ${#SELECTED[@]} -eq 0 ]]; then
+              REASON="package_filter did not resolve to any valid packages: '$MANUAL_TARGETS'"
+            fi
           else
             if [[ "${{ github.event_name }}" == "push" ]]; then
               BASE="${{ github.event.before }}"
@@ -86,12 +92,18 @@ jobs:
             fi
 
             if [[ -z "$BASE" || "$BASE" == "0000000000000000000000000000000000000000" ]]; then
+              REASON="No base commit to compare (initial commit or missing history)."
               echo "has_changes=false" >> "$GITHUB_OUTPUT"
+              echo "reason=$REASON" >> "$GITHUB_OUTPUT"
               echo 'matrix=[]' >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
             CHANGED_PACKAGE_FILES=$(git diff --name-only "$BASE" "$HEAD" | grep '^packages/pi-[^/][^/]*/package.json$' || true)
+
+            if [[ -z "$CHANGED_PACKAGE_FILES" ]]; then
+              REASON="No package.json files changed between $BASE and $HEAD."
+            fi
 
             while IFS= read -r FILE; do
               [[ -z "$FILE" ]] && continue
@@ -106,11 +118,19 @@ jobs:
           fi
 
           if [[ ${#SELECTED[@]} -eq 0 ]]; then
+            if [[ -z "$REASON" ]]; then
+              REASON="No version changes detected in package.json files under packages/pi-*"
+            fi
+
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "reason=$REASON" >> "$GITHUB_OUTPUT"
             echo 'matrix=[]' >> "$GITHUB_OUTPUT"
           else
             MATRIX=$(printf '%s\n' "${SELECTED[@]}" | jq -R . | jq -s .)
+            JOINED="$(printf '%s, ' "${SELECTED[@]}")"
+            REASON="Version bump detected in: ${JOINED%, }"
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "reason=$REASON" >> "$GITHUB_OUTPUT"
             echo 'matrix<<EOF' >> "$GITHUB_OUTPUT"
             echo "$MATRIX" >> "$GITHUB_OUTPUT"
             echo 'EOF' >> "$GITHUB_OUTPUT"
@@ -162,6 +182,14 @@ jobs:
       - name: Test
         run: npm run test -- "${{ matrix.package }}"
 
+  checks_skipped:
+    needs: detect
+    if: needs.detect.outputs.has_changes != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain skip
+        run: echo "::notice::Checks skipped: ${{ needs.detect.outputs.reason }}"
+
   publish:
     needs: checks
     if: needs.checks.outputs.has_changes == 'true' && (github.event.inputs.dry_run != 'true')
@@ -188,3 +216,12 @@ jobs:
             echo "Publishing $pkg"
             (cd "$pkg" && npm publish --access public --provenance)
           done
+
+  publish_skipped:
+    needs: checks
+    if: needs.checks.outputs.has_changes == 'true' && (github.event.inputs.dry_run == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain skip
+        run: echo "::notice::Publish skipped because dry_run=true"
+
