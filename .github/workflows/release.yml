@@ -49,34 +49,34 @@ jobs:
           MANUAL_TARGETS="${{ github.event.inputs.package_filter }}"
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "$MANUAL_TARGETS" ]]; then
-            while IFS=',' read -r -a RAW_PACKAGES <<< "$MANUAL_TARGETS"; do
-              for RAW_PACKAGE in "${RAW_PACKAGES[@]}"; do
-                REQUESTED="$(echo "$RAW_PACKAGE" | xargs)"
+            IFS=',' read -r -a RAW_PACKAGES <<< "$MANUAL_TARGETS"
 
-                [[ -z "$REQUESTED" ]] && continue
+            for RAW_PACKAGE in "${RAW_PACKAGES[@]}"; do
+              REQUESTED="$(echo "$RAW_PACKAGE" | xargs)"
 
-                PACKAGE="${REQUESTED}"
+              [[ -z "$REQUESTED" ]] && continue
 
-                if [[ "$PACKAGE" == @* ]]; then
-                  # Convert npm package names like @feniix/pi-statusline -> pi-statusline
-                  PACKAGE="${PACKAGE##*/}"
-                fi
+              PACKAGE="${REQUESTED}"
 
-                if [[ "$PACKAGE" == packages/* ]]; then
-                  CANDIDATE="$PACKAGE"
-                elif [[ "$PACKAGE" == pi-* ]]; then
-                  CANDIDATE="packages/$PACKAGE"
-                else
-                  CANDIDATE="packages/pi-$PACKAGE"
-                fi
+              if [[ "$PACKAGE" == @* ]]; then
+                # Convert npm package names like @feniix/pi-statusline -> pi-statusline
+                PACKAGE="${PACKAGE##*/}"
+              fi
 
-                if [[ ! -f "$CANDIDATE/package.json" ]]; then
-                  echo "::error::Invalid package '$REQUESTED'. Use package names like pi-statusline or paths like packages/pi-statusline"
-                  exit 1
-                fi
+              if [[ "$PACKAGE" == packages/* ]]; then
+                CANDIDATE="$PACKAGE"
+              elif [[ "$PACKAGE" == pi-* ]]; then
+                CANDIDATE="packages/$PACKAGE"
+              else
+                CANDIDATE="packages/pi-$PACKAGE"
+              fi
 
-                SELECTED+=("$CANDIDATE")
-              done
+              if [[ ! -f "$CANDIDATE/package.json" ]]; then
+                echo "::error::Invalid package '$REQUESTED'. Use package names like pi-statusline or paths like packages/pi-statusline"
+                exit 1
+              fi
+
+              SELECTED+=("$CANDIDATE")
             done
           else
             if [[ "${{ github.event_name }}" == "push" ]]; then
