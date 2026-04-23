@@ -9,6 +9,12 @@ permissions:
 
 on:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run checks only, skip publish"
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - main
@@ -36,6 +42,8 @@ jobs:
 
           if [[ "${{ github.event_name }}" == "push" ]]; then
             BASE="${{ github.event.before }}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            BASE="$(git rev-parse --verify HEAD^ 2>/dev/null || true)"
           fi
 
           if [[ -z "$BASE" || "$BASE" == "0000000000000000000000000000000000000000" ]]; then
@@ -117,7 +125,7 @@ jobs:
 
   publish:
     needs: checks
-    if: needs.checks.outputs.has_changes == 'true'
+    if: needs.checks.outputs.has_changes == 'true' && (github.event.inputs.dry_run != 'true')
     runs-on: ubuntu-latest
     environment: npm-release
     steps:
