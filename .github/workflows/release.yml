@@ -16,7 +16,7 @@ on:
         default: false
         type: boolean
       package_filter:
-        description: "Comma-separated package names to test (e.g. pi-statusline,pi-specdocs)"
+        description: "Comma-separated package names to test (e.g. pi-statusline,pi-specdocs) or 'all'"
         required: false
         default: ""
         type: string
@@ -51,38 +51,51 @@ jobs:
           MANUAL_TARGETS="${{ github.event.inputs.package_filter }}"
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "$MANUAL_TARGETS" ]]; then
-            IFS=',' read -r -a RAW_PACKAGES <<< "$MANUAL_TARGETS"
+            if [[ "${MANUAL_TARGETS,,}" == "all" || "${MANUAL_TARGETS,,}" == "*" ]]; then
+              for PACKAGE_PATH in packages/pi-*; do
+                [[ -d "$PACKAGE_PATH" && -f "$PACKAGE_PATH/package.json" ]] || continue
+                SELECTED+=("$PACKAGE_PATH")
+              done
 
-            for RAW_PACKAGE in "${RAW_PACKAGES[@]}"; do
-              REQUESTED="$(echo "$RAW_PACKAGE" | xargs)"
-
-              [[ -z "$REQUESTED" ]] && continue
-
-              PACKAGE="${REQUESTED}"
-
-              if [[ "$PACKAGE" == @* ]]; then
-                # Convert npm package names like @feniix/pi-statusline -> pi-statusline
-                PACKAGE="${PACKAGE##*/}"
-              fi
-
-              if [[ "$PACKAGE" == packages/* ]]; then
-                CANDIDATE="$PACKAGE"
-              elif [[ "$PACKAGE" == pi-* ]]; then
-                CANDIDATE="packages/$PACKAGE"
+              if [[ ${#SELECTED[@]} -eq 0 ]]; then
+                REASON="package_filter was 'all' but no packages matched the expected pattern under packages/"
               else
-                CANDIDATE="packages/pi-$PACKAGE"
+                REASON="package_filter 'all' selected all packages"
               fi
+            else
+              IFS=',' read -r -a RAW_PACKAGES <<< "$MANUAL_TARGETS"
 
-              if [[ ! -f "$CANDIDATE/package.json" ]]; then
-                echo "::error::Invalid package '$REQUESTED'. Use package names like pi-statusline or paths like packages/pi-statusline"
-                exit 1
+              for RAW_PACKAGE in "${RAW_PACKAGES[@]}"; do
+                REQUESTED="$(echo "$RAW_PACKAGE" | xargs)"
+
+                [[ -z "$REQUESTED" ]] && continue
+
+                PACKAGE="${REQUESTED}"
+
+                if [[ "$PACKAGE" == @* ]]; then
+                  # Convert npm package names like @feniix/pi-statusline -> pi-statusline
+                  PACKAGE="${PACKAGE##*/}"
+                fi
+
+                if [[ "$PACKAGE" == packages/* ]]; then
+                  CANDIDATE="$PACKAGE"
+                elif [[ "$PACKAGE" == pi-* ]]; then
+                  CANDIDATE="packages/$PACKAGE"
+                else
+                  CANDIDATE="packages/pi-$PACKAGE"
+                fi
+
+                if [[ ! -f "$CANDIDATE/package.json" ]]; then
+                  echo "::error::Invalid package '$REQUESTED'. Use package names like pi-statusline or paths like packages/pi-statusline"
+                  exit 1
+                fi
+
+                SELECTED+=("$CANDIDATE")
+              done
+
+              if [[ ${#SELECTED[@]} -eq 0 ]]; then
+                REASON="package_filter did not resolve to any valid packages: '$MANUAL_TARGETS'"
               fi
-
-              SELECTED+=("$CANDIDATE")
-            done
-
-            if [[ ${#SELECTED[@]} -eq 0 ]]; then
-              REASON="package_filter did not resolve to any valid packages: '$MANUAL_TARGETS'"
             fi
           else
             if [[ "${{ github.event_name }}" == "push" ]]; then
