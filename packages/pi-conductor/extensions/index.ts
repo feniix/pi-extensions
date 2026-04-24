@@ -14,6 +14,7 @@ import {
   delegateTaskForRepo,
   getOrCreateRunForRepo,
   pushWorkerForRepo,
+  reconcileProjectForRepo,
   reconcileWorkerHealth,
   recordTaskCompletionForRepo,
   recordTaskProgressForRepo,
@@ -115,6 +116,27 @@ export default function conductorExtension(pi: ExtensionAPI) {
           artifacts: run.artifacts.length,
           events: run.events.length,
         },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_reconcile_project",
+    label: "Conductor Reconcile Project",
+    description: "Reconcile conductor leases and worker health for the current repository",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const before = getOrCreateRunForRepo(ctx.cwd);
+      const after = reconcileProjectForRepo(ctx.cwd);
+      const changed = after.revision !== before.revision || after.updatedAt !== before.updatedAt;
+      return {
+        content: [
+          {
+            type: "text",
+            text: `reconciled project ${after.projectKey}: changed=${changed} workers=${after.workers.length} tasks=${after.tasks.length} runs=${after.runs.length}`,
+          },
+        ],
+        details: { project: after, changed },
       };
     },
   });

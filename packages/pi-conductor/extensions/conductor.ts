@@ -27,6 +27,7 @@ import {
   createWorkerRecord,
   finishWorkerRun,
   readRun,
+  reconcileRunLeases,
   recordTaskCompletion,
   recordTaskProgress,
   removeWorker,
@@ -345,6 +346,13 @@ export function updateWorkerLifecycleForRepo(
     throw new Error(`Worker named ${workerName} disappeared during lifecycle update`);
   }
   return updatedWorker;
+}
+
+export function reconcileProjectForRepo(repoRoot: string, input: { now?: string } = {}): RunRecord {
+  const healthReconciled = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
+  const leaseReconciled = reconcileRunLeases(healthReconciled, input);
+  writeRun(leaseReconciled);
+  return leaseReconciled;
 }
 
 export function reconcileWorkerHealth(run: RunRecord): RunRecord {

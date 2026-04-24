@@ -25,6 +25,7 @@ describe("pi-conductor extension", () => {
     expect(extension).toContain('name: "conductor_list_events"');
     expect(extension).toContain('name: "conductor_list_artifacts"');
     expect(extension).toContain('name: "conductor_backend_status"');
+    expect(extension).toContain('name: "conductor_reconcile_project"');
   });
 
   it("still registers legacy worker tools during the transition", () => {
