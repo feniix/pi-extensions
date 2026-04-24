@@ -251,6 +251,79 @@ describe("storage helpers", () => {
     expect(queryConductorEvents(run, { type: "task.progress", limit: 1 }).hasMore).toBe(true);
   });
 
+  it("audits duplicate completion after terminal runs without changing task state", () => {
+    let run = addWorker(
+      createEmptyRun("abc", "/repo"),
+      createWorkerRecord({
+        workerId: "worker-1",
+        name: "backend",
+        branch: "conductor/backend",
+        worktreePath: "/repo/.worktrees/backend",
+        sessionFile: "/tmp/session.jsonl",
+      }),
+    );
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+    run = recordTaskCompletion(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      status: "succeeded",
+      completionSummary: "done",
+    });
+
+    const audited = recordTaskCompletion(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      status: "failed",
+      completionSummary: "late failure",
+    });
+
+    expect(audited.tasks[0]).toMatchObject({ state: "completed" });
+    expect(audited.runs[0]).toMatchObject({ status: "succeeded", completionSummary: "done" });
+    expect(audited.events.at(-1)).toMatchObject({ type: "task.completion_rejected" });
+  });
+
+  it("audits late progress after terminal runs without changing task state", () => {
+    let run = addWorker(
+      createEmptyRun("abc", "/repo"),
+      createWorkerRecord({
+        workerId: "worker-1",
+        name: "backend",
+        branch: "conductor/backend",
+        worktreePath: "/repo/.worktrees/backend",
+        sessionFile: "/tmp/session.jsonl",
+      }),
+    );
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+    run = completeTaskRun(run, { runId: "run-1", status: "succeeded", completionSummary: "done" });
+
+    const audited = recordTaskProgress(run, { runId: "run-1", taskId: "task-1", progress: "late progress" });
+
+    expect(audited.tasks[0]).toMatchObject({ state: "completed", latestProgress: null });
+    expect(audited.events.at(-1)).toMatchObject({ type: "task.progress_rejected" });
+  });
+
   it("rejects unsafe local artifact refs", () => {
     let run = addWorker(
       createEmptyRun("abc", "/repo"),

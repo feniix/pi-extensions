@@ -792,6 +792,20 @@ export function recordTaskProgress(
 ): RunRecord {
   const normalized = normalizeProjectRecord(run);
   const now = new Date().toISOString();
+  const existingRun = normalized.runs.find((entry) => entry.runId === input.runId);
+  if (existingRun?.taskId === input.taskId && existingRun.finishedAt) {
+    return appendConductorEvent(normalized, {
+      actor: { type: "child_run", id: input.runId },
+      type: "task.progress_rejected",
+      resourceRefs: {
+        projectKey: normalized.projectKey,
+        taskId: input.taskId,
+        workerId: existingRun.workerId,
+        runId: input.runId,
+      },
+      payload: { reason: "run_terminal", progress: input.progress },
+    });
+  }
   const runAttempt = getActiveRunForTask(normalized, input);
   const artifact = input.artifact
     ? createArtifactRecord({
@@ -847,6 +861,20 @@ export function recordTaskCompletion(
   },
 ): RunRecord {
   const normalized = normalizeProjectRecord(run);
+  const existingRun = normalized.runs.find((entry) => entry.runId === input.runId);
+  if (existingRun?.taskId === input.taskId && existingRun.finishedAt) {
+    return appendConductorEvent(normalized, {
+      actor: { type: "child_run", id: input.runId },
+      type: "task.completion_rejected",
+      resourceRefs: {
+        projectKey: normalized.projectKey,
+        taskId: input.taskId,
+        workerId: existingRun.workerId,
+        runId: input.runId,
+      },
+      payload: { reason: "run_terminal", status: input.status, completionSummary: input.completionSummary },
+    });
+  }
   const runAttempt = getActiveRunForTask(normalized, input);
   const artifact = input.artifact
     ? createArtifactRecord({
