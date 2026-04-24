@@ -48,6 +48,7 @@ export type ConductorNextActionKind =
   | "reconcile_project"
   | "recover_worker"
   | "create_worker"
+  | "create_task"
   | "assign_task"
   | "run_task"
   | "wait_for_run"

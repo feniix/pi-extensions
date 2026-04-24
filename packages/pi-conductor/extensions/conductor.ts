@@ -132,6 +132,32 @@ export function computeNextActions(
   const activeRuns = run.runs.filter((attempt) => !attempt.finishedAt && !terminalRunStatuses.has(attempt.status));
   const usableWorkers = run.workers.filter(isUsableIdleWorker);
 
+  for (const objective of run.objectives) {
+    if (["active", "draft"].includes(objective.status) && objective.taskIds.length === 0) {
+      actions.push(
+        nextAction({
+          priority: "high",
+          kind: "create_task",
+          title: `Create the first task for objective ${objective.title}`,
+          rationale: "The objective is active but has no scoped tasks for workers to execute.",
+          resourceRefs: { projectKey: run.projectKey, objectiveId: objective.objectiveId },
+          toolCall: {
+            name: "conductor_create_task",
+            params: {
+              title: `Next task for ${objective.title}`,
+              prompt: "<derive the next concrete task for this objective>",
+              objectiveId: objective.objectiveId,
+            },
+          },
+          requiresHuman: false,
+          destructive: false,
+          blockedBy: [],
+          confidence: "medium",
+        }),
+      );
+    }
+  }
+
   if (run.workers.length === 0) {
     actions.push(
       nextAction({

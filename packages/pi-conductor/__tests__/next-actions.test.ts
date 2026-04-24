@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { computeNextActions } from "../extensions/conductor.js";
 import {
+  addObjective,
   addTask,
   addWorker,
   assignTaskToWorker,
   createConductorGate,
   createEmptyRun,
+  createObjectiveRecord,
   createTaskRecord,
   createWorkerRecord,
   startTaskRun,
@@ -30,6 +32,29 @@ describe("computeNextActions", () => {
       priority: "medium",
       kind: "create_worker",
       toolCall: { name: "conductor_create_worker", params: { name: "worker-1" } },
+    });
+  });
+
+  it("recommends creating a scoped task for an active objective without tasks", () => {
+    const run = addObjective(
+      createEmptyRun("abc", "/repo"),
+      createObjectiveRecord({ objectiveId: "objective-1", title: "Autonomous MVP", prompt: "Ship it" }),
+    );
+
+    const result = computeNextActions(run);
+
+    expect(result.actions[0]).toMatchObject({
+      priority: "high",
+      kind: "create_task",
+      resourceRefs: { objectiveId: "objective-1" },
+      toolCall: {
+        name: "conductor_create_task",
+        params: {
+          title: "Next task for Autonomous MVP",
+          prompt: "<derive the next concrete task for this objective>",
+          objectiveId: "objective-1",
+        },
+      },
     });
   });
 
