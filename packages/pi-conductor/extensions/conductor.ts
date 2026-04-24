@@ -348,10 +348,12 @@ export function updateWorkerLifecycleForRepo(
   return updatedWorker;
 }
 
-export function reconcileProjectForRepo(repoRoot: string, input: { now?: string } = {}): RunRecord {
+export function reconcileProjectForRepo(repoRoot: string, input: { now?: string; dryRun?: boolean } = {}): RunRecord {
   const healthReconciled = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
   const leaseReconciled = reconcileRunLeases(healthReconciled, input);
-  writeRun(leaseReconciled);
+  if (!input.dryRun) {
+    writeRun(leaseReconciled);
+  }
   return leaseReconciled;
 }
 

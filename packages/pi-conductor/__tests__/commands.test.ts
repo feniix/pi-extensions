@@ -70,6 +70,13 @@ describe("runConductorCommand", () => {
     expect(artifacts).toBe("artifacts: none");
   });
 
+  it("previews reconciliation from the reconcile command without persisting", async () => {
+    await runConductorCommand(repoDir, "create worker backend");
+    const text = await runConductorCommand(repoDir, "reconcile --dry-run");
+    expect(text).toContain("previewed project");
+    expect(text).toContain("changed=");
+  });
+
   it("creates a worker from the start subcommand", async () => {
     const text = await runConductorCommand(repoDir, "start backend");
     expect(text).toContain("created worker");

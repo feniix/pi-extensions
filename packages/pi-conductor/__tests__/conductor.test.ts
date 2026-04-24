@@ -136,6 +136,22 @@ describe("conductor service", () => {
     expect(getOrCreateRunForRepo(repoDir).events.map((event) => event.type)).toContain("run.lease_expired");
   });
 
+  it("supports read-only project reconciliation dry runs", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Lease task", prompt: "Do it" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId, leaseSeconds: -1 });
+
+    const preview = reconcileProjectForRepo(repoDir, { now: "2999-01-01T00:00:00.000Z", dryRun: true });
+
+    expect(preview.runs[0]).toMatchObject({ status: "stale" });
+    expect(preview.tasks[0]).toMatchObject({ state: "needs_review" });
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.runs[0]).toMatchObject({ status: "running" });
+    expect(persisted.tasks[0]).toMatchObject({ state: "running" });
+    expect(persisted.events.map((event) => event.type)).not.toContain("run.lease_expired");
+  });
+
   it("creates a worker, worktree, and persisted worker record", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const worktreePath = requireValue(worker.worktreePath, "worker worktree missing");

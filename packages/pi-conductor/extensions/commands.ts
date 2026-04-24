@@ -5,6 +5,7 @@ import {
   createWorkerPrForRepo,
   getOrCreateRunForRepo,
   pushWorkerForRepo,
+  reconcileProjectForRepo,
   reconcileWorkerHealth,
   recoverWorkerForRepo,
   refreshWorkerSummaryForRepo,
@@ -23,6 +24,7 @@ function getUsage(): string {
     "  /conductor create worker <worker-name>",
     "  /conductor create task <title> <prompt>",
     "  /conductor status",
+    "  /conductor reconcile [--dry-run]",
     "  /conductor start <worker-name>",
     "  /conductor task <worker-name> <task>",
     "  /conductor resume <worker-name>",
@@ -117,6 +119,13 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
   }
   if (subcommand === "status") {
     return formatRunStatus(reconcileWorkerHealth(getOrCreateRunForRepo(cwd)));
+  }
+  if (subcommand === "reconcile") {
+    const dryRun = rest.includes("--dry-run");
+    const before = getOrCreateRunForRepo(cwd);
+    const after = reconcileProjectForRepo(cwd, { dryRun });
+    const changed = after.revision !== before.revision || after.updatedAt !== before.updatedAt;
+    return `${dryRun ? "previewed" : "reconciled"} project ${after.projectKey}: changed=${changed} workers=${after.workers.length} tasks=${after.tasks.length} runs=${after.runs.length}`;
   }
   if (subcommand === "start") {
     const workerName = rest.join(" ").trim();

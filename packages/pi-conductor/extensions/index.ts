@@ -124,19 +124,21 @@ export default function conductorExtension(pi: ExtensionAPI) {
     name: "conductor_reconcile_project",
     label: "Conductor Reconcile Project",
     description: "Reconcile conductor leases and worker health for the current repository",
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+    parameters: Type.Object({
+      dryRun: Type.Optional(Type.Boolean({ description: "Preview reconciliation without persisting changes" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const before = getOrCreateRunForRepo(ctx.cwd);
-      const after = reconcileProjectForRepo(ctx.cwd);
+      const after = reconcileProjectForRepo(ctx.cwd, { dryRun: params.dryRun ?? false });
       const changed = after.revision !== before.revision || after.updatedAt !== before.updatedAt;
       return {
         content: [
           {
             type: "text",
-            text: `reconciled project ${after.projectKey}: changed=${changed} workers=${after.workers.length} tasks=${after.tasks.length} runs=${after.runs.length}`,
+            text: `${params.dryRun ? "previewed" : "reconciled"} project ${after.projectKey}: changed=${changed} workers=${after.workers.length} tasks=${after.tasks.length} runs=${after.runs.length}`,
           },
         ],
-        details: { project: after, changed },
+        details: { project: after, changed, dryRun: params.dryRun ?? false },
       };
     },
   });
