@@ -68,6 +68,17 @@ describe("storage helpers", () => {
     expect(dir).toBe(join(conductorHome, "projects", "abc"));
   });
 
+  it("validates event resource references", () => {
+    const run = appendConductorEvent(createEmptyRun("abc", "/tmp/repo"), {
+      actor: { type: "system", id: "test" },
+      type: "worker.created",
+      resourceRefs: { projectKey: "abc", workerId: "missing-worker" },
+      payload: {},
+    });
+
+    expect(() => validateRunRecord(run)).toThrow(/Event .* references missing worker missing-worker/i);
+  });
+
   it("creates and assigns durable task records without changing worker outcome state", () => {
     const run = createEmptyRun("abc", "/tmp/repo");
     const worker = createWorkerRecord({

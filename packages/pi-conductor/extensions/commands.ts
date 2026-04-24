@@ -62,14 +62,18 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
       return formatRunStatus(run);
     }
     if (resource === "workers") {
-      return run.workers.length === 0
-        ? "workers: none"
-        : run.workers.map((worker) => `${worker.name} [${worker.workerId}] state=${worker.lifecycle}`).join("\n");
+      const active = run.workers.map((worker) => `${worker.name} [${worker.workerId}] state=${worker.lifecycle}`);
+      const archived = run.archivedWorkers.map(
+        (worker) => `${worker.name} [${worker.workerId}] state=archived archived=true`,
+      );
+      return active.length === 0 && archived.length === 0 ? "workers: none" : [...active, ...archived].join("\n");
     }
     if (resource === "worker") {
-      const worker = run.workers.find((entry) => entry.workerId === idOrName || entry.name === idOrName);
+      const worker = [...run.workers, ...run.archivedWorkers].find(
+        (entry) => entry.workerId === idOrName || entry.name === idOrName,
+      );
       return worker
-        ? `${worker.name} [${worker.workerId}] state=${worker.lifecycle} branch=${worker.branch ?? "none"} worktree=${worker.worktreePath ?? "none"}`
+        ? `${worker.name} [${worker.workerId}] state=${worker.lifecycle} archived=${worker.lifecycle === "archived"} branch=${worker.branch ?? "none"} worktree=${worker.worktreePath ?? "none"}`
         : `worker not found: ${idOrName ?? ""}`;
     }
     if (resource === "tasks") {

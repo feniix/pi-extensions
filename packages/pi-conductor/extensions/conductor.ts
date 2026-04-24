@@ -34,6 +34,7 @@ import {
   finishWorkerRun,
   linkTaskToObjective,
   markConductorGateUsed,
+  mutateRunWithFileLockSync,
   readRun,
   reconcileRunLeases,
   recordTaskCompletion,
@@ -78,6 +79,12 @@ import type {
   WorkerRecord,
   WorkerRunResult,
 } from "./types.js";
+
+function mutateRepoRunSync(repoRoot: string, mutator: (run: RunRecord) => RunRecord): RunRecord {
+  const normalizedRoot = resolve(repoRoot);
+  return mutateRunWithFileLockSync(deriveProjectKey(normalizedRoot), normalizedRoot, mutator);
+}
+
 import { createWorkerId } from "./workers.js";
 import {
   createManagedWorktree,
@@ -1179,24 +1186,25 @@ export function createTaskForRepo(
   repoRoot: string,
   input: { title: string; prompt: string; objectiveId?: string; dependsOnTaskIds?: string[] },
 ): TaskRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const missingDependency = input.dependsOnTaskIds?.find(
-    (taskId) => !run.tasks.some((entry) => entry.taskId === taskId),
-  );
-  if (missingDependency) {
-    throw new Error(`Task dependency ${missingDependency} not found`);
-  }
-  const task = createTaskRecord({
-    taskId: createTaskId(),
-    title: input.title,
-    prompt: input.prompt,
-    objectiveId: input.objectiveId,
-    dependsOnTaskIds: input.dependsOnTaskIds,
+  let task!: TaskRecord;
+  mutateRepoRunSync(repoRoot, (run) => {
+    const missingDependency = input.dependsOnTaskIds?.find(
+      (taskId) => !run.tasks.some((entry) => entry.taskId === taskId),
+    );
+    if (missingDependency) {
+      throw new Error(`Task dependency ${missingDependency} not found`);
+    }
+    task = createTaskRecord({
+      taskId: createTaskId(),
+      title: input.title,
+      prompt: input.prompt,
+      objectiveId: input.objectiveId,
+      dependsOnTaskIds: input.dependsOnTaskIds,
+    });
+    return input.objectiveId
+      ? linkTaskToObjective(addTask(run, task), input.objectiveId, task.taskId)
+      : addTask(run, task);
   });
-  const updatedRun = input.objectiveId
-    ? linkTaskToObjective(addTask(run, task), input.objectiveId, task.taskId)
-    : addTask(run, task);
-  writeRun(updatedRun);
   return task;
 }
 
@@ -1204,9 +1212,7 @@ export function updateTaskForRepo(
   repoRoot: string,
   input: { taskId: string; title?: string; prompt?: string },
 ): TaskRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const updatedRun = updateTask(run, input);
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => updateTask(run, input));
   const task = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
   if (!task) {
     throw new Error(`Task ${input.taskId} disappeared during update`);
@@ -1215,9 +1221,7 @@ export function updateTaskForRepo(
 }
 
 export function assignTaskForRepo(repoRoot: string, taskId: string, workerId: string): TaskRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const updatedRun = assignTaskToWorker(run, taskId, workerId);
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => assignTaskToWorker(run, taskId, workerId));
   const task = updatedRun.tasks.find((entry) => entry.taskId === taskId);
   if (!task) {
     throw new Error(`Task ${taskId} disappeared during assignment`);
@@ -1239,9 +1243,7 @@ export function recordTaskProgressForRepo(
     };
   },
 ): TaskRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const updatedRun = recordTaskProgress(run, input);
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => recordTaskProgress(run, input));
   const task = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
   if (!task) {
     throw new Error(`Task ${input.taskId} disappeared during progress update`);
@@ -1264,9 +1266,7 @@ export function recordTaskCompletionForRepo(
     };
   },
 ): TaskRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const updatedRun = recordTaskCompletion(run, input);
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => recordTaskCompletion(run, input));
   const task = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
   if (!task) {
     throw new Error(`Task ${input.taskId} disappeared during completion update`);
@@ -1290,10 +1290,8 @@ export function createGateForRepo(
     expiresAt?: string | null;
   },
 ): GateRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
   const gateId = input.gateId ?? `gate-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const updatedRun = createConductorGate(run, { ...input, gateId });
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => createConductorGate(run, { ...input, gateId }));
   const gate = updatedRun.gates.find((entry) => entry.gateId === gateId);
   if (!gate) {
     throw new Error(`Gate ${gateId} disappeared during creation`);
@@ -1354,31 +1352,33 @@ export function startTaskRunForRepo(
   const backend = input.backend ?? "native";
   if (backend === "pi-subagents") {
     const status = (input.inspectBackends ?? inspectConductorBackends)().piSubagents;
-    const withEvent = appendConductorEvent(run, {
-      actor: { type: "backend", id: "pi-subagents" },
-      type: "backend.unavailable",
-      resourceRefs: { projectKey: run.projectKey, taskId: input.taskId, workerId },
-      payload: {
-        backend,
-        diagnostic: status.available
-          ? "pi-subagents dispatch adapter is not implemented yet"
-          : (status.diagnostic ?? "pi-subagents backend is unavailable"),
-      },
-    });
-    writeRun(withEvent);
+    mutateRepoRunSync(repoRoot, (latest) =>
+      appendConductorEvent(latest, {
+        actor: { type: "backend", id: "pi-subagents" },
+        type: "backend.unavailable",
+        resourceRefs: { projectKey: latest.projectKey, taskId: input.taskId, workerId },
+        payload: {
+          backend,
+          diagnostic: status.available
+            ? "pi-subagents dispatch adapter is not implemented yet"
+            : (status.diagnostic ?? "pi-subagents backend is unavailable"),
+        },
+      }),
+    );
     throw new Error(
       `pi-subagents backend unavailable: ${status.available ? "dispatch adapter is not implemented yet" : (status.diagnostic ?? "not available")}`,
     );
   }
   const runId = input.runId ?? createRunId();
-  const updatedRun = startTaskRun(run, {
-    runId,
-    taskId: input.taskId,
-    workerId,
-    backend,
-    leaseExpiresAt: leaseExpiryFromNow(input.leaseSeconds ?? 900),
-  });
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (latest) =>
+    startTaskRun(latest, {
+      runId,
+      taskId: input.taskId,
+      workerId,
+      backend,
+      leaseExpiresAt: leaseExpiryFromNow(input.leaseSeconds ?? 900),
+    }),
+  );
   const started = updatedRun.runs.find((entry) => entry.runId === runId);
   const updatedTask = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
   if (!started || !updatedTask) {

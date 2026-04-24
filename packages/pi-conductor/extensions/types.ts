@@ -233,6 +233,7 @@ export type ConductorEventType =
   | "task.updated"
   | "worker.archived"
   | "worker.created"
+  | "worker.lifecycle_changed"
   | "worker.pr_updated";
 
 export interface ConductorEvent {

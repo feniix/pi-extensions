@@ -261,6 +261,9 @@ export function validateRunRecord(run: RunRecord): void {
   for (const artifact of normalized.artifacts) {
     assertRefsExist(artifact.resourceRefs, indexes, `Artifact ${artifact.artifactId}`);
   }
+  for (const event of normalized.events) {
+    assertRefsExist(event.resourceRefs, indexes, `Event ${event.eventId}`);
+  }
 }
 
 export function readRun(projectKey: string): RunRecord | null {
@@ -319,6 +322,22 @@ export async function mutateRunWithFileLock(
   try {
     const current = readRun(projectKey) ?? createEmptyRun(projectKey, repoRoot);
     const updated = await mutator(current);
+    writeRun(updated);
+    return updated;
+  } finally {
+    release();
+  }
+}
+
+export function mutateRunWithFileLockSync(
+  projectKey: string,
+  repoRoot: string,
+  mutator: (run: RunRecord) => RunRecord,
+): RunRecord {
+  const release = acquireRunFileLock(projectKey);
+  try {
+    const current = readRun(projectKey) ?? createEmptyRun(projectKey, repoRoot);
+    const updated = mutator(current);
     writeRun(updated);
     return updated;
   } finally {
@@ -1806,12 +1825,16 @@ export function finishWorkerRun(
 
 export function setWorkerLifecycle(run: RunRecord, workerId: string, lifecycle: WorkerLifecycleState): RunRecord {
   let found = false;
+  let previousLifecycle: WorkerLifecycleState | null = null;
+  let workerName: string | null = null;
   const now = new Date().toISOString();
   const workers = run.workers.map((worker) => {
     if (worker.workerId !== workerId) {
       return worker;
     }
     found = true;
+    previousLifecycle = worker.lifecycle;
+    workerName = worker.name;
     return {
       ...worker,
       lifecycle,
@@ -1822,12 +1845,21 @@ export function setWorkerLifecycle(run: RunRecord, workerId: string, lifecycle: 
       updatedAt: now,
     };
   });
-  if (!found) {
+  if (!found || !previousLifecycle || !workerName) {
     throw new Error(`Worker ${workerId} not found`);
   }
-  return {
+  const updated = {
     ...run,
     workers,
     updatedAt: now,
   };
+  if (previousLifecycle === lifecycle) {
+    return updated;
+  }
+  return appendConductorEvent(updated, {
+    actor: { type: "system", id: "storage" },
+    type: "worker.lifecycle_changed",
+    resourceRefs: { projectKey: run.projectKey, workerId },
+    payload: { previousLifecycle, lifecycle, name: workerName },
+  });
 }

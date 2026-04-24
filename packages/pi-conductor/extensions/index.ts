@@ -691,14 +691,19 @@ export default function conductorExtension(pi: ExtensionAPI) {
     name: "conductor_list_workers",
     label: "Conductor List Workers",
     description: "List durable pi-conductor workers for the current repository",
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+    parameters: Type.Object({
+      includeArchived: Type.Optional(
+        Type.Boolean({ description: "Include archived workers preserved for audit history" }),
+      ),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const run = getOrCreateRunForRepo(ctx.cwd);
+      const workers = params.includeArchived ? [...run.workers, ...run.archivedWorkers] : run.workers;
       const text =
-        run.workers.length === 0
+        workers.length === 0
           ? "no conductor workers"
-          : run.workers.map((worker) => `${worker.name} [${worker.workerId}] state=${worker.lifecycle}`).join("\n");
-      return { content: [{ type: "text", text }], details: { workers: run.workers } };
+          : workers.map((worker) => `${worker.name} [${worker.workerId}] state=${worker.lifecycle}`).join("\n");
+      return { content: [{ type: "text", text }], details: { workers } };
     },
   });
 

@@ -25,12 +25,17 @@ export interface ConductorBackendsStatus {
 export interface ConductorBackendDispatchResult {
   ok: boolean;
   diagnostic: string | null;
+  backendRunId?: string | null;
 }
+
+export type ConductorBackendDispatcher = (
+  input: unknown,
+) => ConductorBackendDispatchResult | Promise<ConductorBackendDispatchResult>;
 
 export interface ConductorBackendAdapter {
   backend: ConductorBackendKind;
   preflight(): ConductorBackendStatus;
-  dispatch(): ConductorBackendDispatchResult;
+  dispatch(input?: unknown): ConductorBackendDispatchResult | Promise<ConductorBackendDispatchResult>;
 }
 
 const nativeCapabilities: ConductorBackendCapabilities = {
@@ -61,9 +66,10 @@ function resolvePiSubagents(input: { resolvePackage?: (specifier: string) => str
 }
 
 export function inspectConductorBackends(
-  input: { resolvePackage?: (specifier: string) => string | null } = {},
+  input: { resolvePackage?: (specifier: string) => string | null; dispatcher?: ConductorBackendDispatcher } = {},
 ): ConductorBackendsStatus {
   const piSubagentsPath = resolvePiSubagents(input);
+  const piSubagentsAvailable = Boolean(piSubagentsPath && input.dispatcher);
 
   return {
     native: {
@@ -73,22 +79,22 @@ export function inspectConductorBackends(
       diagnostic: null,
     },
     piSubagents: {
-      available: false,
+      available: piSubagentsAvailable,
       canonicalStateOwner: "conductor",
-      capabilities: piSubagentsPath
-        ? { ...unavailablePiSubagentsCapabilities, supportsScopedChildTools: false }
-        : unavailablePiSubagentsCapabilities,
+      capabilities: piSubagentsAvailable ? nativeCapabilities : unavailablePiSubagentsCapabilities,
       packagePath: piSubagentsPath,
-      diagnostic: piSubagentsPath
-        ? "pi-subagents adapter is detected but dispatch is not implemented; conductor fails closed"
-        : "Optional pi-subagents adapter is not installed or not resolvable from pi-conductor",
+      diagnostic: piSubagentsAvailable
+        ? null
+        : piSubagentsPath
+          ? "pi-subagents adapter is detected but dispatch is not implemented; conductor fails closed"
+          : "Optional pi-subagents adapter is not installed or not resolvable from pi-conductor",
     },
   };
 }
 
 export function getConductorBackendAdapter(
   backend: ConductorBackendKind,
-  input: { resolvePackage?: (specifier: string) => string | null } = {},
+  input: { resolvePackage?: (specifier: string) => string | null; dispatcher?: ConductorBackendDispatcher } = {},
 ): ConductorBackendAdapter {
   return {
     backend,
@@ -96,9 +102,12 @@ export function getConductorBackendAdapter(
       const status = inspectConductorBackends(input);
       return backend === "native" ? status.native : status.piSubagents;
     },
-    dispatch() {
+    dispatch(dispatchInput?: unknown) {
       if (backend === "native") {
         return { ok: true, diagnostic: null };
+      }
+      if (input.dispatcher && resolvePiSubagents(input)) {
+        return input.dispatcher(dispatchInput);
       }
       return { ok: false, diagnostic: "pi-subagents dispatch is not implemented; conductor fails closed" };
     },

@@ -46,6 +46,28 @@ describe("worker lifecycle flows", () => {
     expect(resumed.runtime.lastResumedAt).toBeTruthy();
   });
 
+  it("emits lifecycle events when a worker lifecycle changes", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+
+    updateWorkerLifecycleForRepo(repoDir, "backend", "blocked");
+
+    const event = getOrCreateRunForRepo(repoDir).events.at(-1);
+    expect(event).toMatchObject({
+      type: "worker.lifecycle_changed",
+      resourceRefs: { workerId: worker.workerId },
+      payload: { previousLifecycle: "idle", lifecycle: "blocked", name: "backend" },
+    });
+  });
+
+  it("does not emit lifecycle events for no-op lifecycle updates", async () => {
+    await createWorkerForRepo(repoDir, "backend");
+    const before = getOrCreateRunForRepo(repoDir).events.length;
+
+    updateWorkerLifecycleForRepo(repoDir, "backend", "idle");
+
+    expect(getOrCreateRunForRepo(repoDir).events).toHaveLength(before);
+  });
+
   it("updates a worker lifecycle to blocked, ready_for_pr, and done", async () => {
     await createWorkerForRepo(repoDir, "backend");
     expect(updateWorkerLifecycleForRepo(repoDir, "backend", "blocked").lifecycle).toBe("blocked");

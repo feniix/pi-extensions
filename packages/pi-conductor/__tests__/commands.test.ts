@@ -189,6 +189,10 @@ describe("runConductorCommand", () => {
 
     const status = await runConductorCommand(repoDir, "status");
     expect(status).toContain("workers: 0");
+
+    const archived = await runConductorCommand(repoDir, "get worker backend");
+    expect(archived).toContain(worker.workerId);
+    expect(archived).toContain("archived=true");
   });
 
   it("shows help for unknown subcommands", async () => {

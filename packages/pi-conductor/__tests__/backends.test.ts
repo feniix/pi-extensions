@@ -32,4 +32,14 @@ describe("conductor backend inspection", () => {
     expect(piSubagents.preflight()).toMatchObject({ available: false, capabilities: { canStartRun: false } });
     expect(piSubagents.dispatch()).toMatchObject({ ok: false });
   });
+
+  it("reports pi-subagents available when an explicit dispatcher is injected", async () => {
+    const piSubagents = getConductorBackendAdapter("pi-subagents", {
+      resolvePackage: () => "/tmp/pi-subagents/package.json",
+      dispatcher: async () => ({ ok: true, backendRunId: "child-run-1", diagnostic: null }),
+    });
+
+    expect(piSubagents.preflight()).toMatchObject({ available: true, capabilities: { canStartRun: true } });
+    await expect(piSubagents.dispatch({})).resolves.toMatchObject({ ok: true, backendRunId: "child-run-1" });
+  });
 });
