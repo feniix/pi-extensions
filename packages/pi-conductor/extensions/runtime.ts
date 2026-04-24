@@ -147,10 +147,22 @@ const artifactTypeSchema = Type.Union([
 ]);
 
 export function buildRunScopedConductorTools(input: {
+  taskContract?: TaskContractInput;
   onConductorProgress?: (params: ConductorProgressReportInput) => void | Promise<void>;
   onConductorComplete?: (params: ConductorCompletionReportInput) => void | Promise<void>;
   onConductorGate?: (params: ConductorGateReportInput) => void | Promise<void>;
 }) {
+  function assertScoped(params: { runId: string; taskId: string }): void {
+    if (!input.taskContract) {
+      return;
+    }
+    if (params.runId !== input.taskContract.runId || params.taskId !== input.taskContract.taskId) {
+      throw new Error(
+        `Child conductor tool call is not scoped to run ${input.taskContract.runId} task ${input.taskContract.taskId}`,
+      );
+    }
+  }
+
   return [
     defineTool({
       name: "conductor_child_progress",
@@ -169,6 +181,7 @@ export function buildRunScopedConductorTools(input: {
         ),
       }),
       execute: async (_toolCallId, params) => {
+        assertScoped(params);
         await input.onConductorProgress?.(params as ConductorProgressReportInput);
         return { content: [{ type: "text", text: `recorded progress for task ${params.taskId}` }], details: params };
       },
@@ -184,6 +197,7 @@ export function buildRunScopedConductorTools(input: {
         requestedDecision: Type.String(),
       }),
       execute: async (_toolCallId, params) => {
+        assertScoped(params);
         await input.onConductorGate?.(params as ConductorGateReportInput);
         return {
           content: [{ type: "text", text: `created ${params.type} gate for task ${params.taskId}` }],
@@ -215,6 +229,7 @@ export function buildRunScopedConductorTools(input: {
         ),
       }),
       execute: async (_toolCallId, params) => {
+        assertScoped(params);
         await input.onConductorComplete?.(params as ConductorCompletionReportInput);
         return {
           content: [{ type: "text", text: `completed task ${params.taskId} with ${params.status}` }],

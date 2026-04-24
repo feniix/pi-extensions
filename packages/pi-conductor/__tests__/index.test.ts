@@ -16,8 +16,9 @@ describe("pi-conductor extension", () => {
     expect(extension).toContain('name: "conductor_create_task"');
     expect(extension).toContain('name: "conductor_assign_task"');
     expect(extension).toContain('name: "conductor_delegate_task"');
-    expect(extension).toContain('name: "conductor_child_progress"');
-    expect(extension).toContain('name: "conductor_child_complete"');
+    expect(extension).not.toContain('name: "conductor_child_progress"');
+    expect(extension).not.toContain('name: "conductor_child_complete"');
+    expect(extension).not.toContain('name: "conductor_child_create_gate"');
     expect(extension).toContain('name: "conductor_create_gate"');
     expect(extension).toContain('name: "conductor_resolve_gate"');
     expect(extension).toContain('name: "conductor_start_task_run"');

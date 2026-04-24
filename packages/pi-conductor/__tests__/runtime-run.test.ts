@@ -98,6 +98,37 @@ describe("worker run runtime helpers", () => {
     ]);
   });
 
+  it("rejects scoped child tool calls for another task or run", async () => {
+    const tools = buildRunScopedConductorTools({
+      taskContract: {
+        taskId: "task-1",
+        runId: "run-1",
+        taskRevision: 1,
+        goal: "Do it",
+        explicitCompletionTools: true,
+      },
+    });
+
+    await expect(
+      tools[0]?.execute?.(
+        "call-1",
+        { runId: "other-run", taskId: "task-1", progress: "spoofed" } as never,
+        undefined as never,
+        undefined as never,
+        undefined as never,
+      ),
+    ).rejects.toThrow(/not scoped/i);
+    await expect(
+      tools[2]?.execute?.(
+        "call-2",
+        { runId: "run-1", taskId: "other-task", status: "succeeded", completionSummary: "spoofed" } as never,
+        undefined as never,
+        undefined as never,
+        undefined as never,
+      ),
+    ).rejects.toThrow(/not scoped/i);
+  });
+
   it("maps Pi stop reasons to conductor run outcomes", () => {
     expect(mapStopReasonToRunOutcome("stop")).toEqual({ status: "success", errorMessage: null });
     expect(mapStopReasonToRunOutcome("aborted")).toEqual({ status: "aborted", errorMessage: null });

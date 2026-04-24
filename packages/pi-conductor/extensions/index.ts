@@ -16,8 +16,6 @@ import {
   pushWorkerForRepo,
   reconcileProjectForRepo,
   reconcileWorkerHealth,
-  recordTaskCompletionForRepo,
-  recordTaskProgressForRepo,
   recoverWorkerForRepo,
   refreshWorkerSummaryForRepo,
   removeWorkerForRepo,
@@ -297,16 +295,6 @@ export default function conductorExtension(pi: ExtensionAPI) {
     },
   });
 
-  const artifactTypeSchema = Type.Union([
-    Type.Literal("note"),
-    Type.Literal("test_result"),
-    Type.Literal("changed_files"),
-    Type.Literal("log"),
-    Type.Literal("completion_report"),
-    Type.Literal("pr_evidence"),
-    Type.Literal("other"),
-  ]);
-
   const gateTypeSchema = Type.Union([
     Type.Literal("needs_input"),
     Type.Literal("needs_review"),
@@ -402,73 +390,6 @@ export default function conductorExtension(pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: `ran task ${params.taskId}: outcome=${result.status} result=${summary}` }],
         details: result,
-      };
-    },
-  });
-
-  pi.registerTool({
-    name: "conductor_child_progress",
-    label: "Conductor Child Progress",
-    description: "Scoped child-run tool for reporting task progress and optional evidence artifacts",
-    parameters: Type.Object({
-      runId: Type.String({ description: "Run ID from the task contract" }),
-      taskId: Type.String({ description: "Task ID from the task contract" }),
-      progress: Type.String({ description: "Concise progress update" }),
-      artifact: Type.Optional(
-        Type.Object({
-          type: artifactTypeSchema,
-          ref: Type.String({ description: "Artifact reference, URL, file path, or durable URI" }),
-          metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),
-        }),
-      ),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const task = recordTaskProgressForRepo(ctx.cwd, {
-        ...params,
-        artifact: params.artifact
-          ? { ...params.artifact, metadata: params.artifact.metadata as Record<string, unknown> | undefined }
-          : undefined,
-      });
-      return {
-        content: [{ type: "text", text: `recorded progress for task ${task.taskId}: ${task.latestProgress}` }],
-        details: { task },
-      };
-    },
-  });
-
-  pi.registerTool({
-    name: "conductor_child_complete",
-    label: "Conductor Child Complete",
-    description: "Scoped child-run tool for completing a task run with a summary and optional evidence artifact",
-    parameters: Type.Object({
-      runId: Type.String({ description: "Run ID from the task contract" }),
-      taskId: Type.String({ description: "Task ID from the task contract" }),
-      status: Type.Union([
-        Type.Literal("succeeded"),
-        Type.Literal("partial"),
-        Type.Literal("blocked"),
-        Type.Literal("failed"),
-        Type.Literal("aborted"),
-      ]),
-      completionSummary: Type.String({ description: "Completion summary for the parent agent" }),
-      artifact: Type.Optional(
-        Type.Object({
-          type: artifactTypeSchema,
-          ref: Type.String({ description: "Artifact reference, URL, file path, or durable URI" }),
-          metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),
-        }),
-      ),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const task = recordTaskCompletionForRepo(ctx.cwd, {
-        ...params,
-        artifact: params.artifact
-          ? { ...params.artifact, metadata: params.artifact.metadata as Record<string, unknown> | undefined }
-          : undefined,
-      });
-      return {
-        content: [{ type: "text", text: `completed task ${task.taskId}: state=${task.state}` }],
-        details: { task },
       };
     },
   });
