@@ -1,8 +1,22 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import conductorExtension from "../extensions/index.js";
+
+function collectToolNames(): string[] {
+  const names: string[] = [];
+  const fakePi = {
+    registerCommand: () => undefined,
+    registerTool: (tool: { name: string }) => names.push(tool.name),
+  };
+  conductorExtension(fakePi as never);
+  return names;
+}
 
 describe("pi-conductor extension", () => {
+  afterEach(() => {
+    delete process.env.PI_CONDUCTOR_ENABLE_LEGACY_WORKER_TOOLS;
+  });
   it("registers the main conductor command group", () => {
     const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
     expect(extension).toContain('registerCommand("conductor"');
@@ -47,6 +61,7 @@ describe("pi-conductor extension", () => {
     expect(extension).toContain('name: "conductor_resource_timeline"');
     expect(extension).toContain('name: "conductor_run_next_action"');
     expect(extension).toContain('name: "conductor_scheduler_tick"');
+    expect(extension).toContain('name: "conductor_schedule_objective"');
     expect(extension).toContain('name: "conductor_assess_task"');
     expect(extension).toContain('name: "conductor_read_artifact"');
     expect(extension).toContain('name: "conductor_objective_dag"');
@@ -60,19 +75,19 @@ describe("pi-conductor extension", () => {
     expect(extension).toContain('name: "conductor_create_worker_pr"');
   });
 
-  it("still registers legacy worker tools during the transition", () => {
-    const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
-    expect(extension).toContain('name: "conductor_status"');
-    expect(extension).toContain('name: "conductor_start"');
-    expect(extension).toContain('name: "conductor_task_update"');
-    expect(extension).toContain('name: "conductor_recover"');
-    expect(extension).toContain('name: "conductor_summary_refresh"');
-    expect(extension).toContain('name: "conductor_cleanup"');
-    expect(extension).toContain('name: "conductor_resume"');
-    expect(extension).toContain('name: "conductor_lifecycle_update"');
-    expect(extension).toContain('name: "conductor_commit"');
-    expect(extension).toContain('name: "conductor_push"');
-    expect(extension).toContain('name: "conductor_pr_create"');
-    expect(extension).toContain('name: "conductor_run"');
+  it("hides legacy worker tools unless compatibility is enabled", () => {
+    const names = collectToolNames();
+    expect(names).toContain("conductor_get_project");
+    expect(names).not.toContain("conductor_start");
+    expect(names).not.toContain("conductor_run");
+    expect(names).not.toContain("conductor_pr_create");
+  });
+
+  it("registers legacy worker tools when compatibility is enabled", () => {
+    process.env.PI_CONDUCTOR_ENABLE_LEGACY_WORKER_TOOLS = "1";
+    const names = collectToolNames();
+    expect(names).toContain("conductor_start");
+    expect(names).toContain("conductor_run");
+    expect(names).toContain("conductor_pr_create");
   });
 });

@@ -1665,11 +1665,17 @@ export function setWorkerPrState(run: RunRecord, workerId: string, pr: Partial<W
   if (!found) {
     throw new Error(`Worker ${workerId} not found`);
   }
-  return {
+  const updated = {
     ...run,
     workers,
     updatedAt: now,
   };
+  return appendConductorEvent(updated, {
+    actor: { type: "system", id: "storage" },
+    type: "worker.pr_updated",
+    resourceRefs: { projectKey: run.projectKey, workerId },
+    payload: { changed: Object.keys(pr), pr: workers.find((worker) => worker.workerId === workerId)?.pr ?? null },
+  });
 }
 
 export function startWorkerRun(

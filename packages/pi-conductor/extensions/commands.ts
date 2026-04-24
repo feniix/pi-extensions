@@ -18,6 +18,13 @@ import {
 import { formatRunStatus } from "./status.js";
 import { queryConductorEvents } from "./storage.js";
 
+const LEGACY_SLASH_DEPRECATION =
+  "deprecated: legacy /conductor worker subcommands will be removed; prefer resource-native conductor_* tools.\n";
+
+function legacySlashResponse(text: string): string {
+  return `${LEGACY_SLASH_DEPRECATION}${text}`;
+}
+
 function getUsage(): string {
   return [
     "usage:",
@@ -27,17 +34,17 @@ function getUsage(): string {
     "  /conductor status",
     "  /conductor history [project|worker|task|run|gate|artifact] [id] [--after N] [--limit N]",
     "  /conductor reconcile [--dry-run]",
-    "  /conductor start <worker-name>",
-    "  /conductor task <worker-name> <task>",
-    "  /conductor resume <worker-name>",
-    "  /conductor run <worker-name> <task>",
-    "  /conductor state <worker-name> <lifecycle>",
-    "  /conductor recover <worker-name>",
-    "  /conductor summarize <worker-name>",
-    "  /conductor cleanup <worker-name>",
-    "  /conductor commit <worker-name> <message>",
-    "  /conductor push <worker-name>",
-    "  /conductor pr <worker-name> <title>",
+    "  /conductor start <worker-name> (deprecated)",
+    "  /conductor task <worker-name> <task> (deprecated)",
+    "  /conductor resume <worker-name> (deprecated)",
+    "  /conductor run <worker-name> <task> (deprecated)",
+    "  /conductor state <worker-name> <lifecycle> (deprecated)",
+    "  /conductor recover <worker-name> (deprecated)",
+    "  /conductor summarize <worker-name> (deprecated)",
+    "  /conductor cleanup <worker-name> (deprecated)",
+    "  /conductor commit <worker-name> <message> (deprecated)",
+    "  /conductor push <worker-name> (deprecated)",
+    "  /conductor pr <worker-name> <title> (deprecated)",
   ].join("\n");
 }
 
@@ -174,7 +181,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
       return `${getUsage()}\n\nerror: missing worker name`;
     }
     const worker = await createWorkerForRepo(cwd, workerName);
-    return `created worker ${worker.name} [${worker.workerId}] on branch ${worker.branch}`;
+    return legacySlashResponse(`created worker ${worker.name} [${worker.workerId}] on branch ${worker.branch}`);
   }
   if (subcommand === "task") {
     const [workerName, ...taskParts] = rest;
@@ -183,7 +190,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
       return `${getUsage()}\n\nerror: missing worker name or task`;
     }
     const worker = updateWorkerTaskForRepo(cwd, workerName, task);
-    return `updated task for ${worker.name}: ${worker.currentTask}`;
+    return legacySlashResponse(`updated task for ${worker.name}: ${worker.currentTask}`);
   }
   if (subcommand === "resume") {
     const workerName = rest.join(" ").trim();
@@ -191,7 +198,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
       return `${getUsage()}\n\nerror: missing worker name`;
     }
     const worker = await resumeWorkerForRepo(cwd, workerName);
-    return `resumed worker ${worker.name}: session=${worker.sessionFile}`;
+    return legacySlashResponse(`resumed worker ${worker.name}: session=${worker.sessionFile}`);
   }
   if (subcommand === "run") {
     const [workerName, ...taskParts] = rest;
@@ -204,7 +211,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
     }
     const result = await runWorkerForRepo(cwd, workerName, task);
     const summary = result.finalText ?? result.errorMessage ?? "Run completed without a final assistant summary";
-    return `ran worker ${result.workerName}: outcome=${result.status} result=${summary}`;
+    return legacySlashResponse(`ran worker ${result.workerName}: outcome=${result.status} result=${summary}`);
   }
   if (subcommand === "state") {
     const [workerName, lifecycle] = rest;
@@ -212,7 +219,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
       return `${getUsage()}\n\nerror: missing worker name or lifecycle state`;
     }
     const worker = updateWorkerLifecycleForRepo(cwd, workerName, lifecycle as never);
-    return `updated worker ${worker.name} state to ${worker.lifecycle}`;
+    return legacySlashResponse(`updated worker ${worker.name} state to ${worker.lifecycle}`);
   }
   if (subcommand === "recover") {
     const workerName = rest.join(" ").trim();
@@ -220,7 +227,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
       return `${getUsage()}\n\nerror: missing worker name`;
     }
     const worker = await recoverWorkerForRepo(cwd, workerName);
-    return `recovered worker ${worker.name}: session=${worker.sessionFile}`;
+    return legacySlashResponse(`recovered worker ${worker.name}: session=${worker.sessionFile}`);
   }
   if (subcommand === "summarize") {
     const workerName = rest.join(" ").trim();
@@ -228,7 +235,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
       return `${getUsage()}\n\nerror: missing worker name`;
     }
     const worker = await refreshWorkerSummaryForRepo(cwd, workerName);
-    return `refreshed summary for ${worker.name}: ${worker.summary.text}`;
+    return legacySlashResponse(`refreshed summary for ${worker.name}: ${worker.summary.text}`);
   }
   if (subcommand === "cleanup") {
     const workerName = rest.join(" ").trim();
@@ -236,7 +243,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
       return `${getUsage()}\n\nerror: missing worker name`;
     }
     const worker = removeWorkerForRepo(cwd, workerName);
-    return `removed worker ${worker.name} [${worker.workerId}]`;
+    return legacySlashResponse(`removed worker ${worker.name} [${worker.workerId}]`);
   }
   if (subcommand === "commit") {
     const [workerName, ...messageParts] = rest;
@@ -245,7 +252,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
       return `${getUsage()}\n\nerror: missing worker name or commit message`;
     }
     const worker = commitWorkerForRepo(cwd, workerName, message);
-    return `committed worker ${worker.name}: ${message}`;
+    return legacySlashResponse(`committed worker ${worker.name}: ${message}`);
   }
   if (subcommand === "push") {
     const workerName = rest.join(" ").trim();
@@ -253,7 +260,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
       return `${getUsage()}\n\nerror: missing worker name`;
     }
     const worker = pushWorkerForRepo(cwd, workerName);
-    return `pushed worker ${worker.name} on branch ${worker.branch}`;
+    return legacySlashResponse(`pushed worker ${worker.name} on branch ${worker.branch}`);
   }
   if (subcommand === "pr") {
     const [workerName, ...titleParts] = rest;
@@ -262,7 +269,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
       return `${getUsage()}\n\nerror: missing worker name or PR title`;
     }
     const worker = createWorkerPrForRepo(cwd, workerName, title);
-    return `created PR for ${worker.name}: ${worker.pr.url}`;
+    return legacySlashResponse(`created PR for ${worker.name}: ${worker.pr.url}`);
   }
 
   return `${getUsage()}\n\nerror: unknown subcommand '${subcommand}'`;

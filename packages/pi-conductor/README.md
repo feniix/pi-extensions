@@ -122,7 +122,7 @@ Runtime-injected child tools, available only inside native worker task runs:
 - `conductor_child_create_followup_task` when the task contract allows it
 - `conductor_child_complete`
 
-Transition/legacy worker tools still registered for compatibility. Prefer the resource/control-plane tools above for new LLM workflows:
+Transition/legacy worker tools are hidden by default and can be temporarily enabled with `PI_CONDUCTOR_ENABLE_LEGACY_WORKER_TOOLS=1`. Prefer the resource/control-plane tools above for new LLM workflows:
 
 - `conductor_status`
 - `conductor_start`
@@ -164,6 +164,7 @@ conductor_plan_objective({ objectiveId, tasks: [{ title: "Implement", prompt: "M
 conductor_next_actions({ objectiveId })
 conductor_run_next_action({ objectiveId })
 conductor_scheduler_tick({ objectiveId, maxActions: 1 })
+conductor_schedule_objective({ objectiveId, maxConcurrency: 2 })
 ```
 
 Inspect dependency scheduling for parallel-safe work:

@@ -908,6 +908,48 @@ export async function runNextActionForRepo(
   return { executed: false, reason: `unsupported action ${action.kind}`, action, result: null };
 }
 
+export async function scheduleObjectiveForRepo(
+  repoRoot: string,
+  input: { objectiveId: string; maxConcurrency?: number; executeRuns?: boolean },
+): Promise<{
+  objectiveId: string;
+  assigned: TaskRecord[];
+  executed: Array<{ taskId: string; result: unknown }>;
+  skipped: string[];
+}> {
+  const maxConcurrency = Math.max(1, Math.min(input.maxConcurrency ?? 1, 10));
+  const dag = buildObjectiveDagForRepo(repoRoot, input.objectiveId);
+  const run = getOrCreateRunForRepo(repoRoot);
+  const runnableTasks = dag.runnableNow
+    .map((taskId) => run.tasks.find((task) => task.taskId === taskId))
+    .filter((task): task is TaskRecord => Boolean(task))
+    .filter((task) => task.state === "ready" || task.state === "assigned")
+    .slice(0, maxConcurrency);
+  const idleWorkers = run.workers.filter(
+    (worker) => worker.lifecycle === "idle" && !worker.recoverable && worker.worktreePath && worker.sessionFile,
+  );
+  const assigned: TaskRecord[] = [];
+  const executed: Array<{ taskId: string; result: unknown }> = [];
+  const skipped: string[] = [];
+  for (const task of runnableTasks) {
+    let currentTask = task;
+    if (!currentTask.assignedWorkerId) {
+      const worker = idleWorkers.shift();
+      if (!worker) {
+        skipped.push(task.taskId);
+        continue;
+      }
+      currentTask = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
+      assigned.push(currentTask);
+    }
+    if (input.executeRuns) {
+      const result = await runTaskForRepo(repoRoot, currentTask.taskId);
+      executed.push({ taskId: currentTask.taskId, result });
+    }
+  }
+  return { objectiveId: input.objectiveId, assigned, executed, skipped };
+}
+
 export async function schedulerTickForRepo(
   repoRoot: string,
   input: { objectiveId?: string; maxActions?: number } = {},
