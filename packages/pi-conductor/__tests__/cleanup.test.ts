@@ -3,7 +3,13 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createWorkerForRepo, getOrCreateRunForRepo, removeWorkerForRepo } from "../extensions/conductor.js";
+import {
+  createGateForRepo,
+  createWorkerForRepo,
+  getOrCreateRunForRepo,
+  removeWorkerForRepo,
+  resolveGateForRepo,
+} from "../extensions/conductor.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
   if (value == null) {
@@ -15,6 +21,20 @@ function requireValue<T>(value: T | null | undefined, message: string): T {
 describe("cleanup flows", () => {
   let repoDir: string;
   let conductorHome: string;
+
+  function approveCleanupGate(workerId: string): void {
+    const gate = createGateForRepo(repoDir, {
+      type: "destructive_cleanup",
+      resourceRefs: { workerId },
+      requestedDecision: "Approve worker cleanup",
+    });
+    resolveGateForRepo(repoDir, {
+      gateId: gate.gateId,
+      status: "approved",
+      actor: { type: "human", id: "reviewer" },
+      resolutionReason: "cleanup approved",
+    });
+  }
 
   beforeEach(() => {
     repoDir = execSync("mktemp -d", { encoding: "utf-8" }).trim();
@@ -42,6 +62,7 @@ describe("cleanup flows", () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const worktreePath = requireValue(worker.worktreePath, "worker worktree missing");
     expect(existsSync(worktreePath)).toBe(true);
+    approveCleanupGate(worker.workerId);
     const removed = removeWorkerForRepo(repoDir, "backend");
     expect(removed.workerId).toBe(worker.workerId);
     expect(existsSync(worktreePath)).toBe(false);
@@ -52,6 +73,7 @@ describe("cleanup flows", () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const sessionFile = requireValue(worker.sessionFile, "worker session file missing");
     expect(existsSync(sessionFile)).toBe(true);
+    approveCleanupGate(worker.workerId);
     removeWorkerForRepo(repoDir, "backend");
     expect(existsSync(sessionFile)).toBe(false);
   });
@@ -60,6 +82,7 @@ describe("cleanup flows", () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const branch = requireValue(worker.branch, "worker branch missing");
     expect(execSync(`git branch --list ${branch}`, { cwd: repoDir, encoding: "utf-8" }).trim()).toContain(branch);
+    approveCleanupGate(worker.workerId);
     removeWorkerForRepo(repoDir, "backend");
     expect(execSync(`git branch --list ${branch}`, { cwd: repoDir, encoding: "utf-8" }).trim()).toBe("");
 

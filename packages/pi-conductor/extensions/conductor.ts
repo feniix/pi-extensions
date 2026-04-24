@@ -401,6 +401,22 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
   if (!worker) {
     throw new Error(`Worker named ${workerName} not found`);
   }
+  const cleanupGate = run.gates.find(
+    (gate) =>
+      gate.type === "destructive_cleanup" &&
+      gate.resourceRefs.workerId === worker.workerId &&
+      gate.status !== "canceled",
+  );
+  if (cleanupGate?.status !== "approved") {
+    if (!cleanupGate) {
+      createGateForRepo(repoRoot, {
+        type: "destructive_cleanup",
+        resourceRefs: { workerId: worker.workerId },
+        requestedDecision: `Approve deleting worker ${worker.name}, its worktree, session link, and managed branch`,
+      });
+    }
+    throw new Error(`Worker ${worker.name} requires an approved destructive_cleanup gate before cleanup`);
+  }
   if (worker.worktreePath && existsSync(worker.worktreePath)) {
     removeManagedWorktree(run.repoRoot, worker.worktreePath);
   }

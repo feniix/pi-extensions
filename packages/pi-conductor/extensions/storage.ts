@@ -957,6 +957,7 @@ export function removeWorker(run: RunRecord, workerId: string): RunRecord {
   return {
     ...run,
     workers,
+    gates: run.gates.filter((gate) => gate.resourceRefs.workerId !== workerId),
     updatedAt: new Date().toISOString(),
   };
 }

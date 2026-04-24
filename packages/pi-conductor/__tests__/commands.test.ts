@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runConductorCommand } from "../extensions/commands.js";
+import { getOrCreateRunForRepo, resolveGateForRepo } from "../extensions/conductor.js";
 
 describe("runConductorCommand", () => {
   let repoDir: string;
@@ -122,8 +123,24 @@ describe("runConductorCommand", () => {
     expect(status).toContain("state=ready_for_pr");
   });
 
-  it("cleans up a worker through the cleanup subcommand", async () => {
+  it("requires an approved destructive cleanup gate before worker cleanup", async () => {
     await runConductorCommand(repoDir, "start backend");
+
+    await expect(runConductorCommand(repoDir, "cleanup backend")).rejects.toThrow(/destructive_cleanup gate/i);
+    expect(getOrCreateRunForRepo(repoDir).gates[0]).toMatchObject({ type: "destructive_cleanup", status: "open" });
+
+    const worker = getOrCreateRunForRepo(repoDir).workers[0];
+    const gate = getOrCreateRunForRepo(repoDir).gates[0];
+    if (!worker || !gate) {
+      throw new Error("worker or gate missing");
+    }
+    resolveGateForRepo(repoDir, {
+      gateId: gate.gateId,
+      status: "approved",
+      actor: { type: "human", id: "reviewer" },
+      resolutionReason: "cleanup approved",
+    });
+
     const text = await runConductorCommand(repoDir, "cleanup backend");
     expect(text).toContain("removed worker backend");
 
