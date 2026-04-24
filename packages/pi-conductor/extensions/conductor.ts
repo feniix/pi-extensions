@@ -1267,6 +1267,21 @@ export function resolveGateForRepo(
   return gate;
 }
 
+export function resolveGateFromTrustedHumanForRepo(
+  repoRoot: string,
+  input: { gateId: string; status: Exclude<GateStatus, "open">; humanId: string; resolutionReason: string },
+): GateRecord {
+  if (!input.humanId.trim()) {
+    throw new Error("Trusted human resolver requires a non-empty humanId");
+  }
+  return resolveGateForRepo(repoRoot, {
+    gateId: input.gateId,
+    status: input.status,
+    resolutionReason: input.resolutionReason,
+    actor: { type: "human", id: input.humanId },
+  });
+}
+
 export function startTaskRunForRepo(
   repoRoot: string,
   input: {

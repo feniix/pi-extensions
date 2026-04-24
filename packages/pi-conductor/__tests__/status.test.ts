@@ -35,7 +35,7 @@ describe("formatRunStatus", () => {
     const text = formatRunStatus(withTask);
 
     expect(text).toContain("tasks: 1");
-    expect(text).toContain("events: 2");
+    expect(text).toContain("events: 3");
     expect(text).toContain(
       "- task Add ledger [task-1] state=assigned assignedWorker=worker-1 activeRun=none latestProgress=none",
     );

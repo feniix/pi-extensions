@@ -17,7 +17,11 @@ describe("conductor backend inspection", () => {
     expect(unavailable.piSubagents).toMatchObject({ available: false, canonicalStateOwner: "conductor" });
 
     const available = inspectConductorBackends({ resolvePackage: () => "/tmp/pi-subagents/package.json" });
-    expect(available.piSubagents).toMatchObject({ available: true, packagePath: "/tmp/pi-subagents/package.json" });
+    expect(available.piSubagents).toMatchObject({
+      available: false,
+      packagePath: "/tmp/pi-subagents/package.json",
+      capabilities: { canStartRun: false },
+    });
   });
 
   it("exposes backend adapters with fail-closed pi-subagents dispatch", () => {

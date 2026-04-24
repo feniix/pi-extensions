@@ -15,7 +15,7 @@ Agent-native local control plane for Pi worker orchestration.
   - `Gate`: durable review/input/approval/destructive-cleanup decisions.
   - `Artifact`: evidence references for logs, completion reports, test results, changed files, PR evidence, and notes.
   - `Event`: transition/progress/reconciliation audit history.
-- Worker git worktree creation, recovery, cleanup, and branch management via `@feniix/worktrees-core`.
+- Worker git worktree creation, recovery, cleanup, and branch management via `@feniix/worktrees-core`; destructive cleanup archives worker identity for historical task/run/gate/artifact refs while removing active worktree/session/branch resources.
 - Persisted Pi session linkage through `SessionManager`.
 - Native AgentSession-backed task execution with runtime-injected, run-scoped child tools:
   - `conductor_child_progress`
@@ -37,7 +37,7 @@ Agent-native local control plane for Pi worker orchestration.
 - Gate-protected risky operations:
   - PR creation requires an approved `ready_for_pr` gate.
   - Worker cleanup requires an approved `destructive_cleanup` gate.
-- Optional `pi-subagents` backend availability inspection. Conductor remains canonical state owner, and unsupported `pi-subagents` dispatch requests fail closed without creating a run.
+- Optional `pi-subagents` backend detection. Conductor remains canonical state owner; `pi-subagents` dispatch is reported unavailable and fails closed until a real dispatch adapter is implemented.
 - Legacy worker command/tool surface remains during the transition and is considered deprecated; new resource-native model-callable tools are the primary orchestration surface.
 
 ## Command surface

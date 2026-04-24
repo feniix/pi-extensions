@@ -73,6 +73,7 @@ function normalizeProjectRecord(run: RunRecord): RunRecord {
     schemaVersion: run.schemaVersion ?? CONDUCTOR_SCHEMA_VERSION,
     revision: run.revision ?? 0,
     workers: (run.workers ?? []).map(normalizeWorkerRecord),
+    archivedWorkers: (run.archivedWorkers ?? []).map(normalizeWorkerRecord),
     objectives: run.objectives ?? [],
     tasks: (run.tasks ?? []).map(normalizeTaskRecord),
     runs: run.runs ?? [],
@@ -164,7 +165,7 @@ function assertRefsExist(
 
 function createResourceIndexes(run: RunRecord) {
   return {
-    workerIds: new Set(run.workers.map((worker) => worker.workerId)),
+    workerIds: new Set([...run.workers, ...run.archivedWorkers].map((worker) => worker.workerId)),
     taskIds: new Set(run.tasks.map((task) => task.taskId)),
     runIds: new Set(run.runs.map((attempt) => attempt.runId)),
     gateIds: new Set(run.gates.map((gate) => gate.gateId)),
@@ -179,7 +180,7 @@ export function validateRunRecord(run: RunRecord): void {
     throw new Error(`Unsupported conductor schemaVersion ${normalized.schemaVersion}`);
   }
   assertUnique(
-    normalized.workers.map((worker) => worker.workerId),
+    [...normalized.workers, ...normalized.archivedWorkers].map((worker) => worker.workerId),
     "workerId",
   );
   assertUnique(
@@ -361,6 +362,7 @@ export function createEmptyRun(projectKey: string, repoRoot: string): RunRecord 
     repoRoot: resolve(repoRoot),
     storageDir: getConductorProjectDir(projectKey),
     workers: [],
+    archivedWorkers: [],
     objectives: [],
     tasks: [],
     runs: [],
@@ -1155,14 +1157,25 @@ export function readArtifactContentForRepo(
     };
   }
   assertSafeArtifactRef(artifact.ref);
-  const artifactPath = resolve(normalizedRoot, artifact.ref);
-  if (!artifactPath.startsWith(`${normalizedRoot}${"/"}`) && artifactPath !== normalizedRoot) {
+  const metadataRoot = artifact.metadata.worktreeRoot;
+  const worker = artifact.resourceRefs.workerId
+    ? [...(run?.workers ?? []), ...(run?.archivedWorkers ?? [])].find(
+        (entry) => entry.workerId === artifact.resourceRefs.workerId,
+      )
+    : null;
+  const readRoot =
+    typeof metadataRoot === "string" ? resolve(metadataRoot) : resolve(worker?.worktreePath ?? normalizedRoot);
+  if (typeof metadataRoot === "string" && (!worker?.worktreePath || resolve(worker.worktreePath) !== readRoot)) {
+    throw new Error(`Artifact ${artifact.artifactId} declares an untrusted worktree root`);
+  }
+  const artifactPath = resolve(readRoot, artifact.ref);
+  if (!artifactPath.startsWith(`${readRoot}${"/"}`) && artifactPath !== readRoot) {
     throw new Error(`Unsafe artifact ref '${artifact.ref}'`);
   }
   if (!existsSync(artifactPath)) {
     return { artifactId, ref: artifact.ref, content: null, truncated: false, diagnostic: "Artifact file is missing" };
   }
-  const realRoot = realpathSync(normalizedRoot);
+  const realRoot = realpathSync(readRoot);
   const realArtifactPath = realpathSync(artifactPath);
   if (!realArtifactPath.startsWith(`${realRoot}${"/"}`) && realArtifactPath !== realRoot) {
     throw new Error(`Unsafe artifact ref '${artifact.ref}'`);
@@ -1500,11 +1513,19 @@ export function addWorker(run: RunRecord, worker: WorkerRecord): RunRecord {
     throw new Error(`Worker named ${worker.name} already exists`);
   }
 
-  return {
-    ...run,
-    workers: [...run.workers, worker],
-    updatedAt: new Date().toISOString(),
-  };
+  return appendConductorEvent(
+    {
+      ...run,
+      workers: [...run.workers, worker],
+      updatedAt: new Date().toISOString(),
+    },
+    {
+      actor: { type: "system", id: "storage" },
+      type: "worker.created",
+      resourceRefs: { projectKey: run.projectKey, workerId: worker.workerId },
+      payload: { name: worker.name },
+    },
+  );
 }
 
 export function setWorkerTask(run: RunRecord, workerId: string, task: string): RunRecord {
@@ -1567,16 +1588,28 @@ export function setWorkerSummary(run: RunRecord, workerId: string, summaryText: 
 }
 
 export function removeWorker(run: RunRecord, workerId: string): RunRecord {
-  const workers = run.workers.filter((worker) => worker.workerId !== workerId);
-  if (workers.length === run.workers.length) {
+  const worker = run.workers.find((entry) => entry.workerId === workerId);
+  if (!worker) {
     throw new Error(`Worker ${workerId} not found`);
   }
-  return {
-    ...run,
-    workers,
-    gates: run.gates.filter((gate) => gate.resourceRefs.workerId !== workerId),
-    updatedAt: new Date().toISOString(),
-  };
+  const now = new Date().toISOString();
+  return appendConductorEvent(
+    {
+      ...run,
+      workers: run.workers.filter((entry) => entry.workerId !== workerId),
+      archivedWorkers: [
+        ...run.archivedWorkers,
+        { ...worker, lifecycle: "archived", currentTask: null, recoverable: false, updatedAt: now },
+      ],
+      updatedAt: now,
+    },
+    {
+      actor: { type: "system", id: "storage" },
+      type: "worker.archived",
+      resourceRefs: { projectKey: run.projectKey, workerId },
+      payload: { name: worker.name },
+    },
+  );
 }
 
 export function setWorkerRuntimeState(

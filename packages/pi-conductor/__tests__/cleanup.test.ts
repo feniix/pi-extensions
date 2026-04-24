@@ -86,6 +86,7 @@ describe("cleanup flows", () => {
     expect(existsSync(worktreePath)).toBe(false);
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers).toHaveLength(0);
+    expect(run.archivedWorkers.map((entry) => entry.workerId)).toContain(worker.workerId);
     expect(run.events.map((event) => event.type)).toContain("gate.used");
   });
 

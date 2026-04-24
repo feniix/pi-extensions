@@ -1,6 +1,6 @@
 export const CONDUCTOR_SCHEMA_VERSION = 1;
 
-export type WorkerLifecycleState = "idle" | "running" | "blocked" | "ready_for_pr" | "done" | "broken";
+export type WorkerLifecycleState = "idle" | "running" | "blocked" | "ready_for_pr" | "done" | "broken" | "archived";
 export type ObjectiveStatus = "draft" | "active" | "blocked" | "needs_review" | "completed" | "canceled";
 export type WorkerRunStatus = "success" | "error" | "aborted";
 
@@ -230,7 +230,10 @@ export type ConductorEventType =
   | "task.followup_created"
   | "task.progress"
   | "task.progress_rejected"
-  | "task.updated";
+  | "task.updated"
+  | "worker.archived"
+  | "worker.created"
+  | "worker.pr_updated";
 
 export interface ConductorEvent {
   eventId: string;
@@ -377,6 +380,7 @@ export interface RunRecord {
   repoRoot: string;
   storageDir: string;
   workers: WorkerRecord[];
+  archivedWorkers: WorkerRecord[];
   objectives: ObjectiveRecord[];
   tasks: TaskRecord[];
   runs: RunAttemptRecord[];

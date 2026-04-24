@@ -73,7 +73,7 @@ export function inspectConductorBackends(
       diagnostic: null,
     },
     piSubagents: {
-      available: piSubagentsPath !== null,
+      available: false,
       canonicalStateOwner: "conductor",
       capabilities: piSubagentsPath
         ? { ...unavailablePiSubagentsCapabilities, supportsScopedChildTools: false }

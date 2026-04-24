@@ -75,7 +75,7 @@ describe("conductor service", () => {
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.tasks).toHaveLength(1);
     expect(run.tasks[0]?.taskId).toBe(task.taskId);
-    expect(run.events.map((event) => event.type)).toEqual(["task.created", "task.assigned"]);
+    expect(run.events.map((event) => event.type)).toEqual(["worker.created", "task.created", "task.assigned"]);
   });
 
   it("lets allowed child runs create follow-up tasks", async () => {
