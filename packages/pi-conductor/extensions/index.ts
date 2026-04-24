@@ -11,12 +11,14 @@ import {
   checkReadinessForRepo,
   commitWorkerForRepo,
   createGateForRepo,
+  createObjectiveForRepo,
   createTaskForRepo,
   createWorkerForRepo,
   createWorkerPrForRepo,
   delegateTaskForRepo,
   getNextActionsForRepo,
   getOrCreateRunForRepo,
+  linkTaskToObjectiveForRepo,
   pushWorkerForRepo,
   reconcileProjectForRepo,
   reconcileWorkerHealth,
@@ -29,6 +31,7 @@ import {
   runTaskForRepo,
   runWorkerForRepo,
   startTaskRunForRepo,
+  updateObjectiveForRepo,
   updateTaskForRepo,
   updateWorkerLifecycleForRepo,
   updateWorkerTaskForRepo,
@@ -120,6 +123,92 @@ export default function conductorExtension(pi: ExtensionAPI) {
           artifacts: run.artifacts.length,
           events: run.events.length,
         },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_list_objectives",
+    label: "Conductor List Objectives",
+    description: "List parent-level conductor objectives that group durable tasks and evidence",
+    parameters: Type.Object({
+      status: Type.Optional(Type.String({ description: "Optional objective status filter" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const run = getOrCreateRunForRepo(ctx.cwd);
+      const objectives = run.objectives.filter((objective) => !params.status || objective.status === params.status);
+      const text =
+        objectives.length === 0
+          ? "no conductor objectives"
+          : objectives
+              .map(
+                (objective) =>
+                  `${objective.title} [${objective.objectiveId}] status=${objective.status} tasks=${objective.taskIds.length}`,
+              )
+              .join("\n");
+      return { content: [{ type: "text", text }], details: { objectives } };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_create_objective",
+    label: "Conductor Create Objective",
+    description: "Create a parent-level conductor objective for coordinating multiple tasks",
+    parameters: Type.Object({
+      title: Type.String({ description: "Objective title" }),
+      prompt: Type.String({ description: "Objective prompt/goal" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const objective = createObjectiveForRepo(ctx.cwd, params);
+      return {
+        content: [{ type: "text", text: `created objective ${objective.title} [${objective.objectiveId}]` }],
+        details: { objective },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_update_objective",
+    label: "Conductor Update Objective",
+    description: "Update objective title, prompt, status, or summary",
+    parameters: Type.Object({
+      objectiveId: Type.String({ description: "Objective ID" }),
+      title: Type.Optional(Type.String()),
+      prompt: Type.Optional(Type.String()),
+      status: Type.Optional(
+        Type.Union([
+          Type.Literal("draft"),
+          Type.Literal("active"),
+          Type.Literal("blocked"),
+          Type.Literal("needs_review"),
+          Type.Literal("completed"),
+          Type.Literal("canceled"),
+        ]),
+      ),
+      summary: Type.Optional(Type.String()),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const objective = updateObjectiveForRepo(ctx.cwd, params);
+      return {
+        content: [{ type: "text", text: `updated objective ${objective.objectiveId}: status=${objective.status}` }],
+        details: { objective },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_link_task_to_objective",
+    label: "Conductor Link Task To Objective",
+    description: "Link an existing task into a parent-level conductor objective",
+    parameters: Type.Object({
+      objectiveId: Type.String({ description: "Objective ID" }),
+      taskId: Type.String({ description: "Task ID" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const objective = linkTaskToObjectiveForRepo(ctx.cwd, params.objectiveId, params.taskId);
+      return {
+        content: [{ type: "text", text: `linked task ${params.taskId} to objective ${params.objectiveId}` }],
+        details: { objective },
       };
     },
   });
@@ -440,6 +529,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       title: Type.String({ description: "Task title" }),
       prompt: Type.String({ description: "Task prompt/body" }),
+      objectiveId: Type.Optional(Type.String({ description: "Optional objective ID to link this task into" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const task = createTaskForRepo(ctx.cwd, params);

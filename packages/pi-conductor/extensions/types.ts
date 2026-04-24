@@ -1,6 +1,7 @@
 export const CONDUCTOR_SCHEMA_VERSION = 1;
 
 export type WorkerLifecycleState = "idle" | "running" | "blocked" | "ready_for_pr" | "done" | "broken";
+export type ObjectiveStatus = "draft" | "active" | "blocked" | "needs_review" | "completed" | "canceled";
 export type WorkerRunStatus = "success" | "error" | "aborted";
 
 export type TaskState =
@@ -140,6 +141,7 @@ export interface ConductorResourceRefs {
   runId?: string;
   gateId?: string;
   artifactId?: string;
+  objectiveId?: string;
 }
 
 export interface ConductorEvent {
@@ -154,6 +156,20 @@ export interface ConductorEvent {
   payload: Record<string, unknown>;
 }
 
+export interface ObjectiveRecord {
+  objectiveId: string;
+  title: string;
+  prompt: string;
+  status: ObjectiveStatus;
+  revision: number;
+  taskIds: string[];
+  gateIds: string[];
+  artifactIds: string[];
+  summary: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TaskRecord {
   taskId: string;
   title: string;
@@ -165,6 +181,7 @@ export interface TaskRecord {
   runIds: string[];
   artifactIds: string[];
   gateIds: string[];
+  objectiveId: string | null;
   latestProgress: string | null;
   createdAt: string;
   updatedAt: string;
@@ -267,6 +284,7 @@ export interface RunRecord {
   repoRoot: string;
   storageDir: string;
   workers: WorkerRecord[];
+  objectives: ObjectiveRecord[];
   tasks: TaskRecord[];
   runs: RunAttemptRecord[];
   gates: GateRecord[];

@@ -19,6 +19,7 @@ import {
 } from "./runtime.js";
 import {
   addConductorArtifact,
+  addObjective,
   addTask,
   addWorker,
   appendConductorEvent,
@@ -27,9 +28,11 @@ import {
   completeTaskRun,
   createConductorGate,
   createEmptyRun,
+  createObjectiveRecord,
   createTaskRecord,
   createWorkerRecord,
   finishWorkerRun,
+  linkTaskToObjective,
   readRun,
   reconcileRunLeases,
   recordTaskCompletion,
@@ -44,6 +47,7 @@ import {
   setWorkerTask,
   startTaskRun,
   startWorkerRun,
+  updateObjective,
   updateTask,
   writeRun,
 } from "./storage.js";
@@ -57,6 +61,8 @@ import type {
   EvidenceBundlePurpose,
   GateRecord,
   GateStatus,
+  ObjectiveRecord,
+  ObjectiveStatus,
   ReadinessCheck,
   ReadinessPurpose,
   RunAttemptRecord,
@@ -386,6 +392,10 @@ export function getOrCreateRunForRepo(repoRoot: string): RunRecord {
   return run;
 }
 
+function createObjectiveId(): string {
+  return `objective-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function createTaskId(): string {
   return `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -398,14 +408,57 @@ function leaseExpiryFromNow(leaseSeconds: number): string {
   return new Date(Date.now() + leaseSeconds * 1000).toISOString();
 }
 
-export function createTaskForRepo(repoRoot: string, input: { title: string; prompt: string }): TaskRecord {
+export function createObjectiveForRepo(repoRoot: string, input: { title: string; prompt: string }): ObjectiveRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const objective = createObjectiveRecord({
+    objectiveId: createObjectiveId(),
+    title: input.title,
+    prompt: input.prompt,
+  });
+  const updatedRun = addObjective(run, objective);
+  writeRun(updatedRun);
+  return objective;
+}
+
+export function updateObjectiveForRepo(
+  repoRoot: string,
+  input: { objectiveId: string; title?: string; prompt?: string; status?: ObjectiveStatus; summary?: string | null },
+): ObjectiveRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const updatedRun = updateObjective(run, input);
+  writeRun(updatedRun);
+  const objective = updatedRun.objectives.find((entry) => entry.objectiveId === input.objectiveId);
+  if (!objective) {
+    throw new Error(`Objective ${input.objectiveId} disappeared during update`);
+  }
+  return objective;
+}
+
+export function linkTaskToObjectiveForRepo(repoRoot: string, objectiveId: string, taskId: string): ObjectiveRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const updatedRun = linkTaskToObjective(run, objectiveId, taskId);
+  writeRun(updatedRun);
+  const objective = updatedRun.objectives.find((entry) => entry.objectiveId === objectiveId);
+  if (!objective) {
+    throw new Error(`Objective ${objectiveId} disappeared during link`);
+  }
+  return objective;
+}
+
+export function createTaskForRepo(
+  repoRoot: string,
+  input: { title: string; prompt: string; objectiveId?: string },
+): TaskRecord {
   const run = getOrCreateRunForRepo(repoRoot);
   const task = createTaskRecord({
     taskId: createTaskId(),
     title: input.title,
     prompt: input.prompt,
+    objectiveId: input.objectiveId,
   });
-  const updatedRun = addTask(run, task);
+  const updatedRun = input.objectiveId
+    ? linkTaskToObjective(addTask(run, task), input.objectiveId, task.taskId)
+    : addTask(run, task);
   writeRun(updatedRun);
   return task;
 }

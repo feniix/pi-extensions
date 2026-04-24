@@ -9,6 +9,8 @@ import type {
   ConductorResourceRefs,
   GateRecord,
   GateStatus,
+  ObjectiveRecord,
+  ObjectiveStatus,
   RunAttemptRecord,
   RunRecord,
   RunStatus,
@@ -52,11 +54,19 @@ function normalizeProjectRecord(run: RunRecord): RunRecord {
     schemaVersion: run.schemaVersion ?? CONDUCTOR_SCHEMA_VERSION,
     revision: run.revision ?? 0,
     workers: (run.workers ?? []).map(normalizeWorkerRecord),
-    tasks: run.tasks ?? [],
+    objectives: run.objectives ?? [],
+    tasks: (run.tasks ?? []).map(normalizeTaskRecord),
     runs: run.runs ?? [],
     gates: run.gates ?? [],
     artifacts: run.artifacts ?? [],
     events: run.events ?? [],
+  };
+}
+
+function normalizeTaskRecord(task: TaskRecord): TaskRecord {
+  return {
+    ...task,
+    objectiveId: task.objectiveId ?? null,
   };
 }
 
@@ -102,6 +112,9 @@ function assertRefsExist(
   if (refs.artifactId && !indexes.artifactIds.has(refs.artifactId)) {
     throw new Error(`${context} references missing artifact ${refs.artifactId}`);
   }
+  if (refs.objectiveId && !indexes.objectiveIds.has(refs.objectiveId)) {
+    throw new Error(`${context} references missing objective ${refs.objectiveId}`);
+  }
 }
 
 function createResourceIndexes(run: RunRecord) {
@@ -111,6 +124,7 @@ function createResourceIndexes(run: RunRecord) {
     runIds: new Set(run.runs.map((attempt) => attempt.runId)),
     gateIds: new Set(run.gates.map((gate) => gate.gateId)),
     artifactIds: new Set(run.artifacts.map((artifact) => artifact.artifactId)),
+    objectiveIds: new Set(run.objectives.map((objective) => objective.objectiveId)),
   };
 }
 
@@ -126,6 +140,10 @@ export function validateRunRecord(run: RunRecord): void {
   assertUnique(
     normalized.workers.map((worker) => worker.name),
     "worker name",
+  );
+  assertUnique(
+    normalized.objectives.map((objective) => objective.objectiveId),
+    "objectiveId",
   );
   assertUnique(
     normalized.tasks.map((task) => task.taskId),
@@ -145,7 +163,27 @@ export function validateRunRecord(run: RunRecord): void {
   );
 
   const indexes = createResourceIndexes(normalized);
+  for (const objective of normalized.objectives) {
+    for (const taskId of objective.taskIds) {
+      if (!indexes.taskIds.has(taskId)) {
+        throw new Error(`Objective ${objective.objectiveId} references missing task ${taskId}`);
+      }
+    }
+    for (const gateId of objective.gateIds) {
+      if (!indexes.gateIds.has(gateId)) {
+        throw new Error(`Objective ${objective.objectiveId} references missing gate ${gateId}`);
+      }
+    }
+    for (const artifactId of objective.artifactIds) {
+      if (!indexes.artifactIds.has(artifactId)) {
+        throw new Error(`Objective ${objective.objectiveId} references missing artifact ${artifactId}`);
+      }
+    }
+  }
   for (const task of normalized.tasks) {
+    if (task.objectiveId && !indexes.objectiveIds.has(task.objectiveId)) {
+      throw new Error(`Task ${task.taskId} references missing objective ${task.objectiveId}`);
+    }
     if (task.assignedWorkerId && !indexes.workerIds.has(task.assignedWorkerId)) {
       throw new Error(`Task ${task.taskId} references missing worker ${task.assignedWorkerId}`);
     }
@@ -246,6 +284,7 @@ export function createEmptyRun(projectKey: string, repoRoot: string): RunRecord 
     repoRoot: resolve(repoRoot),
     storageDir: getConductorProjectDir(projectKey),
     workers: [],
+    objectives: [],
     tasks: [],
     runs: [],
     gates: [],
@@ -365,7 +404,124 @@ export function queryConductorEvents(
   };
 }
 
-export function createTaskRecord(input: { taskId: string; title: string; prompt: string }): TaskRecord {
+export function createObjectiveRecord(input: {
+  objectiveId: string;
+  title: string;
+  prompt: string;
+  status?: ObjectiveStatus;
+}): ObjectiveRecord {
+  const now = new Date().toISOString();
+  return {
+    objectiveId: input.objectiveId,
+    title: input.title,
+    prompt: input.prompt,
+    status: input.status ?? "active",
+    revision: 1,
+    taskIds: [],
+    gateIds: [],
+    artifactIds: [],
+    summary: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function addObjective(run: RunRecord, objective: ObjectiveRecord): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  if (normalized.objectives.some((existing) => existing.objectiveId === objective.objectiveId)) {
+    throw new Error(`Objective ${objective.objectiveId} already exists`);
+  }
+  return appendConductorEvent(
+    {
+      ...normalized,
+      objectives: [...normalized.objectives, objective],
+      updatedAt: new Date().toISOString(),
+    },
+    {
+      actor: { type: "parent_agent", id: "conductor" },
+      type: "objective.created",
+      resourceRefs: { projectKey: normalized.projectKey, objectiveId: objective.objectiveId },
+      payload: { title: objective.title },
+    },
+  );
+}
+
+export function updateObjective(
+  run: RunRecord,
+  input: { objectiveId: string; title?: string; prompt?: string; status?: ObjectiveStatus; summary?: string | null },
+): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const existing = normalized.objectives.find((entry) => entry.objectiveId === input.objectiveId);
+  if (!existing) {
+    throw new Error(`Objective ${input.objectiveId} not found`);
+  }
+  const now = new Date().toISOString();
+  return appendConductorEvent(
+    {
+      ...normalized,
+      objectives: normalized.objectives.map((entry) =>
+        entry.objectiveId === input.objectiveId
+          ? {
+              ...entry,
+              title: input.title ?? entry.title,
+              prompt: input.prompt ?? entry.prompt,
+              status: input.status ?? entry.status,
+              summary: input.summary !== undefined ? input.summary : entry.summary,
+              revision: entry.revision + 1,
+              updatedAt: now,
+            }
+          : entry,
+      ),
+      updatedAt: now,
+    },
+    {
+      actor: { type: "parent_agent", id: "conductor" },
+      type: "objective.updated",
+      resourceRefs: { projectKey: normalized.projectKey, objectiveId: input.objectiveId },
+      payload: { status: input.status ?? existing.status },
+    },
+  );
+}
+
+export function linkTaskToObjective(run: RunRecord, objectiveId: string, taskId: string): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const objective = normalized.objectives.find((entry) => entry.objectiveId === objectiveId);
+  if (!objective) {
+    throw new Error(`Objective ${objectiveId} not found`);
+  }
+  const task = normalized.tasks.find((entry) => entry.taskId === taskId);
+  if (!task) {
+    throw new Error(`Task ${taskId} not found`);
+  }
+  const now = new Date().toISOString();
+  return appendConductorEvent(
+    {
+      ...normalized,
+      objectives: normalized.objectives.map((entry) =>
+        entry.objectiveId === objectiveId
+          ? { ...entry, taskIds: Array.from(new Set([...entry.taskIds, taskId])), updatedAt: now }
+          : entry,
+      ),
+      tasks: normalized.tasks.map((entry) =>
+        entry.taskId === taskId ? { ...entry, objectiveId, updatedAt: now } : entry,
+      ),
+      updatedAt: now,
+    },
+    {
+      actor: { type: "parent_agent", id: "conductor" },
+      type: "objective.task_linked",
+      resourceRefs: { projectKey: normalized.projectKey, objectiveId, taskId },
+      payload: {},
+    },
+  );
+}
+
+export function createTaskRecord(input: {
+  taskId: string;
+  title: string;
+  prompt: string;
+  objectiveId?: string;
+}): TaskRecord {
   const now = new Date().toISOString();
   return {
     taskId: input.taskId,
@@ -378,6 +534,7 @@ export function createTaskRecord(input: { taskId: string; title: string; prompt:
     runIds: [],
     artifactIds: [],
     gateIds: [],
+    objectiveId: input.objectiveId ?? null,
     latestProgress: null,
     createdAt: now,
     updatedAt: now,
