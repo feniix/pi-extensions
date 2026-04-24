@@ -32,7 +32,6 @@ import {
   cancelTaskRun,
   completeTaskRun,
   createConductorGate,
-  createEmptyRun,
   createObjectiveRecord,
   createTaskRecord,
   createWorkerRecord,
@@ -84,6 +83,18 @@ import type {
   WorkerRecord,
   WorkerRunResult,
 } from "./types.js";
+
+export type SchedulerPolicyName = "safe" | "execute";
+
+function resolveSchedulerPolicy(input: { policy?: SchedulerPolicyName; executeRuns?: boolean }): {
+  policy: SchedulerPolicyName;
+  executeRuns: boolean;
+} {
+  if (input.policy) {
+    return { policy: input.policy, executeRuns: input.policy === "execute" };
+  }
+  return { policy: input.executeRuns ? "execute" : "safe", executeRuns: input.executeRuns ?? false };
+}
 
 function mutateRepoRunSync(repoRoot: string, mutator: (run: RunRecord) => RunRecord): RunRecord {
   const normalizedRoot = resolve(repoRoot);
@@ -859,8 +870,9 @@ export function prepareHumanReviewForRepo(
 
 export async function runNextActionForRepo(
   repoRoot: string,
-  input: { objectiveId?: string; executeRuns?: boolean } = {},
+  input: { objectiveId?: string; executeRuns?: boolean; policy?: SchedulerPolicyName } = {},
 ): Promise<{ executed: boolean; reason: string | null; action: ConductorNextAction | null; result: unknown }> {
+  const schedulerPolicy = resolveSchedulerPolicy(input);
   const recommendation = getNextActionsForRepo(repoRoot, {
     objectiveId: input.objectiveId,
     maxActions: 1,
@@ -894,7 +906,7 @@ export async function runNextActionForRepo(
     return { executed: true, reason: null, action, result: reconcileProjectForRepo(repoRoot, { dryRun: false }) };
   }
   if (action.kind === "run_task" && typeof action.toolCall?.params.taskId === "string") {
-    if (!input.executeRuns) {
+    if (!schedulerPolicy.executeRuns) {
       return { executed: false, reason: "run execution disabled by scheduler policy", action, result: null };
     }
     return {
@@ -937,13 +949,20 @@ export async function runNextActionForRepo(
 
 export async function scheduleObjectiveForRepo(
   repoRoot: string,
-  input: { objectiveId?: string; objectiveIds?: string[]; maxConcurrency?: number; executeRuns?: boolean },
+  input: {
+    objectiveId?: string;
+    objectiveIds?: string[];
+    maxConcurrency?: number;
+    executeRuns?: boolean;
+    policy?: SchedulerPolicyName;
+  },
 ): Promise<{
   objectiveId: string | null;
   assigned: TaskRecord[];
   executed: Array<{ taskId: string; result: unknown }>;
   skipped: string[];
 }> {
+  const schedulerPolicy = resolveSchedulerPolicy(input);
   const maxConcurrency = Math.max(1, Math.min(input.maxConcurrency ?? 1, 10));
   const initialRun = getOrCreateRunForRepo(repoRoot);
   const objectiveIds =
@@ -975,7 +994,7 @@ export async function scheduleObjectiveForRepo(
       currentTask = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
       assigned.push(currentTask);
     }
-    if (input.executeRuns) {
+    if (schedulerPolicy.executeRuns) {
       const result = await runTaskForRepo(repoRoot, currentTask.taskId);
       executed.push({ taskId: currentTask.taskId, result });
     }
@@ -985,18 +1004,19 @@ export async function scheduleObjectiveForRepo(
 
 export async function schedulerTickForRepo(
   repoRoot: string,
-  input: { objectiveId?: string; maxActions?: number; executeRuns?: boolean } = {},
+  input: { objectiveId?: string; maxActions?: number; executeRuns?: boolean; policy?: SchedulerPolicyName } = {},
 ): Promise<{
   executed: Array<{ action: ConductorNextAction | null; result: unknown }>;
   skipped: Array<{ action: ConductorNextAction | null; reason: string | null }>;
 }> {
+  const schedulerPolicy = resolveSchedulerPolicy(input);
   const maxActions = Math.max(1, Math.min(input.maxActions ?? 1, 10));
   const executed: Array<{ action: ConductorNextAction | null; result: unknown }> = [];
   const skipped: Array<{ action: ConductorNextAction | null; reason: string | null }> = [];
   for (let index = 0; index < maxActions; index += 1) {
     const result = await runNextActionForRepo(repoRoot, {
       objectiveId: input.objectiveId,
-      executeRuns: input.executeRuns,
+      executeRuns: schedulerPolicy.executeRuns,
     });
     if (!result.executed) {
       skipped.push({ action: result.action, reason: result.reason });
@@ -1027,12 +1047,7 @@ export function getOrCreateRunForRepo(repoRoot: string): RunRecord {
   const normalizedRoot = resolve(repoRoot);
   const projectKey = deriveProjectKey(normalizedRoot);
   const existing = readRun(projectKey);
-  if (existing) {
-    return existing;
-  }
-  const run = createEmptyRun(projectKey, normalizedRoot);
-  writeRun(run);
-  return run;
+  return existing ?? mutateRepoRunSync(normalizedRoot, (run) => run);
 }
 
 function createObjectiveId(): string {
@@ -1052,14 +1067,15 @@ function leaseExpiryFromNow(leaseSeconds: number): string {
 }
 
 export function createObjectiveForRepo(repoRoot: string, input: { title: string; prompt: string }): ObjectiveRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const objective = createObjectiveRecord({
-    objectiveId: createObjectiveId(),
-    title: input.title,
-    prompt: input.prompt,
+  let objective!: ObjectiveRecord;
+  mutateRepoRunSync(repoRoot, (run) => {
+    objective = createObjectiveRecord({
+      objectiveId: createObjectiveId(),
+      title: input.title,
+      prompt: input.prompt,
+    });
+    return addObjective(run, objective);
   });
-  const updatedRun = addObjective(run, objective);
-  writeRun(updatedRun);
   return objective;
 }
 
@@ -1067,9 +1083,7 @@ export function updateObjectiveForRepo(
   repoRoot: string,
   input: { objectiveId: string; title?: string; prompt?: string; status?: ObjectiveStatus; summary?: string | null },
 ): ObjectiveRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const updatedRun = updateObjective(run, input);
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => updateObjective(run, input));
   const objective = updatedRun.objectives.find((entry) => entry.objectiveId === input.objectiveId);
   if (!objective) {
     throw new Error(`Objective ${input.objectiveId} disappeared during update`);
@@ -1078,43 +1092,43 @@ export function updateObjectiveForRepo(
 }
 
 export function refreshObjectiveStatusForRepo(repoRoot: string, objectiveId: string): ObjectiveRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const objective = run.objectives.find((entry) => entry.objectiveId === objectiveId);
-  if (!objective) {
-    throw new Error(`Objective ${objectiveId} not found`);
-  }
-  const tasks = run.tasks.filter((task) => objective.taskIds.includes(task.taskId));
-  const completed = tasks.filter((task) => task.state === "completed").length;
-  const blocked = tasks.filter((task) => ["blocked", "failed", "canceled"].includes(task.state)).length;
-  const needsReview = tasks.filter((task) => task.state === "needs_review").length;
-  const status =
-    tasks.length > 0 && completed === tasks.length
-      ? "completed"
-      : blocked > 0
-        ? "blocked"
-        : needsReview > 0
-          ? "needs_review"
-          : objective.status === "draft"
-            ? "draft"
-            : "active";
-  const summary = `${completed}/${tasks.length} tasks completed; blocked=${blocked}; needs_review=${needsReview}`;
-  const updatedRun = appendConductorEvent(
-    {
-      ...run,
-      objectives: run.objectives.map((entry) =>
-        entry.objectiveId === objectiveId
-          ? { ...entry, status, summary, revision: entry.revision + 1, updatedAt: new Date().toISOString() }
-          : entry,
-      ),
-    },
-    {
-      actor: { type: "system", id: "conductor" },
-      type: "objective.status_refreshed",
-      resourceRefs: { projectKey: run.projectKey, objectiveId },
-      payload: { status, summary },
-    },
-  );
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => {
+    const objective = run.objectives.find((entry) => entry.objectiveId === objectiveId);
+    if (!objective) {
+      throw new Error(`Objective ${objectiveId} not found`);
+    }
+    const tasks = run.tasks.filter((task) => objective.taskIds.includes(task.taskId));
+    const completed = tasks.filter((task) => task.state === "completed").length;
+    const blocked = tasks.filter((task) => ["blocked", "failed", "canceled"].includes(task.state)).length;
+    const needsReview = tasks.filter((task) => task.state === "needs_review").length;
+    const status =
+      tasks.length > 0 && completed === tasks.length
+        ? "completed"
+        : blocked > 0
+          ? "blocked"
+          : needsReview > 0
+            ? "needs_review"
+            : objective.status === "draft"
+              ? "draft"
+              : "active";
+    const summary = `${completed}/${tasks.length} tasks completed; blocked=${blocked}; needs_review=${needsReview}`;
+    return appendConductorEvent(
+      {
+        ...run,
+        objectives: run.objectives.map((entry) =>
+          entry.objectiveId === objectiveId
+            ? { ...entry, status, summary, revision: entry.revision + 1, updatedAt: new Date().toISOString() }
+            : entry,
+        ),
+      },
+      {
+        actor: { type: "system", id: "conductor" },
+        type: "objective.status_refreshed",
+        resourceRefs: { projectKey: run.projectKey, objectiveId },
+        payload: { status, summary },
+      },
+    );
+  });
   const updated = updatedRun.objectives.find((entry) => entry.objectiveId === objectiveId);
   if (!updated) {
     throw new Error(`Objective ${objectiveId} disappeared during status refresh`);
@@ -1123,9 +1137,7 @@ export function refreshObjectiveStatusForRepo(repoRoot: string, objectiveId: str
 }
 
 export function linkTaskToObjectiveForRepo(repoRoot: string, objectiveId: string, taskId: string): ObjectiveRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const updatedRun = linkTaskToObjective(run, objectiveId, taskId);
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => linkTaskToObjective(run, objectiveId, taskId));
   const objective = updatedRun.objectives.find((entry) => entry.objectiveId === objectiveId);
   if (!objective) {
     throw new Error(`Objective ${objectiveId} disappeared during link`);
@@ -1169,36 +1181,38 @@ export function planObjectiveForRepo(
     throw new Error("Objective plan must include at least one task");
   }
   validateObjectivePlanTasks(input.tasks);
-  let run = getOrCreateRunForRepo(repoRoot);
-  const objective = run.objectives.find((entry) => entry.objectiveId === input.objectiveId);
-  if (!objective) {
-    throw new Error(`Objective ${input.objectiveId} not found`);
-  }
   const createdTasks: TaskRecord[] = [];
-  for (const taskInput of input.tasks) {
-    const dependencyText = taskInput.dependsOn?.length ? `\n\nDepends on: ${taskInput.dependsOn.join(", ")}` : "";
-    const task = createTaskRecord({
-      taskId: createTaskId(),
-      title: taskInput.title,
-      prompt: `${taskInput.prompt}${dependencyText}`,
-      objectiveId: input.objectiveId,
-      dependsOnTaskIds: taskInput.dependsOn
-        ?.map(
-          (dependency) => createdTasks.find((task) => task.title === dependency || task.taskId === dependency)?.taskId,
-        )
-        .filter((taskId): taskId is string => Boolean(taskId)),
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => {
+    const objective = run.objectives.find((entry) => entry.objectiveId === input.objectiveId);
+    if (!objective) {
+      throw new Error(`Objective ${input.objectiveId} not found`);
+    }
+    let nextRun = run;
+    for (const taskInput of input.tasks) {
+      const dependencyText = taskInput.dependsOn?.length ? `\n\nDepends on: ${taskInput.dependsOn.join(", ")}` : "";
+      const task = createTaskRecord({
+        taskId: createTaskId(),
+        title: taskInput.title,
+        prompt: `${taskInput.prompt}${dependencyText}`,
+        objectiveId: input.objectiveId,
+        dependsOnTaskIds: taskInput.dependsOn
+          ?.map(
+            (dependency) =>
+              createdTasks.find((task) => task.title === dependency || task.taskId === dependency)?.taskId,
+          )
+          .filter((taskId): taskId is string => Boolean(taskId)),
+      });
+      nextRun = linkTaskToObjective(addTask(nextRun, task), input.objectiveId, task.taskId);
+      createdTasks.push(task);
+    }
+    return appendConductorEvent(nextRun, {
+      actor: { type: "parent_agent", id: "conductor" },
+      type: "objective.planned",
+      resourceRefs: { projectKey: nextRun.projectKey, objectiveId: input.objectiveId },
+      payload: { taskIds: createdTasks.map((task) => task.taskId), rationale: input.rationale ?? null },
     });
-    run = linkTaskToObjective(addTask(run, task), input.objectiveId, task.taskId);
-    createdTasks.push(task);
-  }
-  run = appendConductorEvent(run, {
-    actor: { type: "parent_agent", id: "conductor" },
-    type: "objective.planned",
-    resourceRefs: { projectKey: run.projectKey, objectiveId: input.objectiveId },
-    payload: { taskIds: createdTasks.map((task) => task.taskId), rationale: input.rationale ?? null },
   });
-  writeRun(run);
-  const updatedObjective = run.objectives.find((entry) => entry.objectiveId === input.objectiveId);
+  const updatedObjective = updatedRun.objectives.find((entry) => entry.objectiveId === input.objectiveId);
   if (!updatedObjective) {
     throw new Error(`Objective ${input.objectiveId} disappeared during planning`);
   }

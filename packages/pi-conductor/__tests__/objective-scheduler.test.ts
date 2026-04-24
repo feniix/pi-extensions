@@ -74,6 +74,21 @@ describe("objective DAG scheduler", () => {
     expect(getOrCreateRunForRepo(repoRoot).tasks.filter((task) => task.state === "assigned")).toHaveLength(1);
   });
 
+  it("safe objective scheduling assigns without executing runs", async () => {
+    const objective = createObjectiveForRepo(repoRoot, { title: "Schedule safely", prompt: "Assign ready work" });
+    createTaskForRepo(repoRoot, { title: "First", prompt: "Do first safely", objectiveId: objective.objectiveId });
+    addIdleWorkers(1);
+
+    const result = await scheduleObjectiveForRepo(repoRoot, {
+      objectiveId: objective.objectiveId,
+      maxConcurrency: 1,
+      policy: "safe",
+    });
+
+    expect(result.assigned).toHaveLength(1);
+    expect(result.executed).toHaveLength(0);
+  });
+
   it("schedules one runnable task per objective across objectives", async () => {
     const firstObjective = createObjectiveForRepo(repoRoot, { title: "First objective", prompt: "Run one" });
     const secondObjective = createObjectiveForRepo(repoRoot, { title: "Second objective", prompt: "Run two" });

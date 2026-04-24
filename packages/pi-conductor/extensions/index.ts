@@ -71,6 +71,8 @@ function findRepoRoot(cwd: string): string | null {
   }
 }
 
+const schedulerPolicySchema = Type.Union([Type.Literal("safe"), Type.Literal("execute")]);
+
 function shouldRegisterLegacyWorkerTools(): boolean {
   return process.env.PI_CONDUCTOR_ENABLE_LEGACY_WORKER_TOOLS === "1";
 }
@@ -344,6 +346,8 @@ export default function conductorExtension(pi: ExtensionAPI) {
     description: "Safely execute the highest-priority non-human conductor next action when supported",
     parameters: Type.Object({
       objectiveId: Type.Optional(Type.String({ description: "Optional objective scope" })),
+      policy: Type.Optional(schedulerPolicySchema),
+      executeRuns: Type.Optional(Type.Boolean({ description: "Allow starting model/backend task execution" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const result = await runNextActionForRepo(ctx.cwd, params);
@@ -367,6 +371,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
       objectiveId: Type.Optional(Type.String({ description: "Objective ID" })),
       objectiveIds: Type.Optional(Type.Array(Type.String({ description: "Objective IDs to consider" }))),
       maxConcurrency: Type.Optional(Type.Number({ description: "Maximum runnable tasks to schedule; defaults to 1" })),
+      policy: Type.Optional(schedulerPolicySchema),
       executeRuns: Type.Optional(Type.Boolean({ description: "Also execute assigned runnable tasks" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -390,6 +395,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       objectiveId: Type.Optional(Type.String({ description: "Optional objective scope" })),
       maxActions: Type.Optional(Type.Number({ description: "Maximum safe actions to execute; defaults to 1" })),
+      policy: Type.Optional(schedulerPolicySchema),
       executeRuns: Type.Optional(
         Type.Boolean({ description: "Allow scheduler to start model/backend task execution" }),
       ),

@@ -88,6 +88,49 @@ describe("storage helpers", () => {
     expect(() => validateRunRecord(invalid)).toThrow(/Event sequence/i);
   });
 
+  it("validates event runtime shape", () => {
+    const run = appendConductorEvent(createEmptyRun("abc", "/tmp/repo"), {
+      actor: { type: "system", id: "test" },
+      type: "project.created",
+      resourceRefs: { projectKey: "abc" },
+      payload: {},
+    });
+    const event = run.events[0];
+    if (!event) {
+      throw new Error("expected event");
+    }
+
+    expect(() => validateRunRecord({ ...run, events: [{ ...event, type: "not.real" } as never] })).toThrow(
+      /invalid event type/i,
+    );
+    expect(() =>
+      validateRunRecord({ ...run, events: [{ ...event, actor: { type: "robot", id: "test" } } as never] }),
+    ).toThrow(/invalid actor type/i);
+    expect(() => validateRunRecord({ ...run, events: [{ ...event, payload: "not-object" } as never] })).toThrow(
+      /invalid payload/i,
+    );
+  });
+
+  it("rejects malformed persisted event records on read", () => {
+    const run = appendConductorEvent(createEmptyRun("abc", "/tmp/repo"), {
+      actor: { type: "system", id: "test" },
+      type: "project.created",
+      resourceRefs: { projectKey: "abc" },
+      payload: {},
+    });
+    const event = run.events[0];
+    if (!event) {
+      throw new Error("expected event");
+    }
+    mkdirSync(getConductorProjectDir("abc"), { recursive: true });
+    writeFileSync(
+      join(getConductorProjectDir("abc"), "run.json"),
+      JSON.stringify({ ...run, events: [{ ...event, type: "not.real" }] }),
+    );
+
+    expect(() => readRun("abc")).toThrow(/Failed to read conductor state.*invalid event type/i);
+  });
+
   it("validates event resource references", () => {
     const run = appendConductorEvent(createEmptyRun("abc", "/tmp/repo"), {
       actor: { type: "system", id: "test" },

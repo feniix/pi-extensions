@@ -88,6 +88,27 @@ describe("conductor scheduler and async next action", () => {
     );
   });
 
+  it("safe scheduler policy skips model execution", async () => {
+    addUsableWorkerAndAssignedTask();
+
+    const result = await schedulerTickForRepo(repoRoot, { maxActions: 1, policy: "safe" });
+
+    expect(result.executed).toHaveLength(0);
+    expect(result.skipped[0]).toMatchObject({ reason: "run execution disabled by scheduler policy" });
+  });
+
+  it("execute scheduler policy allows model execution", async () => {
+    const task = addUsableWorkerAndAssignedTask();
+
+    const result = await schedulerTickForRepo(repoRoot, { maxActions: 1, policy: "execute" });
+
+    expect(result.executed).toHaveLength(1);
+    expect(result.executed[0]?.action?.kind).toBe("run_task");
+    expect(getOrCreateRunForRepo(repoRoot).tasks.find((entry) => entry.taskId === task.taskId)?.state).toBe(
+      "completed",
+    );
+  });
+
   it("scheduler ticks execute bounded safe actions", async () => {
     addUsableWorkerAndAssignedTask();
 

@@ -128,6 +128,51 @@ function normalizeWorkerRecord(worker: WorkerRecord): WorkerRecord {
   };
 }
 
+const conductorEventTypes = new Set<ConductorEventType>([
+  "artifact.created",
+  "backend.unavailable",
+  "gate.created",
+  "gate.resolved",
+  "gate.used",
+  "objective.created",
+  "objective.planned",
+  "objective.status_refreshed",
+  "objective.task_linked",
+  "objective.updated",
+  "project.created",
+  "run.cancel_rejected",
+  "run.canceled",
+  "run.completed",
+  "run.heartbeat",
+  "run.lease_expired",
+  "run.progress_reported",
+  "run.started",
+  "task.assigned",
+  "task.completion_rejected",
+  "task.created",
+  "task.followup_created",
+  "task.progress",
+  "task.progress_rejected",
+  "task.updated",
+  "worker.archived",
+  "worker.created",
+  "worker.lifecycle_changed",
+  "worker.pr_updated",
+]);
+
+const conductorActorTypes = new Set<ConductorActor["type"]>([
+  "parent_agent",
+  "child_run",
+  "human",
+  "backend",
+  "system",
+  "test",
+]);
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function assertUnique(ids: string[], label: string): void {
   const seen = new Set<string>();
   for (const id of ids) {
@@ -263,6 +308,24 @@ export function validateRunRecord(run: RunRecord): void {
   }
   let previousSequence = 0;
   for (const event of normalized.events) {
+    if (typeof event.eventId !== "string" || !event.eventId) {
+      throw new Error("Event has invalid eventId");
+    }
+    if (!conductorEventTypes.has(event.type)) {
+      throw new Error(`Event ${event.eventId} has invalid event type ${String(event.type)}`);
+    }
+    if (!event.actor || !conductorActorTypes.has(event.actor.type) || typeof event.actor.id !== "string") {
+      throw new Error(`Event ${event.eventId} has invalid actor type`);
+    }
+    if (!isPlainRecord(event.resourceRefs)) {
+      throw new Error(`Event ${event.eventId} has invalid resourceRefs`);
+    }
+    if (!isPlainRecord(event.payload)) {
+      throw new Error(`Event ${event.eventId} has invalid payload`);
+    }
+    if (typeof event.occurredAt !== "string" || !event.occurredAt) {
+      throw new Error(`Event ${event.eventId} has invalid occurredAt`);
+    }
     if (event.schemaVersion !== CONDUCTOR_SCHEMA_VERSION) {
       throw new Error(`Event ${event.eventId} has unsupported schemaVersion ${event.schemaVersion}`);
     }
@@ -283,8 +346,9 @@ export function readRun(projectKey: string): RunRecord | null {
     return null;
   }
   try {
-    const run = JSON.parse(readFileSync(path, "utf-8")) as RunRecord;
-    return normalizeProjectRecord(run);
+    const run = normalizeProjectRecord(JSON.parse(readFileSync(path, "utf-8")) as RunRecord);
+    validateRunRecord(run);
+    return run;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to read conductor state for project ${projectKey} at ${path}: ${message}`);
