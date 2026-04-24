@@ -13,6 +13,7 @@ import {
   createWorkerForRepo,
   createWorkerPrForRepo,
   delegateTaskForRepo,
+  getNextActionsForRepo,
   getOrCreateRunForRepo,
   pushWorkerForRepo,
   reconcileProjectForRepo,
@@ -141,6 +142,32 @@ export default function conductorExtension(pi: ExtensionAPI) {
         ],
         details: { project: after, changed, dryRun: params.dryRun ?? false },
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_next_actions",
+    label: "Conductor Next Actions",
+    description: "Recommend prioritized parent-agent orchestration actions from current durable conductor state",
+    parameters: Type.Object({
+      maxActions: Type.Optional(Type.Number({ description: "Maximum actions to return; defaults to 10, max 25" })),
+      includeLowPriority: Type.Optional(Type.Boolean({ description: "Include low-priority monitoring/no-op actions" })),
+      includePrActions: Type.Optional(Type.Boolean({ description: "Include PR preparation recommendations" })),
+      includeHumanGateActions: Type.Optional(
+        Type.Boolean({ description: "Include actions that require human gate decisions" }),
+      ),
+      reconcile: Type.Optional(
+        Type.Boolean({ description: "Preview reconciliation before recommending actions; defaults to true" }),
+      ),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const recommendations = getNextActionsForRepo(ctx.cwd, params);
+      const text = recommendations.actions.length
+        ? recommendations.actions
+            .map((action, index) => `${index + 1}. [${action.priority}] ${action.title}`)
+            .join("\n")
+        : `No conductor actions recommended: ${recommendations.summary.headline}`;
+      return { content: [{ type: "text", text }], details: recommendations };
     },
   });
 

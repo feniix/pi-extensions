@@ -42,6 +42,58 @@ export interface ConductorActor {
   id: string;
 }
 
+export type ConductorNextActionPriority = "critical" | "high" | "medium" | "low";
+export type ConductorNextActionKind =
+  | "reconcile_project"
+  | "recover_worker"
+  | "create_worker"
+  | "assign_task"
+  | "run_task"
+  | "wait_for_run"
+  | "resolve_gate"
+  | "await_human_gate"
+  | "review_task"
+  | "retry_task"
+  | "commit_worker"
+  | "push_worker"
+  | "create_ready_for_pr_gate"
+  | "create_worker_pr"
+  | "no_action";
+
+export interface ConductorNextAction {
+  actionId: string;
+  priority: ConductorNextActionPriority;
+  kind: ConductorNextActionKind;
+  title: string;
+  rationale: string;
+  resourceRefs: ConductorResourceRefs;
+  toolCall: null | { name: string; params: Record<string, unknown> };
+  requiresHuman: boolean;
+  destructive: boolean;
+  blockedBy: ConductorResourceRefs[];
+  confidence: "high" | "medium" | "low";
+}
+
+export interface ConductorNextActionsResponse {
+  project: {
+    projectKey: string;
+    repoRoot: string;
+    schemaVersion: number;
+    revision: number;
+    reconciledPreview: boolean;
+    counts: { workers: number; tasks: number; runs: number; gates: number; artifacts: number; events: number };
+  };
+  summary: {
+    status: "actionable" | "waiting" | "healthy_idle" | "empty" | "blocked" | "error";
+    headline: string;
+    totalActions: number;
+    returnedActions: number;
+    highestPriority: ConductorNextActionPriority | null;
+  };
+  actions: ConductorNextAction[];
+  omitted: { count: number; reason: string | null };
+}
+
 export interface ConductorResourceRefs {
   projectKey?: string;
   workerId?: string;
