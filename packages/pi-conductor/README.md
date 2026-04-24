@@ -31,7 +31,7 @@ Agent-native local control plane for Pi worker orchestration.
 - Gate-protected risky operations:
   - PR creation requires an approved `ready_for_pr` gate.
   - Worker cleanup requires an approved `destructive_cleanup` gate.
-- Optional `pi-subagents` backend availability inspection. Conductor remains canonical state owner.
+- Optional `pi-subagents` backend availability inspection. Conductor remains canonical state owner, and unsupported `pi-subagents` dispatch requests fail closed without creating a run.
 - Legacy worker command/tool surface remains during the transition, but new model-callable tools are the primary orchestration surface.
 
 ## Command surface
