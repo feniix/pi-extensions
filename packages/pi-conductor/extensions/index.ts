@@ -7,6 +7,7 @@ import { runConductorCommand } from "./commands.js";
 import {
   assignTaskForRepo,
   buildEvidenceBundleForRepo,
+  buildProjectBriefForRepo,
   cancelTaskRunForRepo,
   checkReadinessForRepo,
   commitWorkerForRepo,
@@ -262,6 +263,20 @@ export default function conductorExtension(pi: ExtensionAPI) {
         ],
         details: { project: after, changed, dryRun: params.dryRun ?? false },
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_project_brief",
+    label: "Conductor Project Brief",
+    description: "Return an LLM-oriented markdown and structured brief of current conductor state",
+    parameters: Type.Object({
+      maxActions: Type.Optional(Type.Number({ description: "Maximum next actions to include; defaults to 5" })),
+      recentEventLimit: Type.Optional(Type.Number({ description: "Recent events to include; defaults to 10, max 50" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const brief = buildProjectBriefForRepo(ctx.cwd, params);
+      return { content: [{ type: "text", text: brief.markdown }], details: { brief } };
     },
   });
 

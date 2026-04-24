@@ -57,6 +57,7 @@ import type {
   ConductorNextAction,
   ConductorNextActionPriority,
   ConductorNextActionsResponse,
+  ConductorProjectBrief,
   ConductorResourceRefs,
   EvidenceBundle,
   EvidenceBundlePurpose,
@@ -389,6 +390,78 @@ export function computeNextActions(
       count: Math.max(0, sorted.length - returned.length),
       reason: sorted.length > returned.length ? "maxActions" : null,
     },
+  };
+}
+
+export function buildProjectBriefForRepo(
+  repoRoot: string,
+  input: { maxActions?: number; recentEventLimit?: number } = {},
+): ConductorProjectBrief {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const nextActions = computeNextActions(run, { maxActions: input.maxActions ?? 5 }).actions;
+  const blockers = run.gates.filter((gate) => gate.status === "open");
+  const objectives = run.objectives.map((objective) => {
+    const tasks = run.tasks.filter((task) => objective.taskIds.includes(task.taskId));
+    return {
+      objectiveId: objective.objectiveId,
+      title: objective.title,
+      status: objective.status,
+      taskCount: tasks.length,
+      completedTaskCount: tasks.filter((task) => task.state === "completed").length,
+      blockedTaskCount: tasks.filter((task) => ["blocked", "failed", "needs_review"].includes(task.state)).length,
+    };
+  });
+  const recentEventLimit = Math.max(1, Math.min(input.recentEventLimit ?? 10, 50));
+  const recentEvents = run.events.slice(-recentEventLimit);
+  const lines = [
+    "# Conductor Project Brief",
+    "",
+    `Project: ${run.projectKey}`,
+    `Revision: ${run.revision}`,
+    `Counts: workers=${run.workers.length} objectives=${run.objectives.length} tasks=${run.tasks.length} runs=${run.runs.length} gates=${run.gates.length} artifacts=${run.artifacts.length}`,
+    "",
+    "## Objectives",
+    objectives.length === 0
+      ? "- none"
+      : objectives
+          .map(
+            (objective) =>
+              `- ${objective.title} [${objective.objectiveId}] status=${objective.status} tasks=${objective.taskCount} completed=${objective.completedTaskCount} blocked=${objective.blockedTaskCount}`,
+          )
+          .join("\n"),
+    "",
+    "## Blockers",
+    blockers.length === 0
+      ? "- none"
+      : blockers
+          .map((gate) => `- ${gate.type} [${gate.gateId}] ${gate.requestedDecision} operation=${gate.operation}`)
+          .join("\n"),
+    "",
+    "## Recommended Next Actions",
+    nextActions.length === 0
+      ? "- none"
+      : nextActions.map((action) => `- [${action.priority}] ${action.kind}: ${action.title}`).join("\n"),
+  ];
+  return {
+    markdown: lines.join("\n"),
+    project: {
+      projectKey: run.projectKey,
+      repoRoot: run.repoRoot,
+      revision: run.revision,
+      counts: {
+        workers: run.workers.length,
+        objectives: run.objectives.length,
+        tasks: run.tasks.length,
+        runs: run.runs.length,
+        gates: run.gates.length,
+        artifacts: run.artifacts.length,
+        events: run.events.length,
+      },
+    },
+    objectives,
+    blockers,
+    nextActions,
+    recentEvents,
   };
 }
 

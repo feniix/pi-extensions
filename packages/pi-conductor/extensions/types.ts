@@ -117,6 +117,35 @@ export interface ReadinessCheck {
   warnings: Array<{ code: string; message: string; resourceRefs?: ConductorResourceRefs }>;
 }
 
+export interface ConductorProjectBrief {
+  markdown: string;
+  project: {
+    projectKey: string;
+    repoRoot: string;
+    revision: number;
+    counts: {
+      workers: number;
+      objectives: number;
+      tasks: number;
+      runs: number;
+      gates: number;
+      artifacts: number;
+      events: number;
+    };
+  };
+  objectives: Array<{
+    objectiveId: string;
+    title: string;
+    status: ObjectiveStatus;
+    taskCount: number;
+    completedTaskCount: number;
+    blockedTaskCount: number;
+  }>;
+  blockers: GateRecord[];
+  nextActions: ConductorNextAction[];
+  recentEvents: ConductorEvent[];
+}
+
 export interface ConductorNextActionsResponse {
   project: {
     projectKey: string;
