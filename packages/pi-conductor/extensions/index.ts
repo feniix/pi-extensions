@@ -21,6 +21,7 @@ import {
   removeWorkerForRepo,
   resolveGateForRepo,
   resumeWorkerForRepo,
+  runTaskForRepo,
   runWorkerForRepo,
   startTaskRunForRepo,
   updateWorkerLifecycleForRepo,
@@ -347,6 +348,23 @@ export default function conductorExtension(pi: ExtensionAPI) {
           },
         ],
         details: started,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_run_task",
+    label: "Conductor Run Task",
+    description: "Run an assigned durable task through its worker using scoped child completion tools",
+    parameters: Type.Object({
+      taskId: Type.String({ description: "Task ID to run" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = await runTaskForRepo(ctx.cwd, params.taskId);
+      const summary = result.finalText ?? result.errorMessage ?? "Run completed without a final assistant summary";
+      return {
+        content: [{ type: "text", text: `ran task ${params.taskId}: outcome=${result.status} result=${summary}` }],
+        details: result,
       };
     },
   });

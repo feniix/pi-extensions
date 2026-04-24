@@ -20,6 +20,7 @@ import {
   addTask,
   addWorker,
   assignTaskToWorker,
+  completeTaskRun,
   createConductorGate,
   createEmptyRun,
   createTaskRecord,
@@ -451,6 +452,68 @@ export function createWorkerPrForRepo(
     writeRun(updatedRun);
     throw error;
   }
+}
+
+function mapWorkerRunStatusToRunStatus(status: WorkerRunResult["status"]): "succeeded" | "failed" | "aborted" {
+  switch (status) {
+    case "success":
+      return "succeeded";
+    case "aborted":
+      return "aborted";
+    default:
+      return "failed";
+  }
+}
+
+export async function runTaskForRepo(repoRoot: string, taskId: string): Promise<WorkerRunResult> {
+  const started = startTaskRunForRepo(repoRoot, { taskId });
+  let currentRun = getOrCreateRunForRepo(repoRoot);
+  const worker = currentRun.workers.find((entry) => entry.workerId === started.run.workerId);
+  const task = currentRun.tasks.find((entry) => entry.taskId === taskId);
+  if (!worker || !task) {
+    throw new Error(`Task ${taskId} has invalid worker/run references`);
+  }
+  if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
+    throw new Error(`Worker ${worker.name} is missing its session file; recover the worker first`);
+  }
+  if (!worker.worktreePath || !existsSync(worker.worktreePath)) {
+    throw new Error(`Worker ${worker.name} is missing its worktree; recover the worker first`);
+  }
+
+  await preflightWorkerRunRuntime({ worktreePath: worker.worktreePath, sessionFile: worker.sessionFile });
+
+  const runtimeResult = await runWorkerPromptRuntime({
+    worktreePath: worker.worktreePath,
+    sessionFile: worker.sessionFile,
+    task: task.prompt,
+    taskContract: started.taskContract,
+    onConductorProgress: async (progress) => {
+      recordTaskProgressForRepo(repoRoot, progress);
+    },
+    onConductorComplete: async (completion) => {
+      recordTaskCompletionForRepo(repoRoot, completion);
+    },
+  });
+
+  currentRun = getOrCreateRunForRepo(repoRoot);
+  const runAttempt = currentRun.runs.find((entry) => entry.runId === started.run.runId);
+  if (runAttempt && !runAttempt.finishedAt) {
+    const completedRun = completeTaskRun(currentRun, {
+      runId: started.run.runId,
+      status: mapWorkerRunStatusToRunStatus(runtimeResult.status),
+      completionSummary: runtimeResult.finalText,
+      errorMessage: runtimeResult.errorMessage,
+    });
+    writeRun(completedRun);
+  }
+
+  return {
+    workerName: worker.name,
+    status: runtimeResult.status,
+    finalText: runtimeResult.finalText,
+    errorMessage: runtimeResult.errorMessage,
+    sessionId: runtimeResult.sessionId,
+  };
 }
 
 export async function runWorkerForRepo(repoRoot: string, workerName: string, task: string): Promise<WorkerRunResult> {

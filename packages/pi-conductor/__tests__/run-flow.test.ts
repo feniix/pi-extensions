@@ -19,8 +19,11 @@ vi.mock("../extensions/runtime.js", async (importOriginal) => {
 });
 
 import {
+  assignTaskForRepo,
+  createTaskForRepo,
   createWorkerForRepo,
   getOrCreateRunForRepo,
+  runTaskForRepo,
   runWorkerForRepo,
   updateWorkerLifecycleForRepo,
   updateWorkerTaskForRepo,
@@ -93,6 +96,42 @@ describe("worker run flows", () => {
       errorMessage: null,
       sessionId: "run-session-1",
     });
+  });
+
+  it("runs a durable assigned task with scoped child progress and completion", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Durable task", prompt: "Implement the durable flow" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(
+      async ({ taskContract, onConductorProgress, onConductorComplete }) => {
+        expect(taskContract).toMatchObject({ taskId: task.taskId, goal: "Implement the durable flow" });
+        await onConductorProgress?.({
+          runId: taskContract.runId,
+          taskId: task.taskId,
+          progress: "halfway",
+          artifact: { type: "log", ref: "progress://halfway" },
+        });
+        await onConductorComplete?.({
+          runId: taskContract.runId,
+          taskId: task.taskId,
+          status: "succeeded",
+          completionSummary: "done with evidence",
+          artifact: { type: "completion_report", ref: "completion://done" },
+        });
+        return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-durable" };
+      },
+    );
+
+    const result = await runTaskForRepo(repoDir, task.taskId);
+
+    expect(result.status).toBe("success");
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "completed", latestProgress: "halfway", activeRunId: null });
+    expect(persisted.runs[0]).toMatchObject({ status: "succeeded", completionSummary: "done with evidence" });
+    expect(persisted.artifacts.map((artifact) => artifact.type)).toEqual(["log", "completion_report"]);
+    expect(persisted.events.map((event) => event.type)).toContain("run.progress_reported");
+    expect(persisted.events.map((event) => event.type)).toContain("run.completed");
   });
 
   it("fails fast on preflight without mutating currentTask or lifecycle", async () => {
