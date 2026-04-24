@@ -29,8 +29,8 @@ describe("worker run runtime helpers", () => {
     expect(prompt).toContain("revision 2");
     expect(prompt).toContain("Implement durable tasks");
     expect(prompt).toContain("Do not publish a PR");
-    expect(prompt).toContain("conductor_complete_task");
-    expect(prompt).toContain("conductor_report_progress");
+    expect(prompt).toContain("conductor_child_complete");
+    expect(prompt).toContain("conductor_child_progress");
   });
 
   it("maps Pi stop reasons to conductor run outcomes", () => {
