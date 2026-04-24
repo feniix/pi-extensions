@@ -468,6 +468,20 @@ export function createWorkerPrForRepo(
   if (!worker.worktreePath || !existsSync(worker.worktreePath) || !worker.branch) {
     throw new Error(`Worker named ${workerName} does not have a valid worktree or branch`);
   }
+  const readyGate = run.gates.find(
+    (gate) =>
+      gate.type === "ready_for_pr" && gate.resourceRefs.workerId === worker.workerId && gate.status !== "canceled",
+  );
+  if (readyGate?.status !== "approved") {
+    if (!readyGate) {
+      createGateForRepo(repoRoot, {
+        type: "ready_for_pr",
+        resourceRefs: { workerId: worker.workerId },
+        requestedDecision: `Approve creating a pull request for worker ${worker.name}`,
+      });
+    }
+    throw new Error(`Worker ${worker.name} requires an approved ready_for_pr gate before PR creation`);
+  }
   validatePrPreconditions(run.repoRoot);
   const prBody = body?.trim() || worker.summary.text || worker.currentTask || `PR for ${worker.name}`;
   try {

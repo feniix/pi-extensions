@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runConductorCommand } from "../extensions/commands.js";
-import { getOrCreateRunForRepo } from "../extensions/conductor.js";
+import { createGateForRepo, getOrCreateRunForRepo, resolveGateForRepo } from "../extensions/conductor.js";
 
 describe("PR preparation flow", () => {
   let repoDir: string;
@@ -59,6 +59,24 @@ describe("PR preparation flow", () => {
     return worker.worktreePath;
   }
 
+  function approveWorkerPrGate(): void {
+    const worker = getOrCreateRunForRepo(repoDir).workers[0];
+    if (!worker) {
+      throw new Error("worker missing");
+    }
+    const gate = createGateForRepo(repoDir, {
+      type: "ready_for_pr",
+      resourceRefs: { workerId: worker.workerId },
+      requestedDecision: "Approve PR creation",
+    });
+    resolveGateForRepo(repoDir, {
+      gateId: gate.gateId,
+      status: "approved",
+      actor: { type: "human", id: "reviewer" },
+      resolutionReason: "ready",
+    });
+  }
+
   it("commits worker changes and persists commit state", async () => {
     const worktreePath = await createChangedWorker();
     const text = await runConductorCommand(repoDir, "commit backend feat: add backend worker");
@@ -87,6 +105,21 @@ describe("PR preparation flow", () => {
     expect(remoteHead).toContain("refs/heads/conductor/backend");
   });
 
+  it("requires an approved ready_for_pr gate before creating a pull request", async () => {
+    writeFakeGhScript(
+      'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'https://github.com/example/repo/pull/123\'',
+    );
+    await createChangedWorker();
+    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
+    await runConductorCommand(repoDir, "push backend");
+
+    await expect(runConductorCommand(repoDir, "pr backend Backend worker PR")).rejects.toThrow(/ready_for_pr gate/i);
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.gates[0]).toMatchObject({ type: "ready_for_pr", status: "open" });
+    expect(run.workers[0]?.pr.prCreationAttempted).toBe(false);
+  });
+
   it("creates a pull request and persists PR metadata", async () => {
     writeFakeGhScript(
       'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'https://github.com/example/repo/pull/123\'',
@@ -94,6 +127,7 @@ describe("PR preparation flow", () => {
     await createChangedWorker();
     await runConductorCommand(repoDir, "commit backend feat: add backend worker");
     await runConductorCommand(repoDir, "push backend");
+    approveWorkerPrGate();
     const text = await runConductorCommand(repoDir, "pr backend Backend worker PR");
     expect(text).toContain("created PR for backend");
     expect(text).toContain("pull/123");
@@ -111,6 +145,7 @@ describe("PR preparation flow", () => {
     await createChangedWorker();
     await runConductorCommand(repoDir, "commit backend feat: add backend worker");
     await runConductorCommand(repoDir, "push backend");
+    approveWorkerPrGate();
 
     await expect(runConductorCommand(repoDir, "pr backend Backend worker PR")).rejects.toThrow();
 
@@ -127,6 +162,7 @@ describe("PR preparation flow", () => {
     await createChangedWorker();
     await runConductorCommand(repoDir, "commit backend feat: add backend worker");
     await runConductorCommand(repoDir, "push backend");
+    approveWorkerPrGate();
 
     await expect(runConductorCommand(repoDir, "pr backend Backend worker PR")).rejects.toThrow(/GitHub CLI/i);
 
@@ -143,6 +179,7 @@ describe("PR preparation flow", () => {
     await createChangedWorker();
     await runConductorCommand(repoDir, "commit backend feat: add backend worker");
     await runConductorCommand(repoDir, "push backend");
+    approveWorkerPrGate();
 
     await expect(runConductorCommand(repoDir, "pr backend Backend worker PR")).rejects.toThrow(/authenticated/i);
 
