@@ -26,6 +26,7 @@ import {
   reconcileProjectForRepo,
   reconcileWorkerHealth,
   recoverWorkerForRepo,
+  refreshObjectiveStatusForRepo,
   refreshWorkerSummaryForRepo,
   removeWorkerForRepo,
   resolveGateForRepo,
@@ -223,6 +224,27 @@ export default function conductorExtension(pi: ExtensionAPI) {
       const objective = updateObjectiveForRepo(ctx.cwd, params);
       return {
         content: [{ type: "text", text: `updated objective ${objective.objectiveId}: status=${objective.status}` }],
+        details: { objective },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_refresh_objective_status",
+    label: "Conductor Refresh Objective Status",
+    description: "Roll up linked task states into an objective status and summary",
+    parameters: Type.Object({
+      objectiveId: Type.String({ description: "Objective ID" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const objective = refreshObjectiveStatusForRepo(ctx.cwd, params.objectiveId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `objective ${objective.objectiveId}: ${objective.status} — ${objective.summary ?? ""}`,
+          },
+        ],
         details: { objective },
       };
     },

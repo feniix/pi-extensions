@@ -620,6 +620,51 @@ export function updateObjectiveForRepo(
   return objective;
 }
 
+export function refreshObjectiveStatusForRepo(repoRoot: string, objectiveId: string): ObjectiveRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const objective = run.objectives.find((entry) => entry.objectiveId === objectiveId);
+  if (!objective) {
+    throw new Error(`Objective ${objectiveId} not found`);
+  }
+  const tasks = run.tasks.filter((task) => objective.taskIds.includes(task.taskId));
+  const completed = tasks.filter((task) => task.state === "completed").length;
+  const blocked = tasks.filter((task) => ["blocked", "failed", "canceled"].includes(task.state)).length;
+  const needsReview = tasks.filter((task) => task.state === "needs_review").length;
+  const status =
+    tasks.length > 0 && completed === tasks.length
+      ? "completed"
+      : blocked > 0
+        ? "blocked"
+        : needsReview > 0
+          ? "needs_review"
+          : objective.status === "draft"
+            ? "draft"
+            : "active";
+  const summary = `${completed}/${tasks.length} tasks completed; blocked=${blocked}; needs_review=${needsReview}`;
+  const updatedRun = appendConductorEvent(
+    {
+      ...run,
+      objectives: run.objectives.map((entry) =>
+        entry.objectiveId === objectiveId
+          ? { ...entry, status, summary, revision: entry.revision + 1, updatedAt: new Date().toISOString() }
+          : entry,
+      ),
+    },
+    {
+      actor: { type: "system", id: "conductor" },
+      type: "objective.status_refreshed",
+      resourceRefs: { projectKey: run.projectKey, objectiveId },
+      payload: { status, summary },
+    },
+  );
+  writeRun(updatedRun);
+  const updated = updatedRun.objectives.find((entry) => entry.objectiveId === objectiveId);
+  if (!updated) {
+    throw new Error(`Objective ${objectiveId} disappeared during status refresh`);
+  }
+  return updated;
+}
+
 export function linkTaskToObjectiveForRepo(repoRoot: string, objectiveId: string, taskId: string): ObjectiveRecord {
   const run = getOrCreateRunForRepo(repoRoot);
   const updatedRun = linkTaskToObjective(run, objectiveId, taskId);
