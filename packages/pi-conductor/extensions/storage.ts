@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import type {
   ArtifactRecord,
   ArtifactType,
@@ -685,6 +685,21 @@ export function resolveConductorGate(
   });
 }
 
+function assertSafeArtifactRef(ref: string): void {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(ref)) {
+    return;
+  }
+  const normalized = normalize(ref);
+  if (
+    isAbsolute(ref) ||
+    normalized === ".." ||
+    normalized.startsWith(`..${"/"}`) ||
+    normalized.includes(`${"/"}..${"/"}`)
+  ) {
+    throw new Error(`Unsafe artifact ref '${ref}'`);
+  }
+}
+
 function createArtifactRecord(input: {
   artifactId: string;
   type: ArtifactType;
@@ -693,6 +708,7 @@ function createArtifactRecord(input: {
   producer: ArtifactRecord["producer"];
   metadata?: Record<string, unknown>;
 }): ArtifactRecord {
+  assertSafeArtifactRef(input.ref);
   const now = new Date().toISOString();
   return {
     artifactId: input.artifactId,

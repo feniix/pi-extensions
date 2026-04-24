@@ -251,6 +251,40 @@ describe("storage helpers", () => {
     expect(queryConductorEvents(run, { type: "task.progress", limit: 1 }).hasMore).toBe(true);
   });
 
+  it("rejects unsafe local artifact refs", () => {
+    let run = addWorker(
+      createEmptyRun("abc", "/repo"),
+      createWorkerRecord({
+        workerId: "worker-1",
+        name: "backend",
+        branch: "conductor/backend",
+        worktreePath: "/repo/.worktrees/backend",
+        sessionFile: "/tmp/session.jsonl",
+      }),
+    );
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+
+    expect(() =>
+      recordTaskProgress(run, {
+        runId: "run-1",
+        taskId: "task-1",
+        progress: "captured log",
+        artifact: { type: "log", ref: "../outside.log" },
+      }),
+    ).toThrow(/unsafe artifact ref/i);
+  });
+
   it("records scoped child progress and completion artifacts", () => {
     let run = addWorker(
       createEmptyRun("abc", "/repo"),
