@@ -205,6 +205,33 @@ export interface ConductorResourceRefs {
   objectiveId?: string;
 }
 
+export type ConductorEventType =
+  | "artifact.created"
+  | "backend.unavailable"
+  | "gate.created"
+  | "gate.resolved"
+  | "gate.used"
+  | "objective.created"
+  | "objective.planned"
+  | "objective.status_refreshed"
+  | "objective.task_linked"
+  | "objective.updated"
+  | "project.created"
+  | "run.cancel_rejected"
+  | "run.canceled"
+  | "run.completed"
+  | "run.heartbeat"
+  | "run.lease_expired"
+  | "run.progress_reported"
+  | "run.started"
+  | "task.assigned"
+  | "task.completion_rejected"
+  | "task.created"
+  | "task.followup_created"
+  | "task.progress"
+  | "task.progress_rejected"
+  | "task.updated";
+
 export interface ConductorEvent {
   eventId: string;
   sequence: number;
@@ -212,7 +239,7 @@ export interface ConductorEvent {
   projectRevision: number;
   occurredAt: string;
   actor: ConductorActor;
-  type: string;
+  type: ConductorEventType;
   resourceRefs: ConductorResourceRefs;
   payload: Record<string, unknown>;
 }

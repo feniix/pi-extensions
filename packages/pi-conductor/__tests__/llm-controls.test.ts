@@ -33,10 +33,10 @@ describe("LLM autonomous control helpers", () => {
     if (existsSync(repoRoot)) rmSync(repoRoot, { recursive: true, force: true });
   });
 
-  it("executes the safest non-human next action", () => {
+  it("executes the safest non-human next action", async () => {
     const objective = createObjectiveForRepo(repoRoot, { title: "Ship", prompt: "Plan tasks" });
 
-    const result = runNextActionForRepo(repoRoot, { objectiveId: objective.objectiveId });
+    const result = await runNextActionForRepo(repoRoot, { objectiveId: objective.objectiveId });
 
     expect(result.executed).toBe(true);
     expect(result.action?.kind).toBe("plan_objective");

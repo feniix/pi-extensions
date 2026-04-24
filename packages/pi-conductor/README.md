@@ -163,6 +163,7 @@ conductor_create_objective({ title: "Ship feature", prompt: "Implement and verif
 conductor_plan_objective({ objectiveId, tasks: [{ title: "Implement", prompt: "Make the code change" }] })
 conductor_next_actions({ objectiveId })
 conductor_run_next_action({ objectiveId })
+conductor_scheduler_tick({ objectiveId, maxActions: 1 })
 ```
 
 Inspect dependency scheduling for parallel-safe work:
@@ -186,7 +187,7 @@ conductor_list_artifacts({ taskId })
 conductor_read_artifact({ artifactId, maxBytes: 8192 })
 ```
 
-Human-only approval gates such as `ready_for_pr` and `destructive_cleanup` are surfaced for review but are not safe autonomous actions.
+Human-only approval gates such as `ready_for_pr` and `destructive_cleanup` are surfaced for review but are not safe autonomous actions. The model-facing `conductor_resolve_gate` tool resolves only as a parent agent; trusted human approval must come from a host/UI path.
 
 ## Development
 

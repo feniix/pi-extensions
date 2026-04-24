@@ -40,6 +40,7 @@ import {
   runNextActionForRepo,
   runTaskForRepo,
   runWorkerForRepo,
+  schedulerTickForRepo,
   startTaskRunForRepo,
   updateObjectiveForRepo,
   updateTaskForRepo,
@@ -340,7 +341,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
       objectiveId: Type.Optional(Type.String({ description: "Optional objective scope" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = runNextActionForRepo(ctx.cwd, params);
+      const result = await runNextActionForRepo(ctx.cwd, params);
       return {
         content: [
           {
@@ -348,6 +349,23 @@ export default function conductorExtension(pi: ExtensionAPI) {
             text: result.executed ? `executed ${result.action?.kind}` : `no action executed: ${result.reason}`,
           },
         ],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_scheduler_tick",
+    label: "Conductor Scheduler Tick",
+    description: "Execute a bounded deterministic conductor scheduler tick over safe next actions",
+    parameters: Type.Object({
+      objectiveId: Type.Optional(Type.String({ description: "Optional objective scope" })),
+      maxActions: Type.Optional(Type.Number({ description: "Maximum safe actions to execute; defaults to 1" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = await schedulerTickForRepo(ctx.cwd, params);
+      return {
+        content: [{ type: "text", text: `scheduler executed ${result.executed.length} action(s)` }],
         details: result,
       };
     },

@@ -1,0 +1,99 @@
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createTaskForRepo,
+  getOrCreateRunForRepo,
+  runNextActionForRepo,
+  schedulerTickForRepo,
+} from "../extensions/conductor.js";
+import { writeRun } from "../extensions/storage.js";
+
+vi.mock("../extensions/runtime.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../extensions/runtime.js")>();
+  return {
+    ...actual,
+    preflightWorkerRunRuntime: vi.fn(() => undefined),
+    runWorkerPromptRuntime: vi.fn(async (input) => {
+      await input.onConductorComplete?.({
+        runId: input.taskContract?.runId ?? "run-unknown",
+        taskId: input.taskContract?.taskId ?? "task-unknown",
+        status: "succeeded",
+        completionSummary: "done by scheduler",
+        artifact: { type: "completion_report", ref: "completion://scheduler" },
+      });
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "session-1" };
+    }),
+  };
+});
+
+describe("conductor scheduler and async next action", () => {
+  let conductorHome: string;
+  let repoRoot: string;
+
+  beforeEach(() => {
+    conductorHome = mkdtempSync(join(tmpdir(), "pi-conductor-home-"));
+    repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
+    process.env.PI_CONDUCTOR_HOME = conductorHome;
+  });
+
+  afterEach(() => {
+    delete process.env.PI_CONDUCTOR_HOME;
+    if (existsSync(conductorHome)) rmSync(conductorHome, { recursive: true, force: true });
+    if (existsSync(repoRoot)) rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  function addUsableWorkerAndAssignedTask() {
+    writeFileSync(join(repoRoot, "session.jsonl"), "", "utf-8");
+    const task = createTaskForRepo(repoRoot, { title: "Run me", prompt: "Do runnable work" });
+    const run = getOrCreateRunForRepo(repoRoot);
+    const now = new Date().toISOString();
+    writeRun({
+      ...run,
+      workers: [
+        {
+          workerId: "worker-1",
+          name: "worker",
+          branch: null,
+          worktreePath: repoRoot,
+          sessionFile: join(repoRoot, "session.jsonl"),
+          runtime: { backend: "session_manager", sessionId: null, lastResumedAt: null },
+          currentTask: null,
+          lifecycle: "idle",
+          recoverable: false,
+          lastRun: null,
+          summary: { text: null, updatedAt: null, stale: false },
+          pr: { url: null, number: null, commitSucceeded: false, pushSucceeded: false, prCreationAttempted: false },
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      tasks: run.tasks.map((entry) =>
+        entry.taskId === task.taskId ? { ...entry, assignedWorkerId: "worker-1", state: "assigned" } : entry,
+      ),
+    });
+    return task;
+  }
+
+  it("run next action can execute a runnable task", async () => {
+    const task = addUsableWorkerAndAssignedTask();
+
+    const result = await runNextActionForRepo(repoRoot);
+
+    expect(result.executed).toBe(true);
+    expect(result.action?.kind).toBe("run_task");
+    expect(getOrCreateRunForRepo(repoRoot).tasks.find((entry) => entry.taskId === task.taskId)?.state).toBe(
+      "completed",
+    );
+  });
+
+  it("scheduler ticks execute bounded safe actions", async () => {
+    addUsableWorkerAndAssignedTask();
+
+    const result = await schedulerTickForRepo(repoRoot, { maxActions: 1 });
+
+    expect(result.executed).toHaveLength(1);
+    expect(result.executed[0]?.action?.kind).toBe("run_task");
+  });
+});

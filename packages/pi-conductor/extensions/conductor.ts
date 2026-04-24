@@ -841,10 +841,10 @@ export function prepareHumanReviewForRepo(
   return { markdown, objective, task, nextActions, blockers };
 }
 
-export function runNextActionForRepo(
+export async function runNextActionForRepo(
   repoRoot: string,
   input: { objectiveId?: string } = {},
-): { executed: boolean; reason: string | null; action: ConductorNextAction | null; result: unknown } {
+): Promise<{ executed: boolean; reason: string | null; action: ConductorNextAction | null; result: unknown }> {
   const recommendation = getNextActionsForRepo(repoRoot, {
     objectiveId: input.objectiveId,
     maxActions: 1,
@@ -877,6 +877,14 @@ export function runNextActionForRepo(
   if (action.kind === "reconcile_project") {
     return { executed: true, reason: null, action, result: reconcileProjectForRepo(repoRoot, { dryRun: false }) };
   }
+  if (action.kind === "run_task" && typeof action.toolCall?.params.taskId === "string") {
+    return {
+      executed: true,
+      reason: null,
+      action,
+      result: await runTaskForRepo(repoRoot, action.toolCall.params.taskId),
+    };
+  }
   if (action.kind === "retry_task" && typeof action.toolCall?.params.taskId === "string") {
     return {
       executed: true,
@@ -898,6 +906,27 @@ export function runNextActionForRepo(
     };
   }
   return { executed: false, reason: `unsupported action ${action.kind}`, action, result: null };
+}
+
+export async function schedulerTickForRepo(
+  repoRoot: string,
+  input: { objectiveId?: string; maxActions?: number } = {},
+): Promise<{
+  executed: Array<{ action: ConductorNextAction | null; result: unknown }>;
+  skipped: Array<{ action: ConductorNextAction | null; reason: string | null }>;
+}> {
+  const maxActions = Math.max(1, Math.min(input.maxActions ?? 1, 10));
+  const executed: Array<{ action: ConductorNextAction | null; result: unknown }> = [];
+  const skipped: Array<{ action: ConductorNextAction | null; reason: string | null }> = [];
+  for (let index = 0; index < maxActions; index += 1) {
+    const result = await runNextActionForRepo(repoRoot, { objectiveId: input.objectiveId });
+    if (!result.executed) {
+      skipped.push({ action: result.action, reason: result.reason });
+      break;
+    }
+    executed.push({ action: result.action, result: result.result });
+  }
+  return { executed, skipped };
 }
 
 export function getNextActionsForRepo(

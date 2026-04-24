@@ -60,13 +60,13 @@ describe("LLM hardening follow-ups", () => {
     return worker;
   }
 
-  it("run next action executes retry and reconcile recommendations", () => {
+  it("run next action executes retry and reconcile recommendations", async () => {
     const task = createTaskForRepo(repoRoot, { title: "Retry me", prompt: "Recover from failure" });
     const worker = addWorkerAndAssign(task.taskId);
     const run = getOrCreateRunForRepo(repoRoot);
     writeRun({ ...run, tasks: run.tasks.map((entry) => ({ ...entry, state: "failed" as const })) });
 
-    const retry = runNextActionForRepo(repoRoot);
+    const retry = await runNextActionForRepo(repoRoot);
     expect(retry.executed).toBe(true);
     expect(retry.action?.kind).toBe("retry_task");
 
@@ -76,7 +76,7 @@ describe("LLM hardening follow-ups", () => {
       runs: running.runs.map((entry) => ({ ...entry, leaseExpiresAt: "2000-01-01T00:00:00.000Z" })),
       workers: running.workers.map((entry) => ({ ...entry, workerId: worker.workerId })),
     });
-    const reconcile = runNextActionForRepo(repoRoot);
+    const reconcile = await runNextActionForRepo(repoRoot);
     expect(reconcile.executed).toBe(true);
     expect(reconcile.action?.kind).toBe("reconcile_project");
   });
@@ -131,7 +131,7 @@ describe("LLM hardening follow-ups", () => {
     expect(dag.externalDependencies).toEqual([{ taskId: second.taskId, dependsOnTaskId: external.taskId }]);
   });
 
-  it("auto-refreshes objective status after cancel and retry transitions", () => {
+  it("auto-refreshes objective status after cancel and retry transitions", async () => {
     const objective = createObjectiveForRepo(repoRoot, { title: "Refresh", prompt: "Track state" });
     const task = createTaskForRepo(repoRoot, {
       title: "Cancel",
@@ -144,7 +144,7 @@ describe("LLM hardening follow-ups", () => {
     cancelTaskRunForRepo(repoRoot, { runId: started.run.runId, reason: "stop" });
     expect(getOrCreateRunForRepo(repoRoot).objectives[0]?.status).toBe("blocked");
 
-    runNextActionForRepo(repoRoot);
+    await runNextActionForRepo(repoRoot);
     expect(getOrCreateRunForRepo(repoRoot).objectives[0]?.status).toBe("active");
   });
 

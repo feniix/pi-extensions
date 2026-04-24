@@ -1,7 +1,9 @@
 import {
+  closeSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -17,6 +19,7 @@ import type {
   ArtifactType,
   ConductorActor,
   ConductorEvent,
+  ConductorEventType,
   ConductorResourceRefs,
   GateOperation,
   GateRecord,
@@ -50,6 +53,10 @@ export function getConductorProjectDir(projectKey: string): string {
 
 export function getRunFile(projectKey: string): string {
   return join(getConductorProjectDir(projectKey), "run.json");
+}
+
+export function getRunLockFile(projectKey: string): string {
+  return join(getConductorProjectDir(projectKey), "run.lock");
 }
 
 export function ensureDir(path: string): void {
@@ -288,6 +295,33 @@ export function writeRun(run: RunRecord): void {
 
 const projectMutationLocks = new Map<string, Promise<void>>();
 
+function acquireRunFileLock(projectKey: string): () => void {
+  const lockPath = getRunLockFile(projectKey);
+  ensureDir(dirname(lockPath));
+  const fd = openSync(lockPath, "w");
+  writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }));
+  return () => {
+    closeSync(fd);
+    rmSync(lockPath, { force: true });
+  };
+}
+
+export async function mutateRunWithFileLock(
+  projectKey: string,
+  repoRoot: string,
+  mutator: (run: RunRecord) => RunRecord | Promise<RunRecord>,
+): Promise<RunRecord> {
+  const release = acquireRunFileLock(projectKey);
+  try {
+    const current = readRun(projectKey) ?? createEmptyRun(projectKey, repoRoot);
+    const updated = await mutator(current);
+    writeRun(updated);
+    return updated;
+  } finally {
+    release();
+  }
+}
+
 export async function mutateRun(
   projectKey: string,
   repoRoot: string,
@@ -342,7 +376,7 @@ export function appendConductorEvent(
   run: RunRecord,
   input: {
     actor: ConductorActor;
-    type: string;
+    type: ConductorEventType;
     resourceRefs: ConductorResourceRefs;
     payload?: Record<string, unknown>;
   },
