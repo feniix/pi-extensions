@@ -29,6 +29,7 @@ export type RunStatus =
   | "interrupted"
   | "unknown_dispatch";
 export type GateStatus = "open" | "approved" | "rejected" | "canceled";
+export type GateOperation = "create_worker_pr" | "destructive_cleanup" | "resolve_blocker" | "generic";
 export type ArtifactType =
   | "note"
   | "test_result"
@@ -216,6 +217,10 @@ export interface GateRecord {
   status: GateStatus;
   resourceRefs: ConductorResourceRefs;
   requestedDecision: string;
+  operation: GateOperation;
+  targetRevision: number | null;
+  expiresAt: string | null;
+  usedAt: string | null;
   resolvedBy: ConductorActor | null;
   resolutionReason: string | null;
   createdAt: string;

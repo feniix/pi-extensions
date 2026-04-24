@@ -58,6 +58,24 @@ describe("cleanup flows", () => {
     }
   });
 
+  it("rejects destructive cleanup approvals scoped to the wrong operation", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const gate = createGateForRepo(repoDir, {
+      type: "destructive_cleanup",
+      resourceRefs: { workerId: worker.workerId },
+      requestedDecision: "Approve wrong operation",
+      operation: "create_worker_pr",
+    });
+    resolveGateForRepo(repoDir, {
+      gateId: gate.gateId,
+      status: "approved",
+      actor: { type: "human", id: "reviewer" },
+      resolutionReason: "approved",
+    });
+
+    expect(() => removeWorkerForRepo(repoDir, "backend")).toThrow(/destructive_cleanup/i);
+  });
+
   it("removes a worker record and its worktree", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const worktreePath = requireValue(worker.worktreePath, "worker worktree missing");
@@ -66,7 +84,9 @@ describe("cleanup flows", () => {
     const removed = removeWorkerForRepo(repoDir, "backend");
     expect(removed.workerId).toBe(worker.workerId);
     expect(existsSync(worktreePath)).toBe(false);
-    expect(getOrCreateRunForRepo(repoDir).workers).toHaveLength(0);
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers).toHaveLength(0);
+    expect(run.events.map((event) => event.type)).toContain("gate.used");
   });
 
   it("removes the persisted session file when cleaning up a worker", async () => {

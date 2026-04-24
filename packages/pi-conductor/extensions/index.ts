@@ -641,6 +641,12 @@ export default function conductorExtension(pi: ExtensionAPI) {
     Type.Literal("ready_for_pr"),
     Type.Literal("destructive_cleanup"),
   ]);
+  const gateOperationSchema = Type.Union([
+    Type.Literal("create_worker_pr"),
+    Type.Literal("destructive_cleanup"),
+    Type.Literal("resolve_blocker"),
+    Type.Literal("generic"),
+  ]);
 
   pi.registerTool({
     name: "conductor_create_gate",
@@ -655,8 +661,16 @@ export default function conductorExtension(pi: ExtensionAPI) {
           taskId: Type.Optional(Type.String()),
           runId: Type.Optional(Type.String()),
           artifactId: Type.Optional(Type.String()),
+          objectiveId: Type.Optional(Type.String()),
         },
         { additionalProperties: false },
+      ),
+      operation: Type.Optional(gateOperationSchema),
+      targetRevision: Type.Optional(
+        Type.Number({ description: "Optional target resource revision this approval is bound to" }),
+      ),
+      expiresAt: Type.Optional(
+        Type.String({ description: "Optional ISO timestamp after which the gate cannot be approved" }),
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

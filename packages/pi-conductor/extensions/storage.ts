@@ -7,6 +7,7 @@ import type {
   ConductorActor,
   ConductorEvent,
   ConductorResourceRefs,
+  GateOperation,
   GateRecord,
   GateStatus,
   ObjectiveRecord,
@@ -57,9 +58,34 @@ function normalizeProjectRecord(run: RunRecord): RunRecord {
     objectives: run.objectives ?? [],
     tasks: (run.tasks ?? []).map(normalizeTaskRecord),
     runs: run.runs ?? [],
-    gates: run.gates ?? [],
+    gates: (run.gates ?? []).map(normalizeGateRecord),
     artifacts: run.artifacts ?? [],
     events: run.events ?? [],
+  };
+}
+
+function defaultOperationForGate(type: GateRecord["type"]): GateOperation {
+  switch (type) {
+    case "ready_for_pr":
+      return "create_worker_pr";
+    case "destructive_cleanup":
+      return "destructive_cleanup";
+    case "needs_input":
+    case "needs_review":
+    case "approval_required":
+      return "resolve_blocker";
+    default:
+      return "generic";
+  }
+}
+
+function normalizeGateRecord(gate: GateRecord): GateRecord {
+  return {
+    ...gate,
+    operation: gate.operation ?? defaultOperationForGate(gate.type),
+    targetRevision: gate.targetRevision ?? null,
+    expiresAt: gate.expiresAt ?? null,
+    usedAt: gate.usedAt ?? null,
   };
 }
 
@@ -894,6 +920,9 @@ export function createConductorGate(
     type: GateRecord["type"];
     resourceRefs: GateRecord["resourceRefs"];
     requestedDecision: string;
+    operation?: GateOperation;
+    targetRevision?: number | null;
+    expiresAt?: string | null;
   },
 ): RunRecord {
   const normalized = normalizeProjectRecord(run);
@@ -907,6 +936,10 @@ export function createConductorGate(
     status: "open",
     resourceRefs: { projectKey: normalized.projectKey, ...input.resourceRefs },
     requestedDecision: input.requestedDecision,
+    operation: input.operation ?? defaultOperationForGate(input.type),
+    targetRevision: input.targetRevision ?? null,
+    expiresAt: input.expiresAt ?? null,
+    usedAt: null,
     resolvedBy: null,
     resolutionReason: null,
     createdAt: now,
@@ -922,7 +955,40 @@ export function createConductorGate(
     actor: { type: "system", id: "storage" },
     type: "gate.created",
     resourceRefs: gate.resourceRefs,
-    payload: { gateId: gate.gateId, gateType: gate.type, requestedDecision: gate.requestedDecision },
+    payload: {
+      gateId: gate.gateId,
+      gateType: gate.type,
+      requestedDecision: gate.requestedDecision,
+      operation: gate.operation,
+      targetRevision: gate.targetRevision,
+      expiresAt: gate.expiresAt,
+    },
+  });
+}
+
+export function markConductorGateUsed(run: RunRecord, gateId: string, input: { usedAt?: string } = {}): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const existing = normalized.gates.find((entry) => entry.gateId === gateId);
+  if (!existing) {
+    throw new Error(`Gate ${gateId} not found`);
+  }
+  if (existing.status !== "approved") {
+    throw new Error(`Gate ${gateId} is not approved`);
+  }
+  if (existing.usedAt) {
+    throw new Error(`Gate ${gateId} has already been used`);
+  }
+  const usedAt = input.usedAt ?? new Date().toISOString();
+  const updated = {
+    ...normalized,
+    gates: normalized.gates.map((entry) => (entry.gateId === gateId ? { ...entry, usedAt, updatedAt: usedAt } : entry)),
+    updatedAt: usedAt,
+  };
+  return appendConductorEvent(updated, {
+    actor: { type: "system", id: "storage" },
+    type: "gate.used",
+    resourceRefs: existing.resourceRefs,
+    payload: { gateId, operation: existing.operation },
   });
 }
 
@@ -942,6 +1008,9 @@ export function resolveConductorGate(
   }
   if (existing.status !== "open") {
     throw new Error(`Gate ${input.gateId} is already resolved`);
+  }
+  if (existing.expiresAt && existing.expiresAt <= new Date().toISOString()) {
+    throw new Error(`Gate ${input.gateId} expired at ${existing.expiresAt}`);
   }
   if (input.status === "approved" && requiresHumanApproval(existing.type) && input.actor?.type !== "human") {
     throw new Error(`A human actor is required to approve ${existing.type} gate ${input.gateId}`);

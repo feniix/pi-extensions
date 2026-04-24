@@ -128,6 +128,31 @@ describe("PR preparation flow", () => {
     expect(run.workers[0]?.pr.prCreationAttempted).toBe(false);
   });
 
+  it("rejects ready_for_pr approvals scoped to the wrong operation", async () => {
+    writeFakeGhScript(
+      'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'https://github.com/example/repo/pull/123\'',
+    );
+    await createChangedWorker();
+    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
+    await runConductorCommand(repoDir, "push backend");
+    const worker = getOrCreateRunForRepo(repoDir).workers[0];
+    if (!worker) throw new Error("worker missing");
+    const gate = createGateForRepo(repoDir, {
+      type: "ready_for_pr",
+      resourceRefs: { workerId: worker.workerId },
+      requestedDecision: "Approve the wrong thing",
+      operation: "destructive_cleanup",
+    });
+    resolveGateForRepo(repoDir, {
+      gateId: gate.gateId,
+      status: "approved",
+      actor: { type: "human", id: "reviewer" },
+      resolutionReason: "ready",
+    });
+
+    await expect(runConductorCommand(repoDir, "pr backend Backend worker PR")).rejects.toThrow(/create_worker_pr/i);
+  });
+
   it("creates a pull request and persists PR metadata", async () => {
     writeFakeGhScript(
       'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'https://github.com/example/repo/pull/123\'',
@@ -146,6 +171,23 @@ describe("PR preparation flow", () => {
     expect(run.workers[0]?.pr.url).toContain("pull/123");
     expect(run.artifacts[0]).toMatchObject({ type: "pr_evidence", ref: "https://github.com/example/repo/pull/123" });
     expect(run.events.map((event) => event.type)).toContain("artifact.created");
+    const gate = run.gates.find((entry) => entry.type === "ready_for_pr");
+    expect(gate?.usedAt).toBeTruthy();
+  });
+
+  it("does not reuse consumed ready_for_pr approvals", async () => {
+    writeFakeGhScript(
+      'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'https://github.com/example/repo/pull/123\'',
+    );
+    await createChangedWorker();
+    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
+    await runConductorCommand(repoDir, "push backend");
+    approveWorkerPrGate();
+    await runConductorCommand(repoDir, "pr backend Backend worker PR");
+
+    await expect(runConductorCommand(repoDir, "pr backend Backend worker PR Again")).rejects.toThrow(
+      /fresh ready_for_pr gate/i,
+    );
   });
 
   it("links PR evidence to completed worker tasks", async () => {

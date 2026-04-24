@@ -33,6 +33,7 @@ import {
   createWorkerRecord,
   finishWorkerRun,
   linkTaskToObjective,
+  markConductorGateUsed,
   readRun,
   reconcileRunLeases,
   recordTaskCompletion,
@@ -565,7 +566,15 @@ export function recordTaskCompletionForRepo(
 
 export function createGateForRepo(
   repoRoot: string,
-  input: { type: GateRecord["type"]; resourceRefs: ConductorResourceRefs; requestedDecision: string; gateId?: string },
+  input: {
+    type: GateRecord["type"];
+    resourceRefs: ConductorResourceRefs;
+    requestedDecision: string;
+    gateId?: string;
+    operation?: GateRecord["operation"];
+    targetRevision?: number | null;
+    expiresAt?: string | null;
+  },
 ): GateRecord {
   const run = getOrCreateRunForRepo(repoRoot);
   const gateId = input.gateId ?? `gate-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1122,8 +1131,21 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
     (gate) =>
       gate.type === "destructive_cleanup" &&
       gate.resourceRefs.workerId === worker.workerId &&
-      gate.status !== "canceled",
+      gate.operation === "destructive_cleanup" &&
+      gate.status !== "canceled" &&
+      gate.usedAt === null,
   );
+  const wrongOperationGate = run.gates.find(
+    (gate) =>
+      gate.type === "destructive_cleanup" &&
+      gate.resourceRefs.workerId === worker.workerId &&
+      gate.status === "approved" &&
+      gate.operation !== "destructive_cleanup" &&
+      gate.usedAt === null,
+  );
+  if (wrongOperationGate) {
+    throw new Error(`Worker ${worker.name} requires a destructive_cleanup gate scoped to destructive_cleanup`);
+  }
   if (cleanupGate?.status !== "approved") {
     if (!cleanupGate) {
       createGateForRepo(repoRoot, {
@@ -1143,7 +1165,7 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
   if (worker.branch) {
     removeManagedBranch(run.repoRoot, worker.branch);
   }
-  const updatedRun = removeWorker(run, worker.workerId);
+  const updatedRun = removeWorker(markConductorGateUsed(run, cleanupGate.gateId), worker.workerId);
   writeRun(updatedRun);
   return worker;
 }
@@ -1203,8 +1225,23 @@ export function createWorkerPrForRepo(
   }
   const readyGate = run.gates.find(
     (gate) =>
-      gate.type === "ready_for_pr" && gate.resourceRefs.workerId === worker.workerId && gate.status !== "canceled",
+      gate.type === "ready_for_pr" &&
+      gate.resourceRefs.workerId === worker.workerId &&
+      gate.operation === "create_worker_pr" &&
+      gate.status !== "canceled" &&
+      gate.usedAt === null,
   );
+  const wrongOperationGate = run.gates.find(
+    (gate) =>
+      gate.type === "ready_for_pr" &&
+      gate.resourceRefs.workerId === worker.workerId &&
+      gate.status === "approved" &&
+      gate.operation !== "create_worker_pr" &&
+      gate.usedAt === null,
+  );
+  if (wrongOperationGate) {
+    throw new Error(`Worker ${worker.name} requires a ready_for_pr gate scoped to create_worker_pr`);
+  }
   if (readyGate?.status !== "approved") {
     if (!readyGate) {
       createGateForRepo(repoRoot, {
@@ -1212,6 +1249,12 @@ export function createWorkerPrForRepo(
         resourceRefs: { workerId: worker.workerId },
         requestedDecision: `Approve creating a pull request for worker ${worker.name}`,
       });
+    }
+    const consumedGate = run.gates.find(
+      (gate) => gate.type === "ready_for_pr" && gate.resourceRefs.workerId === worker.workerId && gate.usedAt !== null,
+    );
+    if (consumedGate) {
+      throw new Error(`Worker ${worker.name} requires a fresh ready_for_pr gate before PR creation`);
     }
     throw new Error(`Worker ${worker.name} requires an approved ready_for_pr gate before PR creation`);
   }
@@ -1225,11 +1268,14 @@ export function createWorkerPrForRepo(
       title,
       body: prBody,
     });
-    const updatedRun = setWorkerPrState(run, worker.workerId, {
-      prCreationAttempted: true,
-      url: pr.url,
-      number: pr.number,
-    });
+    const updatedRun = markConductorGateUsed(
+      setWorkerPrState(run, worker.workerId, {
+        prCreationAttempted: true,
+        url: pr.url,
+        number: pr.number,
+      }),
+      readyGate.gateId,
+    );
     const completedTasks = updatedRun.tasks.filter(
       (task) => task.assignedWorkerId === worker.workerId && ["completed", "needs_review"].includes(task.state),
     );
