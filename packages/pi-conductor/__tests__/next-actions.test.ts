@@ -171,10 +171,15 @@ describe("computeNextActions", () => {
     });
   });
 
-  it("recommends retrying failed tasks with usable assigned workers", () => {
+  it.each([
+    "blocked",
+    "failed",
+    "needs_review",
+    "canceled",
+  ] as const)("recommends retrying %s tasks with usable assigned workers", (state) => {
     const task = {
       ...createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" }),
-      state: "failed" as const,
+      state,
       assignedWorkerId: "worker-1",
     };
     const run = addTask(addWorker(createEmptyRun("abc", "/repo"), usableWorker()), task);
@@ -185,6 +190,22 @@ describe("computeNextActions", () => {
       priority: "medium",
       kind: "retry_task",
       toolCall: { name: "conductor_retry_task", params: { taskId: "task-1" } },
+    });
+  });
+
+  it("recommends resource-native recovery for broken workers", () => {
+    const run = addWorker(createEmptyRun("abc", "/repo"), {
+      ...usableWorker(),
+      lifecycle: "broken",
+      recoverable: true,
+    });
+
+    const result = computeNextActions(run);
+
+    expect(result.actions[0]).toMatchObject({
+      priority: "high",
+      kind: "recover_worker",
+      toolCall: { name: "conductor_recover_worker", params: { name: "backend" } },
     });
   });
 

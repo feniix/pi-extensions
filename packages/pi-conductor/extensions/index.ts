@@ -35,7 +35,6 @@ import {
   refreshWorkerSummaryForRepo,
   removeWorkerForRepo,
   resolveGateForRepo,
-  resolveGateFromTrustedHumanForRepo,
   resumeWorkerForRepo,
   retryTaskForRepo,
   runNextActionForRepo,
@@ -391,6 +390,9 @@ export default function conductorExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       objectiveId: Type.Optional(Type.String({ description: "Optional objective scope" })),
       maxActions: Type.Optional(Type.Number({ description: "Maximum safe actions to execute; defaults to 1" })),
+      executeRuns: Type.Optional(
+        Type.Boolean({ description: "Allow scheduler to start model/backend task execution" }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const result = await schedulerTickForRepo(ctx.cwd, params);
@@ -951,25 +953,6 @@ export default function conductorExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "conductor_resolve_gate_as_human",
-    label: "Conductor Resolve Gate As Human",
-    description: "Trusted host/UI pathway to resolve a gate with verified human identity",
-    parameters: Type.Object({
-      gateId: Type.String({ description: "Gate ID" }),
-      status: Type.Union([Type.Literal("approved"), Type.Literal("rejected"), Type.Literal("canceled")]),
-      resolutionReason: Type.String({ description: "Reason for the gate decision" }),
-      humanId: Type.String({ description: "Trusted human identifier supplied by the host/UI" }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const gate = resolveGateFromTrustedHumanForRepo(ctx.cwd, params);
-      return {
-        content: [{ type: "text", text: `resolved gate ${gate.gateId} as human: ${gate.status}` }],
-        details: { gate },
-      };
-    },
-  });
-
-  pi.registerTool({
     name: "conductor_resolve_gate",
     label: "Conductor Resolve Gate",
     description: "Resolve an open conductor gate with an explicit decision",
@@ -1070,6 +1053,22 @@ export default function conductorExtension(pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: `retried task ${params.taskId} as run ${retried.run.runId}` }],
         details: retried,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_recover_worker",
+    label: "Conductor Recover Worker",
+    description: "Recover a broken conductor worker with missing worktree or session linkage",
+    parameters: Type.Object({
+      name: Type.String({ description: "Worker name" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const worker = await recoverWorkerForRepo(ctx.cwd, params.name);
+      return {
+        content: [{ type: "text", text: `recovered worker ${worker.name}: session=${worker.sessionFile}` }],
+        details: { workerId: worker.workerId, sessionFile: worker.sessionFile, worktreePath: worker.worktreePath },
       };
     },
   });

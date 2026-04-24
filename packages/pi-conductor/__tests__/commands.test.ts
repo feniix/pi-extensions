@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runConductorCommand } from "../extensions/commands.js";
 import {
   assignTaskForRepo,
+  createGateForRepo,
   getOrCreateRunForRepo,
   resolveGateForRepo,
   startTaskRunForRepo,
@@ -113,67 +114,28 @@ describe("runConductorCommand", () => {
     expect(text).toContain("changed=");
   });
 
-  it("creates a worker from the start subcommand", async () => {
+  it("rejects removed legacy worker slash mutations", async () => {
     const text = await runConductorCommand(repoDir, "start backend");
-    expect(text).toContain("created worker");
-    expect(text).toContain("backend");
 
-    const status = await runConductorCommand(repoDir, "status");
-    expect(status).toContain("workers: 1");
-    expect(status).toContain("backend");
+    expect(text).toContain("legacy /conductor start was removed");
+    expect(text).toContain("conductor_create_worker");
   });
 
-  it("updates a worker task through the task subcommand", async () => {
-    await runConductorCommand(repoDir, "start backend");
-    const text = await runConductorCommand(repoDir, "task backend implement status command");
-    expect(text).toContain("updated task for backend");
+  it("requires resource tools for gate-protected worker cleanup", async () => {
+    await runConductorCommand(repoDir, "create worker backend");
 
-    const status = await runConductorCommand(repoDir, "status");
-    expect(status).toContain("task=implement status command");
-  });
-
-  it("shows an error for run without a task", async () => {
-    const text = await runConductorCommand(repoDir, "run backend");
-    expect(text).toContain("error: missing task");
-  });
-
-  it("refreshes a worker summary from its session", async () => {
-    await runConductorCommand(repoDir, "start backend");
-    const text = await runConductorCommand(repoDir, "summarize backend");
-    expect(text).toContain("refreshed summary for backend");
-
-    const status = await runConductorCommand(repoDir, "status");
-    expect(status).toContain("summary=fresh:");
-  });
-
-  it("resumes a healthy worker through the resume subcommand", async () => {
-    await runConductorCommand(repoDir, "start backend");
-    const text = await runConductorCommand(repoDir, "resume backend");
-    expect(text).toContain("resumed worker backend");
-    expect(text).toContain("session=");
-
-    const status = await runConductorCommand(repoDir, "status");
-    expect(status).toContain("runtime=session_manager");
-    expect(status).toContain("lastResumedAt=");
-  });
-
-  it("updates a worker lifecycle through the state subcommand", async () => {
-    await runConductorCommand(repoDir, "start backend");
-    const text = await runConductorCommand(repoDir, "state backend ready_for_pr");
-    expect(text).toContain("updated worker backend state to ready_for_pr");
-
-    const status = await runConductorCommand(repoDir, "status");
-    expect(status).toContain("state=ready_for_pr");
-  });
-
-  it("requires an approved destructive cleanup gate before worker cleanup", async () => {
-    await runConductorCommand(repoDir, "start backend");
-
-    await expect(runConductorCommand(repoDir, "cleanup backend")).rejects.toThrow(/destructive_cleanup gate/i);
-    expect(getOrCreateRunForRepo(repoDir).gates[0]).toMatchObject({ type: "destructive_cleanup", status: "open" });
+    const removedCleanup = await runConductorCommand(repoDir, "cleanup backend");
+    expect(removedCleanup).toContain("legacy /conductor cleanup was removed");
+    expect(getOrCreateRunForRepo(repoDir).gates).toHaveLength(0);
 
     const worker = getOrCreateRunForRepo(repoDir).workers[0];
-    const gate = getOrCreateRunForRepo(repoDir).gates[0];
+    const gate = worker
+      ? createGateForRepo(repoDir, {
+          type: "destructive_cleanup",
+          resourceRefs: { workerId: worker.workerId },
+          requestedDecision: "Approve cleanup",
+        })
+      : null;
     if (!worker || !gate) {
       throw new Error("worker or gate missing");
     }
@@ -184,8 +146,9 @@ describe("runConductorCommand", () => {
       resolutionReason: "cleanup approved",
     });
 
-    const text = await runConductorCommand(repoDir, "cleanup backend");
-    expect(text).toContain("removed worker backend");
+    const { removeWorkerForRepo } = await import("../extensions/conductor.js");
+    const removed = removeWorkerForRepo(repoDir, "backend");
+    expect(removed.name).toBe("backend");
 
     const status = await runConductorCommand(repoDir, "status");
     expect(status).toContain("workers: 0");

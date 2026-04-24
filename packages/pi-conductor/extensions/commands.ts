@@ -34,17 +34,6 @@ function getUsage(): string {
     "  /conductor status",
     "  /conductor history [project|worker|task|run|gate|artifact] [id] [--after N] [--limit N]",
     "  /conductor reconcile [--dry-run]",
-    "  /conductor start <worker-name> (deprecated)",
-    "  /conductor task <worker-name> <task> (deprecated)",
-    "  /conductor resume <worker-name> (deprecated)",
-    "  /conductor run <worker-name> <task> (deprecated)",
-    "  /conductor state <worker-name> <lifecycle> (deprecated)",
-    "  /conductor recover <worker-name> (deprecated)",
-    "  /conductor summarize <worker-name> (deprecated)",
-    "  /conductor cleanup <worker-name> (deprecated)",
-    "  /conductor commit <worker-name> <message> (deprecated)",
-    "  /conductor push <worker-name> (deprecated)",
-    "  /conductor pr <worker-name> <title> (deprecated)",
   ].join("\n");
 }
 
@@ -179,6 +168,23 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
     const changed = after.revision !== before.revision || after.updatedAt !== before.updatedAt;
     return `${dryRun ? "previewed" : "reconciled"} project ${after.projectKey}: changed=${changed} workers=${after.workers.length} tasks=${after.tasks.length} runs=${after.runs.length}`;
   }
+  const removedLegacySubcommands = new Set([
+    "start",
+    "task",
+    "resume",
+    "run",
+    "state",
+    "recover",
+    "summarize",
+    "cleanup",
+    "commit",
+    "push",
+    "pr",
+  ]);
+  if (removedLegacySubcommands.has(subcommand ?? "")) {
+    return `error: legacy /conductor ${subcommand} was removed; use resource-native conductor_* tools such as conductor_create_worker, conductor_delegate_task, conductor_run_task, conductor_cleanup_worker, conductor_commit_worker, conductor_push_worker, and conductor_create_worker_pr`;
+  }
+
   if (subcommand === "start") {
     const workerName = rest.join(" ").trim();
     if (!workerName) {

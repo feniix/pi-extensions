@@ -110,6 +110,7 @@ Resource/control-plane tools:
 - `conductor_retry_task`
 - `conductor_create_gate`
 - `conductor_resolve_gate`
+- `conductor_recover_worker`
 - `conductor_cleanup_worker`
 - `conductor_commit_worker`
 - `conductor_push_worker`
@@ -122,7 +123,7 @@ Runtime-injected child tools, available only inside native worker task runs:
 - `conductor_child_create_followup_task` when the task contract allows it
 - `conductor_child_complete`
 
-Transition/legacy worker tools are hidden by default and can be temporarily enabled with `PI_CONDUCTOR_ENABLE_LEGACY_WORKER_TOOLS=1`. Prefer the resource/control-plane tools above for new LLM workflows:
+Transition/legacy worker model tools are hidden by default and can be temporarily enabled with `PI_CONDUCTOR_ENABLE_LEGACY_WORKER_TOOLS=1`. Legacy worker slash mutations such as `/conductor start`, `/conductor run`, `/conductor cleanup`, and `/conductor pr` are removed; use resource/control-plane tools above for new LLM workflows:
 
 - `conductor_status`
 - `conductor_start`
@@ -152,7 +153,7 @@ Instead, it uses a narrow Pi SDK runtime seam around persisted sessions:
 
 The native backend uses curated tools and explicit conductor child tools. Backend status is runtime evidence, not semantic completion. If the child exits without `conductor_child_complete`, conductor records a partial run and opens a review gate.
 
-Optional backend adapters such as `pi-subagents` may be used later, but they do not own canonical state. The current `pi-subagents` adapter reports capabilities and fails closed for dispatch until a real dispatch API is implemented.
+Optional backend adapters such as `pi-subagents` may be used later, but they do not own canonical state. The current `pi-subagents` adapter fails closed unless a trusted host injects an explicit dispatcher; injected dispatch records backend run evidence while conductor owns task/run state.
 
 ## LLM orchestration examples
 
@@ -162,8 +163,8 @@ Create and plan an objective, then let conductor take the safest next step:
 conductor_create_objective({ title: "Ship feature", prompt: "Implement and verify the feature" })
 conductor_plan_objective({ objectiveId, tasks: [{ title: "Implement", prompt: "Make the code change" }] })
 conductor_next_actions({ objectiveId })
-conductor_run_next_action({ objectiveId })
-conductor_scheduler_tick({ objectiveId, maxActions: 1 })
+conductor_run_next_action({ objectiveId, executeRuns: true })
+conductor_scheduler_tick({ objectiveId, maxActions: 1, executeRuns: false })
 conductor_schedule_objective({ objectiveId, maxConcurrency: 2 })
 ```
 

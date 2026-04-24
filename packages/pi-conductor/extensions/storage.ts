@@ -261,7 +261,18 @@ export function validateRunRecord(run: RunRecord): void {
   for (const artifact of normalized.artifacts) {
     assertRefsExist(artifact.resourceRefs, indexes, `Artifact ${artifact.artifactId}`);
   }
+  let previousSequence = 0;
   for (const event of normalized.events) {
+    if (event.schemaVersion !== CONDUCTOR_SCHEMA_VERSION) {
+      throw new Error(`Event ${event.eventId} has unsupported schemaVersion ${event.schemaVersion}`);
+    }
+    if (event.sequence <= previousSequence) {
+      throw new Error(`Event sequence ${event.sequence} is not greater than previous sequence ${previousSequence}`);
+    }
+    if (event.projectRevision <= 0) {
+      throw new Error(`Event ${event.eventId} has invalid projectRevision ${event.projectRevision}`);
+    }
+    previousSequence = event.sequence;
     assertRefsExist(event.resourceRefs, indexes, `Event ${event.eventId}`);
   }
 }
@@ -740,6 +751,18 @@ export function assignTaskToWorker(run: RunRecord, taskId: string, workerId: str
   );
 }
 
+function appendWorkerLifecycleChangedEvent(run: RunRecord, before: WorkerRecord, after: WorkerRecord): RunRecord {
+  if (before.lifecycle === after.lifecycle) {
+    return run;
+  }
+  return appendConductorEvent(run, {
+    actor: { type: "system", id: "storage" },
+    type: "worker.lifecycle_changed",
+    resourceRefs: { projectKey: run.projectKey, workerId: after.workerId },
+    payload: { previousLifecycle: before.lifecycle, lifecycle: after.lifecycle, name: after.name },
+  });
+}
+
 export function startTaskRun(
   run: RunRecord,
   input: {
@@ -811,7 +834,7 @@ export function startTaskRun(
     updatedAt: now,
   };
 
-  return appendConductorEvent(updated, {
+  const withRunStarted = appendConductorEvent(updated, {
     actor: { type: "system", id: "storage" },
     type: "run.started",
     resourceRefs: {
@@ -822,6 +845,8 @@ export function startTaskRun(
     },
     payload: { backend: input.backend },
   });
+  const updatedWorker = withRunStarted.workers.find((entry) => entry.workerId === input.workerId);
+  return updatedWorker ? appendWorkerLifecycleChangedEvent(withRunStarted, worker, updatedWorker) : withRunStarted;
 }
 
 export function cancelTaskRun(run: RunRecord, input: { runId: string; reason: string }): RunRecord {
@@ -868,7 +893,7 @@ export function cancelTaskRun(run: RunRecord, input: { runId: string; reason: st
     ),
     updatedAt: now,
   };
-  return appendConductorEvent(updated, {
+  const withRunCanceled = appendConductorEvent(updated, {
     actor: { type: "parent_agent", id: "conductor" },
     type: "run.canceled",
     resourceRefs: {
@@ -879,6 +904,11 @@ export function cancelTaskRun(run: RunRecord, input: { runId: string; reason: st
     },
     payload: { reason: input.reason },
   });
+  const beforeWorker = normalized.workers.find((entry) => entry.workerId === runAttempt.workerId);
+  const afterWorker = withRunCanceled.workers.find((entry) => entry.workerId === runAttempt.workerId);
+  return beforeWorker && afterWorker
+    ? appendWorkerLifecycleChangedEvent(withRunCanceled, beforeWorker, afterWorker)
+    : withRunCanceled;
 }
 
 export function recordRunHeartbeat(
@@ -958,7 +988,7 @@ export function reconcileRunLeases(run: RunRecord, input: { now?: string } = {})
       ),
       updatedAt: now,
     };
-    current = appendConductorEvent(updated, {
+    const withLeaseExpired = appendConductorEvent(updated, {
       actor: { type: "system", id: "reconciler" },
       type: "run.lease_expired",
       resourceRefs: {
@@ -969,6 +999,12 @@ export function reconcileRunLeases(run: RunRecord, input: { now?: string } = {})
       },
       payload: { leaseExpiresAt: expired.leaseExpiresAt, reconciledAt: now },
     });
+    const beforeWorker = current.workers.find((entry) => entry.workerId === expired.workerId);
+    const afterWorker = withLeaseExpired.workers.find((entry) => entry.workerId === expired.workerId);
+    current =
+      beforeWorker && afterWorker
+        ? appendWorkerLifecycleChangedEvent(withLeaseExpired, beforeWorker, afterWorker)
+        : withLeaseExpired;
   }
 
   return current;
@@ -1476,7 +1512,7 @@ export function completeTaskRun(
     updatedAt: now,
   };
 
-  return appendConductorEvent(updated, {
+  const withRunCompleted = appendConductorEvent(updated, {
     actor: { type: "system", id: "storage" },
     type: "run.completed",
     resourceRefs: {
@@ -1491,6 +1527,11 @@ export function completeTaskRun(
       idempotencyKey: input.idempotencyKey ?? null,
     },
   });
+  const beforeWorker = normalized.workers.find((entry) => entry.workerId === runAttempt.workerId);
+  const afterWorker = withRunCompleted.workers.find((entry) => entry.workerId === runAttempt.workerId);
+  return beforeWorker && afterWorker
+    ? appendWorkerLifecycleChangedEvent(withRunCompleted, beforeWorker, afterWorker)
+    : withRunCompleted;
 }
 
 export function createWorkerRecord(input: {
@@ -1740,11 +1781,14 @@ export function startWorkerRun(
     throw new Error(`Worker ${workerId} not found`);
   }
 
-  return {
+  const updated = {
     ...run,
     workers,
     updatedAt: now,
   };
+  const beforeWorker = run.workers.find((worker) => worker.workerId === workerId);
+  const afterWorker = updated.workers.find((worker) => worker.workerId === workerId);
+  return beforeWorker && afterWorker ? appendWorkerLifecycleChangedEvent(updated, beforeWorker, afterWorker) : updated;
 }
 
 export function setWorkerRunSessionId(run: RunRecord, workerId: string, sessionId: string): RunRecord {
@@ -1816,11 +1860,14 @@ export function finishWorkerRun(
     throw new Error(`Worker ${workerId} not found`);
   }
 
-  return {
+  const updated = {
     ...run,
     workers,
     updatedAt: now,
   };
+  const beforeWorker = run.workers.find((worker) => worker.workerId === workerId);
+  const afterWorker = updated.workers.find((worker) => worker.workerId === workerId);
+  return beforeWorker && afterWorker ? appendWorkerLifecycleChangedEvent(updated, beforeWorker, afterWorker) : updated;
 }
 
 export function setWorkerLifecycle(run: RunRecord, workerId: string, lifecycle: WorkerLifecycleState): RunRecord {

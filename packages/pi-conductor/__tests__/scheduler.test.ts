@@ -79,7 +79,7 @@ describe("conductor scheduler and async next action", () => {
   it("run next action can execute a runnable task", async () => {
     const task = addUsableWorkerAndAssignedTask();
 
-    const result = await runNextActionForRepo(repoRoot);
+    const result = await runNextActionForRepo(repoRoot, { executeRuns: true });
 
     expect(result.executed).toBe(true);
     expect(result.action?.kind).toBe("run_task");
@@ -91,9 +91,18 @@ describe("conductor scheduler and async next action", () => {
   it("scheduler ticks execute bounded safe actions", async () => {
     addUsableWorkerAndAssignedTask();
 
-    const result = await schedulerTickForRepo(repoRoot, { maxActions: 1 });
+    const result = await schedulerTickForRepo(repoRoot, { maxActions: 1, executeRuns: true });
 
     expect(result.executed).toHaveLength(1);
     expect(result.executed[0]?.action?.kind).toBe("run_task");
+  });
+
+  it("scheduler ticks skip model execution unless explicitly enabled", async () => {
+    addUsableWorkerAndAssignedTask();
+
+    const result = await schedulerTickForRepo(repoRoot, { maxActions: 1 });
+
+    expect(result.executed).toHaveLength(0);
+    expect(result.skipped[0]).toMatchObject({ reason: "run execution disabled by scheduler policy" });
   });
 });

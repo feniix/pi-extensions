@@ -4,10 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  assignTaskForRepo,
+  createTaskForRepo,
   createWorkerForRepo,
   getOrCreateRunForRepo,
+  recordTaskCompletionForRepo,
   recoverWorkerForRepo,
   resumeWorkerForRepo,
+  startTaskRunForRepo,
   updateWorkerLifecycleForRepo,
 } from "../extensions/conductor.js";
 
@@ -66,6 +70,36 @@ describe("worker lifecycle flows", () => {
     updateWorkerLifecycleForRepo(repoDir, "backend", "idle");
 
     expect(getOrCreateRunForRepo(repoDir).events).toHaveLength(before);
+  });
+
+  it("emits lifecycle events for implicit durable task run transitions", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Durable task", prompt: "Implement a durable task" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
+    recordTaskCompletionForRepo(repoDir, {
+      runId: started.run.runId,
+      taskId: task.taskId,
+      status: "succeeded",
+      completionSummary: "done",
+    });
+
+    const lifecycleEvents = getOrCreateRunForRepo(repoDir).events.filter(
+      (event) => event.type === "worker.lifecycle_changed",
+    );
+    expect(lifecycleEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          resourceRefs: expect.objectContaining({ workerId: worker.workerId }),
+          payload: expect.objectContaining({ previousLifecycle: "idle", lifecycle: "running", name: "backend" }),
+        }),
+        expect.objectContaining({
+          resourceRefs: expect.objectContaining({ workerId: worker.workerId }),
+          payload: expect.objectContaining({ previousLifecycle: "running", lifecycle: "idle", name: "backend" }),
+        }),
+      ]),
+    );
   });
 
   it("updates a worker lifecycle to blocked, ready_for_pr, and done", async () => {

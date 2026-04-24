@@ -47,7 +47,7 @@ describe("pi-conductor extension", () => {
     expect(extension).not.toContain('name: "conductor_child_create_gate"');
     expect(extension).toContain('name: "conductor_create_gate"');
     expect(extension).toContain('name: "conductor_resolve_gate"');
-    expect(extension).toContain('name: "conductor_resolve_gate_as_human"');
+    expect(extension).not.toContain('name: "conductor_resolve_gate_as_human"');
     expect(extension).toContain('name: "conductor_start_task_run"');
     expect(extension).toContain('name: "conductor_run_task"');
     expect(extension).toContain('name: "conductor_cancel_task_run"');
@@ -70,6 +70,7 @@ describe("pi-conductor extension", () => {
     expect(extension).toContain('name: "conductor_diagnose_blockers"');
     expect(extension).toContain('name: "conductor_build_evidence_bundle"');
     expect(extension).toContain('name: "conductor_check_readiness"');
+    expect(extension).toContain('name: "conductor_recover_worker"');
     expect(extension).toContain('name: "conductor_cleanup_worker"');
     expect(extension).toContain('name: "conductor_commit_worker"');
     expect(extension).toContain('name: "conductor_push_worker"');

@@ -68,6 +68,26 @@ describe("storage helpers", () => {
     expect(dir).toBe(join(conductorHome, "projects", "abc"));
   });
 
+  it("validates event sequence ordering", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const first = appendConductorEvent(run, {
+      actor: { type: "system", id: "test" },
+      type: "project.created",
+      resourceRefs: { projectKey: "abc" },
+      payload: {},
+    });
+    const event = first.events[0];
+    if (!event) {
+      throw new Error("expected event");
+    }
+    const invalid = {
+      ...first,
+      events: [event, { ...event, eventId: "event-duplicate", sequence: 1 }],
+    };
+
+    expect(() => validateRunRecord(invalid)).toThrow(/Event sequence/i);
+  });
+
   it("validates event resource references", () => {
     const run = appendConductorEvent(createEmptyRun("abc", "/tmp/repo"), {
       actor: { type: "system", id: "test" },

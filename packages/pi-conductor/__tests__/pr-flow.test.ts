@@ -6,9 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runConductorCommand } from "../extensions/commands.js";
 import {
   assignTaskForRepo,
+  commitWorkerForRepo,
   createGateForRepo,
   createTaskForRepo,
+  createWorkerPrForRepo,
   getOrCreateRunForRepo,
+  pushWorkerForRepo,
   recordTaskCompletionForRepo,
   resolveGateForRepo,
   startTaskRunForRepo,
@@ -58,7 +61,7 @@ describe("PR preparation flow", () => {
   }
 
   async function createChangedWorker(): Promise<string> {
-    await runConductorCommand(repoDir, "start backend");
+    await runConductorCommand(repoDir, "create worker backend");
     const worker = getOrCreateRunForRepo(repoDir).workers[0];
     if (!worker?.worktreePath) {
       throw new Error("worker worktree missing in test setup");
@@ -87,8 +90,8 @@ describe("PR preparation flow", () => {
 
   it("commits worker changes and persists commit state", async () => {
     const worktreePath = await createChangedWorker();
-    const text = await runConductorCommand(repoDir, "commit backend feat: add backend worker");
-    expect(text).toContain("committed worker backend");
+    const worker = commitWorkerForRepo(repoDir, "backend", "feat: add backend worker");
+    expect(worker.pr.commitSucceeded).toBe(true);
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers[0]?.pr.commitSucceeded).toBe(true);
@@ -100,9 +103,9 @@ describe("PR preparation flow", () => {
 
   it("pushes a worker branch and persists push state", async () => {
     await createChangedWorker();
-    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
-    const text = await runConductorCommand(repoDir, "push backend");
-    expect(text).toContain("pushed worker backend");
+    commitWorkerForRepo(repoDir, "backend", "feat: add backend worker");
+    const pushed = pushWorkerForRepo(repoDir, "backend");
+    expect(pushed.pr.pushSucceeded).toBe(true);
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers[0]?.pr.pushSucceeded).toBe(true);
@@ -118,10 +121,10 @@ describe("PR preparation flow", () => {
       'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'https://github.com/example/repo/pull/123\'',
     );
     await createChangedWorker();
-    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
-    await runConductorCommand(repoDir, "push backend");
+    commitWorkerForRepo(repoDir, "backend", "feat: add backend worker");
+    pushWorkerForRepo(repoDir, "backend");
 
-    await expect(runConductorCommand(repoDir, "pr backend Backend worker PR")).rejects.toThrow(/ready_for_pr gate/i);
+    expect(() => createWorkerPrForRepo(repoDir, "backend", "Backend worker PR")).toThrow(/ready_for_pr gate/i);
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.gates[0]).toMatchObject({ type: "ready_for_pr", status: "open" });
@@ -133,8 +136,8 @@ describe("PR preparation flow", () => {
       'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'https://github.com/example/repo/pull/123\'',
     );
     await createChangedWorker();
-    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
-    await runConductorCommand(repoDir, "push backend");
+    commitWorkerForRepo(repoDir, "backend", "feat: add backend worker");
+    pushWorkerForRepo(repoDir, "backend");
     const worker = getOrCreateRunForRepo(repoDir).workers[0];
     if (!worker) throw new Error("worker missing");
     const gate = createGateForRepo(repoDir, {
@@ -150,7 +153,7 @@ describe("PR preparation flow", () => {
       resolutionReason: "ready",
     });
 
-    await expect(runConductorCommand(repoDir, "pr backend Backend worker PR")).rejects.toThrow(/create_worker_pr/i);
+    expect(() => createWorkerPrForRepo(repoDir, "backend", "Backend worker PR")).toThrow(/create_worker_pr/i);
   });
 
   it("creates a pull request and persists PR metadata", async () => {
@@ -158,12 +161,11 @@ describe("PR preparation flow", () => {
       'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'https://github.com/example/repo/pull/123\'',
     );
     await createChangedWorker();
-    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
-    await runConductorCommand(repoDir, "push backend");
+    commitWorkerForRepo(repoDir, "backend", "feat: add backend worker");
+    pushWorkerForRepo(repoDir, "backend");
     approveWorkerPrGate();
-    const text = await runConductorCommand(repoDir, "pr backend Backend worker PR");
-    expect(text).toContain("created PR for backend");
-    expect(text).toContain("pull/123");
+    const prWorker = createWorkerPrForRepo(repoDir, "backend", "Backend worker PR");
+    expect(prWorker.pr.url).toContain("pull/123");
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers[0]?.pr.prCreationAttempted).toBe(true);
@@ -180,12 +182,12 @@ describe("PR preparation flow", () => {
       'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'https://github.com/example/repo/pull/123\'',
     );
     await createChangedWorker();
-    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
-    await runConductorCommand(repoDir, "push backend");
+    commitWorkerForRepo(repoDir, "backend", "feat: add backend worker");
+    pushWorkerForRepo(repoDir, "backend");
     approveWorkerPrGate();
-    await runConductorCommand(repoDir, "pr backend Backend worker PR");
+    createWorkerPrForRepo(repoDir, "backend", "Backend worker PR");
 
-    await expect(runConductorCommand(repoDir, "pr backend Backend worker PR Again")).rejects.toThrow(
+    expect(() => createWorkerPrForRepo(repoDir, "backend", "Backend worker PR Again")).toThrow(
       /fresh ready_for_pr gate/i,
     );
   });
@@ -208,11 +210,11 @@ describe("PR preparation flow", () => {
       status: "succeeded",
       completionSummary: "Backend task complete",
     });
-    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
-    await runConductorCommand(repoDir, "push backend");
+    commitWorkerForRepo(repoDir, "backend", "feat: add backend worker");
+    pushWorkerForRepo(repoDir, "backend");
     approveWorkerPrGate();
 
-    await runConductorCommand(repoDir, "pr backend Backend worker PR");
+    createWorkerPrForRepo(repoDir, "backend", "Backend worker PR");
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.artifacts[0]?.resourceRefs.taskId).toBe(task.taskId);
@@ -225,11 +227,11 @@ describe("PR preparation flow", () => {
       'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'gh pr create failed\' >&2\nexit 1',
     );
     await createChangedWorker();
-    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
-    await runConductorCommand(repoDir, "push backend");
+    commitWorkerForRepo(repoDir, "backend", "feat: add backend worker");
+    pushWorkerForRepo(repoDir, "backend");
     approveWorkerPrGate();
 
-    await expect(runConductorCommand(repoDir, "pr backend Backend worker PR")).rejects.toThrow();
+    expect(() => createWorkerPrForRepo(repoDir, "backend", "Backend worker PR")).toThrow();
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers[0]?.pr.commitSucceeded).toBe(true);
@@ -242,11 +244,11 @@ describe("PR preparation flow", () => {
     writeFakeGhScript("exit 127");
     process.env.PATH = `${fakeBinDir}:${originalPath ?? ""}`;
     await createChangedWorker();
-    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
-    await runConductorCommand(repoDir, "push backend");
+    commitWorkerForRepo(repoDir, "backend", "feat: add backend worker");
+    pushWorkerForRepo(repoDir, "backend");
     approveWorkerPrGate();
 
-    await expect(runConductorCommand(repoDir, "pr backend Backend worker PR")).rejects.toThrow(/GitHub CLI/i);
+    expect(() => createWorkerPrForRepo(repoDir, "backend", "Backend worker PR")).toThrow(/GitHub CLI/i);
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers[0]?.pr.commitSucceeded).toBe(true);
@@ -259,11 +261,11 @@ describe("PR preparation flow", () => {
       'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then echo \'not authenticated\' >&2; exit 1; fi\necho \'unexpected call\' >&2\nexit 1',
     );
     await createChangedWorker();
-    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
-    await runConductorCommand(repoDir, "push backend");
+    commitWorkerForRepo(repoDir, "backend", "feat: add backend worker");
+    pushWorkerForRepo(repoDir, "backend");
     approveWorkerPrGate();
 
-    await expect(runConductorCommand(repoDir, "pr backend Backend worker PR")).rejects.toThrow(/authenticated/i);
+    expect(() => createWorkerPrForRepo(repoDir, "backend", "Backend worker PR")).toThrow(/authenticated/i);
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers[0]?.pr.commitSucceeded).toBe(true);

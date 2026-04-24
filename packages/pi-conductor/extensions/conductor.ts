@@ -1,6 +1,11 @@
 import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
-import { type ConductorBackendsStatus, inspectConductorBackends } from "./backends.js";
+import {
+  type ConductorBackendDispatcher,
+  type ConductorBackendsStatus,
+  getConductorBackendAdapter,
+  inspectConductorBackends,
+} from "./backends.js";
 import {
   commitAllChanges,
   createPullRequest,
@@ -313,7 +318,7 @@ export function computeNextActions(
           title: `Recover worker ${worker.name}`,
           rationale: "The worker is broken or recoverable.",
           resourceRefs: { projectKey: run.projectKey, workerId: worker.workerId },
-          toolCall: { name: "conductor_recover", params: { name: worker.name } },
+          toolCall: { name: "conductor_recover_worker", params: { name: worker.name } },
           requiresHuman: false,
           destructive: false,
           blockedBy: [],
@@ -385,7 +390,11 @@ export function computeNextActions(
         }),
       );
     }
-    if (["failed", "canceled"].includes(task.state) && assignedWorker && isUsableIdleWorker(assignedWorker)) {
+    if (
+      ["blocked", "failed", "needs_review", "canceled"].includes(task.state) &&
+      assignedWorker &&
+      isUsableIdleWorker(assignedWorker)
+    ) {
       actions.push(
         nextAction({
           priority: "medium",
@@ -850,7 +859,7 @@ export function prepareHumanReviewForRepo(
 
 export async function runNextActionForRepo(
   repoRoot: string,
-  input: { objectiveId?: string } = {},
+  input: { objectiveId?: string; executeRuns?: boolean } = {},
 ): Promise<{ executed: boolean; reason: string | null; action: ConductorNextAction | null; result: unknown }> {
   const recommendation = getNextActionsForRepo(repoRoot, {
     objectiveId: input.objectiveId,
@@ -885,6 +894,9 @@ export async function runNextActionForRepo(
     return { executed: true, reason: null, action, result: reconcileProjectForRepo(repoRoot, { dryRun: false }) };
   }
   if (action.kind === "run_task" && typeof action.toolCall?.params.taskId === "string") {
+    if (!input.executeRuns) {
+      return { executed: false, reason: "run execution disabled by scheduler policy", action, result: null };
+    }
     return {
       executed: true,
       reason: null,
@@ -898,6 +910,14 @@ export async function runNextActionForRepo(
       reason: null,
       action,
       result: retryTaskForRepo(repoRoot, { taskId: action.toolCall.params.taskId }),
+    };
+  }
+  if (action.kind === "recover_worker" && typeof action.toolCall?.params.name === "string") {
+    return {
+      executed: true,
+      reason: null,
+      action,
+      result: await recoverWorkerForRepo(repoRoot, action.toolCall.params.name),
     };
   }
   if (
@@ -965,7 +985,7 @@ export async function scheduleObjectiveForRepo(
 
 export async function schedulerTickForRepo(
   repoRoot: string,
-  input: { objectiveId?: string; maxActions?: number } = {},
+  input: { objectiveId?: string; maxActions?: number; executeRuns?: boolean } = {},
 ): Promise<{
   executed: Array<{ action: ConductorNextAction | null; result: unknown }>;
   skipped: Array<{ action: ConductorNextAction | null; reason: string | null }>;
@@ -974,7 +994,10 @@ export async function schedulerTickForRepo(
   const executed: Array<{ action: ConductorNextAction | null; result: unknown }> = [];
   const skipped: Array<{ action: ConductorNextAction | null; reason: string | null }> = [];
   for (let index = 0; index < maxActions; index += 1) {
-    const result = await runNextActionForRepo(repoRoot, { objectiveId: input.objectiveId });
+    const result = await runNextActionForRepo(repoRoot, {
+      objectiveId: input.objectiveId,
+      executeRuns: input.executeRuns,
+    });
     if (!result.executed) {
       skipped.push({ action: result.action, reason: result.reason });
       break;
@@ -1326,6 +1349,69 @@ export function resolveGateFromTrustedHumanForRepo(
     resolutionReason: input.resolutionReason,
     actor: { type: "human", id: input.humanId },
   });
+}
+
+export async function dispatchTaskRunForRepo(
+  repoRoot: string,
+  input: {
+    taskId: string;
+    workerId?: string;
+    leaseSeconds?: number;
+    runId?: string;
+    backend?: RunAttemptRecord["backend"];
+    allowFollowUpTasks?: boolean;
+    dispatcher?: ConductorBackendDispatcher;
+    resolvePackage?: (specifier: string) => string | null;
+  },
+): Promise<{
+  run: RunAttemptRecord;
+  taskContract: TaskContractInput;
+  dispatch: { backendRunId: string | null; diagnostic: string | null } | null;
+}> {
+  const backend = input.backend ?? "native";
+  if (backend !== "pi-subagents") {
+    const started = startTaskRunForRepo(repoRoot, input);
+    return { ...started, dispatch: null };
+  }
+  const adapter = getConductorBackendAdapter("pi-subagents", {
+    dispatcher: input.dispatcher,
+    resolvePackage: input.resolvePackage,
+  });
+  const preflight = adapter.preflight();
+  if (!preflight.available) {
+    startTaskRunForRepo(repoRoot, {
+      ...input,
+      inspectBackends: () => ({ native: inspectConductorBackends().native, piSubagents: preflight }),
+    });
+  }
+  const started = startTaskRunForRepo(repoRoot, { ...input, backend: "native" });
+  const result = await adapter.dispatch({
+    cwd: resolve(repoRoot),
+    taskContract: started.taskContract,
+    run: started.run,
+  });
+  if (!result.ok) {
+    recordTaskCompletionForRepo(repoRoot, {
+      runId: started.run.runId,
+      taskId: input.taskId,
+      status: "failed",
+      completionSummary: result.diagnostic ?? "pi-subagents dispatch failed",
+    });
+    throw new Error(`pi-subagents dispatch failed: ${result.diagnostic ?? "unknown error"}`);
+  }
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => ({
+    ...run,
+    runs: run.runs.map((entry) =>
+      entry.runId === started.run.runId
+        ? { ...entry, backend: "pi-subagents", backendRunId: result.backendRunId ?? null }
+        : entry,
+    ),
+  }));
+  return {
+    run: updatedRun.runs.find((entry) => entry.runId === started.run.runId) ?? started.run,
+    taskContract: started.taskContract,
+    dispatch: { backendRunId: result.backendRunId ?? null, diagnostic: result.diagnostic },
+  };
 }
 
 export function startTaskRunForRepo(
