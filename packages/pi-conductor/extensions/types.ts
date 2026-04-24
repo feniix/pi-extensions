@@ -124,6 +124,15 @@ export interface ReadinessCheck {
   warnings: Array<{ code: string; message: string; resourceRefs?: ConductorResourceRefs }>;
 }
 
+export interface ConductorResourceTimeline {
+  markdown: string;
+  resourceRefs: ConductorResourceRefs;
+  events: ConductorEvent[];
+  artifacts: ArtifactRecord[];
+  gates: GateRecord[];
+  runs: RunAttemptRecord[];
+}
+
 export interface ConductorTaskBrief {
   markdown: string;
   task: TaskRecord;

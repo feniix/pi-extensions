@@ -8,6 +8,7 @@ import {
   assignTaskForRepo,
   buildEvidenceBundleForRepo,
   buildProjectBriefForRepo,
+  buildResourceTimelineForRepo,
   buildTaskBriefForRepo,
   cancelTaskRunForRepo,
   checkReadinessForRepo,
@@ -316,6 +317,26 @@ export default function conductorExtension(pi: ExtensionAPI) {
         ],
         details: { project: after, changed, dryRun: params.dryRun ?? false },
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_resource_timeline",
+    label: "Conductor Resource Timeline",
+    description: "Return chronological events and evidence for one conductor resource",
+    parameters: Type.Object({
+      objectiveId: Type.Optional(Type.String()),
+      workerId: Type.Optional(Type.String()),
+      taskId: Type.Optional(Type.String()),
+      runId: Type.Optional(Type.String()),
+      gateId: Type.Optional(Type.String()),
+      artifactId: Type.Optional(Type.String()),
+      limit: Type.Optional(Type.Number({ description: "Maximum events to include; defaults to 25, max 100" })),
+      includeArtifacts: Type.Optional(Type.Boolean({ description: "Include matching artifact records" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const timeline = buildResourceTimelineForRepo(ctx.cwd, params);
+      return { content: [{ type: "text", text: timeline.markdown }], details: { timeline } };
     },
   });
 

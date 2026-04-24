@@ -59,6 +59,7 @@ import type {
   ConductorNextActionsResponse,
   ConductorProjectBrief,
   ConductorResourceRefs,
+  ConductorResourceTimeline,
   ConductorTaskBrief,
   EvidenceBundle,
   EvidenceBundlePurpose,
@@ -420,6 +421,72 @@ export function computeNextActions(
       count: Math.max(0, sorted.length - returned.length),
       reason: sorted.length > returned.length ? "maxActions" : null,
     },
+  };
+}
+
+function refsMatchFilter(refs: ConductorResourceRefs, filter: ConductorResourceRefs): boolean {
+  return (["objectiveId", "workerId", "taskId", "runId", "gateId", "artifactId"] as const).some(
+    (key) => filter[key] !== undefined && refs[key] === filter[key],
+  );
+}
+
+export function buildResourceTimelineForRepo(
+  repoRoot: string,
+  input: ConductorResourceRefs & { limit?: number; includeArtifacts?: boolean },
+): ConductorResourceTimeline {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const resourceRefs: ConductorResourceRefs = {
+    projectKey: run.projectKey,
+    objectiveId: input.objectiveId,
+    workerId: input.workerId,
+    taskId: input.taskId,
+    runId: input.runId,
+    gateId: input.gateId,
+    artifactId: input.artifactId,
+  };
+  const limit = Math.max(1, Math.min(input.limit ?? 25, 100));
+  const matchingEvents = run.events.filter((event) => refsMatchFilter(event.resourceRefs, resourceRefs)).slice(-limit);
+  const matchingArtifacts = input.includeArtifacts
+    ? run.artifacts.filter(
+        (artifact) => refsMatchFilter(artifact.resourceRefs, resourceRefs) || artifact.artifactId === input.artifactId,
+      )
+    : [];
+  const matchingGates = run.gates.filter(
+    (gate) => refsMatchFilter(gate.resourceRefs, resourceRefs) || gate.gateId === input.gateId,
+  );
+  const matchingRuns = run.runs.filter((attempt) => {
+    if (input.runId && attempt.runId === input.runId) return true;
+    if (input.taskId && attempt.taskId === input.taskId) return true;
+    if (input.workerId && attempt.workerId === input.workerId) return true;
+    return false;
+  });
+  const markdown = [
+    "# Conductor Resource Timeline",
+    "",
+    `Resource: ${JSON.stringify(resourceRefs)}`,
+    "",
+    "## Events",
+    matchingEvents.length === 0
+      ? "- none"
+      : matchingEvents
+          .map(
+            (event) =>
+              `- #${event.sequence} ${event.type} at ${event.occurredAt} refs=${JSON.stringify(event.resourceRefs)}`,
+          )
+          .join("\n"),
+    "",
+    "## Artifacts",
+    matchingArtifacts.length === 0
+      ? "- none"
+      : matchingArtifacts.map((artifact) => `- ${artifact.type} ${artifact.ref} [${artifact.artifactId}]`).join("\n"),
+  ].join("\n");
+  return {
+    markdown,
+    resourceRefs,
+    events: matchingEvents,
+    artifacts: matchingArtifacts,
+    gates: matchingGates,
+    runs: matchingRuns,
   };
 }
 
