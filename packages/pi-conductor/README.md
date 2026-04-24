@@ -20,8 +20,10 @@ Agent-native local control plane for Pi worker orchestration.
 - Native AgentSession-backed task execution with runtime-injected, run-scoped child tools:
   - `conductor_child_progress`
   - `conductor_child_create_gate`
+  - `conductor_child_create_followup_task` when explicitly allowed by the parent task contract
   - `conductor_child_complete`
 - Child tool calls are bound to the task/run contract, support `idempotencyKey`, and are not registered as broad parent-agent tools.
+- Parent agents can explicitly grant child runs permission to create scoped follow-up tasks; this is disabled by default.
 - Parent-agent task control supports safe task update, explicit cancellation, and retry without overwriting prior run history.
 - Explicit semantic completion: a backend exit or final assistant message is not enough to mark a task complete. Missing child completion becomes `needs_review` with a review gate.
 - Lease heartbeats and reconciliation for stale/crashed runs, including read-only dry-run previews.
@@ -94,6 +96,7 @@ Runtime-injected child tools, available only inside native worker task runs:
 
 - `conductor_child_progress`
 - `conductor_child_create_gate`
+- `conductor_child_create_followup_task` when the task contract allows it
 - `conductor_child_complete`
 
 Transition/legacy worker tools still registered:
