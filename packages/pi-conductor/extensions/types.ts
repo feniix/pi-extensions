@@ -84,6 +84,7 @@ export interface EvidenceBundle {
   purpose: EvidenceBundlePurpose;
   generatedAt: string;
   resourceRefs: ConductorResourceRefs;
+  objective: ObjectiveRecord | null;
   worker: WorkerRecord | null;
   tasks: TaskRecord[];
   runs: RunAttemptRecord[];

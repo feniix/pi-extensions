@@ -8,6 +8,7 @@ import {
   buildEvidenceBundleForRepo,
   checkReadinessForRepo,
   createGateForRepo,
+  createObjectiveForRepo,
   createTaskForRepo,
   createWorkerForRepo,
   getOrCreateRunForRepo,
@@ -53,6 +54,17 @@ describe("conductor readiness and evidence bundles", () => {
     });
     return { worker, task, run: started.run };
   }
+
+  it("builds an objective-scoped evidence bundle", async () => {
+    const objective = createObjectiveForRepo(repoDir, { title: "Ship objective", prompt: "Coordinate work" });
+    const task = createTaskForRepo(repoDir, { title: "Build", prompt: "Do it", objectiveId: objective.objectiveId });
+
+    const bundle = buildEvidenceBundleForRepo(repoDir, { objectiveId: objective.objectiveId, purpose: "handoff" });
+
+    expect(bundle.resourceRefs.objectiveId).toBe(objective.objectiveId);
+    expect(bundle.objective?.objectiveId).toBe(objective.objectiveId);
+    expect(bundle.tasks.map((entry) => entry.taskId)).toEqual([task.taskId]);
+  });
 
   it("builds a task-scoped evidence bundle", async () => {
     const { task, run } = await completedTaskWithEvidence();

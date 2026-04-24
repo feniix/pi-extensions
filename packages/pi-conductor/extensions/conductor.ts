@@ -755,6 +755,7 @@ export function buildEvidenceBundleForRepo(
   input: {
     workerId?: string;
     workerName?: string;
+    objectiveId?: string;
     taskId?: string;
     runId?: string;
     purpose?: EvidenceBundlePurpose;
@@ -764,6 +765,9 @@ export function buildEvidenceBundleForRepo(
 ): EvidenceBundle {
   const run = getOrCreateRunForRepo(repoRoot);
   const selectedRun = input.runId ? run.runs.find((entry) => entry.runId === input.runId) : null;
+  const objective = input.objectiveId
+    ? (run.objectives.find((entry) => entry.objectiveId === input.objectiveId) ?? null)
+    : null;
   const task = input.taskId
     ? run.tasks.find((entry) => entry.taskId === input.taskId)
     : selectedRun
@@ -780,6 +784,9 @@ export function buildEvidenceBundleForRepo(
           : null;
   const taskIds = new Set<string>();
   const runIds = new Set<string>();
+  if (objective) {
+    for (const taskId of objective.taskIds) taskIds.add(taskId);
+  }
   if (task) taskIds.add(task.taskId);
   if (selectedRun) runIds.add(selectedRun.runId);
   if (worker) {
@@ -798,17 +805,20 @@ export function buildEvidenceBundleForRepo(
   const gates = run.gates.filter(
     (gate) =>
       (worker && gate.resourceRefs.workerId === worker.workerId) ||
+      (objective && gate.resourceRefs.objectiveId === objective.objectiveId) ||
       (gate.resourceRefs.taskId !== undefined && taskIds.has(gate.resourceRefs.taskId)) ||
       (gate.resourceRefs.runId !== undefined && runIds.has(gate.resourceRefs.runId)),
   );
   const artifacts = run.artifacts.filter(
     (artifact) =>
       (worker && artifact.resourceRefs.workerId === worker.workerId) ||
+      (objective && artifact.resourceRefs.objectiveId === objective.objectiveId) ||
       (artifact.resourceRefs.taskId !== undefined && taskIds.has(artifact.resourceRefs.taskId)) ||
       (artifact.resourceRefs.runId !== undefined && runIds.has(artifact.resourceRefs.runId)),
   );
-  const eventMatches = (refs: { workerId?: string; taskId?: string; runId?: string }) =>
+  const eventMatches = (refs: { workerId?: string; objectiveId?: string; taskId?: string; runId?: string }) =>
     (worker && refs.workerId === worker.workerId) ||
+    (objective && refs.objectiveId === objective.objectiveId) ||
     (refs.taskId !== undefined && taskIds.has(refs.taskId)) ||
     (refs.runId !== undefined && runIds.has(refs.runId));
   const bundle: EvidenceBundle = {
@@ -816,10 +826,12 @@ export function buildEvidenceBundleForRepo(
     generatedAt: new Date().toISOString(),
     resourceRefs: {
       projectKey: run.projectKey,
+      objectiveId: objective?.objectiveId,
       workerId: worker?.workerId,
       taskId: task?.taskId,
       runId: selectedRun?.runId,
     },
+    objective,
     worker,
     tasks,
     runs,
@@ -842,7 +854,7 @@ export function buildEvidenceBundleForRepo(
   if (input.persistArtifact) {
     const withArtifact = addConductorArtifact(run, {
       type: "other",
-      ref: `evidence://${bundle.purpose}/${task?.taskId ?? worker?.workerId ?? selectedRun?.runId ?? run.projectKey}/${Date.now().toString(36)}`,
+      ref: `evidence://${bundle.purpose}/${task?.taskId ?? worker?.workerId ?? objective?.objectiveId ?? selectedRun?.runId ?? run.projectKey}/${Date.now().toString(36)}`,
       resourceRefs: bundle.resourceRefs,
       producer: { type: "parent_agent", id: "conductor" },
       metadata: {

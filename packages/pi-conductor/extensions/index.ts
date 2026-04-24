@@ -151,6 +151,35 @@ export default function conductorExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "conductor_get_objective",
+    label: "Conductor Get Objective",
+    description: "Get one objective with its task, run, gate, artifact, and event evidence bundle",
+    parameters: Type.Object({
+      objectiveId: Type.String({ description: "Objective ID" }),
+      includeEvents: Type.Optional(Type.Boolean({ description: "Include matching event history" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const bundle = buildEvidenceBundleForRepo(ctx.cwd, {
+        objectiveId: params.objectiveId,
+        purpose: "handoff",
+        includeEvents: params.includeEvents ?? true,
+      });
+      if (!bundle.objective) {
+        return { content: [{ type: "text", text: `objective not found: ${params.objectiveId}` }], details: {} };
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${bundle.objective.title} [${bundle.objective.objectiveId}] status=${bundle.objective.status} tasks=${bundle.tasks.length} runs=${bundle.runs.length}`,
+          },
+        ],
+        details: { bundle },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "conductor_create_objective",
     label: "Conductor Create Objective",
     description: "Create a parent-level conductor objective for coordinating multiple tasks",
@@ -269,6 +298,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       workerId: Type.Optional(Type.String()),
       workerName: Type.Optional(Type.String()),
+      objectiveId: Type.Optional(Type.String()),
       taskId: Type.Optional(Type.String()),
       runId: Type.Optional(Type.String()),
       purpose: Type.Optional(

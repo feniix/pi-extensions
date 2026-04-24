@@ -26,7 +26,8 @@ Agent-native local control plane for Pi worker orchestration.
 - Parent agents can explicitly grant child runs permission to create scoped follow-up tasks; this is disabled by default.
 - Parent-agent task control supports safe task update, explicit cancellation, and retry without overwriting prior run history.
 - Parent-agent orchestration advice is available through `conductor_next_actions`.
-- Readiness/evidence tools can build task/worker evidence bundles and evaluate task-review or PR-readiness blockers.
+- Objectives group related tasks above the worker/run layer so parent agents can keep multi-task goals explicit.
+- Readiness/evidence tools can build objective/task/worker evidence bundles and evaluate task-review or PR-readiness blockers.
 - Explicit semantic completion: a backend exit or final assistant message is not enough to mark a task complete. Missing child completion becomes `needs_review` with a review gate.
 - Lease heartbeats and reconciliation for stale/crashed runs, including read-only dry-run previews.
 - Filtered, paginated event history separate from concise status.
@@ -72,6 +73,11 @@ Resource/control-plane tools:
 - `conductor_backend_status`
 - `conductor_reconcile_project`
 - `conductor_next_actions`
+- `conductor_list_objectives`
+- `conductor_get_objective`
+- `conductor_create_objective`
+- `conductor_update_objective`
+- `conductor_link_task_to_objective`
 - `conductor_build_evidence_bundle`
 - `conductor_check_readiness`
 - `conductor_list_events`
