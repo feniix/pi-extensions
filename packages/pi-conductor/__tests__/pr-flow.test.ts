@@ -136,6 +136,8 @@ describe("PR preparation flow", () => {
     expect(run.workers[0]?.pr.prCreationAttempted).toBe(true);
     expect(run.workers[0]?.pr.number).toBe(123);
     expect(run.workers[0]?.pr.url).toContain("pull/123");
+    expect(run.artifacts[0]).toMatchObject({ type: "pr_evidence", ref: "https://github.com/example/repo/pull/123" });
+    expect(run.events.map((event) => event.type)).toContain("artifact.created");
   });
 
   it("persists partial PR state when gh pr create fails", async () => {

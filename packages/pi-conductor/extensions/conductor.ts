@@ -17,6 +17,7 @@ import {
   summarizeWorkerSessionRuntime,
 } from "./runtime.js";
 import {
+  addConductorArtifact,
   addTask,
   addWorker,
   assignTaskToWorker,
@@ -515,8 +516,17 @@ export function createWorkerPrForRepo(
       url: pr.url,
       number: pr.number,
     });
-    writeRun(updatedRun);
-    return updatedRun.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
+    const withEvidence = pr.url
+      ? addConductorArtifact(updatedRun, {
+          type: "pr_evidence",
+          ref: pr.url,
+          resourceRefs: { workerId: worker.workerId },
+          producer: { type: "system", id: "github-cli" },
+          metadata: { number: pr.number, branch: worker.branch ?? null, title },
+        })
+      : updatedRun;
+    writeRun(withEvidence);
+    return withEvidence.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
   } catch (error) {
     const updatedRun = setWorkerPrState(run, worker.workerId, {
       prCreationAttempted: true,

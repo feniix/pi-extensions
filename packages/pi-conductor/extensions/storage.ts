@@ -673,6 +673,40 @@ function createArtifactId(runId: string): string {
   return `artifact-${runId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export function addConductorArtifact(
+  run: RunRecord,
+  input: {
+    artifactId?: string;
+    type: ArtifactType;
+    ref: string;
+    resourceRefs: ArtifactRecord["resourceRefs"];
+    producer: ArtifactRecord["producer"];
+    metadata?: Record<string, unknown>;
+  },
+): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const artifact = createArtifactRecord({
+    artifactId:
+      input.artifactId ?? createArtifactId(input.resourceRefs.runId ?? input.resourceRefs.workerId ?? "project"),
+    type: input.type,
+    ref: input.ref,
+    resourceRefs: { projectKey: normalized.projectKey, ...input.resourceRefs },
+    producer: input.producer,
+    metadata: input.metadata,
+  });
+  const updated = {
+    ...normalized,
+    artifacts: [...normalized.artifacts, artifact],
+    updatedAt: artifact.updatedAt,
+  };
+  return appendConductorEvent(updated, {
+    actor: input.producer,
+    type: "artifact.created",
+    resourceRefs: artifact.resourceRefs,
+    payload: { artifactId: artifact.artifactId, type: artifact.type, ref: artifact.ref },
+  });
+}
+
 function getActiveRunForTask(normalized: RunRecord, input: { runId: string; taskId: string }): RunAttemptRecord {
   const runAttempt = normalized.runs.find((entry) => entry.runId === input.runId);
   if (!runAttempt) {
