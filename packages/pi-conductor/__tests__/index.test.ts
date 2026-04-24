@@ -12,6 +12,10 @@ describe("pi-conductor extension", () => {
     const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
     expect(extension).toContain('name: "conductor_get_project"');
     expect(extension).toContain('name: "conductor_list_workers"');
+    expect(extension).toContain('name: "conductor_list_tasks"');
+    expect(extension).toContain('name: "conductor_get_task"');
+    expect(extension).toContain('name: "conductor_list_runs"');
+    expect(extension).toContain('name: "conductor_list_gates"');
     expect(extension).toContain('name: "conductor_create_worker"');
     expect(extension).toContain('name: "conductor_create_task"');
     expect(extension).toContain('name: "conductor_update_task"');

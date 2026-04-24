@@ -233,6 +233,101 @@ export default function conductorExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "conductor_list_tasks",
+    label: "Conductor List Tasks",
+    description: "List durable pi-conductor tasks for the current repository",
+    parameters: Type.Object({
+      state: Type.Optional(Type.String({ description: "Optional task state filter" })),
+      workerId: Type.Optional(Type.String({ description: "Optional assigned worker ID filter" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const run = getOrCreateRunForRepo(ctx.cwd);
+      const tasks = run.tasks.filter(
+        (task) =>
+          (!params.state || task.state === params.state) &&
+          (!params.workerId || task.assignedWorkerId === params.workerId),
+      );
+      const text =
+        tasks.length === 0
+          ? "no conductor tasks"
+          : tasks.map((task) => `${task.title} [${task.taskId}] state=${task.state}`).join("\n");
+      return { content: [{ type: "text", text }], details: { tasks } };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_get_task",
+    label: "Conductor Get Task",
+    description: "Get one durable task with run, gate, and artifact references",
+    parameters: Type.Object({
+      taskId: Type.String({ description: "Task ID" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const run = getOrCreateRunForRepo(ctx.cwd);
+      const task = run.tasks.find((entry) => entry.taskId === params.taskId);
+      if (!task) {
+        return { content: [{ type: "text", text: `task not found: ${params.taskId}` }], details: {} };
+      }
+      return {
+        content: [{ type: "text", text: `${task.title} [${task.taskId}] state=${task.state}` }],
+        details: { task },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_list_runs",
+    label: "Conductor List Runs",
+    description: "List durable task run attempts for the current repository",
+    parameters: Type.Object({
+      taskId: Type.Optional(Type.String()),
+      workerId: Type.Optional(Type.String()),
+      status: Type.Optional(Type.String()),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const run = getOrCreateRunForRepo(ctx.cwd);
+      const runs = run.runs.filter(
+        (attempt) =>
+          (!params.taskId || attempt.taskId === params.taskId) &&
+          (!params.workerId || attempt.workerId === params.workerId) &&
+          (!params.status || attempt.status === params.status),
+      );
+      const text =
+        runs.length === 0
+          ? "no conductor runs"
+          : runs.map((attempt) => `${attempt.runId} task=${attempt.taskId} status=${attempt.status}`).join("\n");
+      return { content: [{ type: "text", text }], details: { runs } };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_list_gates",
+    label: "Conductor List Gates",
+    description: "List durable conductor gates for the current repository",
+    parameters: Type.Object({
+      taskId: Type.Optional(Type.String()),
+      workerId: Type.Optional(Type.String()),
+      status: Type.Optional(Type.String()),
+      type: Type.Optional(Type.String()),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const run = getOrCreateRunForRepo(ctx.cwd);
+      const gates = run.gates.filter(
+        (gate) =>
+          (!params.taskId || gate.resourceRefs.taskId === params.taskId) &&
+          (!params.workerId || gate.resourceRefs.workerId === params.workerId) &&
+          (!params.status || gate.status === params.status) &&
+          (!params.type || gate.type === params.type),
+      );
+      const text =
+        gates.length === 0
+          ? "no conductor gates"
+          : gates.map((gate) => `${gate.gateId} type=${gate.type} status=${gate.status}`).join("\n");
+      return { content: [{ type: "text", text }], details: { gates } };
+    },
+  });
+
+  pi.registerTool({
     name: "conductor_create_worker",
     label: "Conductor Create Worker",
     description: "Create a durable pi-conductor worker for the current repository",
