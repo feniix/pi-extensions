@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   assignTaskForRepo,
   cancelTaskRunForRepo,
+  createFollowUpTaskForRepo,
   createTaskForRepo,
   createWorkerForRepo,
   delegateTaskForRepo,
@@ -75,6 +76,30 @@ describe("conductor service", () => {
     expect(run.tasks).toHaveLength(1);
     expect(run.tasks[0]?.taskId).toBe(task.taskId);
     expect(run.events.map((event) => event.type)).toEqual(["task.created", "task.assigned"]);
+  });
+
+  it("lets allowed child runs create follow-up tasks", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Primary", prompt: "Do it" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, {
+      taskId: task.taskId,
+      workerId: worker.workerId,
+      allowFollowUpTasks: true,
+    });
+
+    expect(started.taskContract.allowFollowUpTasks).toBe(true);
+    const followUp = createFollowUpTaskForRepo(repoDir, {
+      runId: started.run.runId,
+      taskId: task.taskId,
+      title: "Follow-up",
+      prompt: "Do more",
+    });
+
+    expect(followUp).toMatchObject({ title: "Follow-up", prompt: "Do more", state: "ready" });
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.tasks).toHaveLength(2);
+    expect(run.events.map((event) => event.type)).toContain("task.followup_created");
   });
 
   it("fails closed when an unsupported backend is requested", async () => {

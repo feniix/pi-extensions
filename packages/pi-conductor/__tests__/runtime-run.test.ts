@@ -34,6 +34,20 @@ describe("worker run runtime helpers", () => {
     expect(prompt).toContain("conductor_child_progress");
     expect(prompt).toContain("conductor_child_create_gate");
     expect(prompt).toContain("idempotencyKey");
+    expect(prompt).not.toContain("conductor_child_create_followup_task");
+  });
+
+  it("includes follow-up task instructions only when allowed", () => {
+    const prompt = buildTaskContractPrompt({
+      taskId: "task-1",
+      runId: "run-1",
+      taskRevision: 2,
+      goal: "Implement durable tasks",
+      explicitCompletionTools: true,
+      allowFollowUpTasks: true,
+    });
+
+    expect(prompt).toContain("conductor_child_create_followup_task");
   });
 
   it("builds run-scoped conductor tools for native child sessions", async () => {
@@ -97,6 +111,48 @@ describe("worker run runtime helpers", () => {
     expect(completeCalls).toEqual([
       { runId: "run-1", taskId: "task-1", status: "succeeded", completionSummary: "done" },
     ]);
+  });
+
+  it("adds a scoped follow-up task tool only when the task contract allows it", async () => {
+    const followUpCalls: unknown[] = [];
+    const tools = buildRunScopedConductorTools({
+      taskContract: {
+        taskId: "task-1",
+        runId: "run-1",
+        taskRevision: 1,
+        goal: "Do it",
+        explicitCompletionTools: true,
+        allowFollowUpTasks: true,
+      },
+      onConductorFollowUpTask: async (params) => {
+        followUpCalls.push(params);
+      },
+    });
+
+    expect(tools.map((tool) => tool.name)).toContain("conductor_child_create_followup_task");
+    const followUpTool = tools.find((tool) => tool.name === "conductor_child_create_followup_task");
+    await followUpTool?.execute?.(
+      "call-1",
+      { runId: "run-1", taskId: "task-1", title: "Follow up", prompt: "Do the follow-up" } as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+    );
+
+    expect(followUpCalls).toEqual([
+      { runId: "run-1", taskId: "task-1", title: "Follow up", prompt: "Do the follow-up" },
+    ]);
+    expect(
+      buildRunScopedConductorTools({
+        taskContract: {
+          taskId: "task-1",
+          runId: "run-1",
+          taskRevision: 1,
+          goal: "Do it",
+          explicitCompletionTools: true,
+        },
+      }).map((tool) => tool.name),
+    ).not.toContain("conductor_child_create_followup_task");
   });
 
   it("rejects scoped child tool calls for another task or run", async () => {

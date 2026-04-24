@@ -494,6 +494,9 @@ export default function conductorExtension(pi: ExtensionAPI) {
       workerId: Type.Optional(Type.String({ description: "Worker ID; defaults to the task's assigned worker" })),
       leaseSeconds: Type.Optional(Type.Number({ description: "Lease duration in seconds; defaults to 900" })),
       backend: Type.Optional(Type.Union([Type.Literal("native"), Type.Literal("pi-subagents")])),
+      allowFollowUpTasks: Type.Optional(
+        Type.Boolean({ description: "Allow the child run to create scoped follow-up tasks" }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const started = startTaskRunForRepo(ctx.cwd, params);

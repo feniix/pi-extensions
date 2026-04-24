@@ -207,6 +207,7 @@ export interface TaskContractInput {
   goal: string;
   constraints?: string[];
   explicitCompletionTools: boolean;
+  allowFollowUpTasks?: boolean;
 }
 
 export interface ConductorProgressReportInput {
@@ -233,6 +234,13 @@ export interface ConductorGateReportInput {
   requestedDecision: string;
 }
 
+export interface ConductorFollowUpTaskInput {
+  runId: string;
+  taskId: string;
+  title: string;
+  prompt: string;
+}
+
 export interface RuntimeRunContext {
   worktreePath: string;
   sessionFile: string;
@@ -242,6 +250,7 @@ export interface RuntimeRunContext {
   onConductorProgress?: (input: ConductorProgressReportInput) => void | Promise<void>;
   onConductorComplete?: (input: ConductorCompletionReportInput) => void | Promise<void>;
   onConductorGate?: (input: ConductorGateReportInput) => void | Promise<void>;
+  onConductorFollowUpTask?: (input: ConductorFollowUpTaskInput) => void | Promise<void>;
 }
 
 export interface RuntimeRunPreflightContext {

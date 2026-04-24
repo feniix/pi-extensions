@@ -13,6 +13,7 @@ import { Type } from "typebox";
 import { generateWorkerSummaryFromSession } from "./summaries.js";
 import type {
   ConductorCompletionReportInput,
+  ConductorFollowUpTaskInput,
   ConductorGateReportInput,
   ConductorProgressReportInput,
   RuntimeRunContext,
@@ -151,6 +152,7 @@ export function buildRunScopedConductorTools(input: {
   onConductorProgress?: (params: ConductorProgressReportInput) => void | Promise<void>;
   onConductorComplete?: (params: ConductorCompletionReportInput) => void | Promise<void>;
   onConductorGate?: (params: ConductorGateReportInput) => void | Promise<void>;
+  onConductorFollowUpTask?: (params: ConductorFollowUpTaskInput) => void | Promise<void>;
 }) {
   function assertScoped(params: { runId: string; taskId: string }): void {
     if (!input.taskContract) {
@@ -163,7 +165,7 @@ export function buildRunScopedConductorTools(input: {
     }
   }
 
-  return [
+  const tools = [
     defineTool({
       name: "conductor_child_progress",
       label: "Conductor Child Progress",
@@ -206,6 +208,29 @@ export function buildRunScopedConductorTools(input: {
         };
       },
     }),
+    ...(input.taskContract?.allowFollowUpTasks
+      ? [
+          defineTool({
+            name: "conductor_child_create_followup_task",
+            label: "Conductor Child Create Follow-Up Task",
+            description: "Create a scoped follow-up task requested by the current conductor task run",
+            parameters: Type.Object({
+              runId: Type.String(),
+              taskId: Type.String(),
+              title: Type.String(),
+              prompt: Type.String(),
+            }),
+            execute: async (_toolCallId, params) => {
+              assertScoped(params);
+              await input.onConductorFollowUpTask?.(params as ConductorFollowUpTaskInput);
+              return {
+                content: [{ type: "text", text: `created follow-up task request from ${params.taskId}` }],
+                details: params,
+              };
+            },
+          }),
+        ]
+      : []),
     defineTool({
       name: "conductor_child_complete",
       label: "Conductor Child Complete",
@@ -240,17 +265,22 @@ export function buildRunScopedConductorTools(input: {
       },
     }),
   ];
+  return tools;
 }
 
 export function buildTaskContractPrompt(input: TaskContractInput): string {
   const constraints = input.constraints?.length
     ? input.constraints.map((constraint) => `- ${constraint}`).join("\n")
     : "- No additional constraints were provided.";
+  const followUpInstruction = input.allowFollowUpTasks
+    ? "If you discover follow-up work that should be tracked separately, call conductor_child_create_followup_task."
+    : null;
   const completion = input.explicitCompletionTools
     ? [
         "Report progress with conductor_child_progress when meaningful milestones happen.",
         "Attach evidence through the artifact field on conductor_child_progress or conductor_child_complete.",
         "If you are blocked or need input/review, create a scoped gate with conductor_child_create_gate.",
+        ...(followUpInstruction ? [followUpInstruction] : []),
         "Include a stable idempotencyKey on progress and completion tool calls when retrying or after tool-call uncertainty.",
         "When finished, call conductor_child_complete with succeeded, partial, blocked, failed, or aborted status.",
       ].join("\n")

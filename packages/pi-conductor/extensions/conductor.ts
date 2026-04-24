@@ -215,6 +215,7 @@ export function startTaskRunForRepo(
     leaseSeconds?: number;
     runId?: string;
     backend?: RunAttemptRecord["backend"];
+    allowFollowUpTasks?: boolean;
     inspectBackends?: () => ConductorBackendsStatus;
   },
 ): { run: RunAttemptRecord; taskContract: TaskContractInput } {
@@ -269,6 +270,7 @@ export function startTaskRunForRepo(
       goal: updatedTask.prompt,
       constraints: [],
       explicitCompletionTools: true,
+      allowFollowUpTasks: input.allowFollowUpTasks ?? false,
     },
   };
 }
@@ -296,6 +298,31 @@ export function retryTaskForRepo(
     throw new Error(`Task ${input.taskId} is ${task.state} and is not eligible for retry`);
   }
   return startTaskRunForRepo(repoRoot, input);
+}
+
+export function createFollowUpTaskForRepo(
+  repoRoot: string,
+  input: { runId: string; taskId: string; title: string; prompt: string },
+): TaskRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const runAttempt = run.runs.find((entry) => entry.runId === input.runId);
+  if (!runAttempt || runAttempt.taskId !== input.taskId || runAttempt.finishedAt) {
+    throw new Error(`Run ${input.runId} is not an active run for task ${input.taskId}`);
+  }
+  const task = createTaskRecord({ taskId: createTaskId(), title: input.title, prompt: input.prompt });
+  const withTask = addTask(run, task);
+  const withEvent = appendConductorEvent(withTask, {
+    actor: { type: "child_run", id: input.runId },
+    type: "task.followup_created",
+    resourceRefs: { projectKey: run.projectKey, taskId: task.taskId, runId: input.runId },
+    payload: { parentTaskId: input.taskId, title: input.title },
+  });
+  writeRun(withEvent);
+  const created = withEvent.tasks.find((entry) => entry.taskId === task.taskId);
+  if (!created) {
+    throw new Error(`Follow-up task ${task.taskId} disappeared during creation`);
+  }
+  return created;
 }
 
 export async function delegateTaskForRepo(
@@ -663,6 +690,9 @@ export async function runTaskForRepo(repoRoot: string, taskId: string): Promise<
         resourceRefs: { taskId: gate.taskId, runId: gate.runId, workerId: worker.workerId },
         requestedDecision: gate.requestedDecision,
       });
+    },
+    onConductorFollowUpTask: async (followUp) => {
+      createFollowUpTaskForRepo(repoRoot, followUp);
     },
   });
 
