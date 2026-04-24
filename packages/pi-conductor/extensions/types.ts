@@ -54,6 +54,7 @@ export type ConductorNextActionKind =
   | "assign_task"
   | "run_task"
   | "wait_for_run"
+  | "wait_for_dependency"
   | "resolve_gate"
   | "await_human_gate"
   | "review_task"
@@ -132,6 +133,7 @@ export interface ConductorTaskBrief {
   gates: GateRecord[];
   artifacts: ArtifactRecord[];
   suggestedNextTool: null | { name: string; params: Record<string, unknown> };
+  dependencies: Array<{ taskId: string; title: string; state: TaskState }>;
 }
 
 export interface ConductorProjectBrief {
@@ -231,6 +233,7 @@ export interface TaskRecord {
   artifactIds: string[];
   gateIds: string[];
   objectiveId: string | null;
+  dependsOnTaskIds: string[];
   latestProgress: string | null;
   createdAt: string;
   updatedAt: string;

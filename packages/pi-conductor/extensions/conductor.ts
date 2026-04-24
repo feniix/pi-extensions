@@ -105,6 +105,13 @@ function nextAction(input: Omit<ConductorNextAction, "actionId">): ConductorNext
   return { ...input, actionId };
 }
 
+function incompleteDependenciesForTask(run: RunRecord, task: TaskRecord): TaskRecord[] {
+  const dependencies = task.dependsOnTaskIds
+    .map((taskId) => run.tasks.find((entry) => entry.taskId === taskId))
+    .filter((entry): entry is TaskRecord => Boolean(entry));
+  return dependencies.filter((entry) => entry.state !== "completed");
+}
+
 function isUsableIdleWorker(worker: WorkerRecord): boolean {
   return (
     worker.lifecycle === "idle" && !worker.recoverable && Boolean(worker.worktreePath) && Boolean(worker.sessionFile)
@@ -311,6 +318,28 @@ export function computeNextActions(
         }),
       );
     }
+    const incompleteDependencies = incompleteDependenciesForTask(run, task);
+    if (task.state === "assigned" && incompleteDependencies.length > 0) {
+      actions.push(
+        nextAction({
+          priority: "high",
+          kind: "wait_for_dependency",
+          title: `Wait for dependencies before running task ${task.taskId}`,
+          rationale: "The task is assigned but one or more dependency tasks are not completed.",
+          resourceRefs: {
+            projectKey: run.projectKey,
+            taskId: task.taskId,
+            workerId: task.assignedWorkerId ?? undefined,
+          },
+          toolCall: { name: "conductor_task_brief", params: { taskId: task.taskId } },
+          requiresHuman: false,
+          destructive: false,
+          blockedBy: incompleteDependencies.map((dependency) => ({ taskId: dependency.taskId })),
+          confidence: "high",
+        }),
+      );
+      continue;
+    }
     if (task.state === "assigned" && assignedWorker && isUsableIdleWorker(assignedWorker)) {
       actions.push(
         nextAction({
@@ -409,6 +438,10 @@ export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string 
   const runs = run.runs.filter((entry) => task.runIds.includes(entry.runId));
   const gates = run.gates.filter((gate) => gate.resourceRefs.taskId === task.taskId);
   const artifacts = run.artifacts.filter((artifact) => artifact.resourceRefs.taskId === task.taskId);
+  const dependencies = task.dependsOnTaskIds.map((taskId) => {
+    const dependency = run.tasks.find((entry) => entry.taskId === taskId);
+    return { taskId, title: dependency?.title ?? "<missing dependency>", state: dependency?.state ?? "failed" };
+  });
   const suggestedNextTool =
     task.state === "assigned" && worker
       ? { name: "conductor_run_task", params: { taskId: task.taskId } }
@@ -433,10 +466,17 @@ export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string 
     `Gates: ${gates.length}`,
     `Artifacts: ${artifacts.length}`,
     "",
+    "## Dependencies",
+    dependencies.length === 0
+      ? "- none"
+      : dependencies
+          .map((dependency) => `- ${dependency.title} [${dependency.taskId}] state=${dependency.state}`)
+          .join("\n"),
+    "",
     "## Suggested Next Tool",
     suggestedNextTool ? `${suggestedNextTool.name} ${JSON.stringify(suggestedNextTool.params)}` : "none",
   ].join("\n");
-  return { markdown, task, objective, worker, runs, gates, artifacts, suggestedNextTool };
+  return { markdown, task, objective, worker, runs, gates, artifacts, suggestedNextTool, dependencies };
 }
 
 export function buildProjectBriefForRepo(
@@ -615,6 +655,11 @@ export function planObjectiveForRepo(
       title: taskInput.title,
       prompt: `${taskInput.prompt}${dependencyText}`,
       objectiveId: input.objectiveId,
+      dependsOnTaskIds: taskInput.dependsOn
+        ?.map(
+          (dependency) => createdTasks.find((task) => task.title === dependency || task.taskId === dependency)?.taskId,
+        )
+        .filter((taskId): taskId is string => Boolean(taskId)),
     });
     run = linkTaskToObjective(addTask(run, task), input.objectiveId, task.taskId);
     createdTasks.push(task);
@@ -635,7 +680,7 @@ export function planObjectiveForRepo(
 
 export function createTaskForRepo(
   repoRoot: string,
-  input: { title: string; prompt: string; objectiveId?: string },
+  input: { title: string; prompt: string; objectiveId?: string; dependsOnTaskIds?: string[] },
 ): TaskRecord {
   const run = getOrCreateRunForRepo(repoRoot);
   const task = createTaskRecord({
@@ -643,6 +688,7 @@ export function createTaskForRepo(
     title: input.title,
     prompt: input.prompt,
     objectiveId: input.objectiveId,
+    dependsOnTaskIds: input.dependsOnTaskIds,
   });
   const updatedRun = input.objectiveId
     ? linkTaskToObjective(addTask(run, task), input.objectiveId, task.taskId)

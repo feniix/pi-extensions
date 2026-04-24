@@ -93,6 +93,7 @@ function normalizeTaskRecord(task: TaskRecord): TaskRecord {
   return {
     ...task,
     objectiveId: task.objectiveId ?? null,
+    dependsOnTaskIds: task.dependsOnTaskIds ?? [],
   };
 }
 
@@ -215,6 +216,11 @@ export function validateRunRecord(run: RunRecord): void {
     }
     if (task.activeRunId && !indexes.runIds.has(task.activeRunId)) {
       throw new Error(`Task ${task.taskId} references missing run ${task.activeRunId}`);
+    }
+    for (const dependencyId of task.dependsOnTaskIds) {
+      if (!indexes.taskIds.has(dependencyId)) {
+        throw new Error(`Task ${task.taskId} references missing dependency ${dependencyId}`);
+      }
     }
     for (const runId of task.runIds) {
       if (!indexes.runIds.has(runId)) {
@@ -547,6 +553,7 @@ export function createTaskRecord(input: {
   title: string;
   prompt: string;
   objectiveId?: string;
+  dependsOnTaskIds?: string[];
 }): TaskRecord {
   const now = new Date().toISOString();
   return {
@@ -561,6 +568,7 @@ export function createTaskRecord(input: {
     artifactIds: [],
     gateIds: [],
     objectiveId: input.objectiveId ?? null,
+    dependsOnTaskIds: input.dependsOnTaskIds ?? [],
     latestProgress: null,
     createdAt: now,
     updatedAt: now,
