@@ -134,17 +134,38 @@ export function computeNextActions(
     includeLowPriority?: boolean;
     includePrActions?: boolean;
     includeHumanGateActions?: boolean;
+    objectiveId?: string;
     reconciledPreview?: boolean;
   } = {},
 ): ConductorNextActionsResponse {
   const now = input.now ?? new Date().toISOString();
   const maxActions = Math.max(1, Math.min(input.maxActions ?? 10, 25));
   const actions: ConductorNextAction[] = [];
-  const openGates = run.gates.filter((gate) => gate.status === "open");
-  const activeRuns = run.runs.filter((attempt) => !attempt.finishedAt && !terminalRunStatuses.has(attempt.status));
+  const objectiveTaskIds = input.objectiveId
+    ? new Set(run.objectives.find((objective) => objective.objectiveId === input.objectiveId)?.taskIds ?? [])
+    : null;
+  const isInObjectiveScope = (refs: ConductorResourceRefs): boolean => {
+    if (!input.objectiveId) return true;
+    return (
+      refs.objectiveId === input.objectiveId ||
+      (refs.taskId !== undefined && Boolean(objectiveTaskIds?.has(refs.taskId)))
+    );
+  };
+  const scopedTasks = input.objectiveId
+    ? run.tasks.filter((task) => task.objectiveId === input.objectiveId || Boolean(objectiveTaskIds?.has(task.taskId)))
+    : run.tasks;
+  const openGates = run.gates.filter((gate) => gate.status === "open" && isInObjectiveScope(gate.resourceRefs));
+  const activeRuns = run.runs.filter(
+    (attempt) =>
+      !attempt.finishedAt &&
+      !terminalRunStatuses.has(attempt.status) &&
+      (!input.objectiveId || Boolean(objectiveTaskIds?.has(attempt.taskId))),
+  );
   const usableWorkers = run.workers.filter(isUsableIdleWorker);
 
-  for (const objective of run.objectives) {
+  for (const objective of run.objectives.filter(
+    (entry) => !input.objectiveId || entry.objectiveId === input.objectiveId,
+  )) {
     if (["active", "draft"].includes(objective.status) && objective.taskIds.length === 0) {
       actions.push(
         nextAction({
@@ -169,7 +190,7 @@ export function computeNextActions(
     }
   }
 
-  if (run.workers.length === 0) {
+  if (!input.objectiveId && run.workers.length === 0) {
     actions.push(
       nextAction({
         priority: run.tasks.length === 0 ? "medium" : "high",
@@ -295,7 +316,7 @@ export function computeNextActions(
     }
   }
 
-  for (const task of run.tasks) {
+  for (const task of scopedTasks) {
     const assignedWorker = run.workers.find((worker) => worker.workerId === task.assignedWorkerId);
     if (task.activeRunId) {
       continue;
@@ -408,7 +429,7 @@ export function computeNextActions(
       reconciledPreview: input.reconciledPreview ?? false,
       counts: {
         workers: run.workers.length,
-        tasks: run.tasks.length,
+        tasks: scopedTasks.length,
         runs: run.runs.length,
         gates: run.gates.length,
         artifacts: run.artifacts.length,
@@ -625,6 +646,7 @@ export function getNextActionsForRepo(
     includeLowPriority?: boolean;
     includePrActions?: boolean;
     includeHumanGateActions?: boolean;
+    objectiveId?: string;
     reconcile?: boolean;
   } = {},
 ): ConductorNextActionsResponse {

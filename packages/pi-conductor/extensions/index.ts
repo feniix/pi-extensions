@@ -375,6 +375,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
       maxActions: Type.Optional(Type.Number({ description: "Maximum actions to return; defaults to 10, max 25" })),
       includeLowPriority: Type.Optional(Type.Boolean({ description: "Include low-priority monitoring/no-op actions" })),
       includePrActions: Type.Optional(Type.Boolean({ description: "Include PR preparation recommendations" })),
+      objectiveId: Type.Optional(Type.String({ description: "Limit recommendations to one objective and its tasks" })),
       includeHumanGateActions: Type.Optional(
         Type.Boolean({ description: "Include actions that require human gate decisions" }),
       ),
