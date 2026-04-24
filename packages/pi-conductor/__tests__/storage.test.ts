@@ -195,6 +195,32 @@ describe("storage helpers", () => {
     expect(resolved.events.map((event) => event.type)).toContain("gate.resolved");
   });
 
+  it("prevents parent agents from approving high-risk gates", () => {
+    const run = createConductorGate(createEmptyRun("abc", "/repo"), {
+      gateId: "gate-1",
+      type: "destructive_cleanup",
+      resourceRefs: { projectKey: "abc", workerId: "worker-1" },
+      requestedDecision: "Approve worker cleanup?",
+    });
+
+    expect(() =>
+      resolveConductorGate(run, {
+        gateId: "gate-1",
+        status: "approved",
+        actor: { type: "parent_agent", id: "parent" },
+        resolutionReason: "I think it is safe",
+      }),
+    ).toThrow(/human.*destructive_cleanup/i);
+
+    const rejected = resolveConductorGate(run, {
+      gateId: "gate-1",
+      status: "rejected",
+      actor: { type: "parent_agent", id: "parent" },
+      resolutionReason: "Not safe yet",
+    });
+    expect(rejected.gates[0]?.status).toBe("rejected");
+  });
+
   it("records scoped child progress and completion artifacts", () => {
     let run = addWorker(
       createEmptyRun("abc", "/repo"),

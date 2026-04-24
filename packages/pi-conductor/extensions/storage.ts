@@ -501,6 +501,10 @@ function isTerminalRunStatus(status: RunStatus): boolean {
   );
 }
 
+function requiresHumanApproval(gateType: GateRecord["type"]): boolean {
+  return ["approval_required", "ready_for_pr", "destructive_cleanup"].includes(gateType);
+}
+
 export function reconcileRunLeases(run: RunRecord, input: { now?: string } = {}): RunRecord {
   let current = normalizeProjectRecord(run);
   const now = input.now ?? new Date().toISOString();
@@ -615,6 +619,9 @@ export function resolveConductorGate(
   }
   if (existing.status !== "open") {
     throw new Error(`Gate ${input.gateId} is already resolved`);
+  }
+  if (input.status === "approved" && requiresHumanApproval(existing.type) && input.actor?.type !== "human") {
+    throw new Error(`A human actor is required to approve ${existing.type} gate ${input.gateId}`);
   }
   const now = new Date().toISOString();
   const updated = {
