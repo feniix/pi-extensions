@@ -457,6 +457,95 @@ export function startTaskRun(
   });
 }
 
+export function recordRunHeartbeat(
+  run: RunRecord,
+  input: { runId: string; leaseExpiresAt?: string | null },
+): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const now = new Date().toISOString();
+  const runAttempt = normalized.runs.find((entry) => entry.runId === input.runId);
+  if (!runAttempt) {
+    throw new Error(`Run ${input.runId} not found`);
+  }
+  if (runAttempt.finishedAt) {
+    throw new Error(`Run ${input.runId} is already terminal`);
+  }
+  const updated = {
+    ...normalized,
+    runs: normalized.runs.map((entry) =>
+      entry.runId === input.runId
+        ? {
+            ...entry,
+            lastHeartbeatAt: now,
+            leaseExpiresAt: input.leaseExpiresAt === undefined ? entry.leaseExpiresAt : input.leaseExpiresAt,
+          }
+        : entry,
+    ),
+    updatedAt: now,
+  };
+
+  return appendConductorEvent(updated, {
+    actor: { type: "system", id: "storage" },
+    type: "run.heartbeat",
+    resourceRefs: {
+      projectKey: normalized.projectKey,
+      taskId: runAttempt.taskId,
+      workerId: runAttempt.workerId,
+      runId: input.runId,
+    },
+    payload: { leaseExpiresAt: input.leaseExpiresAt ?? runAttempt.leaseExpiresAt },
+  });
+}
+
+function isTerminalRunStatus(status: RunStatus): boolean {
+  return ["succeeded", "partial", "blocked", "failed", "aborted", "stale", "interrupted", "unknown_dispatch"].includes(
+    status,
+  );
+}
+
+export function reconcileRunLeases(run: RunRecord, input: { now?: string } = {}): RunRecord {
+  let current = normalizeProjectRecord(run);
+  const now = input.now ?? new Date().toISOString();
+  const expiredRuns = current.runs.filter(
+    (entry) => !isTerminalRunStatus(entry.status) && entry.leaseExpiresAt !== null && entry.leaseExpiresAt <= now,
+  );
+
+  for (const expired of expiredRuns) {
+    const updated = {
+      ...current,
+      runs: current.runs.map((entry) =>
+        entry.runId === expired.runId
+          ? { ...entry, status: "stale" as const, finishedAt: now, leaseExpiresAt: null, errorMessage: "Lease expired" }
+          : entry,
+      ),
+      tasks: current.tasks.map((entry) =>
+        entry.taskId === expired.taskId && entry.activeRunId === expired.runId
+          ? { ...entry, state: "needs_review" as const, activeRunId: null, updatedAt: now }
+          : entry,
+      ),
+      workers: current.workers.map((entry) =>
+        entry.workerId === expired.workerId && entry.lifecycle === "running"
+          ? { ...entry, lifecycle: "idle" as const, updatedAt: now }
+          : entry,
+      ),
+      updatedAt: now,
+    };
+    current = appendConductorEvent(updated, {
+      actor: { type: "system", id: "reconciler" },
+      type: "run.lease_expired",
+      resourceRefs: {
+        projectKey: current.projectKey,
+        taskId: expired.taskId,
+        workerId: expired.workerId,
+        runId: expired.runId,
+      },
+      payload: { leaseExpiresAt: expired.leaseExpiresAt, reconciledAt: now },
+    });
+  }
+
+  return current;
+}
+
 function taskStateForRunStatus(status: RunStatus): TaskRecord["state"] {
   switch (status) {
     case "succeeded":

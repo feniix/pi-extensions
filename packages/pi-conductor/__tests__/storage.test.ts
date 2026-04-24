@@ -16,6 +16,8 @@ import {
   getConductorProjectDir,
   mutateRun,
   readRun,
+  reconcileRunLeases,
+  recordRunHeartbeat,
   recordTaskCompletion,
   recordTaskProgress,
   resolveConductorGate,
@@ -127,6 +129,45 @@ describe("storage helpers", () => {
     });
     expect(completed.workers[0]?.lifecycle).toBe("idle");
     expect(completed.events.map((event) => event.type)).toContain("run.completed");
+  });
+
+  it("records run heartbeats and reconciles expired leases", () => {
+    let run = addWorker(
+      createEmptyRun("abc", "/repo"),
+      createWorkerRecord({
+        workerId: "worker-1",
+        name: "backend",
+        branch: "conductor/backend",
+        worktreePath: "/repo/.worktrees/backend",
+        sessionFile: "/tmp/session.jsonl",
+      }),
+    );
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    const running = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+
+    const heartbeat = recordRunHeartbeat(running, {
+      runId: "run-1",
+      leaseExpiresAt: "2026-04-24T02:00:00.000Z",
+    });
+    expect(heartbeat.runs[0]).toMatchObject({ leaseExpiresAt: "2026-04-24T02:00:00.000Z" });
+    expect(heartbeat.runs[0]?.lastHeartbeatAt).toBeTruthy();
+    expect(heartbeat.events.map((event) => event.type)).toContain("run.heartbeat");
+
+    const reconciled = reconcileRunLeases(heartbeat, { now: "2026-04-24T02:00:01.000Z" });
+    expect(reconciled.runs[0]).toMatchObject({ status: "stale", finishedAt: "2026-04-24T02:00:01.000Z" });
+    expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+    expect(reconciled.workers[0]?.lifecycle).toBe("idle");
+    expect(reconciled.events.map((event) => event.type)).toContain("run.lease_expired");
   });
 
   it("creates and resolves gates with events", () => {
