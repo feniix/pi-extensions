@@ -14,6 +14,7 @@ import {
   createWorkerRecord,
   finishWorkerRun,
   getConductorProjectDir,
+  mutateRun,
   readRun,
   recordTaskCompletion,
   recordTaskProgress,
@@ -303,6 +304,28 @@ describe("storage helpers", () => {
         ],
       }),
     ).toThrow(/references missing task missing-task/i);
+  });
+
+  it("serializes per-project mutations so concurrent updates do not clobber each other", async () => {
+    const seed = createEmptyRun("abc", "/tmp/repo");
+    writeRun(seed);
+    let releaseFirstMutation: () => void = () => undefined;
+    const firstCanFinish = new Promise<void>((resolve) => {
+      releaseFirstMutation = resolve;
+    });
+
+    const first = mutateRun("abc", "/tmp/repo", async (current) => {
+      await firstCanFinish;
+      return addTask(current, createTaskRecord({ taskId: "task-1", title: "One", prompt: "First" }));
+    });
+    const second = mutateRun("abc", "/tmp/repo", (current) =>
+      addTask(current, createTaskRecord({ taskId: "task-2", title: "Two", prompt: "Second" })),
+    );
+
+    releaseFirstMutation();
+    await Promise.all([first, second]);
+
+    expect(readRun("abc")?.tasks.map((task) => task.taskId)).toEqual(["task-1", "task-2"]);
   });
 
   it("writes state atomically without leaving temporary files", () => {

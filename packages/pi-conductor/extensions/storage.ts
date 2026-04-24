@@ -205,6 +205,40 @@ export function writeRun(run: RunRecord): void {
   }
 }
 
+const projectMutationLocks = new Map<string, Promise<void>>();
+
+export async function mutateRun(
+  projectKey: string,
+  repoRoot: string,
+  mutator: (run: RunRecord) => RunRecord | Promise<RunRecord>,
+): Promise<RunRecord> {
+  const previous = projectMutationLocks.get(projectKey) ?? Promise.resolve();
+  let releaseCurrent!: () => void;
+  const currentLock = new Promise<void>((resolve) => {
+    releaseCurrent = resolve;
+  });
+  projectMutationLocks.set(
+    projectKey,
+    previous.then(
+      () => currentLock,
+      () => currentLock,
+    ),
+  );
+
+  await previous;
+  try {
+    const current = readRun(projectKey) ?? createEmptyRun(projectKey, repoRoot);
+    const updated = await mutator(current);
+    writeRun(updated);
+    return updated;
+  } finally {
+    releaseCurrent();
+    if (projectMutationLocks.get(projectKey) === currentLock) {
+      projectMutationLocks.delete(projectKey);
+    }
+  }
+}
+
 export function createEmptyRun(projectKey: string, repoRoot: string): RunRecord {
   const now = new Date().toISOString();
   return {
