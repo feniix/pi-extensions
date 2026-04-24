@@ -8,6 +8,7 @@ import {
   appendConductorEvent,
   assignTaskToWorker,
   completeTaskRun,
+  createConductorGate,
   createEmptyRun,
   createTaskRecord,
   createWorkerRecord,
@@ -16,6 +17,7 @@ import {
   readRun,
   recordTaskCompletion,
   recordTaskProgress,
+  resolveConductorGate,
   setWorkerLifecycle,
   setWorkerRunSessionId,
   setWorkerRuntimeState,
@@ -122,6 +124,31 @@ describe("storage helpers", () => {
     });
     expect(completed.workers[0]?.lifecycle).toBe("idle");
     expect(completed.events.map((event) => event.type)).toContain("run.completed");
+  });
+
+  it("creates and resolves gates with events", () => {
+    const run = createEmptyRun("abc", "/repo");
+
+    const gated = createConductorGate(run, {
+      gateId: "gate-1",
+      type: "approval_required",
+      resourceRefs: { projectKey: "abc", taskId: "task-1" },
+      requestedDecision: "Approve cleanup?",
+    });
+
+    expect(gated.gates).toHaveLength(1);
+    expect(gated.gates[0]).toMatchObject({ gateId: "gate-1", status: "open", requestedDecision: "Approve cleanup?" });
+    expect(gated.events.map((event) => event.type)).toContain("gate.created");
+
+    const resolved = resolveConductorGate(gated, {
+      gateId: "gate-1",
+      status: "approved",
+      actor: { type: "human", id: "reviewer" },
+      resolutionReason: "safe to proceed",
+    });
+
+    expect(resolved.gates[0]).toMatchObject({ status: "approved", resolutionReason: "safe to proceed" });
+    expect(resolved.events.map((event) => event.type)).toContain("gate.resolved");
   });
 
   it("records scoped child progress and completion artifacts", () => {

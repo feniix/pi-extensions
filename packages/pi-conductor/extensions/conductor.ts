@@ -20,6 +20,7 @@ import {
   addTask,
   addWorker,
   assignTaskToWorker,
+  createConductorGate,
   createEmptyRun,
   createTaskRecord,
   createWorkerRecord,
@@ -28,6 +29,7 @@ import {
   recordTaskCompletion,
   recordTaskProgress,
   removeWorker,
+  resolveConductorGate,
   setWorkerLifecycle,
   setWorkerPrState,
   setWorkerRunSessionId,
@@ -37,7 +39,17 @@ import {
   startWorkerRun,
   writeRun,
 } from "./storage.js";
-import type { RunRecord, TaskRecord, WorkerLifecycleState, WorkerRecord, WorkerRunResult } from "./types.js";
+import type {
+  ConductorActor,
+  ConductorResourceRefs,
+  GateRecord,
+  GateStatus,
+  RunRecord,
+  TaskRecord,
+  WorkerLifecycleState,
+  WorkerRecord,
+  WorkerRunResult,
+} from "./types.js";
 import { createWorkerId } from "./workers.js";
 import {
   createManagedWorktree,
@@ -130,6 +142,35 @@ export function recordTaskCompletionForRepo(
     throw new Error(`Task ${input.taskId} disappeared during completion update`);
   }
   return task;
+}
+
+export function createGateForRepo(
+  repoRoot: string,
+  input: { type: GateRecord["type"]; resourceRefs: ConductorResourceRefs; requestedDecision: string; gateId?: string },
+): GateRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const gateId = input.gateId ?? `gate-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const updatedRun = createConductorGate(run, { ...input, gateId });
+  writeRun(updatedRun);
+  const gate = updatedRun.gates.find((entry) => entry.gateId === gateId);
+  if (!gate) {
+    throw new Error(`Gate ${gateId} disappeared during creation`);
+  }
+  return gate;
+}
+
+export function resolveGateForRepo(
+  repoRoot: string,
+  input: { gateId: string; status: Exclude<GateStatus, "open">; actor: ConductorActor; resolutionReason: string },
+): GateRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const updatedRun = resolveConductorGate(run, input);
+  writeRun(updatedRun);
+  const gate = updatedRun.gates.find((entry) => entry.gateId === input.gateId);
+  if (!gate) {
+    throw new Error(`Gate ${input.gateId} disappeared during resolution`);
+  }
+  return gate;
 }
 
 export async function createWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {

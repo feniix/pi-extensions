@@ -6,6 +6,7 @@ import { runConductorCommand } from "./commands.js";
 import {
   assignTaskForRepo,
   commitWorkerForRepo,
+  createGateForRepo,
   createTaskForRepo,
   createWorkerForRepo,
   createWorkerPrForRepo,
@@ -17,6 +18,7 @@ import {
   recoverWorkerForRepo,
   refreshWorkerSummaryForRepo,
   removeWorkerForRepo,
+  resolveGateForRepo,
   resumeWorkerForRepo,
   runWorkerForRepo,
   updateWorkerLifecycleForRepo,
@@ -211,6 +213,65 @@ export default function conductorExtension(pi: ExtensionAPI) {
     Type.Literal("pr_evidence"),
     Type.Literal("other"),
   ]);
+
+  const gateTypeSchema = Type.Union([
+    Type.Literal("needs_input"),
+    Type.Literal("needs_review"),
+    Type.Literal("approval_required"),
+    Type.Literal("ready_for_pr"),
+    Type.Literal("destructive_cleanup"),
+  ]);
+
+  pi.registerTool({
+    name: "conductor_create_gate",
+    label: "Conductor Create Gate",
+    description: "Create a gate for parent/human approval, review, or input before risky work proceeds",
+    parameters: Type.Object({
+      type: gateTypeSchema,
+      requestedDecision: Type.String({ description: "Decision or review needed" }),
+      resourceRefs: Type.Object(
+        {
+          workerId: Type.Optional(Type.String()),
+          taskId: Type.Optional(Type.String()),
+          runId: Type.Optional(Type.String()),
+          artifactId: Type.Optional(Type.String()),
+        },
+        { additionalProperties: false },
+      ),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const gate = createGateForRepo(ctx.cwd, params);
+      return {
+        content: [{ type: "text", text: `created gate ${gate.gateId}: ${gate.requestedDecision}` }],
+        details: { gate },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_resolve_gate",
+    label: "Conductor Resolve Gate",
+    description: "Resolve an open conductor gate with an explicit decision",
+    parameters: Type.Object({
+      gateId: Type.String({ description: "Gate ID" }),
+      status: Type.Union([Type.Literal("approved"), Type.Literal("rejected"), Type.Literal("canceled")]),
+      resolutionReason: Type.String({ description: "Reason for the gate decision" }),
+      actorId: Type.String({ description: "Identifier for the human or parent agent resolving the gate" }),
+      actorType: Type.Optional(Type.Union([Type.Literal("human"), Type.Literal("parent_agent")])),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const gate = resolveGateForRepo(ctx.cwd, {
+        gateId: params.gateId,
+        status: params.status,
+        resolutionReason: params.resolutionReason,
+        actor: { type: params.actorType ?? "parent_agent", id: params.actorId },
+      });
+      return {
+        content: [{ type: "text", text: `resolved gate ${gate.gateId}: ${gate.status}` }],
+        details: { gate },
+      };
+    },
+  });
 
   pi.registerTool({
     name: "conductor_child_progress",

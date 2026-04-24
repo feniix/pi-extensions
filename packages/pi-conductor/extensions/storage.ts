@@ -7,6 +7,8 @@ import type {
   ConductorActor,
   ConductorEvent,
   ConductorResourceRefs,
+  GateRecord,
+  GateStatus,
   RunAttemptRecord,
   RunRecord,
   RunStatus,
@@ -317,6 +319,87 @@ function taskStateForRunStatus(status: RunStatus): TaskRecord["state"] {
     default:
       return "failed";
   }
+}
+
+export function createConductorGate(
+  run: RunRecord,
+  input: {
+    gateId: string;
+    type: GateRecord["type"];
+    resourceRefs: GateRecord["resourceRefs"];
+    requestedDecision: string;
+  },
+): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  if (normalized.gates.some((entry) => entry.gateId === input.gateId)) {
+    throw new Error(`Gate ${input.gateId} already exists`);
+  }
+  const now = new Date().toISOString();
+  const gate: GateRecord = {
+    gateId: input.gateId,
+    type: input.type,
+    status: "open",
+    resourceRefs: { projectKey: normalized.projectKey, ...input.resourceRefs },
+    requestedDecision: input.requestedDecision,
+    resolvedBy: null,
+    resolutionReason: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const updated = {
+    ...normalized,
+    gates: [...normalized.gates, gate],
+    updatedAt: now,
+  };
+
+  return appendConductorEvent(updated, {
+    actor: { type: "system", id: "storage" },
+    type: "gate.created",
+    resourceRefs: gate.resourceRefs,
+    payload: { gateId: gate.gateId, gateType: gate.type, requestedDecision: gate.requestedDecision },
+  });
+}
+
+export function resolveConductorGate(
+  run: RunRecord,
+  input: {
+    gateId: string;
+    status: Exclude<GateStatus, "open">;
+    actor: GateRecord["resolvedBy"];
+    resolutionReason: string;
+  },
+): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const existing = normalized.gates.find((entry) => entry.gateId === input.gateId);
+  if (!existing) {
+    throw new Error(`Gate ${input.gateId} not found`);
+  }
+  if (existing.status !== "open") {
+    throw new Error(`Gate ${input.gateId} is already resolved`);
+  }
+  const now = new Date().toISOString();
+  const updated = {
+    ...normalized,
+    gates: normalized.gates.map((entry) =>
+      entry.gateId === input.gateId
+        ? {
+            ...entry,
+            status: input.status,
+            resolvedBy: input.actor,
+            resolutionReason: input.resolutionReason,
+            updatedAt: now,
+          }
+        : entry,
+    ),
+    updatedAt: now,
+  };
+
+  return appendConductorEvent(updated, {
+    actor: input.actor ?? { type: "system", id: "storage" },
+    type: "gate.resolved",
+    resourceRefs: existing.resourceRefs,
+    payload: { gateId: input.gateId, status: input.status, resolutionReason: input.resolutionReason },
+  });
 }
 
 function createArtifactRecord(input: {
