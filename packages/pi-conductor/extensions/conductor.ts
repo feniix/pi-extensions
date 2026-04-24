@@ -511,6 +511,67 @@ export function buildResourceTimelineForRepo(
   };
 }
 
+export function buildObjectiveDagForRepo(
+  repoRoot: string,
+  objectiveId: string,
+): { objectiveId: string; batches: string[][]; parallelizableBatches: string[][] } {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const objective = run.objectives.find((entry) => entry.objectiveId === objectiveId);
+  if (!objective) {
+    throw new Error(`Objective ${objectiveId} not found`);
+  }
+  const tasks = run.tasks.filter((task) => objective.taskIds.includes(task.taskId));
+  const remaining = new Map(tasks.map((task) => [task.taskId, new Set(task.dependsOnTaskIds)]));
+  const completed = new Set<string>();
+  const batches: string[][] = [];
+  while (remaining.size > 0) {
+    const batch = [...remaining.entries()]
+      .filter(([, deps]) => [...deps].every((dep) => completed.has(dep) || !remaining.has(dep)))
+      .map(([taskId]) => taskId);
+    if (batch.length === 0) {
+      throw new Error(`Objective ${objectiveId} has a cyclic task dependency graph`);
+    }
+    batches.push(batch);
+    for (const taskId of batch) {
+      remaining.delete(taskId);
+      completed.add(taskId);
+    }
+  }
+  return { objectiveId, batches, parallelizableBatches: batches };
+}
+
+export function assessTaskForRepo(
+  repoRoot: string,
+  input: { taskId: string },
+): {
+  taskId: string;
+  verdict: "ready" | "not_ready" | "blocked" | "needs_review";
+  findings: Array<{ code: string; message: string }>;
+} {
+  const brief = buildTaskBriefForRepo(repoRoot, input);
+  const findings: Array<{ code: string; message: string }> = [];
+  if (!brief.artifacts.some((artifact) => artifact.type === "completion_report")) {
+    findings.push({
+      code: "missing_completion_report",
+      message: "No completion report artifact is linked to this task",
+    });
+  }
+  if (brief.gates.some((gate) => gate.status === "open")) {
+    findings.push({ code: "open_gate", message: "Task has open gates" });
+  }
+  if (brief.dependencies.some((dependency) => dependency.state !== "completed")) {
+    findings.push({ code: "incomplete_dependency", message: "Task dependencies are not completed" });
+  }
+  const verdict = findings.some((finding) => finding.code === "open_gate" || finding.code === "incomplete_dependency")
+    ? "blocked"
+    : findings.length === 0
+      ? "ready"
+      : brief.task.state === "needs_review"
+        ? "needs_review"
+        : "not_ready";
+  return { taskId: input.taskId, verdict, findings };
+}
+
 export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string }): ConductorTaskBrief {
   const run = getOrCreateRunForRepo(repoRoot);
   const task = run.tasks.find((entry) => entry.taskId === input.taskId);
@@ -639,6 +700,152 @@ export function buildProjectBriefForRepo(
   };
 }
 
+export function buildBlockingDiagnosisForRepo(
+  repoRoot: string,
+  input: { objectiveId?: string; taskId?: string } = {},
+): {
+  markdown: string;
+  blockers: Array<{
+    kind: string;
+    gateId?: string;
+    taskId?: string;
+    message: string;
+    nextToolCall: { name: string; params: Record<string, unknown> } | null;
+  }>;
+} {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const taskIds = input.objectiveId
+    ? new Set(run.objectives.find((objective) => objective.objectiveId === input.objectiveId)?.taskIds ?? [])
+    : null;
+  const blockers = [] as Array<{
+    kind: string;
+    gateId?: string;
+    taskId?: string;
+    message: string;
+    nextToolCall: { name: string; params: Record<string, unknown> } | null;
+  }>;
+  for (const gate of run.gates.filter(
+    (entry) =>
+      entry.status === "open" &&
+      (!input.objectiveId ||
+        entry.resourceRefs.objectiveId === input.objectiveId ||
+        (entry.resourceRefs.taskId && taskIds?.has(entry.resourceRefs.taskId))) &&
+      (!input.taskId || entry.resourceRefs.taskId === input.taskId),
+  )) {
+    blockers.push({
+      kind: "gate",
+      gateId: gate.gateId,
+      message: gate.requestedDecision,
+      nextToolCall: ["needs_input", "needs_review"].includes(gate.type)
+        ? {
+            name: "conductor_resolve_gate",
+            params: { gateId: gate.gateId, status: "approved", resolutionReason: "<decision>", actorId: "parent" },
+          }
+        : null,
+    });
+  }
+  const tasks = input.taskId
+    ? run.tasks.filter((task) => task.taskId === input.taskId)
+    : input.objectiveId
+      ? run.tasks.filter((task) => taskIds?.has(task.taskId))
+      : run.tasks;
+  for (const task of tasks) {
+    for (const dependency of incompleteDependenciesForTask(run, task)) {
+      blockers.push({
+        kind: "dependency",
+        taskId: task.taskId,
+        message: `Task ${task.taskId} waits for ${dependency.taskId}`,
+        nextToolCall: { name: "conductor_task_brief", params: { taskId: dependency.taskId } },
+      });
+    }
+  }
+  const markdown = [
+    "# Conductor Blocking Diagnosis",
+    "",
+    blockers.length === 0
+      ? "- no blockers"
+      : blockers.map((blocker) => `- ${blocker.kind}: ${blocker.message}`).join("\n"),
+  ].join("\n");
+  return { markdown, blockers };
+}
+
+export function prepareHumanReviewForRepo(
+  repoRoot: string,
+  input: { objectiveId?: string; taskId?: string } = {},
+): {
+  markdown: string;
+  objective: ObjectiveRecord | null;
+  task: TaskRecord | null;
+  nextActions: ConductorNextAction[];
+  blockers: ReturnType<typeof buildBlockingDiagnosisForRepo>["blockers"];
+} {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const objective = input.objectiveId
+    ? (run.objectives.find((entry) => entry.objectiveId === input.objectiveId) ?? null)
+    : null;
+  const task = input.taskId ? (run.tasks.find((entry) => entry.taskId === input.taskId) ?? null) : null;
+  const nextActions = computeNextActions(run, { objectiveId: input.objectiveId, maxActions: 5 }).actions;
+  const blockers = buildBlockingDiagnosisForRepo(repoRoot, input).blockers;
+  const markdown = [
+    "# Conductor Human Review Packet",
+    "",
+    objective
+      ? `Objective: ${objective.title} [${objective.objectiveId}] status=${objective.status}`
+      : "Objective: project",
+    task ? `Task: ${task.title} [${task.taskId}] state=${task.state}` : "Task: none selected",
+    "",
+    "## Blockers",
+    blockers.length === 0 ? "- none" : blockers.map((blocker) => `- ${blocker.kind}: ${blocker.message}`).join("\n"),
+    "",
+    "## Next Actions",
+    nextActions.length === 0 ? "- none" : nextActions.map((action) => `- ${action.kind}: ${action.title}`).join("\n"),
+  ].join("\n");
+  return { markdown, objective, task, nextActions, blockers };
+}
+
+export function runNextActionForRepo(
+  repoRoot: string,
+  input: { objectiveId?: string } = {},
+): { executed: boolean; reason: string | null; action: ConductorNextAction | null; result: unknown } {
+  const recommendation = getNextActionsForRepo(repoRoot, { objectiveId: input.objectiveId, maxActions: 1 });
+  const action = recommendation.actions[0] ?? null;
+  if (!action) return { executed: false, reason: "no action", action, result: null };
+  if (action.requiresHuman) return { executed: false, reason: "action requires human", action, result: null };
+  if (action.destructive) return { executed: false, reason: "action is destructive", action, result: null };
+  if (action.confidence !== "high" && action.kind !== "plan_objective") {
+    return { executed: false, reason: "action confidence is not high", action, result: null };
+  }
+  if (action.kind === "plan_objective" && action.resourceRefs.objectiveId) {
+    const objective = getOrCreateRunForRepo(repoRoot).objectives.find(
+      (entry) => entry.objectiveId === action.resourceRefs.objectiveId,
+    );
+    const result = planObjectiveForRepo(repoRoot, {
+      objectiveId: action.resourceRefs.objectiveId,
+      tasks: [
+        {
+          title: `Next task for ${objective?.title ?? "objective"}`,
+          prompt: objective?.prompt ?? "Execute the objective",
+        },
+      ],
+      rationale: "Generated from conductor_run_next_action",
+    });
+    return { executed: true, reason: null, action, result };
+  }
+  if (
+    action.kind === "assign_task" &&
+    typeof action.toolCall?.params.taskId === "string" &&
+    typeof action.toolCall.params.workerId === "string"
+  ) {
+    return {
+      executed: true,
+      reason: null,
+      action,
+      result: assignTaskForRepo(repoRoot, action.toolCall.params.taskId, action.toolCall.params.workerId),
+    };
+  }
+  return { executed: false, reason: `unsupported action ${action.kind}`, action, result: null };
+}
+
 export function getNextActionsForRepo(
   repoRoot: string,
   input: {
@@ -765,6 +972,30 @@ export function linkTaskToObjectiveForRepo(repoRoot: string, objectiveId: string
   return objective;
 }
 
+function validateObjectivePlanTasks(tasks: Array<{ title: string; prompt: string; dependsOn?: string[] }>): void {
+  const titles = new Set<string>();
+  for (const task of tasks) {
+    const title = task.title.trim();
+    if (titles.has(title)) {
+      throw new Error(`Duplicate task title '${title}' in objective plan`);
+    }
+    titles.add(title);
+    if (task.prompt.trim().length < 10) {
+      throw new Error(`Vague prompt for task '${title}' in objective plan`);
+    }
+  }
+  for (const task of tasks) {
+    for (const dependency of task.dependsOn ?? []) {
+      if (!titles.has(dependency)) {
+        throw new Error(`Unresolved dependency '${dependency}' for task '${task.title}'`);
+      }
+      if (dependency === task.title) {
+        throw new Error(`Task '${task.title}' cannot depend on itself`);
+      }
+    }
+  }
+}
+
 export function planObjectiveForRepo(
   repoRoot: string,
   input: {
@@ -776,6 +1007,7 @@ export function planObjectiveForRepo(
   if (input.tasks.length === 0) {
     throw new Error("Objective plan must include at least one task");
   }
+  validateObjectivePlanTasks(input.tasks);
   let run = getOrCreateRunForRepo(repoRoot);
   const objective = run.objectives.find((entry) => entry.objectiveId === input.objectiveId);
   if (!objective) {
@@ -817,6 +1049,12 @@ export function createTaskForRepo(
   input: { title: string; prompt: string; objectiveId?: string; dependsOnTaskIds?: string[] },
 ): TaskRecord {
   const run = getOrCreateRunForRepo(repoRoot);
+  const missingDependency = input.dependsOnTaskIds?.find(
+    (taskId) => !run.tasks.some((entry) => entry.taskId === taskId),
+  );
+  if (missingDependency) {
+    throw new Error(`Task dependency ${missingDependency} not found`);
+  }
   const task = createTaskRecord({
     taskId: createTaskId(),
     title: input.title,
@@ -901,6 +1139,10 @@ export function recordTaskCompletionForRepo(
   const task = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
   if (!task) {
     throw new Error(`Task ${input.taskId} disappeared during completion update`);
+  }
+  if (task.objectiveId) {
+    refreshObjectiveStatusForRepo(repoRoot, task.objectiveId);
+    return getOrCreateRunForRepo(repoRoot).tasks.find((entry) => entry.taskId === input.taskId) ?? task;
   }
   return task;
 }

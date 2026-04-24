@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { inspectConductorBackends } from "../extensions/backends.js";
+import { getConductorBackendAdapter, inspectConductorBackends } from "../extensions/backends.js";
 
 describe("conductor backend inspection", () => {
   it("always reports the native backend as available", () => {
     const status = inspectConductorBackends({ resolvePackage: () => null });
 
-    expect(status.native).toMatchObject({ available: true, canonicalStateOwner: "conductor" });
+    expect(status.native).toMatchObject({
+      available: true,
+      canonicalStateOwner: "conductor",
+      capabilities: { canStartRun: true, supportsScopedChildTools: true },
+    });
   });
 
   it("treats pi-subagents as an optional adapter", () => {
@@ -14,5 +18,11 @@ describe("conductor backend inspection", () => {
 
     const available = inspectConductorBackends({ resolvePackage: () => "/tmp/pi-subagents/package.json" });
     expect(available.piSubagents).toMatchObject({ available: true, packagePath: "/tmp/pi-subagents/package.json" });
+  });
+
+  it("exposes backend adapters with fail-closed pi-subagents dispatch", () => {
+    expect(getConductorBackendAdapter("native").preflight().available).toBe(true);
+    const piSubagents = getConductorBackendAdapter("pi-subagents", { resolvePackage: () => null });
+    expect(piSubagents.preflight()).toMatchObject({ available: false, capabilities: { canStartRun: false } });
   });
 });

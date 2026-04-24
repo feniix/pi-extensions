@@ -5,8 +5,11 @@ import { Type } from "typebox";
 import { inspectConductorBackends } from "./backends.js";
 import { runConductorCommand } from "./commands.js";
 import {
+  assessTaskForRepo,
   assignTaskForRepo,
+  buildBlockingDiagnosisForRepo,
   buildEvidenceBundleForRepo,
+  buildObjectiveDagForRepo,
   buildProjectBriefForRepo,
   buildResourceTimelineForRepo,
   buildTaskBriefForRepo,
@@ -23,6 +26,7 @@ import {
   getOrCreateRunForRepo,
   linkTaskToObjectiveForRepo,
   planObjectiveForRepo,
+  prepareHumanReviewForRepo,
   pushWorkerForRepo,
   reconcileProjectForRepo,
   reconcileWorkerHealth,
@@ -33,6 +37,7 @@ import {
   resolveGateForRepo,
   resumeWorkerForRepo,
   retryTaskForRepo,
+  runNextActionForRepo,
   runTaskForRepo,
   runWorkerForRepo,
   startTaskRunForRepo,
@@ -43,7 +48,14 @@ import {
 } from "./conductor.js";
 import { deriveProjectKey } from "./project-key.js";
 import { formatRunStatus } from "./status.js";
-import { createEmptyRun, queryConductorArtifacts, queryConductorEvents, readRun, writeRun } from "./storage.js";
+import {
+  createEmptyRun,
+  queryConductorArtifacts,
+  queryConductorEvents,
+  readArtifactContentForRepo,
+  readRun,
+  writeRun,
+} from "./storage.js";
 
 function findRepoRoot(cwd: string): string | null {
   try {
@@ -317,6 +329,104 @@ export default function conductorExtension(pi: ExtensionAPI) {
         ],
         details: { project: after, changed, dryRun: params.dryRun ?? false },
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_run_next_action",
+    label: "Conductor Run Next Action",
+    description: "Safely execute the highest-priority non-human conductor next action when supported",
+    parameters: Type.Object({
+      objectiveId: Type.Optional(Type.String({ description: "Optional objective scope" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = runNextActionForRepo(ctx.cwd, params);
+      return {
+        content: [
+          {
+            type: "text",
+            text: result.executed ? `executed ${result.action?.kind}` : `no action executed: ${result.reason}`,
+          },
+        ],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_assess_task",
+    label: "Conductor Assess Task",
+    description: "Assess one task's review readiness, evidence, dependencies, and blockers",
+    parameters: Type.Object({
+      taskId: Type.String({ description: "Task ID" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const assessment = assessTaskForRepo(ctx.cwd, params);
+      return {
+        content: [{ type: "text", text: `task ${assessment.taskId}: ${assessment.verdict}` }],
+        details: { assessment },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_read_artifact",
+    label: "Conductor Read Artifact",
+    description: "Safely read bounded content from a local conductor artifact ref",
+    parameters: Type.Object({
+      artifactId: Type.String({ description: "Artifact ID" }),
+      maxBytes: Type.Optional(Type.Number({ description: "Maximum bytes to return; defaults to 8192" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = readArtifactContentForRepo(ctx.cwd, params.artifactId, { maxBytes: params.maxBytes });
+      return {
+        content: [{ type: "text", text: result.content ?? result.diagnostic ?? "no content" }],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_objective_dag",
+    label: "Conductor Objective DAG",
+    description: "Summarize objective task dependency batches for safe sequencing and parallelism",
+    parameters: Type.Object({
+      objectiveId: Type.String({ description: "Objective ID" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const dag = buildObjectiveDagForRepo(ctx.cwd, params.objectiveId);
+      return {
+        content: [{ type: "text", text: `objective ${dag.objectiveId}: ${dag.batches.length} batches` }],
+        details: { dag },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_prepare_human_review",
+    label: "Conductor Prepare Human Review",
+    description: "Prepare a concise markdown packet for human review of an objective or task",
+    parameters: Type.Object({
+      objectiveId: Type.Optional(Type.String()),
+      taskId: Type.Optional(Type.String()),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const packet = prepareHumanReviewForRepo(ctx.cwd, params);
+      return { content: [{ type: "text", text: packet.markdown }], details: { packet } };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_diagnose_blockers",
+    label: "Conductor Diagnose Blockers",
+    description: "Return exact blockers and safe next tool calls for an objective or task",
+    parameters: Type.Object({
+      objectiveId: Type.Optional(Type.String()),
+      taskId: Type.Optional(Type.String()),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const diagnosis = buildBlockingDiagnosisForRepo(ctx.cwd, params);
+      return { content: [{ type: "text", text: diagnosis.markdown }], details: { diagnosis } };
     },
   });
 

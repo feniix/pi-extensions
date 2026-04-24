@@ -1,8 +1,18 @@
 import { createRequire } from "node:module";
 
+export type ConductorBackendKind = "native" | "pi-subagents";
+
+export interface ConductorBackendCapabilities {
+  canStartRun: boolean;
+  canRunForeground: boolean;
+  supportsScopedChildTools: boolean;
+  requiresReviewOnExit: boolean;
+}
+
 export interface ConductorBackendStatus {
   available: boolean;
   canonicalStateOwner: "conductor";
+  capabilities: ConductorBackendCapabilities;
   packagePath?: string | null;
   diagnostic?: string | null;
 }
@@ -12,9 +22,26 @@ export interface ConductorBackendsStatus {
   piSubagents: ConductorBackendStatus;
 }
 
-export function inspectConductorBackends(
-  input: { resolvePackage?: (specifier: string) => string | null } = {},
-): ConductorBackendsStatus {
+export interface ConductorBackendAdapter {
+  backend: ConductorBackendKind;
+  preflight(): ConductorBackendStatus;
+}
+
+const nativeCapabilities: ConductorBackendCapabilities = {
+  canStartRun: true,
+  canRunForeground: true,
+  supportsScopedChildTools: true,
+  requiresReviewOnExit: true,
+};
+
+const unavailablePiSubagentsCapabilities: ConductorBackendCapabilities = {
+  canStartRun: false,
+  canRunForeground: false,
+  supportsScopedChildTools: false,
+  requiresReviewOnExit: true,
+};
+
+function resolvePiSubagents(input: { resolvePackage?: (specifier: string) => string | null } = {}): string | null {
   const resolvePackage =
     input.resolvePackage ??
     ((specifier: string) => {
@@ -24,21 +51,44 @@ export function inspectConductorBackends(
         return null;
       }
     });
-  const piSubagentsPath = resolvePackage("pi-subagents/package.json");
+  return resolvePackage("pi-subagents/package.json");
+}
+
+export function inspectConductorBackends(
+  input: { resolvePackage?: (specifier: string) => string | null } = {},
+): ConductorBackendsStatus {
+  const piSubagentsPath = resolvePiSubagents(input);
 
   return {
     native: {
       available: true,
       canonicalStateOwner: "conductor",
+      capabilities: nativeCapabilities,
       diagnostic: null,
     },
     piSubagents: {
       available: piSubagentsPath !== null,
       canonicalStateOwner: "conductor",
+      capabilities: piSubagentsPath
+        ? { ...unavailablePiSubagentsCapabilities, supportsScopedChildTools: false }
+        : unavailablePiSubagentsCapabilities,
       packagePath: piSubagentsPath,
       diagnostic: piSubagentsPath
-        ? null
+        ? "pi-subagents adapter is detected but dispatch is not implemented; conductor fails closed"
         : "Optional pi-subagents adapter is not installed or not resolvable from pi-conductor",
+    },
+  };
+}
+
+export function getConductorBackendAdapter(
+  backend: ConductorBackendKind,
+  input: { resolvePackage?: (specifier: string) => string | null } = {},
+): ConductorBackendAdapter {
+  return {
+    backend,
+    preflight() {
+      const status = inspectConductorBackends(input);
+      return backend === "native" ? status.native : status.piSubagents;
     },
   };
 }

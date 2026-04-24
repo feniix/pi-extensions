@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
+import { deriveProjectKey } from "./project-key.js";
 import type {
   ArtifactRecord,
   ArtifactType,
@@ -1087,6 +1088,40 @@ function createArtifactRecord(input: {
 
 function createArtifactId(runId: string): string {
   return `artifact-${runId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function readArtifactContentForRepo(
+  repoRoot: string,
+  artifactId: string,
+  input: { maxBytes?: number } = {},
+): { artifactId: string; ref: string; content: string | null; truncated: boolean; diagnostic: string | null } {
+  const normalizedRoot = resolve(repoRoot);
+  const run = readRun(deriveProjectKey(normalizedRoot));
+  const artifact = run?.artifacts.find((entry) => entry.artifactId === artifactId);
+  if (!artifact) {
+    throw new Error(`Artifact ${artifactId} not found`);
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(artifact.ref)) {
+    return {
+      artifactId,
+      ref: artifact.ref,
+      content: null,
+      truncated: false,
+      diagnostic: "Artifact ref is external or virtual",
+    };
+  }
+  assertSafeArtifactRef(artifact.ref);
+  const artifactPath = resolve(normalizedRoot, artifact.ref);
+  if (!artifactPath.startsWith(`${normalizedRoot}${"/"}`) && artifactPath !== normalizedRoot) {
+    throw new Error(`Unsafe artifact ref '${artifact.ref}'`);
+  }
+  if (!existsSync(artifactPath)) {
+    return { artifactId, ref: artifact.ref, content: null, truncated: false, diagnostic: "Artifact file is missing" };
+  }
+  const maxBytes = Math.max(1, Math.min(input.maxBytes ?? 8192, 1024 * 1024));
+  const size = statSync(artifactPath).size;
+  const content = readFileSync(artifactPath, "utf-8").slice(0, maxBytes);
+  return { artifactId, ref: artifact.ref, content, truncated: size > maxBytes, diagnostic: null };
 }
 
 export function addConductorArtifact(

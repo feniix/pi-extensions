@@ -25,7 +25,8 @@ Agent-native local control plane for Pi worker orchestration.
 - Child tool calls are bound to the task/run contract, support `idempotencyKey`, and are not registered as broad parent-agent tools.
 - Parent agents can explicitly grant child runs permission to create scoped follow-up tasks; this is disabled by default.
 - Parent-agent task control supports safe task update, explicit cancellation, and retry without overwriting prior run history.
-- Parent-agent orchestration advice is available through `conductor_next_actions`; `conductor_project_brief`, `conductor_task_brief`, and `conductor_resource_timeline` provide markdown + structured state/history digests for LLM handoffs.
+- Parent-agent orchestration advice is available through `conductor_next_actions`; `conductor_run_next_action` can execute safe non-human recommendations, while `conductor_project_brief`, `conductor_task_brief`, and `conductor_resource_timeline` provide markdown + structured state/history digests for LLM handoffs.
+- LLM review helpers include task assessment, blocker diagnosis, objective DAG batching, safe artifact reads, and human review packet preparation.
 - Objectives group related tasks above the worker/run layer so parent agents can keep multi-task goals explicit, expand them into durable task plans with `conductor_plan_objective`, and roll up linked task states with `conductor_refresh_objective_status`.
 - Readiness/evidence tools can build objective/task/worker evidence bundles and evaluate task-review or PR-readiness blockers.
 - Explicit semantic completion: a backend exit or final assistant message is not enough to mark a task complete. Missing child completion becomes `needs_review` with a review gate.
@@ -75,6 +76,12 @@ Resource/control-plane tools:
 - `conductor_project_brief`
 - `conductor_task_brief`
 - `conductor_resource_timeline`
+- `conductor_run_next_action`
+- `conductor_assess_task`
+- `conductor_read_artifact`
+- `conductor_objective_dag`
+- `conductor_prepare_human_review`
+- `conductor_diagnose_blockers`
 - `conductor_next_actions`
 - `conductor_list_objectives`
 - `conductor_get_objective`

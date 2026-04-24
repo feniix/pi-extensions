@@ -113,10 +113,26 @@ describe("conductor service", () => {
         workerId: worker.workerId,
         backend: "pi-subagents",
         inspectBackends: () => ({
-          native: { available: true, canonicalStateOwner: "conductor", diagnostic: null },
+          native: {
+            available: true,
+            canonicalStateOwner: "conductor",
+            capabilities: {
+              canStartRun: true,
+              canRunForeground: true,
+              supportsScopedChildTools: true,
+              requiresReviewOnExit: true,
+            },
+            diagnostic: null,
+          },
           piSubagents: {
             available: false,
             canonicalStateOwner: "conductor",
+            capabilities: {
+              canStartRun: false,
+              canRunForeground: false,
+              supportsScopedChildTools: false,
+              requiresReviewOnExit: true,
+            },
             diagnostic: "not installed in test",
           },
         }),

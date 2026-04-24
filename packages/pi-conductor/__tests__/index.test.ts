@@ -45,6 +45,12 @@ describe("pi-conductor extension", () => {
     expect(extension).toContain('name: "conductor_project_brief"');
     expect(extension).toContain('name: "conductor_task_brief"');
     expect(extension).toContain('name: "conductor_resource_timeline"');
+    expect(extension).toContain('name: "conductor_run_next_action"');
+    expect(extension).toContain('name: "conductor_assess_task"');
+    expect(extension).toContain('name: "conductor_read_artifact"');
+    expect(extension).toContain('name: "conductor_objective_dag"');
+    expect(extension).toContain('name: "conductor_prepare_human_review"');
+    expect(extension).toContain('name: "conductor_diagnose_blockers"');
     expect(extension).toContain('name: "conductor_build_evidence_bundle"');
     expect(extension).toContain('name: "conductor_check_readiness"');
     expect(extension).toContain('name: "conductor_cleanup_worker"');
