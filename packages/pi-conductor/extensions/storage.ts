@@ -1,4 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { deriveProjectKey } from "./project-key.js";
@@ -1118,9 +1128,27 @@ export function readArtifactContentForRepo(
   if (!existsSync(artifactPath)) {
     return { artifactId, ref: artifact.ref, content: null, truncated: false, diagnostic: "Artifact file is missing" };
   }
+  const realRoot = realpathSync(normalizedRoot);
+  const realArtifactPath = realpathSync(artifactPath);
+  if (!realArtifactPath.startsWith(`${realRoot}${"/"}`) && realArtifactPath !== realRoot) {
+    throw new Error(`Unsafe artifact ref '${artifact.ref}'`);
+  }
+  if (!lstatSync(realArtifactPath).isFile()) {
+    return { artifactId, ref: artifact.ref, content: null, truncated: false, diagnostic: "Artifact ref is not a file" };
+  }
   const maxBytes = Math.max(1, Math.min(input.maxBytes ?? 8192, 1024 * 1024));
-  const size = statSync(artifactPath).size;
-  const content = readFileSync(artifactPath, "utf-8").slice(0, maxBytes);
+  const size = statSync(realArtifactPath).size;
+  const buffer = readFileSync(realArtifactPath);
+  if (buffer.subarray(0, Math.min(buffer.length, 1024)).includes(0)) {
+    return {
+      artifactId,
+      ref: artifact.ref,
+      content: null,
+      truncated: false,
+      diagnostic: "Artifact file appears to be binary",
+    };
+  }
+  const content = buffer.toString("utf-8").slice(0, maxBytes);
   return { artifactId, ref: artifact.ref, content, truncated: size > maxBytes, diagnostic: null };
 }
 

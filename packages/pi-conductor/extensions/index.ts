@@ -359,6 +359,8 @@ export default function conductorExtension(pi: ExtensionAPI) {
     description: "Assess one task's review readiness, evidence, dependencies, and blockers",
     parameters: Type.Object({
       taskId: Type.String({ description: "Task ID" }),
+      requireTestEvidence: Type.Optional(Type.Boolean({ description: "Require linked test_result artifacts" })),
+      requirePrEvidence: Type.Optional(Type.Boolean({ description: "Require linked pr_evidence artifacts" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const assessment = assessTaskForRepo(ctx.cwd, params);
@@ -903,15 +905,15 @@ export default function conductorExtension(pi: ExtensionAPI) {
       gateId: Type.String({ description: "Gate ID" }),
       status: Type.Union([Type.Literal("approved"), Type.Literal("rejected"), Type.Literal("canceled")]),
       resolutionReason: Type.String({ description: "Reason for the gate decision" }),
-      actorId: Type.String({ description: "Identifier for the human or parent agent resolving the gate" }),
-      actorType: Type.Optional(Type.Union([Type.Literal("human"), Type.Literal("parent_agent")])),
+      actorId: Type.String({ description: "Identifier for the parent agent resolving the gate" }),
+      actorType: Type.Optional(Type.Literal("parent_agent")),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const gate = resolveGateForRepo(ctx.cwd, {
         gateId: params.gateId,
         status: params.status,
         resolutionReason: params.resolutionReason,
-        actor: { type: params.actorType ?? "parent_agent", id: params.actorId },
+        actor: { type: "parent_agent", id: params.actorId },
       });
       return {
         content: [{ type: "text", text: `resolved gate ${gate.gateId}: ${gate.status}` }],

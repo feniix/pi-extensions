@@ -32,13 +32,13 @@ Agent-native local control plane for Pi worker orchestration.
 - Explicit semantic completion: a backend exit or final assistant message is not enough to mark a task complete. Missing child completion becomes `needs_review` with a review gate.
 - Lease heartbeats and reconciliation for stale/crashed runs, including read-only dry-run previews.
 - Filtered, paginated event history separate from concise status.
-- Artifact refs are treated as evidence and unsafe local path traversal refs are rejected.
+- Artifact refs are treated as evidence; unsafe local path traversal refs, symlink escapes, and binary local reads are rejected or diagnosed.
 - Late child progress/completion after terminal runs is audited without changing terminal task state.
 - Gate-protected risky operations:
   - PR creation requires an approved `ready_for_pr` gate.
   - Worker cleanup requires an approved `destructive_cleanup` gate.
 - Optional `pi-subagents` backend availability inspection. Conductor remains canonical state owner, and unsupported `pi-subagents` dispatch requests fail closed without creating a run.
-- Legacy worker command/tool surface remains during the transition, but new model-callable tools are the primary orchestration surface.
+- Legacy worker command/tool surface remains during the transition and is considered deprecated; new resource-native model-callable tools are the primary orchestration surface.
 
 ## Command surface
 
@@ -122,7 +122,7 @@ Runtime-injected child tools, available only inside native worker task runs:
 - `conductor_child_create_followup_task` when the task contract allows it
 - `conductor_child_complete`
 
-Transition/legacy worker tools still registered:
+Transition/legacy worker tools still registered for compatibility. Prefer the resource/control-plane tools above for new LLM workflows:
 
 - `conductor_status`
 - `conductor_start`
@@ -152,7 +152,41 @@ Instead, it uses a narrow Pi SDK runtime seam around persisted sessions:
 
 The native backend uses curated tools and explicit conductor child tools. Backend status is runtime evidence, not semantic completion. If the child exits without `conductor_child_complete`, conductor records a partial run and opens a review gate.
 
-Optional backend adapters such as `pi-subagents` may be used later, but they do not own canonical state.
+Optional backend adapters such as `pi-subagents` may be used later, but they do not own canonical state. The current `pi-subagents` adapter reports capabilities and fails closed for dispatch until a real dispatch API is implemented.
+
+## LLM orchestration examples
+
+Create and plan an objective, then let conductor take the safest next step:
+
+```text
+conductor_create_objective({ title: "Ship feature", prompt: "Implement and verify the feature" })
+conductor_plan_objective({ objectiveId, tasks: [{ title: "Implement", prompt: "Make the code change" }] })
+conductor_next_actions({ objectiveId })
+conductor_run_next_action({ objectiveId })
+```
+
+Inspect dependency scheduling for parallel-safe work:
+
+```text
+conductor_objective_dag({ objectiveId })
+```
+
+Assess a task before review or PR preparation:
+
+```text
+conductor_assess_task({ taskId, requireTestEvidence: true })
+conductor_diagnose_blockers({ taskId })
+conductor_prepare_human_review({ objectiveId })
+```
+
+Read bounded local artifact evidence safely:
+
+```text
+conductor_list_artifacts({ taskId })
+conductor_read_artifact({ artifactId, maxBytes: 8192 })
+```
+
+Human-only approval gates such as `ready_for_pr` and `destructive_cleanup` are surfaced for review but are not safe autonomous actions.
 
 ## Development
 

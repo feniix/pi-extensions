@@ -59,6 +59,7 @@ export type ConductorNextActionKind =
   | "await_human_gate"
   | "review_task"
   | "retry_task"
+  | "refresh_objective_status"
   | "commit_worker"
   | "push_worker"
   | "create_ready_for_pr_gate"

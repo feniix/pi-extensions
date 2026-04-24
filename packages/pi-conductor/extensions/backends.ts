@@ -22,9 +22,15 @@ export interface ConductorBackendsStatus {
   piSubagents: ConductorBackendStatus;
 }
 
+export interface ConductorBackendDispatchResult {
+  ok: boolean;
+  diagnostic: string | null;
+}
+
 export interface ConductorBackendAdapter {
   backend: ConductorBackendKind;
   preflight(): ConductorBackendStatus;
+  dispatch(): ConductorBackendDispatchResult;
 }
 
 const nativeCapabilities: ConductorBackendCapabilities = {
@@ -89,6 +95,12 @@ export function getConductorBackendAdapter(
     preflight() {
       const status = inspectConductorBackends(input);
       return backend === "native" ? status.native : status.piSubagents;
+    },
+    dispatch() {
+      if (backend === "native") {
+        return { ok: true, diagnostic: null };
+      }
+      return { ok: false, diagnostic: "pi-subagents dispatch is not implemented; conductor fails closed" };
     },
   };
 }

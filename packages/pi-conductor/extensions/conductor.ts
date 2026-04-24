@@ -514,14 +514,31 @@ export function buildResourceTimelineForRepo(
 export function buildObjectiveDagForRepo(
   repoRoot: string,
   objectiveId: string,
-): { objectiveId: string; batches: string[][]; parallelizableBatches: string[][] } {
+): {
+  objectiveId: string;
+  batches: string[][];
+  parallelizableBatches: string[][];
+  runnableNow: string[];
+  externalDependencies: Array<{ taskId: string; dependsOnTaskId: string }>;
+} {
   const run = getOrCreateRunForRepo(repoRoot);
   const objective = run.objectives.find((entry) => entry.objectiveId === objectiveId);
   if (!objective) {
     throw new Error(`Objective ${objectiveId} not found`);
   }
   const tasks = run.tasks.filter((task) => objective.taskIds.includes(task.taskId));
-  const remaining = new Map(tasks.map((task) => [task.taskId, new Set(task.dependsOnTaskIds)]));
+  const taskIdSet = new Set(tasks.map((task) => task.taskId));
+  const externalDependencies = tasks.flatMap((task) =>
+    task.dependsOnTaskIds
+      .filter((dependencyId) => !taskIdSet.has(dependencyId))
+      .map((dependencyId) => ({ taskId: task.taskId, dependsOnTaskId: dependencyId })),
+  );
+  const remaining = new Map(
+    tasks.map((task) => [
+      task.taskId,
+      new Set(task.dependsOnTaskIds.filter((dependencyId) => taskIdSet.has(dependencyId))),
+    ]),
+  );
   const completed = new Set<string>();
   const batches: string[][] = [];
   while (remaining.size > 0) {
@@ -537,12 +554,21 @@ export function buildObjectiveDagForRepo(
       completed.add(taskId);
     }
   }
-  return { objectiveId, batches, parallelizableBatches: batches };
+  const runnableNow = tasks
+    .filter(
+      (task) =>
+        task.state !== "completed" &&
+        task.dependsOnTaskIds.every(
+          (dependencyId) => run.tasks.find((entry) => entry.taskId === dependencyId)?.state === "completed",
+        ),
+    )
+    .map((task) => task.taskId);
+  return { objectiveId, batches, parallelizableBatches: batches, runnableNow, externalDependencies };
 }
 
 export function assessTaskForRepo(
   repoRoot: string,
-  input: { taskId: string },
+  input: { taskId: string; requireTestEvidence?: boolean; requirePrEvidence?: boolean },
 ): {
   taskId: string;
   verdict: "ready" | "not_ready" | "blocked" | "needs_review";
@@ -550,6 +576,12 @@ export function assessTaskForRepo(
 } {
   const brief = buildTaskBriefForRepo(repoRoot, input);
   const findings: Array<{ code: string; message: string }> = [];
+  if (!["completed", "needs_review"].includes(brief.task.state)) {
+    findings.push({ code: "task_not_terminal", message: `Task is ${brief.task.state}` });
+  }
+  if (brief.runs.some((run) => run.status === "failed" || run.status === "stale")) {
+    findings.push({ code: "failed_or_stale_run", message: "Task has failed or stale runs" });
+  }
   if (!brief.artifacts.some((artifact) => artifact.type === "completion_report")) {
     findings.push({
       code: "missing_completion_report",
@@ -561,6 +593,12 @@ export function assessTaskForRepo(
   }
   if (brief.dependencies.some((dependency) => dependency.state !== "completed")) {
     findings.push({ code: "incomplete_dependency", message: "Task dependencies are not completed" });
+  }
+  if (input.requireTestEvidence && !brief.artifacts.some((artifact) => artifact.type === "test_result")) {
+    findings.push({ code: "missing_test_result", message: "No test result artifact is linked to this task" });
+  }
+  if (input.requirePrEvidence && !brief.artifacts.some((artifact) => artifact.type === "pr_evidence")) {
+    findings.push({ code: "missing_pr_evidence", message: "No PR evidence artifact is linked to this task" });
   }
   const verdict = findings.some((finding) => finding.code === "open_gate" || finding.code === "incomplete_dependency")
     ? "blocked"
@@ -807,12 +845,17 @@ export function runNextActionForRepo(
   repoRoot: string,
   input: { objectiveId?: string } = {},
 ): { executed: boolean; reason: string | null; action: ConductorNextAction | null; result: unknown } {
-  const recommendation = getNextActionsForRepo(repoRoot, { objectiveId: input.objectiveId, maxActions: 1 });
+  const recommendation = getNextActionsForRepo(repoRoot, {
+    objectiveId: input.objectiveId,
+    maxActions: 1,
+    reconcile: false,
+  });
   const action = recommendation.actions[0] ?? null;
   if (!action) return { executed: false, reason: "no action", action, result: null };
   if (action.requiresHuman) return { executed: false, reason: "action requires human", action, result: null };
   if (action.destructive) return { executed: false, reason: "action is destructive", action, result: null };
-  if (action.confidence !== "high" && action.kind !== "plan_objective") {
+  const mediumConfidenceAllowed = new Set(["retry_task", "refresh_objective_status"]);
+  if (action.confidence !== "high" && action.kind !== "plan_objective" && !mediumConfidenceAllowed.has(action.kind)) {
     return { executed: false, reason: "action confidence is not high", action, result: null };
   }
   if (action.kind === "plan_objective" && action.resourceRefs.objectiveId) {
@@ -830,6 +873,17 @@ export function runNextActionForRepo(
       rationale: "Generated from conductor_run_next_action",
     });
     return { executed: true, reason: null, action, result };
+  }
+  if (action.kind === "reconcile_project") {
+    return { executed: true, reason: null, action, result: reconcileProjectForRepo(repoRoot, { dryRun: false }) };
+  }
+  if (action.kind === "retry_task" && typeof action.toolCall?.params.taskId === "string") {
+    return {
+      executed: true,
+      reason: null,
+      action,
+      result: retryTaskForRepo(repoRoot, { taskId: action.toolCall.params.taskId }),
+    };
   }
   if (
     action.kind === "assign_task" &&
@@ -1256,6 +1310,11 @@ export function cancelTaskRunForRepo(repoRoot: string, input: { runId: string; r
   const run = getOrCreateRunForRepo(repoRoot);
   const updatedRun = cancelTaskRun(run, input);
   writeRun(updatedRun);
+  const task = updatedRun.tasks.find((entry) => entry.runIds.includes(input.runId));
+  if (task?.objectiveId) {
+    refreshObjectiveStatusForRepo(repoRoot, task.objectiveId);
+    return getOrCreateRunForRepo(repoRoot);
+  }
   return updatedRun;
 }
 
@@ -1274,7 +1333,12 @@ export function retryTaskForRepo(
   if (!["blocked", "failed", "needs_review", "canceled"].includes(task.state)) {
     throw new Error(`Task ${input.taskId} is ${task.state} and is not eligible for retry`);
   }
-  return startTaskRunForRepo(repoRoot, input);
+  const started = startTaskRunForRepo(repoRoot, input);
+  const refreshedTask = getOrCreateRunForRepo(repoRoot).tasks.find((entry) => entry.taskId === input.taskId);
+  if (refreshedTask?.objectiveId) {
+    refreshObjectiveStatusForRepo(repoRoot, refreshedTask.objectiveId);
+  }
+  return started;
 }
 
 export function createFollowUpTaskForRepo(

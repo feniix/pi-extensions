@@ -21,8 +21,11 @@ describe("conductor backend inspection", () => {
   });
 
   it("exposes backend adapters with fail-closed pi-subagents dispatch", () => {
-    expect(getConductorBackendAdapter("native").preflight().available).toBe(true);
+    const native = getConductorBackendAdapter("native");
+    expect(native.preflight().available).toBe(true);
+    expect(native.dispatch()).toMatchObject({ ok: true });
     const piSubagents = getConductorBackendAdapter("pi-subagents", { resolvePackage: () => null });
     expect(piSubagents.preflight()).toMatchObject({ available: false, capabilities: { canStartRun: false } });
+    expect(piSubagents.dispatch()).toMatchObject({ ok: false });
   });
 });
