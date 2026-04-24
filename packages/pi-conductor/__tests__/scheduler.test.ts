@@ -104,9 +104,12 @@ describe("conductor scheduler and async next action", () => {
 
     expect(result.executed).toHaveLength(1);
     expect(result.executed[0]?.action?.kind).toBe("run_task");
-    expect(getOrCreateRunForRepo(repoRoot).tasks.find((entry) => entry.taskId === task.taskId)?.state).toBe(
-      "completed",
-    );
+    const run = getOrCreateRunForRepo(repoRoot);
+    expect(run.tasks.find((entry) => entry.taskId === task.taskId)?.state).toBe("completed");
+    expect(run.events.at(-1)).toMatchObject({
+      type: "external_operation.succeeded",
+      payload: { operation: "scheduler_tick", policy: "execute", executedCount: 1 },
+    });
   });
 
   it("scheduler ticks execute bounded safe actions", async () => {

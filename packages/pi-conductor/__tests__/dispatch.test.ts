@@ -66,5 +66,10 @@ describe("conductor backend dispatch wrapper", () => {
     });
 
     expect(result.run).toMatchObject({ backend: "pi-subagents", backendRunId: "sub-run-1", status: "running" });
+    expect(getOrCreateRunForRepo(repoRoot).events.at(-1)).toMatchObject({
+      type: "external_operation.succeeded",
+      resourceRefs: { taskId: task.taskId, workerId: "worker-1", runId: result.run.runId },
+      payload: { operation: "dispatch_task_run", backend: "pi-subagents", dispatchBackendRunId: "sub-run-1" },
+    });
   });
 });

@@ -131,6 +131,8 @@ function normalizeWorkerRecord(worker: WorkerRecord): WorkerRecord {
 const conductorEventTypes = new Set<ConductorEventType>([
   "artifact.created",
   "backend.unavailable",
+  "external_operation.failed",
+  "external_operation.succeeded",
   "gate.created",
   "gate.resolved",
   "gate.used",

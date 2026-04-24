@@ -35,6 +35,7 @@ import {
   refreshWorkerSummaryForRepo,
   removeWorkerForRepo,
   resolveGateForRepo,
+  resolveGateFromTrustedHumanForRepo,
   resumeWorkerForRepo,
   retryTaskForRepo,
   runNextActionForRepo,
@@ -108,6 +109,42 @@ export default function conductorExtension(pi: ExtensionAPI) {
   pi.registerCommand("conductor", {
     description: "Manage pi-conductor workers and PR preparation",
     handler: async (args, ctx) => {
+      const trimmed = args.trim();
+      const humanApproval = trimmed.match(/^human\s+approve\s+gate\s+(\S+)(?:\s+(.+))?$/);
+      if (humanApproval) {
+        const gateId = humanApproval[1];
+        const reason = humanApproval[2]?.trim() || "Approved from pi conductor UI";
+        if (!ctx.hasUI) {
+          console.log("error: trusted human gate approval requires interactive UI");
+          return;
+        }
+        const run = getOrCreateRunForRepo(ctx.cwd);
+        const gate = run.gates.find((entry) => entry.gateId === gateId);
+        if (!gate) {
+          ctx.ui.notify(`gate not found: ${gateId}`, "error");
+          return;
+        }
+        const ui = ctx.ui as unknown as {
+          confirm?: (message: string) => Promise<boolean> | boolean;
+          notify: typeof ctx.ui.notify;
+        };
+        const confirmed = await (ui.confirm?.(
+          `Approve gate ${gate.gateId} (${gate.type}) for ${gate.operation}: ${gate.requestedDecision}`,
+        ) ?? false);
+        if (!confirmed) {
+          ctx.ui.notify(`left gate ${gateId} open`, "info");
+          return;
+        }
+        const humanId = `ui:${process.env.USER ?? "local-human"}`;
+        const resolved = resolveGateFromTrustedHumanForRepo(ctx.cwd, {
+          gateId,
+          status: "approved",
+          humanId,
+          resolutionReason: reason,
+        });
+        ctx.ui.notify(`approved gate ${resolved.gateId} as trusted human`, "info");
+        return;
+      }
       const text = await runConductorCommand(ctx.cwd, args);
       if (ctx.hasUI) {
         ctx.ui.notify(text, "info");
