@@ -516,13 +516,18 @@ export function createWorkerPrForRepo(
       url: pr.url,
       number: pr.number,
     });
+    const completedTasks = updatedRun.tasks.filter(
+      (task) => task.assignedWorkerId === worker.workerId && ["completed", "needs_review"].includes(task.state),
+    );
+    const taskIds = completedTasks.map((task) => task.taskId);
+    const runIds = completedTasks.flatMap((task) => task.runIds);
     const withEvidence = pr.url
       ? addConductorArtifact(updatedRun, {
           type: "pr_evidence",
           ref: pr.url,
-          resourceRefs: { workerId: worker.workerId },
+          resourceRefs: { workerId: worker.workerId, taskId: taskIds[0], runId: runIds[0] },
           producer: { type: "system", id: "github-cli" },
-          metadata: { number: pr.number, branch: worker.branch ?? null, title },
+          metadata: { number: pr.number, branch: worker.branch ?? null, title, taskIds, runIds },
         })
       : updatedRun;
     writeRun(withEvidence);

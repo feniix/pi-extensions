@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runConductorCommand } from "../extensions/commands.js";
-import { createGateForRepo, getOrCreateRunForRepo, resolveGateForRepo } from "../extensions/conductor.js";
+import {
+  assignTaskForRepo,
+  createGateForRepo,
+  createTaskForRepo,
+  getOrCreateRunForRepo,
+  recordTaskCompletionForRepo,
+  resolveGateForRepo,
+  startTaskRunForRepo,
+} from "../extensions/conductor.js";
 
 describe("PR preparation flow", () => {
   let repoDir: string;
@@ -138,6 +146,36 @@ describe("PR preparation flow", () => {
     expect(run.workers[0]?.pr.url).toContain("pull/123");
     expect(run.artifacts[0]).toMatchObject({ type: "pr_evidence", ref: "https://github.com/example/repo/pull/123" });
     expect(run.events.map((event) => event.type)).toContain("artifact.created");
+  });
+
+  it("links PR evidence to completed worker tasks", async () => {
+    writeFakeGhScript(
+      'if [ "$1" = "--version" ]; then echo \'gh version test\'; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit 0; fi\necho \'https://github.com/example/repo/pull/123\'',
+    );
+    await createChangedWorker();
+    const worker = getOrCreateRunForRepo(repoDir).workers[0];
+    if (!worker) {
+      throw new Error("worker missing");
+    }
+    const task = createTaskForRepo(repoDir, { title: "Backend task", prompt: "Implement backend changes" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+    recordTaskCompletionForRepo(repoDir, {
+      runId: started.run.runId,
+      taskId: task.taskId,
+      status: "succeeded",
+      completionSummary: "Backend task complete",
+    });
+    await runConductorCommand(repoDir, "commit backend feat: add backend worker");
+    await runConductorCommand(repoDir, "push backend");
+    approveWorkerPrGate();
+
+    await runConductorCommand(repoDir, "pr backend Backend worker PR");
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.artifacts[0]?.resourceRefs.taskId).toBe(task.taskId);
+    expect(run.artifacts[0]?.resourceRefs.runId).toBe(started.run.runId);
+    expect(run.artifacts[0]?.metadata).toMatchObject({ taskIds: [task.taskId], runIds: [started.run.runId] });
   });
 
   it("persists partial PR state when gh pr create fails", async () => {
