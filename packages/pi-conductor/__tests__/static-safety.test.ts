@@ -67,15 +67,6 @@ describe("pi-conductor static safety guards", () => {
     ]);
 
     expect(sites).toEqual([
-      "conductor.ts:buildEvidenceBundleForRepo",
-      "conductor.ts:cancelTaskRunForRepo",
-      "conductor.ts:createFollowUpTaskForRepo",
-      "conductor.ts:resolveGateForRepo",
-      "conductor.ts:runTaskForRepo",
-      "conductor.ts:runWorkerForRepo",
-      "conductor.ts:runWorkerForRepo",
-      "conductor.ts:runWorkerForRepo",
-      "conductor.ts:runWorkerForRepo",
       "index.ts:getStatusText",
       "storage.ts:mutateRun",
       "storage.ts:mutateRunWithFileLock",

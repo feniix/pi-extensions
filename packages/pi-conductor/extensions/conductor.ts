@@ -55,7 +55,6 @@ import {
   startWorkerRun,
   updateObjective,
   updateTask,
-  writeRun,
 } from "./storage.js";
 import type {
   ConductorActor,
@@ -1392,9 +1391,7 @@ export function resolveGateForRepo(
   repoRoot: string,
   input: { gateId: string; status: Exclude<GateStatus, "open">; actor: ConductorActor; resolutionReason: string },
 ): GateRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const updatedRun = resolveConductorGate(run, input);
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => resolveConductorGate(run, input));
   const gate = updatedRun.gates.find((entry) => entry.gateId === input.gateId);
   if (!gate) {
     throw new Error(`Gate ${input.gateId} disappeared during resolution`);
@@ -1580,9 +1577,7 @@ export function startTaskRunForRepo(
 }
 
 export function cancelTaskRunForRepo(repoRoot: string, input: { runId: string; reason: string }): RunRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const updatedRun = cancelTaskRun(run, input);
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => cancelTaskRun(run, input));
   const task = updatedRun.tasks.find((entry) => entry.runIds.includes(input.runId));
   if (task?.objectiveId) {
     refreshObjectiveStatusForRepo(repoRoot, task.objectiveId);
@@ -1618,20 +1613,21 @@ export function createFollowUpTaskForRepo(
   repoRoot: string,
   input: { runId: string; taskId: string; title: string; prompt: string },
 ): TaskRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const runAttempt = run.runs.find((entry) => entry.runId === input.runId);
-  if (!runAttempt || runAttempt.taskId !== input.taskId || runAttempt.finishedAt) {
-    throw new Error(`Run ${input.runId} is not an active run for task ${input.taskId}`);
-  }
-  const task = createTaskRecord({ taskId: createTaskId(), title: input.title, prompt: input.prompt });
-  const withTask = addTask(run, task);
-  const withEvent = appendConductorEvent(withTask, {
-    actor: { type: "child_run", id: input.runId },
-    type: "task.followup_created",
-    resourceRefs: { projectKey: run.projectKey, taskId: task.taskId, runId: input.runId },
-    payload: { parentTaskId: input.taskId, title: input.title },
+  let task!: TaskRecord;
+  const withEvent = mutateRepoRunSync(repoRoot, (run) => {
+    const runAttempt = run.runs.find((entry) => entry.runId === input.runId);
+    if (!runAttempt || runAttempt.taskId !== input.taskId || runAttempt.finishedAt) {
+      throw new Error(`Run ${input.runId} is not an active run for task ${input.taskId}`);
+    }
+    task = createTaskRecord({ taskId: createTaskId(), title: input.title, prompt: input.prompt });
+    const withTask = addTask(run, task);
+    return appendConductorEvent(withTask, {
+      actor: { type: "child_run", id: input.runId },
+      type: "task.followup_created",
+      resourceRefs: { projectKey: run.projectKey, taskId: task.taskId, runId: input.runId },
+      payload: { parentTaskId: input.taskId, title: input.title },
+    });
   });
-  writeRun(withEvent);
   const created = withEvent.tasks.find((entry) => entry.taskId === task.taskId);
   if (!created) {
     throw new Error(`Follow-up task ${task.taskId} disappeared during creation`);
@@ -1781,20 +1777,21 @@ export function buildEvidenceBundleForRepo(
     },
   };
   if (input.persistArtifact) {
-    const withArtifact = addConductorArtifact(run, {
-      type: "other",
-      ref: `evidence://${bundle.purpose}/${task?.taskId ?? worker?.workerId ?? objective?.objectiveId ?? selectedRun?.runId ?? run.projectKey}/${Date.now().toString(36)}`,
-      resourceRefs: bundle.resourceRefs,
-      producer: { type: "parent_agent", id: "conductor" },
-      metadata: {
-        purpose: bundle.purpose,
-        taskIds: tasks.map((entry) => entry.taskId),
-        runIds: runs.map((entry) => entry.runId),
-        artifactIds: artifacts.map((entry) => entry.artifactId),
-        summary: bundle.summary,
-      },
-    });
-    writeRun(withArtifact);
+    const withArtifact = mutateRepoRunSync(repoRoot, (latest) =>
+      addConductorArtifact(latest, {
+        type: "other",
+        ref: `evidence://${bundle.purpose}/${task?.taskId ?? worker?.workerId ?? objective?.objectiveId ?? selectedRun?.runId ?? latest.projectKey}/${Date.now().toString(36)}`,
+        resourceRefs: bundle.resourceRefs,
+        producer: { type: "parent_agent", id: "conductor" },
+        metadata: {
+          purpose: bundle.purpose,
+          taskIds: tasks.map((entry) => entry.taskId),
+          runIds: runs.map((entry) => entry.runId),
+          artifactIds: artifacts.map((entry) => entry.artifactId),
+          summary: bundle.summary,
+        },
+      }),
+    );
     bundle.persistedArtifact = withArtifact.artifacts.at(-1);
   }
   return bundle;
@@ -2433,7 +2430,7 @@ function createGateId(): string {
 
 export async function runTaskForRepo(repoRoot: string, taskId: string): Promise<WorkerRunResult> {
   const started = startTaskRunForRepo(repoRoot, { taskId });
-  let currentRun = getOrCreateRunForRepo(repoRoot);
+  const currentRun = getOrCreateRunForRepo(repoRoot);
   const worker = currentRun.workers.find((entry) => entry.workerId === started.run.workerId);
   const task = currentRun.tasks.find((entry) => entry.taskId === taskId);
   if (!worker || !task) {
@@ -2471,26 +2468,29 @@ export async function runTaskForRepo(repoRoot: string, taskId: string): Promise<
     },
   });
 
-  currentRun = getOrCreateRunForRepo(repoRoot);
-  const runAttempt = currentRun.runs.find((entry) => entry.runId === started.run.runId);
-  if (runAttempt && !runAttempt.finishedAt) {
+  let createdFallbackCompletion = false;
+  mutateRepoRunSync(repoRoot, (latest) => {
+    const runAttempt = latest.runs.find((entry) => entry.runId === started.run.runId);
+    if (!runAttempt || runAttempt.finishedAt) {
+      return latest;
+    }
     const semanticStatus =
       runtimeResult.status === "success" ? "partial" : mapWorkerRunStatusToRunStatus(runtimeResult.status);
-    const completedRun = completeTaskRun(currentRun, {
+    createdFallbackCompletion = true;
+    return completeTaskRun(latest, {
       runId: started.run.runId,
       status: semanticStatus,
       completionSummary: runtimeResult.finalText,
       errorMessage: runtimeResult.errorMessage,
     });
-    writeRun(completedRun);
-    if (runtimeResult.status === "success") {
-      createGateForRepo(repoRoot, {
-        gateId: createGateId(),
-        type: "needs_review",
-        resourceRefs: { taskId, runId: started.run.runId, workerId: worker.workerId },
-        requestedDecision: `Review task ${taskId}: native worker exited without explicit conductor_child_complete`,
-      });
-    }
+  });
+  if (createdFallbackCompletion && runtimeResult.status === "success") {
+    createGateForRepo(repoRoot, {
+      gateId: createGateId(),
+      type: "needs_review",
+      resourceRefs: { taskId, runId: started.run.runId, workerId: worker.workerId },
+      requestedDecision: `Review task ${taskId}: native worker exited without explicit conductor_child_complete`,
+    });
   }
 
   return {
@@ -2526,16 +2526,20 @@ export async function runWorkerForRepo(repoRoot: string, workerName: string, tas
     sessionFile: worker.sessionFile,
   });
 
-  const runningRun = startWorkerRun(run, worker.workerId, {
-    task,
-    sessionId: null,
+  mutateRepoRunSync(repoRoot, (latest) => {
+    const reconciled = reconcileWorkerHealth(latest);
+    const latestWorker = reconciled.workers.find((entry) => entry.workerId === worker.workerId);
+    if (!latestWorker) {
+      throw new Error(`Worker named ${workerName} not found`);
+    }
+    if (latestWorker.lifecycle === "broken") {
+      throw new Error(`Worker named ${workerName} is broken and must recover the worker first`);
+    }
+    if (latestWorker.lifecycle === "running") {
+      throw new Error(`Worker named ${workerName} is already running and cannot accept overlapping runs`);
+    }
+    return startWorkerRun(reconciled, latestWorker.workerId, { task, sessionId: null });
   });
-  writeRun(runningRun);
-
-  // latestRun is intentionally captured by the onSessionReady callback so the
-  // single foreground run can durably record the execution session id before the
-  // prompt completes. This path is single-session and single-threaded.
-  let latestRun = runningRun;
 
   try {
     const runtimeResult = await runWorkerPromptRuntime({
@@ -2543,23 +2547,21 @@ export async function runWorkerForRepo(repoRoot: string, workerName: string, tas
       sessionFile: worker.sessionFile,
       task,
       onSessionReady: async (sessionId) => {
-        latestRun = setWorkerRunSessionId(latestRun, worker.workerId, sessionId);
-        writeRun(latestRun);
+        mutateRepoRunSync(repoRoot, (latest) => setWorkerRunSessionId(latest, worker.workerId, sessionId));
       },
     });
 
-    if (
-      runtimeResult.sessionId &&
-      latestRun.workers.find((entry) => entry.workerId === worker.workerId)?.lastRun?.sessionId !==
-        runtimeResult.sessionId
-    ) {
-      latestRun = setWorkerRunSessionId(latestRun, worker.workerId, runtimeResult.sessionId);
-    }
-    const completedRun = finishWorkerRun(latestRun, worker.workerId, {
-      status: runtimeResult.status,
-      errorMessage: runtimeResult.errorMessage,
+    mutateRepoRunSync(repoRoot, (latest) => {
+      let nextRun = latest;
+      const latestWorker = nextRun.workers.find((entry) => entry.workerId === worker.workerId);
+      if (runtimeResult.sessionId && latestWorker?.lastRun?.sessionId !== runtimeResult.sessionId) {
+        nextRun = setWorkerRunSessionId(nextRun, worker.workerId, runtimeResult.sessionId);
+      }
+      return finishWorkerRun(nextRun, worker.workerId, {
+        status: runtimeResult.status,
+        errorMessage: runtimeResult.errorMessage,
+      });
     });
-    writeRun(completedRun);
 
     return {
       workerName: worker.name,
@@ -2572,11 +2574,12 @@ export async function runWorkerForRepo(repoRoot: string, workerName: string, tas
     const message = error instanceof Error ? error.message : String(error);
 
     try {
-      const completedRun = finishWorkerRun(latestRun, worker.workerId, {
-        status: "error",
-        errorMessage: message,
-      });
-      writeRun(completedRun);
+      mutateRepoRunSync(repoRoot, (latest) =>
+        finishWorkerRun(latest, worker.workerId, {
+          status: "error",
+          errorMessage: message,
+        }),
+      );
     } catch (persistenceError) {
       const persistenceMessage =
         persistenceError instanceof Error ? persistenceError.message : String(persistenceError);

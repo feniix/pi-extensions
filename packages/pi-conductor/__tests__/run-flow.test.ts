@@ -186,6 +186,50 @@ describe("worker run flows", () => {
     await runWorkerForRepo(repoDir, "backend", "record session id early");
   });
 
+  it("does not drop concurrent conductor state when persisting early session id", async () => {
+    await createWorkerForRepo(repoDir, "backend");
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async ({ onSessionReady }) => {
+      const concurrentTask = createTaskForRepo(repoDir, {
+        title: "Concurrent task",
+        prompt: "Preserve this task while recording session id",
+      });
+
+      await onSessionReady?.("run-session-early");
+
+      const duringRun = getOrCreateRunForRepo(repoDir);
+      expect(duringRun.tasks.some((entry) => entry.taskId === concurrentTask.taskId)).toBe(true);
+      expect(duringRun.workers[0]?.lastRun?.sessionId).toBe("run-session-early");
+
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-early" };
+    });
+
+    await runWorkerForRepo(repoDir, "backend", "record session id without stale write");
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks).toHaveLength(1);
+    expect(persisted.tasks[0]?.title).toBe("Concurrent task");
+  });
+
+  it("does not drop conductor state added while finishing a worker run", async () => {
+    await createWorkerForRepo(repoDir, "backend");
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async () => {
+      const concurrentTask = createTaskForRepo(repoDir, {
+        title: "Runtime-added task",
+        prompt: "Preserve this task when finishing worker run",
+      });
+
+      expect(getOrCreateRunForRepo(repoDir).tasks.some((entry) => entry.taskId === concurrentTask.taskId)).toBe(true);
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-finish" };
+    });
+
+    await runWorkerForRepo(repoDir, "backend", "finish without stale write");
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks).toHaveLength(1);
+    expect(persisted.tasks[0]?.title).toBe("Runtime-added task");
+    expect(persisted.workers[0]?.lastRun).toMatchObject({ status: "success", sessionId: "run-session-finish" });
+  });
+
   it("marks errored runs blocked and persists the run error message", async () => {
     await createWorkerForRepo(repoDir, "backend");
     runtimeMocks.runWorkerPromptRuntime.mockResolvedValueOnce({
