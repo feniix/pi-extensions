@@ -37,6 +37,21 @@ describe("runConductorCommand", () => {
     expect(text).toContain("workers: 0");
   });
 
+  it("supports resource-shaped worker and task inspection commands", async () => {
+    const workerText = await runConductorCommand(repoDir, "create worker backend");
+    expect(workerText).toContain("created worker backend");
+
+    const taskText = await runConductorCommand(repoDir, "create task Add-ledger Implement durable tasks");
+    expect(taskText).toContain("created task");
+
+    const tasks = await runConductorCommand(repoDir, "get tasks");
+    expect(tasks).toContain("Add-ledger");
+    expect(tasks).toContain("state=ready");
+
+    const workers = await runConductorCommand(repoDir, "get workers");
+    expect(workers).toContain("backend");
+  });
+
   it("creates a worker from the start subcommand", async () => {
     const text = await runConductorCommand(repoDir, "start backend");
     expect(text).toContain("created worker");

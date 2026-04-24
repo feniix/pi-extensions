@@ -4,7 +4,9 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { runConductorCommand } from "./commands.js";
 import {
+  assignTaskForRepo,
   commitWorkerForRepo,
+  createTaskForRepo,
   createWorkerForRepo,
   createWorkerPrForRepo,
   getOrCreateRunForRepo,
@@ -71,6 +73,130 @@ export default function conductorExtension(pi: ExtensionAPI) {
       } else {
         console.log(text);
       }
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_get_project",
+    label: "Conductor Get Project",
+    description: "Get current pi-conductor project metadata and concise aggregate status",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const repoRoot = findRepoRoot(ctx.cwd);
+      if (!repoRoot) {
+        return { content: [{ type: "text", text: "pi-conductor: not inside a git repository" }], details: {} };
+      }
+      const run = getOrCreateRunForRepo(repoRoot);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `project ${run.projectKey}: workers=${run.workers.length} tasks=${run.tasks.length} runs=${run.runs.length} events=${run.events.length}`,
+          },
+        ],
+        details: {
+          projectKey: run.projectKey,
+          repoRoot: run.repoRoot,
+          storageDir: run.storageDir,
+          schemaVersion: run.schemaVersion,
+          revision: run.revision,
+          workers: run.workers.length,
+          tasks: run.tasks.length,
+          runs: run.runs.length,
+          gates: run.gates.length,
+          artifacts: run.artifacts.length,
+          events: run.events.length,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_list_workers",
+    label: "Conductor List Workers",
+    description: "List durable pi-conductor workers for the current repository",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      const run = getOrCreateRunForRepo(ctx.cwd);
+      const text =
+        run.workers.length === 0
+          ? "no conductor workers"
+          : run.workers.map((worker) => `${worker.name} [${worker.workerId}] state=${worker.lifecycle}`).join("\n");
+      return { content: [{ type: "text", text }], details: { workers: run.workers } };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_create_worker",
+    label: "Conductor Create Worker",
+    description: "Create a durable pi-conductor worker for the current repository",
+    parameters: Type.Object({
+      name: Type.String({ description: "Worker name" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const worker = await createWorkerForRepo(ctx.cwd, params.name);
+      return {
+        content: [
+          { type: "text", text: `created worker ${worker.name} [${worker.workerId}] on branch ${worker.branch}` },
+        ],
+        details: { worker },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_create_task",
+    label: "Conductor Create Task",
+    description: "Create a durable pi-conductor task for the current repository",
+    parameters: Type.Object({
+      title: Type.String({ description: "Task title" }),
+      prompt: Type.String({ description: "Task prompt/body" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const task = createTaskForRepo(ctx.cwd, params);
+      return { content: [{ type: "text", text: `created task ${task.title} [${task.taskId}]` }], details: { task } };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_assign_task",
+    label: "Conductor Assign Task",
+    description: "Assign a durable pi-conductor task to a worker",
+    parameters: Type.Object({
+      taskId: Type.String({ description: "Task ID" }),
+      workerId: Type.String({ description: "Worker ID" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const task = assignTaskForRepo(ctx.cwd, params.taskId, params.workerId);
+      return {
+        content: [{ type: "text", text: `assigned task ${task.taskId} to ${task.assignedWorkerId}` }],
+        details: { task },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_delegate_task",
+    label: "Conductor Delegate Task",
+    description: "Create a task and assign it to an existing or newly-created worker in one model-friendly step",
+    parameters: Type.Object({
+      title: Type.String({ description: "Task title" }),
+      prompt: Type.String({ description: "Task prompt/body" }),
+      workerName: Type.String({ description: "Worker name to use or create" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const run = getOrCreateRunForRepo(ctx.cwd);
+      const worker =
+        run.workers.find((entry) => entry.name === params.workerName) ??
+        (await createWorkerForRepo(ctx.cwd, params.workerName));
+      const task = createTaskForRepo(ctx.cwd, { title: params.title, prompt: params.prompt });
+      const assigned = assignTaskForRepo(ctx.cwd, task.taskId, worker.workerId);
+      return {
+        content: [
+          { type: "text", text: `delegated task ${assigned.taskId} to worker ${worker.name} [${worker.workerId}]` },
+        ],
+        details: { task: assigned, worker },
+      };
     },
   });
 

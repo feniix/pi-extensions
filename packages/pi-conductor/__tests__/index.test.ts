@@ -8,7 +8,17 @@ describe("pi-conductor extension", () => {
     expect(extension).toContain('registerCommand("conductor"');
   });
 
-  it("registers conductor tools", () => {
+  it("registers resource-oriented conductor tools", () => {
+    const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
+    expect(extension).toContain('name: "conductor_get_project"');
+    expect(extension).toContain('name: "conductor_list_workers"');
+    expect(extension).toContain('name: "conductor_create_worker"');
+    expect(extension).toContain('name: "conductor_create_task"');
+    expect(extension).toContain('name: "conductor_assign_task"');
+    expect(extension).toContain('name: "conductor_delegate_task"');
+  });
+
+  it("still registers legacy worker tools during the transition", () => {
     const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
     expect(extension).toContain('name: "conductor_status"');
     expect(extension).toContain('name: "conductor_start"');

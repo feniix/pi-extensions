@@ -1,5 +1,6 @@
 import {
   commitWorkerForRepo,
+  createTaskForRepo,
   createWorkerForRepo,
   createWorkerPrForRepo,
   getOrCreateRunForRepo,
@@ -18,6 +19,9 @@ import { formatRunStatus } from "./status.js";
 function getUsage(): string {
   return [
     "usage:",
+    "  /conductor get workers|tasks|project",
+    "  /conductor create worker <worker-name>",
+    "  /conductor create task <title> <prompt>",
     "  /conductor status",
     "  /conductor start <worker-name>",
     "  /conductor task <worker-name> <task>",
@@ -40,6 +44,50 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
   }
 
   const [subcommand, ...rest] = trimmed.split(/\s+/);
+  if (subcommand === "get") {
+    const [resource] = rest;
+    const run = reconcileWorkerHealth(getOrCreateRunForRepo(cwd));
+    if (resource === "project") {
+      return formatRunStatus(run);
+    }
+    if (resource === "workers") {
+      return run.workers.length === 0
+        ? "workers: none"
+        : run.workers.map((worker) => `${worker.name} [${worker.workerId}] state=${worker.lifecycle}`).join("\n");
+    }
+    if (resource === "tasks") {
+      return run.tasks.length === 0
+        ? "tasks: none"
+        : run.tasks
+            .map(
+              (task) =>
+                `${task.title} [${task.taskId}] state=${task.state} assignedWorker=${task.assignedWorkerId ?? "none"}`,
+            )
+            .join("\n");
+    }
+    return `${getUsage()}\n\nerror: unknown resource '${resource ?? ""}'`;
+  }
+  if (subcommand === "create") {
+    const [resource, first, ...restParts] = rest;
+    if (resource === "worker") {
+      const workerName = [first, ...restParts].filter(Boolean).join(" ").trim();
+      if (!workerName) {
+        return `${getUsage()}\n\nerror: missing worker name`;
+      }
+      const worker = await createWorkerForRepo(cwd, workerName);
+      return `created worker ${worker.name} [${worker.workerId}] on branch ${worker.branch}`;
+    }
+    if (resource === "task") {
+      const title = first;
+      const prompt = restParts.join(" ").trim();
+      if (!title || !prompt) {
+        return `${getUsage()}\n\nerror: missing task title or prompt`;
+      }
+      const task = createTaskForRepo(cwd, { title, prompt });
+      return `created task ${task.title} [${task.taskId}]`;
+    }
+    return `${getUsage()}\n\nerror: unknown resource '${resource ?? ""}'`;
+  }
   if (subcommand === "status") {
     return formatRunStatus(reconcileWorkerHealth(getOrCreateRunForRepo(cwd)));
   }

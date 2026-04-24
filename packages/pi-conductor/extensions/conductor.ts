@@ -17,8 +17,11 @@ import {
   summarizeWorkerSessionRuntime,
 } from "./runtime.js";
 import {
+  addTask,
   addWorker,
+  assignTaskToWorker,
   createEmptyRun,
+  createTaskRecord,
   createWorkerRecord,
   finishWorkerRun,
   readRun,
@@ -32,7 +35,7 @@ import {
   startWorkerRun,
   writeRun,
 } from "./storage.js";
-import type { RunRecord, WorkerLifecycleState, WorkerRecord, WorkerRunResult } from "./types.js";
+import type { RunRecord, TaskRecord, WorkerLifecycleState, WorkerRecord, WorkerRunResult } from "./types.js";
 import { createWorkerId } from "./workers.js";
 import {
   createManagedWorktree,
@@ -51,6 +54,33 @@ export function getOrCreateRunForRepo(repoRoot: string): RunRecord {
   const run = createEmptyRun(projectKey, normalizedRoot);
   writeRun(run);
   return run;
+}
+
+function createTaskId(): string {
+  return `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function createTaskForRepo(repoRoot: string, input: { title: string; prompt: string }): TaskRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const task = createTaskRecord({
+    taskId: createTaskId(),
+    title: input.title,
+    prompt: input.prompt,
+  });
+  const updatedRun = addTask(run, task);
+  writeRun(updatedRun);
+  return task;
+}
+
+export function assignTaskForRepo(repoRoot: string, taskId: string, workerId: string): TaskRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const updatedRun = assignTaskToWorker(run, taskId, workerId);
+  writeRun(updatedRun);
+  const task = updatedRun.tasks.find((entry) => entry.taskId === taskId);
+  if (!task) {
+    throw new Error(`Task ${taskId} disappeared during assignment`);
+  }
+  return task;
 }
 
 export async function createWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {

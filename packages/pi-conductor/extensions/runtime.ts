@@ -13,6 +13,7 @@ import type {
   RuntimeRunContext,
   RuntimeRunPreflightContext,
   RuntimeRunResult,
+  TaskContractInput,
   WorkerRunStatus,
   WorkerRuntimeState,
 } from "./types.js";
@@ -130,6 +131,36 @@ export function extractFinalAssistantText(messages: unknown[]): string | null {
   return null;
 }
 
+export function buildTaskContractPrompt(input: TaskContractInput): string {
+  const constraints = input.constraints?.length
+    ? input.constraints.map((constraint) => `- ${constraint}`).join("\n")
+    : "- No additional constraints were provided.";
+  const completion = input.explicitCompletionTools
+    ? [
+        "Report progress with conductor_report_progress when meaningful milestones happen.",
+        "Register evidence with conductor_emit_artifact when you create useful artifacts.",
+        "If you are blocked, create a gate with conductor_create_gate.",
+        "When finished, call conductor_complete_task with success, partial, blocked, failed, or aborted status.",
+      ].join("\n")
+    : "Explicit conductor completion tools are unavailable for this backend; finish with a concise outcome summary and expect parent review.";
+
+  return [
+    "# pi-conductor task contract",
+    `Task ID: ${input.taskId}`,
+    `Run ID: ${input.runId}`,
+    `Task revision ${input.taskRevision}`,
+    "",
+    "## Goal",
+    input.goal,
+    "",
+    "## Constraints",
+    constraints,
+    "",
+    "## Completion contract",
+    completion,
+  ].join("\n");
+}
+
 export async function preflightWorkerRunRuntime(input: RuntimeRunPreflightContext): Promise<void> {
   if (!input.worktreePath || !existsSync(input.worktreePath)) {
     throw new Error("Worker worktree is not available for a foreground run");
@@ -162,7 +193,7 @@ export async function runWorkerPromptRuntime(input: RuntimeRunContext): Promise<
     await session.bindExtensions({});
     await input.onSessionReady?.(session.sessionId);
 
-    await session.prompt(input.task);
+    await session.prompt(input.taskContract ? buildTaskContractPrompt(input.taskContract) : input.task);
 
     const finalAssistant = [...session.messages].reverse().find(isAssistantMessage);
     if (!finalAssistant) {

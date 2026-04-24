@@ -3,7 +3,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createWorkerForRepo, getOrCreateRunForRepo } from "../extensions/conductor.js";
+import {
+  assignTaskForRepo,
+  createTaskForRepo,
+  createWorkerForRepo,
+  getOrCreateRunForRepo,
+} from "../extensions/conductor.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
   if (value == null) {
@@ -44,6 +49,26 @@ describe("conductor service", () => {
     expect(run.repoRoot).toBe(repoDir);
     expect(run.workers).toEqual([]);
     expect(readFileSync(join(run.storageDir, "run.json"), "utf-8")).toContain("projectKey");
+  });
+
+  it("creates and assigns durable tasks through conductor service helpers", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, {
+      title: "Add task ledger",
+      prompt: "Implement durable task records",
+    });
+
+    expect(task.title).toBe("Add task ledger");
+    expect(task.state).toBe("ready");
+
+    const assigned = assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    expect(assigned.state).toBe("assigned");
+    expect(assigned.assignedWorkerId).toBe(worker.workerId);
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.tasks).toHaveLength(1);
+    expect(run.tasks[0]?.taskId).toBe(task.taskId);
+    expect(run.events.map((event) => event.type)).toEqual(["task.created", "task.assigned"]);
   });
 
   it("creates a worker, worktree, and persisted worker record", async () => {

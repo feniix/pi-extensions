@@ -3,8 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  addTask,
   addWorker,
+  appendConductorEvent,
+  assignTaskToWorker,
+  completeTaskRun,
   createEmptyRun,
+  createTaskRecord,
   createWorkerRecord,
   finishWorkerRun,
   getConductorProjectDir,
@@ -12,6 +17,7 @@ import {
   setWorkerLifecycle,
   setWorkerRunSessionId,
   setWorkerRuntimeState,
+  startTaskRun,
   startWorkerRun,
 } from "../extensions/storage.js";
 
@@ -29,16 +35,91 @@ describe("storage helpers", () => {
       rmSync(conductorHome, { recursive: true, force: true });
     }
   });
-  it("creates an empty run", () => {
+  it("creates an empty control-plane record", () => {
     const run = createEmptyRun("abc", "/tmp/repo");
     expect(run.projectKey).toBe("abc");
     expect(run.repoRoot).toBe("/tmp/repo");
+    expect(run.schemaVersion).toBe(1);
+    expect(run.revision).toBe(0);
     expect(run.workers).toEqual([]);
+    expect(run.tasks).toEqual([]);
+    expect(run.runs).toEqual([]);
+    expect(run.gates).toEqual([]);
+    expect(run.artifacts).toEqual([]);
+    expect(run.events).toEqual([]);
   });
 
   it("builds a conductor project dir", () => {
     const dir = getConductorProjectDir("abc");
     expect(dir).toBe(join(conductorHome, "projects", "abc"));
+  });
+
+  it("creates and assigns durable task records without changing worker outcome state", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: null,
+    });
+    const task = createTaskRecord({ taskId: "task-1", title: "Add task ledger", prompt: "Implement durable tasks" });
+
+    const withWorker = addWorker(run, worker);
+    const withTask = addTask(withWorker, task);
+    const assigned = assignTaskToWorker(withTask, task.taskId, worker.workerId);
+
+    expect(assigned.tasks[0]).toMatchObject({
+      taskId: "task-1",
+      title: "Add task ledger",
+      prompt: "Implement durable tasks",
+      state: "assigned",
+      assignedWorkerId: "worker-1",
+      revision: 1,
+      activeRunId: null,
+      runIds: [],
+    });
+    expect(assigned.workers[0]?.lifecycle).toBe("idle");
+    expect(assigned.workers[0]?.currentTask).toBeNull();
+  });
+
+  it("starts and completes durable task runs without storing outcome on worker lifecycle", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: null,
+    });
+    const task = createTaskRecord({ taskId: "task-1", title: "Add task ledger", prompt: "Implement durable tasks" });
+    const assigned = assignTaskToWorker(addTask(addWorker(run, worker), task), task.taskId, worker.workerId);
+
+    const running = startTaskRun(assigned, {
+      runId: "run-1",
+      taskId: task.taskId,
+      workerId: worker.workerId,
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T12:00:00.000Z",
+    });
+
+    expect(running.tasks[0]).toMatchObject({ state: "running", activeRunId: "run-1", runIds: ["run-1"] });
+    expect(running.runs[0]).toMatchObject({ runId: "run-1", status: "running", taskRevision: 1 });
+    expect(running.workers[0]?.lifecycle).toBe("running");
+
+    const completed = completeTaskRun(running, {
+      runId: "run-1",
+      status: "succeeded",
+      completionSummary: "Implemented durable task runs",
+    });
+
+    expect(completed.tasks[0]).toMatchObject({ state: "completed", activeRunId: null });
+    expect(completed.runs[0]).toMatchObject({
+      status: "succeeded",
+      completionSummary: "Implemented durable task runs",
+    });
+    expect(completed.workers[0]?.lifecycle).toBe("idle");
+    expect(completed.events.map((event) => event.type)).toContain("run.completed");
   });
 
   it("creates a worker record with default lifecycle metadata", () => {
@@ -61,6 +142,29 @@ describe("storage helpers", () => {
     expect(worker.runtime.sessionId).toBeNull();
     expect(worker.runtime.lastResumedAt).toBeNull();
     expect(worker.lastRun).toBeNull();
+  });
+
+  it("appends events with monotonic sequence and revision metadata", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+
+    const first = appendConductorEvent(run, {
+      actor: { type: "system", id: "test" },
+      type: "project.created",
+      resourceRefs: { projectKey: "abc" },
+      payload: { reason: "test" },
+    });
+    const second = appendConductorEvent(first, {
+      actor: { type: "parent_agent", id: "parent" },
+      type: "task.created",
+      resourceRefs: { taskId: "task-1" },
+      payload: {},
+    });
+
+    expect(first.revision).toBe(1);
+    expect(first.events[0]).toMatchObject({ sequence: 1, projectRevision: 1, type: "project.created" });
+    expect(second.revision).toBe(2);
+    expect(second.events.map((event) => event.sequence)).toEqual([1, 2]);
+    expect(second.events[1]).toMatchObject({ projectRevision: 2, type: "task.created" });
   });
 
   it("normalizes missing lastRun when reading older persisted workers", () => {

@@ -35,7 +35,22 @@ export function formatRunStatus(run: RunRecord): string {
     `repoRoot: ${run.repoRoot}`,
     `storageDir: ${getConductorProjectDir(run.projectKey)}`,
     `workers: ${run.workers.length}`,
+    `tasks: ${run.tasks.length}`,
+    `runs: ${run.runs.length}`,
+    `gates: ${run.gates.length}`,
+    `artifacts: ${run.artifacts.length}`,
+    `events: ${run.events.length}`,
   ];
+
+  for (const task of run.tasks) {
+    lines.push(
+      `- task ${task.title} [${task.taskId}] ` +
+        `state=${task.state} ` +
+        `assignedWorker=${task.assignedWorkerId ?? "none"} ` +
+        `activeRun=${task.activeRunId ?? "none"} ` +
+        `latestProgress=${task.latestProgress ?? "none"}`,
+    );
+  }
 
   for (const worker of run.workers) {
     const summary = worker.summary.text

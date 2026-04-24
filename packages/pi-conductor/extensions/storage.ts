@@ -2,7 +2,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type {
+  ConductorActor,
+  ConductorEvent,
+  ConductorResourceRefs,
+  RunAttemptRecord,
   RunRecord,
+  RunStatus,
+  TaskRecord,
   WorkerLastRun,
   WorkerLifecycleState,
   WorkerPrState,
@@ -10,6 +16,7 @@ import type {
   WorkerRunStatus,
   WorkerRuntimeState,
 } from "./types.js";
+import { CONDUCTOR_SCHEMA_VERSION } from "./types.js";
 
 function getConductorRoot(): string {
   const override = process.env.PI_CONDUCTOR_HOME?.trim();
@@ -31,6 +38,24 @@ export function ensureDir(path: string): void {
   mkdirSync(path, { recursive: true });
 }
 
+function createEventId(sequence: number): string {
+  return `event-${Date.now().toString(36)}-${sequence.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeProjectRecord(run: RunRecord): RunRecord {
+  return {
+    ...run,
+    schemaVersion: run.schemaVersion ?? CONDUCTOR_SCHEMA_VERSION,
+    revision: run.revision ?? 0,
+    workers: (run.workers ?? []).map(normalizeWorkerRecord),
+    tasks: run.tasks ?? [],
+    runs: run.runs ?? [],
+    gates: run.gates ?? [],
+    artifacts: run.artifacts ?? [],
+    events: run.events ?? [],
+  };
+}
+
 function normalizeWorkerRecord(worker: WorkerRecord): WorkerRecord {
   return {
     ...worker,
@@ -49,10 +74,7 @@ export function readRun(projectKey: string): RunRecord | null {
     return null;
   }
   const run = JSON.parse(readFileSync(path, "utf-8")) as RunRecord;
-  return {
-    ...run,
-    workers: run.workers.map(normalizeWorkerRecord),
-  };
+  return normalizeProjectRecord(run);
 }
 
 export function writeRun(run: RunRecord): void {
@@ -64,13 +86,287 @@ export function writeRun(run: RunRecord): void {
 export function createEmptyRun(projectKey: string, repoRoot: string): RunRecord {
   const now = new Date().toISOString();
   return {
+    schemaVersion: CONDUCTOR_SCHEMA_VERSION,
+    revision: 0,
     projectKey,
     repoRoot: resolve(repoRoot),
     storageDir: getConductorProjectDir(projectKey),
     workers: [],
+    tasks: [],
+    runs: [],
+    gates: [],
+    artifacts: [],
+    events: [],
     createdAt: now,
     updatedAt: now,
   };
+}
+
+export function appendConductorEvent(
+  run: RunRecord,
+  input: {
+    actor: ConductorActor;
+    type: string;
+    resourceRefs: ConductorResourceRefs;
+    payload?: Record<string, unknown>;
+  },
+): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const now = new Date().toISOString();
+  const sequence = (normalized.events.at(-1)?.sequence ?? 0) + 1;
+  const projectRevision = normalized.revision + 1;
+  const event: ConductorEvent = {
+    eventId: createEventId(sequence),
+    sequence,
+    schemaVersion: normalized.schemaVersion,
+    projectRevision,
+    occurredAt: now,
+    actor: input.actor,
+    type: input.type,
+    resourceRefs: input.resourceRefs,
+    payload: input.payload ?? {},
+  };
+
+  return {
+    ...normalized,
+    revision: projectRevision,
+    events: [...normalized.events, event],
+    updatedAt: now,
+  };
+}
+
+export function createTaskRecord(input: { taskId: string; title: string; prompt: string }): TaskRecord {
+  const now = new Date().toISOString();
+  return {
+    taskId: input.taskId,
+    title: input.title,
+    prompt: input.prompt,
+    state: "ready",
+    revision: 1,
+    assignedWorkerId: null,
+    activeRunId: null,
+    runIds: [],
+    artifactIds: [],
+    gateIds: [],
+    latestProgress: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function addTask(run: RunRecord, task: TaskRecord): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  if (normalized.tasks.some((existing) => existing.taskId === task.taskId)) {
+    throw new Error(`Task ${task.taskId} already exists`);
+  }
+  return appendConductorEvent(
+    {
+      ...normalized,
+      tasks: [...normalized.tasks, task],
+      updatedAt: new Date().toISOString(),
+    },
+    {
+      actor: { type: "system", id: "storage" },
+      type: "task.created",
+      resourceRefs: { projectKey: normalized.projectKey, taskId: task.taskId },
+      payload: { title: task.title },
+    },
+  );
+}
+
+export function assignTaskToWorker(run: RunRecord, taskId: string, workerId: string): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  if (!normalized.workers.some((worker) => worker.workerId === workerId)) {
+    throw new Error(`Worker ${workerId} not found`);
+  }
+
+  let found = false;
+  const now = new Date().toISOString();
+  const tasks = normalized.tasks.map((task) => {
+    if (task.taskId !== taskId) {
+      return task;
+    }
+    found = true;
+    if (task.activeRunId) {
+      throw new Error(`Task ${taskId} has an active run and cannot be reassigned`);
+    }
+    return {
+      ...task,
+      state: "assigned" as const,
+      assignedWorkerId: workerId,
+      updatedAt: now,
+    };
+  });
+
+  if (!found) {
+    throw new Error(`Task ${taskId} not found`);
+  }
+
+  return appendConductorEvent(
+    {
+      ...normalized,
+      tasks,
+      updatedAt: now,
+    },
+    {
+      actor: { type: "system", id: "storage" },
+      type: "task.assigned",
+      resourceRefs: { projectKey: normalized.projectKey, taskId, workerId },
+      payload: {},
+    },
+  );
+}
+
+export function startTaskRun(
+  run: RunRecord,
+  input: {
+    runId: string;
+    taskId: string;
+    workerId: string;
+    backend: RunAttemptRecord["backend"];
+    leaseExpiresAt: string;
+  },
+): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const now = new Date().toISOString();
+  const task = normalized.tasks.find((entry) => entry.taskId === input.taskId);
+  if (!task) {
+    throw new Error(`Task ${input.taskId} not found`);
+  }
+  if (task.activeRunId) {
+    throw new Error(`Task ${input.taskId} already has an active run`);
+  }
+  if (task.assignedWorkerId !== input.workerId) {
+    throw new Error(`Task ${input.taskId} is not assigned to worker ${input.workerId}`);
+  }
+  const worker = normalized.workers.find((entry) => entry.workerId === input.workerId);
+  if (!worker) {
+    throw new Error(`Worker ${input.workerId} not found`);
+  }
+  if (normalized.runs.some((entry) => entry.runId === input.runId)) {
+    throw new Error(`Run ${input.runId} already exists`);
+  }
+
+  const runAttempt: RunAttemptRecord = {
+    runId: input.runId,
+    taskId: input.taskId,
+    workerId: input.workerId,
+    taskRevision: task.revision,
+    status: "running",
+    backend: input.backend,
+    backendRunId: null,
+    sessionId: worker.runtime.sessionId,
+    leaseGeneration: 1,
+    leaseStartedAt: now,
+    leaseExpiresAt: input.leaseExpiresAt,
+    lastHeartbeatAt: null,
+    startedAt: now,
+    finishedAt: null,
+    completionSummary: null,
+    errorMessage: null,
+    artifactIds: [],
+    gateIds: [],
+  };
+
+  const updated = {
+    ...normalized,
+    tasks: normalized.tasks.map((entry) =>
+      entry.taskId === input.taskId
+        ? {
+            ...entry,
+            state: "running" as const,
+            activeRunId: input.runId,
+            runIds: [...entry.runIds, input.runId],
+            updatedAt: now,
+          }
+        : entry,
+    ),
+    workers: normalized.workers.map((entry) =>
+      entry.workerId === input.workerId ? { ...entry, lifecycle: "running" as const, updatedAt: now } : entry,
+    ),
+    runs: [...normalized.runs, runAttempt],
+    updatedAt: now,
+  };
+
+  return appendConductorEvent(updated, {
+    actor: { type: "system", id: "storage" },
+    type: "run.started",
+    resourceRefs: {
+      projectKey: normalized.projectKey,
+      taskId: input.taskId,
+      workerId: input.workerId,
+      runId: input.runId,
+    },
+    payload: { backend: input.backend },
+  });
+}
+
+function taskStateForRunStatus(status: RunStatus): TaskRecord["state"] {
+  switch (status) {
+    case "succeeded":
+      return "completed";
+    case "blocked":
+      return "blocked";
+    case "aborted":
+      return "canceled";
+    case "partial":
+    case "unknown_dispatch":
+      return "needs_review";
+    default:
+      return "failed";
+  }
+}
+
+export function completeTaskRun(
+  run: RunRecord,
+  input: { runId: string; status: RunStatus; completionSummary?: string | null; errorMessage?: string | null },
+): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const now = new Date().toISOString();
+  const runAttempt = normalized.runs.find((entry) => entry.runId === input.runId);
+  if (!runAttempt) {
+    throw new Error(`Run ${input.runId} not found`);
+  }
+  if (runAttempt.finishedAt) {
+    throw new Error(`Run ${input.runId} is already terminal`);
+  }
+
+  const taskState = taskStateForRunStatus(input.status);
+  const updated = {
+    ...normalized,
+    tasks: normalized.tasks.map((entry) =>
+      entry.taskId === runAttempt.taskId ? { ...entry, state: taskState, activeRunId: null, updatedAt: now } : entry,
+    ),
+    workers: normalized.workers.map((entry) =>
+      entry.workerId === runAttempt.workerId ? { ...entry, lifecycle: "idle" as const, updatedAt: now } : entry,
+    ),
+    runs: normalized.runs.map((entry) =>
+      entry.runId === input.runId
+        ? {
+            ...entry,
+            status: input.status,
+            finishedAt: now,
+            leaseExpiresAt: null,
+            completionSummary: input.completionSummary ?? null,
+            errorMessage: input.errorMessage ?? null,
+            updatedAt: now,
+          }
+        : entry,
+    ),
+    updatedAt: now,
+  };
+
+  return appendConductorEvent(updated, {
+    actor: { type: "system", id: "storage" },
+    type: "run.completed",
+    resourceRefs: {
+      projectKey: normalized.projectKey,
+      taskId: runAttempt.taskId,
+      workerId: runAttempt.workerId,
+      runId: input.runId,
+    },
+    payload: { status: input.status, completionSummary: input.completionSummary ?? null },
+  });
 }
 
 export function createWorkerRecord(input: {
