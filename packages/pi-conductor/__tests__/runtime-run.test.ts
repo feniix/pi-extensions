@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildRunScopedConductorTools,
   buildTaskContractPrompt,
   extractFinalAssistantText,
   mapStopReasonToRunOutcome,
@@ -31,6 +32,46 @@ describe("worker run runtime helpers", () => {
     expect(prompt).toContain("Do not publish a PR");
     expect(prompt).toContain("conductor_child_complete");
     expect(prompt).toContain("conductor_child_progress");
+  });
+
+  it("builds run-scoped conductor tools for native child sessions", async () => {
+    const progressCalls: unknown[] = [];
+    const completeCalls: unknown[] = [];
+    const tools = buildRunScopedConductorTools({
+      onConductorProgress: async (params) => {
+        progressCalls.push(params);
+      },
+      onConductorComplete: async (params) => {
+        completeCalls.push(params);
+      },
+    });
+
+    expect(tools.map((tool) => tool.name)).toEqual(["conductor_child_progress", "conductor_child_complete"]);
+
+    await tools[0]?.execute?.(
+      "call-1",
+      { runId: "run-1", taskId: "task-1", progress: "half done" } as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+    );
+    await tools[1]?.execute?.(
+      "call-2",
+      {
+        runId: "run-1",
+        taskId: "task-1",
+        status: "succeeded",
+        completionSummary: "done",
+      } as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+    );
+
+    expect(progressCalls).toEqual([{ runId: "run-1", taskId: "task-1", progress: "half done" }]);
+    expect(completeCalls).toEqual([
+      { runId: "run-1", taskId: "task-1", status: "succeeded", completionSummary: "done" },
+    ]);
   });
 
   it("maps Pi stop reasons to conductor run outcomes", () => {

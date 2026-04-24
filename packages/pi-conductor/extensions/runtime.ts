@@ -5,11 +5,15 @@ import {
   AuthStorage,
   createAgentSession,
   createExtensionRuntime,
+  defineTool,
   ModelRegistry,
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
+import { Type } from "typebox";
 import { generateWorkerSummaryFromSession } from "./summaries.js";
 import type {
+  ConductorCompletionReportInput,
+  ConductorProgressReportInput,
   RuntimeRunContext,
   RuntimeRunPreflightContext,
   RuntimeRunResult,
@@ -131,6 +135,76 @@ export function extractFinalAssistantText(messages: unknown[]): string | null {
   return null;
 }
 
+const artifactTypeSchema = Type.Union([
+  Type.Literal("note"),
+  Type.Literal("test_result"),
+  Type.Literal("changed_files"),
+  Type.Literal("log"),
+  Type.Literal("completion_report"),
+  Type.Literal("pr_evidence"),
+  Type.Literal("other"),
+]);
+
+export function buildRunScopedConductorTools(input: {
+  onConductorProgress?: (params: ConductorProgressReportInput) => void | Promise<void>;
+  onConductorComplete?: (params: ConductorCompletionReportInput) => void | Promise<void>;
+}) {
+  return [
+    defineTool({
+      name: "conductor_child_progress",
+      label: "Conductor Child Progress",
+      description: "Report scoped progress for the current conductor task run",
+      parameters: Type.Object({
+        runId: Type.String(),
+        taskId: Type.String(),
+        progress: Type.String(),
+        artifact: Type.Optional(
+          Type.Object({
+            type: artifactTypeSchema,
+            ref: Type.String(),
+            metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),
+          }),
+        ),
+      }),
+      execute: async (_toolCallId, params) => {
+        await input.onConductorProgress?.(params as ConductorProgressReportInput);
+        return { content: [{ type: "text", text: `recorded progress for task ${params.taskId}` }], details: params };
+      },
+    }),
+    defineTool({
+      name: "conductor_child_complete",
+      label: "Conductor Child Complete",
+      description: "Complete the current conductor task run with a scoped semantic outcome",
+      parameters: Type.Object({
+        runId: Type.String(),
+        taskId: Type.String(),
+        status: Type.Union([
+          Type.Literal("succeeded"),
+          Type.Literal("partial"),
+          Type.Literal("blocked"),
+          Type.Literal("failed"),
+          Type.Literal("aborted"),
+        ]),
+        completionSummary: Type.String(),
+        artifact: Type.Optional(
+          Type.Object({
+            type: artifactTypeSchema,
+            ref: Type.String(),
+            metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),
+          }),
+        ),
+      }),
+      execute: async (_toolCallId, params) => {
+        await input.onConductorComplete?.(params as ConductorCompletionReportInput);
+        return {
+          content: [{ type: "text", text: `completed task ${params.taskId} with ${params.status}` }],
+          details: params,
+        };
+      },
+    }),
+  ];
+}
+
 export function buildTaskContractPrompt(input: TaskContractInput): string {
   const constraints = input.constraints?.length
     ? input.constraints.map((constraint) => `- ${constraint}`).join("\n")
@@ -187,6 +261,7 @@ export async function runWorkerPromptRuntime(input: RuntimeRunContext): Promise<
     modelRegistry,
     resourceLoader,
     tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
+    customTools: input.taskContract ? buildRunScopedConductorTools(input) : [],
   });
 
   try {

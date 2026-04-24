@@ -209,12 +209,29 @@ export interface TaskContractInput {
   explicitCompletionTools: boolean;
 }
 
+export interface ConductorProgressReportInput {
+  runId: string;
+  taskId: string;
+  progress: string;
+  artifact?: { type: ArtifactType; ref: string; metadata?: Record<string, unknown> };
+}
+
+export interface ConductorCompletionReportInput {
+  runId: string;
+  taskId: string;
+  status: "succeeded" | "partial" | "blocked" | "failed" | "aborted";
+  completionSummary: string;
+  artifact?: { type: ArtifactType; ref: string; metadata?: Record<string, unknown> };
+}
+
 export interface RuntimeRunContext {
   worktreePath: string;
   sessionFile: string;
   task: string;
   taskContract?: TaskContractInput;
   onSessionReady?: (sessionId: string) => void | Promise<void>;
+  onConductorProgress?: (input: ConductorProgressReportInput) => void | Promise<void>;
+  onConductorComplete?: (input: ConductorCompletionReportInput) => void | Promise<void>;
 }
 
 export interface RuntimeRunPreflightContext {
