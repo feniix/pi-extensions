@@ -14,6 +14,8 @@ import {
   finishWorkerRun,
   getConductorProjectDir,
   readRun,
+  recordTaskCompletion,
+  recordTaskProgress,
   setWorkerLifecycle,
   setWorkerRunSessionId,
   setWorkerRuntimeState,
@@ -120,6 +122,59 @@ describe("storage helpers", () => {
     });
     expect(completed.workers[0]?.lifecycle).toBe("idle");
     expect(completed.events.map((event) => event.type)).toContain("run.completed");
+  });
+
+  it("records scoped child progress and completion artifacts", () => {
+    let run = addWorker(
+      createEmptyRun("abc", "/repo"),
+      createWorkerRecord({
+        workerId: "worker-1",
+        name: "backend",
+        branch: "conductor/backend",
+        worktreePath: "/repo/.worktrees/backend",
+        sessionFile: "/tmp/session.jsonl",
+      }),
+    );
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+
+    const withProgress = recordTaskProgress(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      progress: "tests passing",
+      artifact: { type: "log", ref: "progress://run-1/1", metadata: { step: 1 } },
+    });
+
+    expect(withProgress.tasks.find((entry) => entry.taskId === "task-1")?.latestProgress).toBe("tests passing");
+    expect(withProgress.artifacts).toHaveLength(1);
+    expect(withProgress.artifacts[0]?.resourceRefs).toMatchObject({ taskId: "task-1", runId: "run-1" });
+    expect(withProgress.runs.find((entry) => entry.runId === "run-1")?.artifactIds).toContain(
+      withProgress.artifacts[0]?.artifactId,
+    );
+    expect(withProgress.events.map((event) => event.type)).toContain("run.progress_reported");
+
+    const completed = recordTaskCompletion(withProgress, {
+      runId: "run-1",
+      taskId: "task-1",
+      status: "succeeded",
+      completionSummary: "implemented and verified",
+      artifact: { type: "completion_report", ref: "completion://run-1", metadata: { checks: "ok" } },
+    });
+
+    expect(completed.tasks.find((entry) => entry.taskId === "task-1")?.state).toBe("completed");
+    expect(completed.artifacts).toHaveLength(2);
+    expect(completed.artifacts[1]?.type).toBe("completion_report");
+    expect(completed.runs.find((entry) => entry.runId === "run-1")?.completionSummary).toBe("implemented and verified");
   });
 
   it("creates a worker record with default lifecycle metadata", () => {

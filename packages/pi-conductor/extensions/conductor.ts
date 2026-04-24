@@ -25,6 +25,8 @@ import {
   createWorkerRecord,
   finishWorkerRun,
   readRun,
+  recordTaskCompletion,
+  recordTaskProgress,
   removeWorker,
   setWorkerLifecycle,
   setWorkerPrState,
@@ -79,6 +81,53 @@ export function assignTaskForRepo(repoRoot: string, taskId: string, workerId: st
   const task = updatedRun.tasks.find((entry) => entry.taskId === taskId);
   if (!task) {
     throw new Error(`Task ${taskId} disappeared during assignment`);
+  }
+  return task;
+}
+
+export function recordTaskProgressForRepo(
+  repoRoot: string,
+  input: {
+    runId: string;
+    taskId: string;
+    progress: string;
+    artifact?: {
+      type: "note" | "test_result" | "changed_files" | "log" | "completion_report" | "pr_evidence" | "other";
+      ref: string;
+      metadata?: Record<string, unknown>;
+    };
+  },
+): TaskRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const updatedRun = recordTaskProgress(run, input);
+  writeRun(updatedRun);
+  const task = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
+  if (!task) {
+    throw new Error(`Task ${input.taskId} disappeared during progress update`);
+  }
+  return task;
+}
+
+export function recordTaskCompletionForRepo(
+  repoRoot: string,
+  input: {
+    runId: string;
+    taskId: string;
+    status: "succeeded" | "partial" | "blocked" | "failed" | "aborted";
+    completionSummary: string;
+    artifact?: {
+      type: "note" | "test_result" | "changed_files" | "log" | "completion_report" | "pr_evidence" | "other";
+      ref: string;
+      metadata?: Record<string, unknown>;
+    };
+  },
+): TaskRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const updatedRun = recordTaskCompletion(run, input);
+  writeRun(updatedRun);
+  const task = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
+  if (!task) {
+    throw new Error(`Task ${input.taskId} disappeared during completion update`);
   }
   return task;
 }

@@ -16,6 +16,8 @@ describe("pi-conductor extension", () => {
     expect(extension).toContain('name: "conductor_create_task"');
     expect(extension).toContain('name: "conductor_assign_task"');
     expect(extension).toContain('name: "conductor_delegate_task"');
+    expect(extension).toContain('name: "conductor_child_progress"');
+    expect(extension).toContain('name: "conductor_child_complete"');
   });
 
   it("still registers legacy worker tools during the transition", () => {

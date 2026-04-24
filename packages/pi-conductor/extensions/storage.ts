@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type {
+  ArtifactRecord,
+  ArtifactType,
   ConductorActor,
   ConductorEvent,
   ConductorResourceRefs,
@@ -315,6 +317,150 @@ function taskStateForRunStatus(status: RunStatus): TaskRecord["state"] {
     default:
       return "failed";
   }
+}
+
+function createArtifactRecord(input: {
+  artifactId: string;
+  type: ArtifactType;
+  ref: string;
+  resourceRefs: ArtifactRecord["resourceRefs"];
+  producer: ArtifactRecord["producer"];
+  metadata?: Record<string, unknown>;
+}): ArtifactRecord {
+  const now = new Date().toISOString();
+  return {
+    artifactId: input.artifactId,
+    type: input.type,
+    ref: input.ref,
+    resourceRefs: input.resourceRefs,
+    producer: input.producer,
+    metadata: input.metadata ?? {},
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createArtifactId(runId: string): string {
+  return `artifact-${runId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getActiveRunForTask(normalized: RunRecord, input: { runId: string; taskId: string }): RunAttemptRecord {
+  const runAttempt = normalized.runs.find((entry) => entry.runId === input.runId);
+  if (!runAttempt) {
+    throw new Error(`Run ${input.runId} not found`);
+  }
+  if (runAttempt.taskId !== input.taskId) {
+    throw new Error(`Run ${input.runId} is not scoped to task ${input.taskId}`);
+  }
+  if (runAttempt.finishedAt) {
+    throw new Error(`Run ${input.runId} is already terminal`);
+  }
+  const task = normalized.tasks.find((entry) => entry.taskId === input.taskId);
+  if (!task) {
+    throw new Error(`Task ${input.taskId} not found`);
+  }
+  if (task.activeRunId !== input.runId) {
+    throw new Error(`Task ${input.taskId} is not actively running ${input.runId}`);
+  }
+  return runAttempt;
+}
+
+export function recordTaskProgress(
+  run: RunRecord,
+  input: {
+    runId: string;
+    taskId: string;
+    progress: string;
+    artifact?: { type: ArtifactType; ref: string; metadata?: Record<string, unknown> };
+  },
+): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const now = new Date().toISOString();
+  const runAttempt = getActiveRunForTask(normalized, input);
+  const artifact = input.artifact
+    ? createArtifactRecord({
+        artifactId: createArtifactId(input.runId),
+        type: input.artifact.type,
+        ref: input.artifact.ref,
+        resourceRefs: {
+          projectKey: normalized.projectKey,
+          taskId: input.taskId,
+          workerId: runAttempt.workerId,
+          runId: input.runId,
+        },
+        producer: { type: "child_run", id: input.runId },
+        metadata: input.artifact.metadata,
+      })
+    : null;
+  const artifactIds = artifact ? [artifact.artifactId] : [];
+  const updated = {
+    ...normalized,
+    tasks: normalized.tasks.map((entry) =>
+      entry.taskId === input.taskId ? { ...entry, latestProgress: input.progress, updatedAt: now } : entry,
+    ),
+    runs: normalized.runs.map((entry) =>
+      entry.runId === input.runId
+        ? { ...entry, lastHeartbeatAt: now, artifactIds: [...entry.artifactIds, ...artifactIds] }
+        : entry,
+    ),
+    artifacts: artifact ? [...normalized.artifacts, artifact] : normalized.artifacts,
+    updatedAt: now,
+  };
+
+  return appendConductorEvent(updated, {
+    actor: { type: "child_run", id: input.runId },
+    type: "run.progress_reported",
+    resourceRefs: {
+      projectKey: normalized.projectKey,
+      taskId: input.taskId,
+      workerId: runAttempt.workerId,
+      runId: input.runId,
+    },
+    payload: { progress: input.progress, artifactIds },
+  });
+}
+
+export function recordTaskCompletion(
+  run: RunRecord,
+  input: {
+    runId: string;
+    taskId: string;
+    status: RunStatus;
+    completionSummary: string;
+    artifact?: { type: ArtifactType; ref: string; metadata?: Record<string, unknown> };
+  },
+): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const runAttempt = getActiveRunForTask(normalized, input);
+  const artifact = input.artifact
+    ? createArtifactRecord({
+        artifactId: createArtifactId(input.runId),
+        type: input.artifact.type,
+        ref: input.artifact.ref,
+        resourceRefs: {
+          projectKey: normalized.projectKey,
+          taskId: input.taskId,
+          workerId: runAttempt.workerId,
+          runId: input.runId,
+        },
+        producer: { type: "child_run", id: input.runId },
+        metadata: input.artifact.metadata,
+      })
+    : null;
+  const withArtifact = artifact
+    ? {
+        ...normalized,
+        runs: normalized.runs.map((entry) =>
+          entry.runId === input.runId ? { ...entry, artifactIds: [...entry.artifactIds, artifact.artifactId] } : entry,
+        ),
+        artifacts: [...normalized.artifacts, artifact],
+      }
+    : normalized;
+  return completeTaskRun(withArtifact, {
+    runId: input.runId,
+    status: input.status,
+    completionSummary: input.completionSummary,
+  });
 }
 
 export function completeTaskRun(
