@@ -29,7 +29,7 @@
     "typebox": "*"
   },
   "dependencies": {
-    "@feniix/worktrees-core": "^1.0.0"
+    "@feniix/worktrees-core": "^1.1.0"
   },
   "repository": {
     "url": "git+https://github.com/feniix/pi-extensions.git",
