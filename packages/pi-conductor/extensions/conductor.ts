@@ -59,6 +59,7 @@ import type {
   ConductorNextActionsResponse,
   ConductorProjectBrief,
   ConductorResourceRefs,
+  ConductorTaskBrief,
   EvidenceBundle,
   EvidenceBundlePurpose,
   GateRecord,
@@ -391,6 +392,51 @@ export function computeNextActions(
       reason: sorted.length > returned.length ? "maxActions" : null,
     },
   };
+}
+
+export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string }): ConductorTaskBrief {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const task = run.tasks.find((entry) => entry.taskId === input.taskId);
+  if (!task) {
+    throw new Error(`Task ${input.taskId} not found`);
+  }
+  const objective = task.objectiveId
+    ? (run.objectives.find((entry) => entry.objectiveId === task.objectiveId) ?? null)
+    : null;
+  const worker = task.assignedWorkerId
+    ? (run.workers.find((entry) => entry.workerId === task.assignedWorkerId) ?? null)
+    : null;
+  const runs = run.runs.filter((entry) => task.runIds.includes(entry.runId));
+  const gates = run.gates.filter((gate) => gate.resourceRefs.taskId === task.taskId);
+  const artifacts = run.artifacts.filter((artifact) => artifact.resourceRefs.taskId === task.taskId);
+  const suggestedNextTool =
+    task.state === "assigned" && worker
+      ? { name: "conductor_run_task", params: { taskId: task.taskId } }
+      : task.state === "ready"
+        ? { name: "conductor_assign_task", params: { taskId: task.taskId, workerId: "<workerId>" } }
+        : ["failed", "blocked", "needs_review", "canceled"].includes(task.state)
+          ? { name: "conductor_retry_task", params: { taskId: task.taskId } }
+          : null;
+  const markdown = [
+    "# Conductor Task Brief",
+    "",
+    `Task: ${task.title} [${task.taskId}]`,
+    `State: ${task.state}`,
+    objective ? `Objective: ${objective.title} [${objective.objectiveId}]` : "Objective: none",
+    worker ? `Worker: ${worker.name} [${worker.workerId}] lifecycle=${worker.lifecycle}` : "Worker: unassigned",
+    "",
+    "## Prompt",
+    task.prompt,
+    "",
+    "## Evidence",
+    `Runs: ${runs.length}`,
+    `Gates: ${gates.length}`,
+    `Artifacts: ${artifacts.length}`,
+    "",
+    "## Suggested Next Tool",
+    suggestedNextTool ? `${suggestedNextTool.name} ${JSON.stringify(suggestedNextTool.params)}` : "none",
+  ].join("\n");
+  return { markdown, task, objective, worker, runs, gates, artifacts, suggestedNextTool };
 }
 
 export function buildProjectBriefForRepo(

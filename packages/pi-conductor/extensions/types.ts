@@ -123,6 +123,17 @@ export interface ReadinessCheck {
   warnings: Array<{ code: string; message: string; resourceRefs?: ConductorResourceRefs }>;
 }
 
+export interface ConductorTaskBrief {
+  markdown: string;
+  task: TaskRecord;
+  objective: ObjectiveRecord | null;
+  worker: WorkerRecord | null;
+  runs: RunAttemptRecord[];
+  gates: GateRecord[];
+  artifacts: ArtifactRecord[];
+  suggestedNextTool: null | { name: string; params: Record<string, unknown> };
+}
+
 export interface ConductorProjectBrief {
   markdown: string;
   project: {

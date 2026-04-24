@@ -8,6 +8,7 @@ import {
   assignTaskForRepo,
   buildEvidenceBundleForRepo,
   buildProjectBriefForRepo,
+  buildTaskBriefForRepo,
   cancelTaskRunForRepo,
   checkReadinessForRepo,
   commitWorkerForRepo,
@@ -293,6 +294,19 @@ export default function conductorExtension(pi: ExtensionAPI) {
         ],
         details: { project: after, changed, dryRun: params.dryRun ?? false },
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_task_brief",
+    label: "Conductor Task Brief",
+    description: "Return a model-ready markdown and structured brief for one durable task",
+    parameters: Type.Object({
+      taskId: Type.String({ description: "Task ID" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const brief = buildTaskBriefForRepo(ctx.cwd, params);
+      return { content: [{ type: "text", text: brief.markdown }], details: { brief } };
     },
   });
 
