@@ -15,6 +15,7 @@ import {
   finishWorkerRun,
   getConductorProjectDir,
   mutateRun,
+  queryConductorEvents,
   readRun,
   reconcileRunLeases,
   recordRunHeartbeat,
@@ -219,6 +220,35 @@ describe("storage helpers", () => {
       resolutionReason: "Not safe yet",
     });
     expect(rejected.gates[0]?.status).toBe("rejected");
+  });
+
+  it("queries events with filters and pagination", () => {
+    let run = createEmptyRun("abc", "/repo");
+    run = appendConductorEvent(run, {
+      actor: { type: "test", id: "suite" },
+      type: "task.created",
+      resourceRefs: { projectKey: "abc", taskId: "task-1" },
+      payload: {},
+    });
+    run = appendConductorEvent(run, {
+      actor: { type: "test", id: "suite" },
+      type: "task.progress",
+      resourceRefs: { projectKey: "abc", taskId: "task-1", runId: "run-1" },
+      payload: {},
+    });
+    run = appendConductorEvent(run, {
+      actor: { type: "test", id: "suite" },
+      type: "task.progress",
+      resourceRefs: { projectKey: "abc", taskId: "task-2", runId: "run-2" },
+      payload: {},
+    });
+
+    const page = queryConductorEvents(run, { taskId: "task-1", afterSequence: 1, limit: 1 });
+
+    expect(page.events.map((event) => event.sequence)).toEqual([2]);
+    expect(page.lastSequence).toBe(2);
+    expect(page.hasMore).toBe(false);
+    expect(queryConductorEvents(run, { type: "task.progress", limit: 1 }).hasMore).toBe(true);
   });
 
   it("records scoped child progress and completion artifacts", () => {

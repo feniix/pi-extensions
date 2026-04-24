@@ -31,7 +31,7 @@ import {
 } from "./conductor.js";
 import { deriveProjectKey } from "./project-key.js";
 import { formatRunStatus } from "./status.js";
-import { createEmptyRun, readRun, writeRun } from "./storage.js";
+import { createEmptyRun, queryConductorEvents, readRun, writeRun } from "./storage.js";
 
 function findRepoRoot(cwd: string): string | null {
   try {
@@ -161,19 +161,24 @@ export default function conductorExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "conductor_list_events",
     label: "Conductor List Events",
-    description: "List recent durable conductor events for the current repository",
+    description: "List durable conductor events with resource filters and bounded pagination",
     parameters: Type.Object({
-      limit: Type.Optional(Type.Number({ description: "Maximum events to return; defaults to 20" })),
+      limit: Type.Optional(Type.Number({ description: "Maximum events to return; defaults to 20, max 100" })),
+      afterSequence: Type.Optional(Type.Number({ description: "Exclusive sequence cursor" })),
+      type: Type.Optional(Type.String({ description: "Event type filter" })),
+      workerId: Type.Optional(Type.String()),
+      taskId: Type.Optional(Type.String()),
+      runId: Type.Optional(Type.String()),
+      gateId: Type.Optional(Type.String()),
+      artifactId: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const run = getOrCreateRunForRepo(ctx.cwd);
-      const limit = Math.max(1, Math.min(params.limit ?? 20, 100));
-      const events = run.events.slice(-limit);
+      const page = queryConductorEvents(getOrCreateRunForRepo(ctx.cwd), params);
       const text =
-        events.length === 0
+        page.events.length === 0
           ? "no conductor events"
-          : events.map((event) => `#${event.sequence} ${event.type} ${event.occurredAt}`).join("\n");
-      return { content: [{ type: "text", text }], details: { events } };
+          : page.events.map((event) => `#${event.sequence} ${event.type} ${event.occurredAt}`).join("\n");
+      return { content: [{ type: "text", text }], details: page };
     },
   });
 

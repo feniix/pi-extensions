@@ -16,6 +16,7 @@ import {
   updateWorkerTaskForRepo,
 } from "./conductor.js";
 import { formatRunStatus } from "./status.js";
+import { queryConductorEvents } from "./storage.js";
 
 function getUsage(): string {
   return [
@@ -24,6 +25,7 @@ function getUsage(): string {
     "  /conductor create worker <worker-name>",
     "  /conductor create task <title> <prompt>",
     "  /conductor status",
+    "  /conductor history [project|worker|task|run|gate|artifact] [id] [--after N] [--limit N]",
     "  /conductor reconcile [--dry-run]",
     "  /conductor start <worker-name>",
     "  /conductor task <worker-name> <task>",
@@ -137,6 +139,27 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
   }
   if (subcommand === "status") {
     return formatRunStatus(reconcileWorkerHealth(getOrCreateRunForRepo(cwd)));
+  }
+  if (subcommand === "history") {
+    const [scope, id, ...flags] = rest;
+    const limitFlagIndex = flags.indexOf("--limit");
+    const afterFlagIndex = flags.indexOf("--after");
+    const limit = limitFlagIndex >= 0 ? Number.parseInt(flags[limitFlagIndex + 1] ?? "", 10) : undefined;
+    const afterSequence = afterFlagIndex >= 0 ? Number.parseInt(flags[afterFlagIndex + 1] ?? "", 10) : undefined;
+    const page = queryConductorEvents(getOrCreateRunForRepo(cwd), {
+      limit: Number.isFinite(limit) ? limit : undefined,
+      afterSequence: Number.isFinite(afterSequence) ? afterSequence : undefined,
+      workerId: scope === "worker" ? id : undefined,
+      taskId: scope === "task" ? id : undefined,
+      runId: scope === "run" ? id : undefined,
+      gateId: scope === "gate" ? id : undefined,
+      artifactId: scope === "artifact" ? id : undefined,
+    });
+    const lines = page.events.map((event) => `#${event.sequence} ${event.type} ${event.occurredAt}`);
+    return [
+      `history: count=${page.events.length} hasMore=${page.hasMore} lastSequence=${page.lastSequence ?? "none"}`,
+      ...lines,
+    ].join("\n");
   }
   if (subcommand === "reconcile") {
     const dryRun = rest.includes("--dry-run");

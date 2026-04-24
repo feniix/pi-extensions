@@ -92,6 +92,20 @@ describe("runConductorCommand", () => {
     expect(artifacts).toBe("artifacts: none");
   });
 
+  it("shows paginated resource history", async () => {
+    await runConductorCommand(repoDir, "create worker backend");
+    await runConductorCommand(repoDir, "create task Build Implement it");
+    const task = getOrCreateRunForRepo(repoDir).tasks[0];
+    if (!task) {
+      throw new Error("task missing");
+    }
+
+    const text = await runConductorCommand(repoDir, `history task ${task.taskId} --limit 1`);
+
+    expect(text).toContain("hasMore=");
+    expect(text).toContain("task.created");
+  });
+
   it("previews reconciliation from the reconcile command without persisting", async () => {
     await runConductorCommand(repoDir, "create worker backend");
     const text = await runConductorCommand(repoDir, "reconcile --dry-run");

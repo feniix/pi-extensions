@@ -289,6 +289,43 @@ export function appendConductorEvent(
   };
 }
 
+export function queryConductorEvents(
+  run: RunRecord,
+  input: {
+    workerId?: string;
+    taskId?: string;
+    runId?: string;
+    gateId?: string;
+    artifactId?: string;
+    type?: string;
+    afterSequence?: number;
+    limit?: number;
+  } = {},
+): { events: ConductorEvent[]; lastSequence: number | null; hasMore: boolean } {
+  const normalized = normalizeProjectRecord(run);
+  const limit = Math.max(1, Math.min(input.limit ?? 20, 100));
+  const filtered = normalized.events.filter((event) => {
+    if (input.afterSequence !== undefined && event.sequence <= input.afterSequence) {
+      return false;
+    }
+    if (input.type && event.type !== input.type) {
+      return false;
+    }
+    for (const key of ["workerId", "taskId", "runId", "gateId", "artifactId"] as const) {
+      if (input[key] && event.resourceRefs[key] !== input[key]) {
+        return false;
+      }
+    }
+    return true;
+  });
+  const events = filtered.slice(0, limit);
+  return {
+    events,
+    lastSequence: events.at(-1)?.sequence ?? null,
+    hasMore: filtered.length > events.length,
+  };
+}
+
 export function createTaskRecord(input: { taskId: string; title: string; prompt: string }): TaskRecord {
   const now = new Date().toISOString();
   return {
