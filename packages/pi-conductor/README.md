@@ -19,9 +19,10 @@ Agent-native local control plane for Pi worker orchestration.
 - Persisted Pi session linkage through `SessionManager`.
 - Native AgentSession-backed task execution with run-scoped child tools:
   - `conductor_child_progress`
+  - `conductor_child_create_gate`
   - `conductor_child_complete`
 - Explicit semantic completion: a backend exit or final assistant message is not enough to mark a task complete. Missing child completion becomes `needs_review` with a review gate.
-- Lease heartbeats and reconciliation for stale/crashed runs.
+- Lease heartbeats and reconciliation for stale/crashed runs, including read-only dry-run previews.
 - Gate-protected risky operations:
   - PR creation requires an approved `ready_for_pr` gate.
   - Worker cleanup requires an approved `destructive_cleanup` gate.
@@ -33,10 +34,11 @@ Agent-native local control plane for Pi worker orchestration.
 Primary inspection/debug UX is the `/conductor` command group:
 
 ```text
-/conductor get project|workers|tasks|runs|gates|events|artifacts
+/conductor get project|workers|worker <id-or-name>|tasks|task <task-id>|runs|run <run-id>|gates|events|artifacts
 /conductor create worker <worker-name>
 /conductor create task <title> <prompt>
 /conductor status
+/conductor reconcile [--dry-run]
 /conductor start <worker-name>
 /conductor task <worker-name> <task>
 /conductor resume <worker-name>
@@ -71,7 +73,12 @@ Resource/control-plane tools:
 - `conductor_create_gate`
 - `conductor_resolve_gate`
 - `conductor_child_progress`
+- `conductor_child_create_gate`
 - `conductor_child_complete`
+- `conductor_cleanup_worker`
+- `conductor_commit_worker`
+- `conductor_push_worker`
+- `conductor_create_worker_pr`
 
 Transition/legacy worker tools still registered:
 
@@ -98,7 +105,7 @@ Instead, it uses a narrow Pi SDK runtime seam around persisted sessions:
 2. Create and assign durable tasks.
 3. Start a durable run with a scoped task contract.
 4. Execute through the native `AgentSession` backend.
-5. Let the child report progress/completion through scoped tools.
+5. Let the child report progress, request scoped input/review gates, and complete through scoped tools.
 6. Persist artifacts/events/gates and reconcile leases safely.
 
 The native backend uses curated tools and explicit conductor child tools. Backend status is runtime evidence, not semantic completion. If the child exits without `conductor_child_complete`, conductor records a partial run and opens a review gate.
