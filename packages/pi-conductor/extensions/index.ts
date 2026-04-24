@@ -6,6 +6,7 @@ import { inspectConductorBackends } from "./backends.js";
 import { runConductorCommand } from "./commands.js";
 import {
   assignTaskForRepo,
+  cancelTaskRunForRepo,
   commitWorkerForRepo,
   createGateForRepo,
   createTaskForRepo,
@@ -21,6 +22,7 @@ import {
   removeWorkerForRepo,
   resolveGateForRepo,
   resumeWorkerForRepo,
+  retryTaskForRepo,
   runTaskForRepo,
   runWorkerForRepo,
   startTaskRunForRepo,
@@ -405,6 +407,42 @@ export default function conductorExtension(pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: `ran task ${params.taskId}: outcome=${result.status} result=${summary}` }],
         details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_cancel_task_run",
+    label: "Conductor Cancel Task Run",
+    description: "Cancel an active durable task run without marking the task complete",
+    parameters: Type.Object({
+      runId: Type.String({ description: "Run ID to cancel" }),
+      reason: Type.String({ description: "Cancellation reason" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const project = cancelTaskRunForRepo(ctx.cwd, params);
+      const run = project.runs.find((entry) => entry.runId === params.runId);
+      return {
+        content: [{ type: "text", text: `canceled run ${params.runId}: ${params.reason}` }],
+        details: { run, projectRevision: project.revision },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_retry_task",
+    label: "Conductor Retry Task",
+    description: "Start a new run for a failed, blocked, canceled, or needs-review task",
+    parameters: Type.Object({
+      taskId: Type.String({ description: "Task ID to retry" }),
+      workerId: Type.Optional(Type.String({ description: "Worker ID; defaults to assigned worker" })),
+      leaseSeconds: Type.Optional(Type.Number({ description: "Lease duration in seconds; defaults to 900" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const retried = retryTaskForRepo(ctx.cwd, params);
+      return {
+        content: [{ type: "text", text: `retried task ${params.taskId} as run ${retried.run.runId}` }],
+        details: retried,
       };
     },
   });

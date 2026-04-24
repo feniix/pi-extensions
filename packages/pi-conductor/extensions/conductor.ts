@@ -21,6 +21,7 @@ import {
   addTask,
   addWorker,
   assignTaskToWorker,
+  cancelTaskRun,
   completeTaskRun,
   createConductorGate,
   createEmptyRun,
@@ -227,6 +228,31 @@ export function startTaskRunForRepo(
       explicitCompletionTools: true,
     },
   };
+}
+
+export function cancelTaskRunForRepo(repoRoot: string, input: { runId: string; reason: string }): RunRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const updatedRun = cancelTaskRun(run, input);
+  writeRun(updatedRun);
+  return updatedRun;
+}
+
+export function retryTaskForRepo(
+  repoRoot: string,
+  input: { taskId: string; workerId?: string; leaseSeconds?: number },
+): { run: RunAttemptRecord; taskContract: TaskContractInput } {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const task = run.tasks.find((entry) => entry.taskId === input.taskId);
+  if (!task) {
+    throw new Error(`Task ${input.taskId} not found`);
+  }
+  if (task.activeRunId) {
+    throw new Error(`Task ${input.taskId} already has an active run`);
+  }
+  if (!["blocked", "failed", "needs_review", "canceled"].includes(task.state)) {
+    throw new Error(`Task ${input.taskId} is ${task.state} and is not eligible for retry`);
+  }
+  return startTaskRunForRepo(repoRoot, input);
 }
 
 export async function delegateTaskForRepo(

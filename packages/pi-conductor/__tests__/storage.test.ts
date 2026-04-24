@@ -8,6 +8,7 @@ import {
   addWorker,
   appendConductorEvent,
   assignTaskToWorker,
+  cancelTaskRun,
   completeTaskRun,
   createConductorGate,
   createEmptyRun,
@@ -251,6 +252,38 @@ describe("storage helpers", () => {
     expect(page.lastSequence).toBe(2);
     expect(page.hasMore).toBe(false);
     expect(queryConductorEvents(run, { type: "task.progress", limit: 1 }).hasMore).toBe(true);
+  });
+
+  it("cancels an active task run without inventing completion", () => {
+    let run = addWorker(
+      createEmptyRun("abc", "/repo"),
+      createWorkerRecord({
+        workerId: "worker-1",
+        name: "backend",
+        branch: "conductor/backend",
+        worktreePath: "/repo/.worktrees/backend",
+        sessionFile: "/tmp/session.jsonl",
+      }),
+    );
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+
+    const canceled = cancelTaskRun(run, { runId: "run-1", reason: "Parent agent stopped obsolete work" });
+
+    expect(canceled.runs[0]).toMatchObject({ status: "aborted", errorMessage: "Parent agent stopped obsolete work" });
+    expect(canceled.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
+    expect(canceled.workers[0]?.lifecycle).toBe("idle");
+    expect(canceled.events.map((event) => event.type)).toContain("run.canceled");
   });
 
   it("deduplicates child progress and completion by idempotency key", () => {

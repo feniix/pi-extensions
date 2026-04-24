@@ -531,6 +531,63 @@ export function startTaskRun(
   });
 }
 
+export function cancelTaskRun(run: RunRecord, input: { runId: string; reason: string }): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const runAttempt = normalized.runs.find((entry) => entry.runId === input.runId);
+  if (!runAttempt) {
+    throw new Error(`Run ${input.runId} not found`);
+  }
+  if (runAttempt.finishedAt) {
+    return appendConductorEvent(normalized, {
+      actor: { type: "parent_agent", id: "conductor" },
+      type: "run.cancel_rejected",
+      resourceRefs: {
+        projectKey: normalized.projectKey,
+        taskId: runAttempt.taskId,
+        workerId: runAttempt.workerId,
+        runId: input.runId,
+      },
+      payload: { reason: "run_terminal", requestedReason: input.reason },
+    });
+  }
+  const now = new Date().toISOString();
+  const updated = {
+    ...normalized,
+    runs: normalized.runs.map((entry) =>
+      entry.runId === input.runId
+        ? {
+            ...entry,
+            status: "aborted" as const,
+            finishedAt: now,
+            leaseExpiresAt: null,
+            errorMessage: input.reason,
+            updatedAt: now,
+          }
+        : entry,
+    ),
+    tasks: normalized.tasks.map((entry) =>
+      entry.taskId === runAttempt.taskId && entry.activeRunId === input.runId
+        ? { ...entry, state: "canceled" as const, activeRunId: null, updatedAt: now }
+        : entry,
+    ),
+    workers: normalized.workers.map((entry) =>
+      entry.workerId === runAttempt.workerId ? { ...entry, lifecycle: "idle" as const, updatedAt: now } : entry,
+    ),
+    updatedAt: now,
+  };
+  return appendConductorEvent(updated, {
+    actor: { type: "parent_agent", id: "conductor" },
+    type: "run.canceled",
+    resourceRefs: {
+      projectKey: normalized.projectKey,
+      taskId: runAttempt.taskId,
+      workerId: runAttempt.workerId,
+      runId: input.runId,
+    },
+    payload: { reason: input.reason },
+  });
+}
+
 export function recordRunHeartbeat(
   run: RunRecord,
   input: { runId: string; leaseExpiresAt?: string | null },

@@ -5,11 +5,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   assignTaskForRepo,
+  cancelTaskRunForRepo,
   createTaskForRepo,
   createWorkerForRepo,
   delegateTaskForRepo,
   getOrCreateRunForRepo,
   reconcileProjectForRepo,
+  retryTaskForRepo,
   startTaskRunForRepo,
 } from "../extensions/conductor.js";
 
@@ -121,6 +123,26 @@ describe("conductor service", () => {
     expect(run.workers).toHaveLength(1);
     expect(run.tasks).toHaveLength(1);
     expect(run.runs).toHaveLength(1);
+  });
+
+  it("cancels and retries task runs through conductor service helpers", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Retry task", prompt: "Do it" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+
+    const canceled = cancelTaskRunForRepo(repoDir, {
+      runId: started.run.runId,
+      reason: "obsolete attempt",
+    });
+    expect(canceled.runs[0]).toMatchObject({ status: "aborted" });
+    expect(canceled.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
+
+    const retried = retryTaskForRepo(repoDir, { taskId: task.taskId, leaseSeconds: 300 });
+    expect(retried.run.runId).not.toBe(started.run.runId);
+    expect(retried.run).toMatchObject({ taskId: task.taskId, workerId: worker.workerId, status: "running" });
+    expect(retried.taskContract).toMatchObject({ taskId: task.taskId, runId: retried.run.runId });
+    expect(getOrCreateRunForRepo(repoDir).tasks[0]?.runIds).toHaveLength(2);
   });
 
   it("reconciles project leases and persists safe state transitions", async () => {
