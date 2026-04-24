@@ -217,13 +217,11 @@ export async function mutateRun(
   const currentLock = new Promise<void>((resolve) => {
     releaseCurrent = resolve;
   });
-  projectMutationLocks.set(
-    projectKey,
-    previous.then(
-      () => currentLock,
-      () => currentLock,
-    ),
+  const chainedLock = previous.then(
+    () => currentLock,
+    () => currentLock,
   );
+  projectMutationLocks.set(projectKey, chainedLock);
 
   await previous;
   try {
@@ -233,7 +231,7 @@ export async function mutateRun(
     return updated;
   } finally {
     releaseCurrent();
-    if (projectMutationLocks.get(projectKey) === currentLock) {
+    if (projectMutationLocks.get(projectKey) === chainedLock) {
       projectMutationLocks.delete(projectKey);
     }
   }
