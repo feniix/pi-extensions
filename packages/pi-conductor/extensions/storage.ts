@@ -404,6 +404,39 @@ export function addTask(run: RunRecord, task: TaskRecord): RunRecord {
   );
 }
 
+export function updateTask(run: RunRecord, input: { taskId: string; title?: string; prompt?: string }): RunRecord {
+  const normalized = normalizeProjectRecord(run);
+  const existing = normalized.tasks.find((entry) => entry.taskId === input.taskId);
+  if (!existing) {
+    throw new Error(`Task ${input.taskId} not found`);
+  }
+  if (existing.activeRunId) {
+    throw new Error(`Task ${input.taskId} has an active run and cannot be updated`);
+  }
+  const now = new Date().toISOString();
+  const updated = {
+    ...normalized,
+    tasks: normalized.tasks.map((entry) =>
+      entry.taskId === input.taskId
+        ? {
+            ...entry,
+            title: input.title ?? entry.title,
+            prompt: input.prompt ?? entry.prompt,
+            revision: entry.revision + 1,
+            updatedAt: now,
+          }
+        : entry,
+    ),
+    updatedAt: now,
+  };
+  return appendConductorEvent(updated, {
+    actor: { type: "parent_agent", id: "conductor" },
+    type: "task.updated",
+    resourceRefs: { projectKey: normalized.projectKey, taskId: input.taskId },
+    payload: { titleChanged: input.title !== undefined, promptChanged: input.prompt !== undefined },
+  });
+}
+
 export function assignTaskToWorker(run: RunRecord, taskId: string, workerId: string): RunRecord {
   const normalized = normalizeProjectRecord(run);
   if (!normalized.workers.some((worker) => worker.workerId === workerId)) {

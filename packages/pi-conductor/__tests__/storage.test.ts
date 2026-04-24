@@ -30,6 +30,7 @@ import {
   setWorkerRuntimeState,
   startTaskRun,
   startWorkerRun,
+  updateTask,
   validateRunRecord,
   writeRun,
 } from "../extensions/storage.js";
@@ -252,6 +253,39 @@ describe("storage helpers", () => {
     expect(page.lastSequence).toBe(2);
     expect(page.hasMore).toBe(false);
     expect(queryConductorEvents(run, { type: "task.progress", limit: 1 }).hasMore).toBe(true);
+  });
+
+  it("updates non-running tasks by incrementing revision and rejects active task edits", () => {
+    let run = addTask(
+      createEmptyRun("abc", "/repo"),
+      createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" }),
+    );
+
+    const updated = updateTask(run, { taskId: "task-1", title: "Build v2", prompt: "Do it carefully" });
+
+    expect(updated.tasks[0]).toMatchObject({ title: "Build v2", prompt: "Do it carefully", revision: 2 });
+    expect(updated.events.map((event) => event.type)).toContain("task.updated");
+
+    run = addWorker(
+      updated,
+      createWorkerRecord({
+        workerId: "worker-1",
+        name: "backend",
+        branch: "conductor/backend",
+        worktreePath: "/repo/.worktrees/backend",
+        sessionFile: "/tmp/session.jsonl",
+      }),
+    );
+    run = assignTaskToWorker(run, "task-1", "worker-1");
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+
+    expect(() => updateTask(run, { taskId: "task-1", prompt: "late edit" })).toThrow(/active run/i);
   });
 
   it("cancels an active task run without inventing completion", () => {

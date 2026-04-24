@@ -13,6 +13,7 @@ import {
   reconcileProjectForRepo,
   retryTaskForRepo,
   startTaskRunForRepo,
+  updateTaskForRepo,
 } from "../extensions/conductor.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
@@ -123,6 +124,15 @@ describe("conductor service", () => {
     expect(run.workers).toHaveLength(1);
     expect(run.tasks).toHaveLength(1);
     expect(run.runs).toHaveLength(1);
+  });
+
+  it("updates durable tasks through conductor service helpers", () => {
+    const task = createTaskForRepo(repoDir, { title: "Original", prompt: "Do it" });
+
+    const updated = updateTaskForRepo(repoDir, { taskId: task.taskId, title: "Updated", prompt: "Do it better" });
+
+    expect(updated).toMatchObject({ title: "Updated", prompt: "Do it better", revision: 2 });
+    expect(getOrCreateRunForRepo(repoDir).events.map((event) => event.type)).toContain("task.updated");
   });
 
   it("cancels and retries task runs through conductor service helpers", async () => {

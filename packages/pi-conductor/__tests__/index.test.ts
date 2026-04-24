@@ -14,6 +14,7 @@ describe("pi-conductor extension", () => {
     expect(extension).toContain('name: "conductor_list_workers"');
     expect(extension).toContain('name: "conductor_create_worker"');
     expect(extension).toContain('name: "conductor_create_task"');
+    expect(extension).toContain('name: "conductor_update_task"');
     expect(extension).toContain('name: "conductor_assign_task"');
     expect(extension).toContain('name: "conductor_delegate_task"');
     expect(extension).not.toContain('name: "conductor_child_progress"');

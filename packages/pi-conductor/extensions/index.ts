@@ -26,6 +26,7 @@ import {
   runTaskForRepo,
   runWorkerForRepo,
   startTaskRunForRepo,
+  updateTaskForRepo,
   updateWorkerLifecycleForRepo,
   updateWorkerTaskForRepo,
 } from "./conductor.js";
@@ -260,6 +261,24 @@ export default function conductorExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const task = createTaskForRepo(ctx.cwd, params);
       return { content: [{ type: "text", text: `created task ${task.title} [${task.taskId}]` }], details: { task } };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_update_task",
+    label: "Conductor Update Task",
+    description: "Update a durable task title or prompt when no run is active; increments task revision",
+    parameters: Type.Object({
+      taskId: Type.String({ description: "Task ID" }),
+      title: Type.Optional(Type.String({ description: "Updated task title" })),
+      prompt: Type.Optional(Type.String({ description: "Updated task prompt/body" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const task = updateTaskForRepo(ctx.cwd, params);
+      return {
+        content: [{ type: "text", text: `updated task ${task.taskId}: revision=${task.revision}` }],
+        details: { task },
+      };
     },
   });
 

@@ -42,6 +42,7 @@ import {
   setWorkerTask,
   startTaskRun,
   startWorkerRun,
+  updateTask,
   writeRun,
 } from "./storage.js";
 import type {
@@ -98,6 +99,20 @@ export function createTaskForRepo(repoRoot: string, input: { title: string; prom
   });
   const updatedRun = addTask(run, task);
   writeRun(updatedRun);
+  return task;
+}
+
+export function updateTaskForRepo(
+  repoRoot: string,
+  input: { taskId: string; title?: string; prompt?: string },
+): TaskRecord {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const updatedRun = updateTask(run, input);
+  writeRun(updatedRun);
+  const task = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
+  if (!task) {
+    throw new Error(`Task ${input.taskId} disappeared during update`);
+  }
   return task;
 }
 
