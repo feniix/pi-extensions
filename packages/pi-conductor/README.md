@@ -22,6 +22,7 @@ Agent-native local control plane for Pi worker orchestration.
   - `conductor_child_create_gate`
   - `conductor_child_complete`
 - Child tool calls are bound to the task/run contract, support `idempotencyKey`, and are not registered as broad parent-agent tools.
+- Parent-agent task control supports safe task update, explicit cancellation, and retry without overwriting prior run history.
 - Explicit semantic completion: a backend exit or final assistant message is not enough to mark a task complete. Missing child completion becomes `needs_review` with a review gate.
 - Lease heartbeats and reconciliation for stale/crashed runs, including read-only dry-run previews.
 - Filtered, paginated event history separate from concise status.
@@ -69,12 +70,19 @@ Resource/control-plane tools:
 - `conductor_list_events`
 - `conductor_list_artifacts`
 - `conductor_list_workers`
+- `conductor_list_tasks`
+- `conductor_get_task`
+- `conductor_list_runs`
+- `conductor_list_gates`
 - `conductor_create_worker`
 - `conductor_create_task`
+- `conductor_update_task`
 - `conductor_assign_task`
 - `conductor_delegate_task`
 - `conductor_start_task_run`
 - `conductor_run_task`
+- `conductor_cancel_task_run`
+- `conductor_retry_task`
 - `conductor_create_gate`
 - `conductor_resolve_gate`
 - `conductor_cleanup_worker`
