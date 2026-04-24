@@ -23,6 +23,9 @@ Agent-native local control plane for Pi worker orchestration.
   - `conductor_child_complete`
 - Explicit semantic completion: a backend exit or final assistant message is not enough to mark a task complete. Missing child completion becomes `needs_review` with a review gate.
 - Lease heartbeats and reconciliation for stale/crashed runs, including read-only dry-run previews.
+- Filtered, paginated event history separate from concise status.
+- Artifact refs are treated as evidence and unsafe local path traversal refs are rejected.
+- Late child progress/completion after terminal runs is audited without changing terminal task state.
 - Gate-protected risky operations:
   - PR creation requires an approved `ready_for_pr` gate.
   - Worker cleanup requires an approved `destructive_cleanup` gate.
@@ -38,6 +41,7 @@ Primary inspection/debug UX is the `/conductor` command group:
 /conductor create worker <worker-name>
 /conductor create task <title> <prompt>
 /conductor status
+/conductor history [project|worker|task|run|gate|artifact] [id] [--after N] [--limit N]
 /conductor reconcile [--dry-run]
 /conductor start <worker-name>
 /conductor task <worker-name> <task>
