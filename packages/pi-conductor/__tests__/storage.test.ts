@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -23,6 +23,8 @@ import {
   setWorkerRuntimeState,
   startTaskRun,
   startWorkerRun,
+  validateRunRecord,
+  writeRun,
 } from "../extensions/storage.js";
 
 describe("storage helpers", () => {
@@ -247,6 +249,69 @@ describe("storage helpers", () => {
     expect(second.revision).toBe(2);
     expect(second.events.map((event) => event.sequence)).toEqual([1, 2]);
     expect(second.events[1]).toMatchObject({ projectRevision: 2, type: "task.created" });
+  });
+
+  it("throws a clear diagnostic for corrupt persisted JSON", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    mkdirSync(run.storageDir, { recursive: true });
+    writeFileSync(join(run.storageDir, "run.json"), "{not json", "utf-8");
+
+    expect(() => readRun("abc")).toThrow(/Failed to read conductor state for project abc/i);
+  });
+
+  it("validates resource identity and reference invariants", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: null,
+    });
+    const task = createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" });
+
+    expect(() => validateRunRecord({ ...run, workers: [worker, worker] })).toThrow(/Duplicate workerId worker-1/i);
+    expect(() => validateRunRecord({ ...run, tasks: [{ ...task, assignedWorkerId: "missing-worker" }] })).toThrow(
+      /references missing worker missing-worker/i,
+    );
+    expect(() =>
+      validateRunRecord({
+        ...run,
+        workers: [worker],
+        tasks: [task],
+        runs: [
+          {
+            runId: "run-1",
+            taskId: "missing-task",
+            workerId: worker.workerId,
+            taskRevision: 1,
+            status: "running",
+            backend: "native",
+            backendRunId: null,
+            sessionId: null,
+            leaseGeneration: 1,
+            leaseStartedAt: null,
+            leaseExpiresAt: null,
+            lastHeartbeatAt: null,
+            startedAt: null,
+            finishedAt: null,
+            completionSummary: null,
+            errorMessage: null,
+            artifactIds: [],
+            gateIds: [],
+          },
+        ],
+      }),
+    ).toThrow(/references missing task missing-task/i);
+  });
+
+  it("writes state atomically without leaving temporary files", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+
+    writeRun(run);
+
+    expect(existsSync(join(run.storageDir, "run.json"))).toBe(true);
+    expect(readdirSync(run.storageDir).filter((entry) => entry.includes(".tmp"))).toEqual([]);
   });
 
   it("normalizes missing lastRun when reading older persisted workers", () => {

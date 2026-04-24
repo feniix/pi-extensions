@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type {
@@ -72,19 +72,137 @@ function normalizeWorkerRecord(worker: WorkerRecord): WorkerRecord {
   };
 }
 
+function assertUnique(ids: string[], label: string): void {
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) {
+      throw new Error(`Duplicate ${label} ${id}`);
+    }
+    seen.add(id);
+  }
+}
+
+function assertRefsExist(
+  refs: ConductorResourceRefs,
+  indexes: ReturnType<typeof createResourceIndexes>,
+  context: string,
+): void {
+  if (refs.workerId && !indexes.workerIds.has(refs.workerId)) {
+    throw new Error(`${context} references missing worker ${refs.workerId}`);
+  }
+  if (refs.taskId && !indexes.taskIds.has(refs.taskId)) {
+    throw new Error(`${context} references missing task ${refs.taskId}`);
+  }
+  if (refs.runId && !indexes.runIds.has(refs.runId)) {
+    throw new Error(`${context} references missing run ${refs.runId}`);
+  }
+  if (refs.gateId && !indexes.gateIds.has(refs.gateId)) {
+    throw new Error(`${context} references missing gate ${refs.gateId}`);
+  }
+  if (refs.artifactId && !indexes.artifactIds.has(refs.artifactId)) {
+    throw new Error(`${context} references missing artifact ${refs.artifactId}`);
+  }
+}
+
+function createResourceIndexes(run: RunRecord) {
+  return {
+    workerIds: new Set(run.workers.map((worker) => worker.workerId)),
+    taskIds: new Set(run.tasks.map((task) => task.taskId)),
+    runIds: new Set(run.runs.map((attempt) => attempt.runId)),
+    gateIds: new Set(run.gates.map((gate) => gate.gateId)),
+    artifactIds: new Set(run.artifacts.map((artifact) => artifact.artifactId)),
+  };
+}
+
+export function validateRunRecord(run: RunRecord): void {
+  const normalized = normalizeProjectRecord(run);
+  if (normalized.schemaVersion !== CONDUCTOR_SCHEMA_VERSION) {
+    throw new Error(`Unsupported conductor schemaVersion ${normalized.schemaVersion}`);
+  }
+  assertUnique(
+    normalized.workers.map((worker) => worker.workerId),
+    "workerId",
+  );
+  assertUnique(
+    normalized.workers.map((worker) => worker.name),
+    "worker name",
+  );
+  assertUnique(
+    normalized.tasks.map((task) => task.taskId),
+    "taskId",
+  );
+  assertUnique(
+    normalized.runs.map((attempt) => attempt.runId),
+    "runId",
+  );
+  assertUnique(
+    normalized.gates.map((gate) => gate.gateId),
+    "gateId",
+  );
+  assertUnique(
+    normalized.artifacts.map((artifact) => artifact.artifactId),
+    "artifactId",
+  );
+
+  const indexes = createResourceIndexes(normalized);
+  for (const task of normalized.tasks) {
+    if (task.assignedWorkerId && !indexes.workerIds.has(task.assignedWorkerId)) {
+      throw new Error(`Task ${task.taskId} references missing worker ${task.assignedWorkerId}`);
+    }
+    if (task.activeRunId && !indexes.runIds.has(task.activeRunId)) {
+      throw new Error(`Task ${task.taskId} references missing run ${task.activeRunId}`);
+    }
+    for (const runId of task.runIds) {
+      if (!indexes.runIds.has(runId)) {
+        throw new Error(`Task ${task.taskId} references missing run ${runId}`);
+      }
+    }
+  }
+  for (const attempt of normalized.runs) {
+    if (!indexes.taskIds.has(attempt.taskId)) {
+      throw new Error(`Run ${attempt.runId} references missing task ${attempt.taskId}`);
+    }
+    if (!indexes.workerIds.has(attempt.workerId)) {
+      throw new Error(`Run ${attempt.runId} references missing worker ${attempt.workerId}`);
+    }
+  }
+  for (const gate of normalized.gates) {
+    assertRefsExist(gate.resourceRefs, indexes, `Gate ${gate.gateId}`);
+  }
+  for (const artifact of normalized.artifacts) {
+    assertRefsExist(artifact.resourceRefs, indexes, `Artifact ${artifact.artifactId}`);
+  }
+}
+
 export function readRun(projectKey: string): RunRecord | null {
   const path = getRunFile(projectKey);
   if (!existsSync(path)) {
     return null;
   }
-  const run = JSON.parse(readFileSync(path, "utf-8")) as RunRecord;
-  return normalizeProjectRecord(run);
+  try {
+    const run = JSON.parse(readFileSync(path, "utf-8")) as RunRecord;
+    return normalizeProjectRecord(run);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read conductor state for project ${projectKey} at ${path}: ${message}`);
+  }
 }
 
 export function writeRun(run: RunRecord): void {
-  const path = getRunFile(run.projectKey);
+  const normalized = normalizeProjectRecord(run);
+  validateRunRecord(normalized);
+  const path = getRunFile(normalized.projectKey);
   ensureDir(dirname(path));
-  writeFileSync(path, `${JSON.stringify(run, null, 2)}\n`, "utf-8");
+  const tmpPath = `${path}.${process.pid}.${Date.now().toString(36)}.tmp`;
+  try {
+    writeFileSync(tmpPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf-8");
+    renameSync(tmpPath, path);
+  } catch (error) {
+    if (existsSync(tmpPath)) {
+      rmSync(tmpPath, { force: true });
+    }
+    throw error;
+  }
 }
 
 export function createEmptyRun(projectKey: string, repoRoot: string): RunRecord {
