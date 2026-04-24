@@ -13,6 +13,7 @@ import { Type } from "typebox";
 import { generateWorkerSummaryFromSession } from "./summaries.js";
 import type {
   ConductorCompletionReportInput,
+  ConductorGateReportInput,
   ConductorProgressReportInput,
   RuntimeRunContext,
   RuntimeRunPreflightContext,
@@ -148,6 +149,7 @@ const artifactTypeSchema = Type.Union([
 export function buildRunScopedConductorTools(input: {
   onConductorProgress?: (params: ConductorProgressReportInput) => void | Promise<void>;
   onConductorComplete?: (params: ConductorCompletionReportInput) => void | Promise<void>;
+  onConductorGate?: (params: ConductorGateReportInput) => void | Promise<void>;
 }) {
   return [
     defineTool({
@@ -169,6 +171,24 @@ export function buildRunScopedConductorTools(input: {
       execute: async (_toolCallId, params) => {
         await input.onConductorProgress?.(params as ConductorProgressReportInput);
         return { content: [{ type: "text", text: `recorded progress for task ${params.taskId}` }], details: params };
+      },
+    }),
+    defineTool({
+      name: "conductor_child_create_gate",
+      label: "Conductor Child Create Gate",
+      description: "Request scoped input or review for the current conductor task run",
+      parameters: Type.Object({
+        runId: Type.String(),
+        taskId: Type.String(),
+        type: Type.Union([Type.Literal("needs_input"), Type.Literal("needs_review")]),
+        requestedDecision: Type.String(),
+      }),
+      execute: async (_toolCallId, params) => {
+        await input.onConductorGate?.(params as ConductorGateReportInput);
+        return {
+          content: [{ type: "text", text: `created ${params.type} gate for task ${params.taskId}` }],
+          details: params,
+        };
       },
     }),
     defineTool({
@@ -213,7 +233,7 @@ export function buildTaskContractPrompt(input: TaskContractInput): string {
     ? [
         "Report progress with conductor_child_progress when meaningful milestones happen.",
         "Attach evidence through the artifact field on conductor_child_progress or conductor_child_complete.",
-        "If you are blocked or need approval, create a gate with conductor_create_gate.",
+        "If you are blocked or need input/review, create a scoped gate with conductor_child_create_gate.",
         "When finished, call conductor_child_complete with succeeded, partial, blocked, failed, or aborted status.",
       ].join("\n")
     : "Explicit conductor completion tools are unavailable for this backend; finish with a concise outcome summary and expect parent review.";

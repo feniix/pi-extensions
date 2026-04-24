@@ -224,6 +224,13 @@ export interface ConductorCompletionReportInput {
   artifact?: { type: ArtifactType; ref: string; metadata?: Record<string, unknown> };
 }
 
+export interface ConductorGateReportInput {
+  runId: string;
+  taskId: string;
+  type: "needs_input" | "needs_review";
+  requestedDecision: string;
+}
+
 export interface RuntimeRunContext {
   worktreePath: string;
   sessionFile: string;
@@ -232,6 +239,7 @@ export interface RuntimeRunContext {
   onSessionReady?: (sessionId: string) => void | Promise<void>;
   onConductorProgress?: (input: ConductorProgressReportInput) => void | Promise<void>;
   onConductorComplete?: (input: ConductorCompletionReportInput) => void | Promise<void>;
+  onConductorGate?: (input: ConductorGateReportInput) => void | Promise<void>;
 }
 
 export interface RuntimeRunPreflightContext {

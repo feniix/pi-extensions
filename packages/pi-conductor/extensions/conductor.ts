@@ -586,6 +586,13 @@ export async function runTaskForRepo(repoRoot: string, taskId: string): Promise<
     onConductorComplete: async (completion) => {
       recordTaskCompletionForRepo(repoRoot, completion);
     },
+    onConductorGate: async (gate) => {
+      createGateForRepo(repoRoot, {
+        type: gate.type,
+        resourceRefs: { taskId: gate.taskId, runId: gate.runId, workerId: worker.workerId },
+        requestedDecision: gate.requestedDecision,
+      });
+    },
   });
 
   currentRun = getOrCreateRunForRepo(repoRoot);
