@@ -1920,8 +1920,20 @@ export async function createWorkerForRepo(repoRoot: string, workerName: string):
     sessionFile: runtime.sessionFile,
     sessionId: runtime.sessionId,
   });
-  const updatedRun = addWorker(run, worker);
-  writeRun(updatedRun);
+  try {
+    mutateRepoRunSync(repoRoot, (latest) => addWorker(latest, worker));
+  } catch (error) {
+    if (worker.worktreePath && existsSync(worker.worktreePath)) {
+      removeManagedWorktree(run.repoRoot, worker.worktreePath);
+    }
+    if (worker.sessionFile && existsSync(worker.sessionFile)) {
+      rmSync(worker.sessionFile, { force: true });
+    }
+    if (worker.branch) {
+      removeManagedBranch(run.repoRoot, worker.branch);
+    }
+    throw error;
+  }
   return worker;
 }
 
@@ -1931,8 +1943,9 @@ export function updateWorkerTaskForRepo(repoRoot: string, workerName: string, ta
   if (!worker) {
     throw new Error(`Worker named ${workerName} not found`);
   }
-  const updatedRun = setWorkerLifecycle(setWorkerTask(run, worker.workerId, task), worker.workerId, "idle");
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (latest) =>
+    setWorkerLifecycle(setWorkerTask(latest, worker.workerId, task), worker.workerId, "idle"),
+  );
   const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
   if (!updatedWorker) {
     throw new Error(`Worker named ${workerName} disappeared during task update`);
@@ -1972,28 +1985,31 @@ export async function resumeWorkerForRepo(repoRoot: string, workerName: string):
   // Resume in the current MVP means "reopen and re-link the persisted worker
   // session" rather than "continue an autonomous running agent". For that
   // reason, resume intentionally normalizes the worker back to idle.
-  const updatedRun = setWorkerLifecycle(
-    setWorkerRuntimeState(run, worker.workerId, {
-      sessionFile: runtime.sessionFile,
-      sessionId: runtime.sessionId,
-      lastResumedAt: runtime.lastResumedAt,
-    }),
-    worker.workerId,
-    "idle",
+  const withEvent = mutateRepoRunSync(repoRoot, (latest) =>
+    appendExternalOperationEvent(
+      setWorkerLifecycle(
+        setWorkerRuntimeState(latest, worker.workerId, {
+          sessionFile: runtime.sessionFile,
+          sessionId: runtime.sessionId,
+          lastResumedAt: runtime.lastResumedAt,
+        }),
+        worker.workerId,
+        "idle",
+      ),
+      {
+        status: "succeeded",
+        resourceRefs: { workerId: worker.workerId },
+        payload: {
+          operation: "resume_worker",
+          name: worker.name,
+          sessionFile: runtime.sessionFile,
+          sessionId: runtime.sessionId,
+          lastResumedAt: runtime.lastResumedAt,
+          lifecycle: "idle",
+        },
+      },
+    ),
   );
-  const withEvent = appendExternalOperationEvent(updatedRun, {
-    status: "succeeded",
-    resourceRefs: { workerId: worker.workerId },
-    payload: {
-      operation: "resume_worker",
-      name: worker.name,
-      sessionFile: runtime.sessionFile,
-      sessionId: runtime.sessionId,
-      lastResumedAt: runtime.lastResumedAt,
-      lifecycle: "idle",
-    },
-  });
-  writeRun(withEvent);
   return withEvent.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
 }
 
@@ -2010,8 +2026,7 @@ export function updateWorkerLifecycleForRepo(
   if (!worker) {
     throw new Error(`Worker named ${workerName} not found`);
   }
-  const updatedRun = setWorkerLifecycle(run, worker.workerId, lifecycle);
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (latest) => setWorkerLifecycle(latest, worker.workerId, lifecycle));
   const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
   if (!updatedWorker) {
     throw new Error(`Worker named ${workerName} disappeared during lifecycle update`);
@@ -2023,7 +2038,7 @@ export function reconcileProjectForRepo(repoRoot: string, input: { now?: string;
   const healthReconciled = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
   const leaseReconciled = reconcileRunLeases(healthReconciled, input);
   if (!input.dryRun) {
-    writeRun(leaseReconciled);
+    return mutateRepoRunSync(repoRoot, (latest) => reconcileRunLeases(reconcileWorkerHealth(latest), input));
   }
   return leaseReconciled;
 }
@@ -2074,17 +2089,18 @@ export async function refreshWorkerSummaryForRepo(repoRoot: string, workerName: 
     });
     throw error;
   }
-  const updatedRun = appendExternalOperationEvent(setWorkerSummary(run, worker.workerId, summaryText), {
-    status: "succeeded",
-    resourceRefs: { workerId: worker.workerId },
-    payload: {
-      operation: "refresh_worker_summary",
-      name: worker.name,
-      sessionFile: worker.sessionFile,
-      summaryLength: summaryText.length,
-    },
-  });
-  writeRun(updatedRun);
+  const updatedRun = mutateRepoRunSync(repoRoot, (latest) =>
+    appendExternalOperationEvent(setWorkerSummary(latest, worker.workerId, summaryText), {
+      status: "succeeded",
+      resourceRefs: { workerId: worker.workerId },
+      payload: {
+        operation: "refresh_worker_summary",
+        name: worker.name,
+        sessionFile: worker.sessionFile,
+        summaryLength: summaryText.length,
+      },
+    }),
+  );
   const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
   if (!updatedWorker) {
     throw new Error(`Worker named ${workerName} disappeared during summary refresh`);
@@ -2136,9 +2152,26 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
   if (worker.branch) {
     removeManagedBranch(run.repoRoot, worker.branch);
   }
-  const updatedRun = removeWorker(markConductorGateUsed(run, cleanupGate.gateId), worker.workerId);
-  writeRun(updatedRun);
-  return worker;
+  const updatedRun = mutateRepoRunSync(repoRoot, (latest) => {
+    const latestGate = latest.gates.find((gate) => gate.gateId === cleanupGate.gateId);
+    if (!latestGate || latestGate.status !== "approved" || latestGate.usedAt !== null) {
+      throw new Error(`Worker ${worker.name} requires a fresh destructive_cleanup gate before cleanup finalization`);
+    }
+    return appendExternalOperationEvent(
+      removeWorker(markConductorGateUsed(latest, cleanupGate.gateId), worker.workerId),
+      {
+        status: "succeeded",
+        resourceRefs: { workerId: worker.workerId, gateId: cleanupGate.gateId },
+        payload: {
+          operation: "cleanup_worker",
+          name: worker.name,
+          worktreePath: worker.worktreePath,
+          branch: worker.branch,
+        },
+      },
+    );
+  });
+  return updatedRun.archivedWorkers.find((entry) => entry.workerId === worker.workerId) ?? worker;
 }
 
 export function commitWorkerForRepo(repoRoot: string, workerName: string, message: string): WorkerRecord {
@@ -2167,27 +2200,28 @@ export function commitWorkerForRepo(repoRoot: string, workerName: string, messag
     });
     throw error;
   }
-  const updatedRun = appendExternalOperationEvent(
-    setWorkerPrState(run, worker.workerId, {
-      commitSucceeded: true,
-      pushSucceeded: false,
-      prCreationAttempted: false,
-      url: null,
-      number: null,
-    }),
-    {
-      status: "succeeded",
-      resourceRefs: { workerId: worker.workerId },
-      payload: {
-        operation: "commit_worker",
-        name: worker.name,
-        worktreePath: worker.worktreePath,
-        branch: worker.branch,
-        message,
+  const updatedRun = mutateRepoRunSync(repoRoot, (latest) =>
+    appendExternalOperationEvent(
+      setWorkerPrState(latest, worker.workerId, {
+        commitSucceeded: true,
+        pushSucceeded: false,
+        prCreationAttempted: false,
+        url: null,
+        number: null,
+      }),
+      {
+        status: "succeeded",
+        resourceRefs: { workerId: worker.workerId },
+        payload: {
+          operation: "commit_worker",
+          name: worker.name,
+          worktreePath: worker.worktreePath,
+          branch: worker.branch,
+          message,
+        },
       },
-    },
+    ),
   );
-  writeRun(updatedRun);
   return updatedRun.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
 }
 
@@ -2218,23 +2252,24 @@ export function pushWorkerForRepo(repoRoot: string, workerName: string): WorkerR
     });
     throw error;
   }
-  const updatedRun = appendExternalOperationEvent(
-    setWorkerPrState(run, worker.workerId, {
-      pushSucceeded: true,
-    }),
-    {
-      status: "succeeded",
-      resourceRefs: { workerId: worker.workerId },
-      payload: {
-        operation: "push_worker",
-        name: worker.name,
-        worktreePath: worker.worktreePath,
-        branch: worker.branch,
-        remote: "origin",
+  const updatedRun = mutateRepoRunSync(repoRoot, (latest) =>
+    appendExternalOperationEvent(
+      setWorkerPrState(latest, worker.workerId, {
+        pushSucceeded: true,
+      }),
+      {
+        status: "succeeded",
+        resourceRefs: { workerId: worker.workerId },
+        payload: {
+          operation: "push_worker",
+          name: worker.name,
+          worktreePath: worker.worktreePath,
+          branch: worker.branch,
+          remote: "origin",
+        },
       },
-    },
+    ),
   );
-  writeRun(updatedRun);
   return updatedRun.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
 }
 
@@ -2287,8 +2322,24 @@ export function createWorkerPrForRepo(
     }
     throw new Error(`Worker ${worker.name} requires an approved ready_for_pr gate before PR creation`);
   }
-  validatePrPreconditions(run.repoRoot);
   const prBody = body?.trim() || worker.summary.text || worker.currentTask || `PR for ${worker.name}`;
+  try {
+    validatePrPreconditions(run.repoRoot);
+  } catch (error) {
+    recordExternalOperationEvent(repoRoot, {
+      status: "failed",
+      resourceRefs: { workerId: worker.workerId, gateId: readyGate.gateId },
+      payload: {
+        operation: "create_worker_pr",
+        phase: "preflight",
+        name: worker.name,
+        branch: worker.branch,
+        title,
+        errorMessage: errorMessage(error),
+      },
+    });
+    throw error;
+  }
   try {
     const pr = createPullRequest({
       repoRoot: run.repoRoot,
@@ -2297,64 +2348,70 @@ export function createWorkerPrForRepo(
       title,
       body: prBody,
     });
-    const updatedRun = markConductorGateUsed(
-      setWorkerPrState(run, worker.workerId, {
-        prCreationAttempted: true,
-        url: pr.url,
-        number: pr.number,
-      }),
-      readyGate.gateId,
-    );
-    const completedTasks = updatedRun.tasks.filter(
-      (task) => task.assignedWorkerId === worker.workerId && ["completed", "needs_review"].includes(task.state),
-    );
-    const taskIds = completedTasks.map((task) => task.taskId);
-    const runIds = completedTasks.flatMap((task) => task.runIds);
-    const withEvidence = pr.url
-      ? addConductorArtifact(updatedRun, {
-          type: "pr_evidence",
-          ref: pr.url,
-          resourceRefs: { workerId: worker.workerId, taskId: taskIds[0], runId: runIds[0] },
-          producer: { type: "system", id: "github-cli" },
-          metadata: { number: pr.number, branch: worker.branch ?? null, title, taskIds, runIds },
-        })
-      : updatedRun;
-    const withEvent = appendExternalOperationEvent(withEvidence, {
-      status: "succeeded",
-      resourceRefs: { workerId: worker.workerId, gateId: readyGate.gateId, taskId: taskIds[0], runId: runIds[0] },
-      payload: {
-        operation: "create_worker_pr",
-        name: worker.name,
-        branch: worker.branch,
-        title,
-        url: pr.url,
-        number: pr.number,
-        taskIds,
-        runIds,
-      },
-    });
-    writeRun(withEvent);
-    return withEvent.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
-  } catch (error) {
-    const updatedRun = appendExternalOperationEvent(
-      setWorkerPrState(run, worker.workerId, {
-        prCreationAttempted: true,
-        url: null,
-        number: null,
-      }),
-      {
-        status: "failed",
-        resourceRefs: { workerId: worker.workerId, gateId: readyGate.gateId },
+    const withEvent = mutateRepoRunSync(repoRoot, (latest) => {
+      const latestGate = latest.gates.find((gate) => gate.gateId === readyGate.gateId);
+      if (!latestGate || latestGate.status !== "approved" || latestGate.usedAt !== null) {
+        throw new Error(`Worker ${worker.name} requires a fresh ready_for_pr gate before PR finalization`);
+      }
+      const updatedRun = markConductorGateUsed(
+        setWorkerPrState(latest, worker.workerId, {
+          prCreationAttempted: true,
+          url: pr.url,
+          number: pr.number,
+        }),
+        readyGate.gateId,
+      );
+      const completedTasks = updatedRun.tasks.filter(
+        (task) => task.assignedWorkerId === worker.workerId && ["completed", "needs_review"].includes(task.state),
+      );
+      const taskIds = completedTasks.map((task) => task.taskId);
+      const runIds = completedTasks.flatMap((task) => task.runIds);
+      const withEvidence = pr.url
+        ? addConductorArtifact(updatedRun, {
+            type: "pr_evidence",
+            ref: pr.url,
+            resourceRefs: { workerId: worker.workerId, taskId: taskIds[0], runId: runIds[0] },
+            producer: { type: "system", id: "github-cli" },
+            metadata: { number: pr.number, branch: worker.branch ?? null, title, taskIds, runIds },
+          })
+        : updatedRun;
+      return appendExternalOperationEvent(withEvidence, {
+        status: "succeeded",
+        resourceRefs: { workerId: worker.workerId, gateId: readyGate.gateId, taskId: taskIds[0], runId: runIds[0] },
         payload: {
           operation: "create_worker_pr",
           name: worker.name,
           branch: worker.branch,
           title,
-          errorMessage: errorMessage(error),
+          url: pr.url,
+          number: pr.number,
+          taskIds,
+          runIds,
         },
-      },
+      });
+    });
+    return withEvent.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
+  } catch (error) {
+    mutateRepoRunSync(repoRoot, (latest) =>
+      appendExternalOperationEvent(
+        setWorkerPrState(latest, worker.workerId, {
+          prCreationAttempted: true,
+          url: null,
+          number: null,
+        }),
+        {
+          status: "failed",
+          resourceRefs: { workerId: worker.workerId, gateId: readyGate.gateId },
+          payload: {
+            operation: "create_worker_pr",
+            name: worker.name,
+            branch: worker.branch,
+            title,
+            errorMessage: errorMessage(error),
+          },
+        },
+      ),
     );
-    writeRun(updatedRun);
     throw error;
   }
 }
@@ -2576,48 +2633,49 @@ export async function recoverWorkerForRepo(repoRoot: string, workerName: string)
     throw error;
   }
 
-  const workers = run.workers.map((entry) =>
-    entry.workerId === worker.workerId
-      ? {
-          ...entry,
-          worktreePath,
-          sessionFile: runtime?.sessionFile ?? entry.sessionFile,
-          runtime: {
-            ...entry.runtime,
-            sessionId: runtime?.sessionId ?? entry.runtime.sessionId,
-            lastResumedAt: runtime?.lastResumedAt ?? entry.runtime.lastResumedAt,
-          },
-          lifecycle: "idle" as const,
-          recoverable: false,
-          updatedAt: new Date().toISOString(),
-        }
-      : entry,
-  );
-  const updatedRun = appendExternalOperationEvent(
-    {
-      ...run,
-      workers,
-      updatedAt: new Date().toISOString(),
-    },
-    {
-      status: "succeeded",
-      resourceRefs: { workerId: worker.workerId },
-      payload: {
-        operation: "recover_worker",
-        name: worker.name,
-        branch: worker.branch,
-        worktreePath,
-        worktreeRecreated: worktreePath !== worker.worktreePath,
-        sessionRecovered: runtime !== null,
-        sessionFile: runtime?.sessionFile ?? worker.sessionFile,
-        sessionId: runtime?.sessionId ?? worker.runtime.sessionId,
-        lastResumedAt: runtime?.lastResumedAt ?? worker.runtime.lastResumedAt,
-        lifecycle: "idle",
-        recoverable: false,
+  const updatedRun = mutateRepoRunSync(repoRoot, (latest) => {
+    const workers = latest.workers.map((entry) =>
+      entry.workerId === worker.workerId
+        ? {
+            ...entry,
+            worktreePath,
+            sessionFile: runtime?.sessionFile ?? entry.sessionFile,
+            runtime: {
+              ...entry.runtime,
+              sessionId: runtime?.sessionId ?? entry.runtime.sessionId,
+              lastResumedAt: runtime?.lastResumedAt ?? entry.runtime.lastResumedAt,
+            },
+            lifecycle: "idle" as const,
+            recoverable: false,
+            updatedAt: new Date().toISOString(),
+          }
+        : entry,
+    );
+    return appendExternalOperationEvent(
+      {
+        ...latest,
+        workers,
+        updatedAt: new Date().toISOString(),
       },
-    },
-  );
-  writeRun(updatedRun);
+      {
+        status: "succeeded",
+        resourceRefs: { workerId: worker.workerId },
+        payload: {
+          operation: "recover_worker",
+          name: worker.name,
+          branch: worker.branch,
+          worktreePath,
+          worktreeRecreated: worktreePath !== worker.worktreePath,
+          sessionRecovered: runtime !== null,
+          sessionFile: runtime?.sessionFile ?? worker.sessionFile,
+          sessionId: runtime?.sessionId ?? worker.runtime.sessionId,
+          lastResumedAt: runtime?.lastResumedAt ?? worker.runtime.lastResumedAt,
+          lifecycle: "idle",
+          recoverable: false,
+        },
+      },
+    );
+  });
   const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
   if (!updatedWorker) {
     throw new Error(`Worker named ${workerName} disappeared during recovery`);
