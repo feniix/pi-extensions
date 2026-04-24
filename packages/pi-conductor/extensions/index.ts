@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
+import { inspectConductorBackends } from "./backends.js";
 import { runConductorCommand } from "./commands.js";
 import {
   assignTaskForRepo,
@@ -113,6 +114,21 @@ export default function conductorExtension(pi: ExtensionAPI) {
           events: run.events.length,
         },
       };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_backend_status",
+    label: "Conductor Backend Status",
+    description: "Inspect native and optional pi-subagents backend adapter availability",
+    parameters: Type.Object({}),
+    async execute() {
+      const backends = inspectConductorBackends();
+      const text = [
+        `native: available=${backends.native.available}`,
+        `pi-subagents: available=${backends.piSubagents.available}${backends.piSubagents.diagnostic ? ` (${backends.piSubagents.diagnostic})` : ""}`,
+      ].join("\n");
+      return { content: [{ type: "text", text }], details: backends };
     },
   });
 
