@@ -17,10 +17,11 @@ Agent-native local control plane for Pi worker orchestration.
   - `Event`: transition/progress/reconciliation audit history.
 - Worker git worktree creation, recovery, cleanup, and branch management via `@feniix/worktrees-core`.
 - Persisted Pi session linkage through `SessionManager`.
-- Native AgentSession-backed task execution with run-scoped child tools:
+- Native AgentSession-backed task execution with runtime-injected, run-scoped child tools:
   - `conductor_child_progress`
   - `conductor_child_create_gate`
   - `conductor_child_complete`
+- Child tool calls are bound to the task/run contract, support `idempotencyKey`, and are not registered as broad parent-agent tools.
 - Explicit semantic completion: a backend exit or final assistant message is not enough to mark a task complete. Missing child completion becomes `needs_review` with a review gate.
 - Lease heartbeats and reconciliation for stale/crashed runs, including read-only dry-run previews.
 - Filtered, paginated event history separate from concise status.
@@ -76,13 +77,16 @@ Resource/control-plane tools:
 - `conductor_run_task`
 - `conductor_create_gate`
 - `conductor_resolve_gate`
-- `conductor_child_progress`
-- `conductor_child_create_gate`
-- `conductor_child_complete`
 - `conductor_cleanup_worker`
 - `conductor_commit_worker`
 - `conductor_push_worker`
 - `conductor_create_worker_pr`
+
+Runtime-injected child tools, available only inside native worker task runs:
+
+- `conductor_child_progress`
+- `conductor_child_create_gate`
+- `conductor_child_complete`
 
 Transition/legacy worker tools still registered:
 
