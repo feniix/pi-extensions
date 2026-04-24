@@ -21,6 +21,7 @@ import {
   resolveGateForRepo,
   resumeWorkerForRepo,
   runWorkerForRepo,
+  startTaskRunForRepo,
   updateWorkerLifecycleForRepo,
   updateWorkerTaskForRepo,
 } from "./conductor.js";
@@ -269,6 +270,29 @@ export default function conductorExtension(pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: `resolved gate ${gate.gateId}: ${gate.status}` }],
         details: { gate },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_start_task_run",
+    label: "Conductor Start Task Run",
+    description: "Start a durable task run and return the scoped child task contract",
+    parameters: Type.Object({
+      taskId: Type.String({ description: "Task ID to start" }),
+      workerId: Type.Optional(Type.String({ description: "Worker ID; defaults to the task's assigned worker" })),
+      leaseSeconds: Type.Optional(Type.Number({ description: "Lease duration in seconds; defaults to 900" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const started = startTaskRunForRepo(ctx.cwd, params);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `started run ${started.run.runId} for task ${started.run.taskId}; pass this task contract to the child worker`,
+          },
+        ],
+        details: started,
       };
     },
   });

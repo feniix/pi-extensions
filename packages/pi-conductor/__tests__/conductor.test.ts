@@ -8,6 +8,7 @@ import {
   createTaskForRepo,
   createWorkerForRepo,
   getOrCreateRunForRepo,
+  startTaskRunForRepo,
 } from "../extensions/conductor.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
@@ -69,6 +70,27 @@ describe("conductor service", () => {
     expect(run.tasks).toHaveLength(1);
     expect(run.tasks[0]?.taskId).toBe(task.taskId);
     expect(run.events.map((event) => event.type)).toEqual(["task.created", "task.assigned"]);
+  });
+
+  it("starts an assigned durable task run through conductor service helpers", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Add run ledger", prompt: "Implement durable runs" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId, leaseSeconds: 300 });
+
+    expect(started.run.taskId).toBe(task.taskId);
+    expect(started.run.workerId).toBe(worker.workerId);
+    expect(started.run.status).toBe("running");
+    expect(started.taskContract).toMatchObject({
+      taskId: task.taskId,
+      runId: started.run.runId,
+      goal: "Implement durable runs",
+      explicitCompletionTools: true,
+    });
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.tasks[0]).toMatchObject({ state: "running", activeRunId: started.run.runId });
   });
 
   it("creates a worker, worktree, and persisted worker record", async () => {

@@ -36,6 +36,7 @@ import {
   setWorkerRuntimeState,
   setWorkerSummary,
   setWorkerTask,
+  startTaskRun,
   startWorkerRun,
   writeRun,
 } from "./storage.js";
@@ -44,7 +45,9 @@ import type {
   ConductorResourceRefs,
   GateRecord,
   GateStatus,
+  RunAttemptRecord,
   RunRecord,
+  TaskContractInput,
   TaskRecord,
   WorkerLifecycleState,
   WorkerRecord,
@@ -72,6 +75,14 @@ export function getOrCreateRunForRepo(repoRoot: string): RunRecord {
 
 function createTaskId(): string {
   return `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createRunId(): string {
+  return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function leaseExpiryFromNow(leaseSeconds: number): string {
+  return new Date(Date.now() + leaseSeconds * 1000).toISOString();
 }
 
 export function createTaskForRepo(repoRoot: string, input: { title: string; prompt: string }): TaskRecord {
@@ -171,6 +182,46 @@ export function resolveGateForRepo(
     throw new Error(`Gate ${input.gateId} disappeared during resolution`);
   }
   return gate;
+}
+
+export function startTaskRunForRepo(
+  repoRoot: string,
+  input: { taskId: string; workerId?: string; leaseSeconds?: number; runId?: string },
+): { run: RunAttemptRecord; taskContract: TaskContractInput } {
+  const run = getOrCreateRunForRepo(repoRoot);
+  const task = run.tasks.find((entry) => entry.taskId === input.taskId);
+  if (!task) {
+    throw new Error(`Task ${input.taskId} not found`);
+  }
+  const workerId = input.workerId ?? task.assignedWorkerId;
+  if (!workerId) {
+    throw new Error(`Task ${input.taskId} is not assigned to a worker`);
+  }
+  const runId = input.runId ?? createRunId();
+  const updatedRun = startTaskRun(run, {
+    runId,
+    taskId: input.taskId,
+    workerId,
+    backend: "native",
+    leaseExpiresAt: leaseExpiryFromNow(input.leaseSeconds ?? 900),
+  });
+  writeRun(updatedRun);
+  const started = updatedRun.runs.find((entry) => entry.runId === runId);
+  const updatedTask = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
+  if (!started || !updatedTask) {
+    throw new Error(`Run ${runId} disappeared during start`);
+  }
+  return {
+    run: started,
+    taskContract: {
+      taskId: updatedTask.taskId,
+      runId: started.runId,
+      taskRevision: started.taskRevision,
+      goal: updatedTask.prompt,
+      constraints: [],
+      explicitCompletionTools: true,
+    },
+  };
 }
 
 export async function createWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
