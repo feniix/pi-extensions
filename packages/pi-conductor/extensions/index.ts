@@ -35,6 +35,7 @@ import {
   refreshWorkerSummaryForRepo,
   removeWorkerForRepo,
   resolveGateForRepo,
+  resolveGateFromTrustedHumanForRepo,
   resumeWorkerForRepo,
   retryTaskForRepo,
   runNextActionForRepo,
@@ -364,7 +365,8 @@ export default function conductorExtension(pi: ExtensionAPI) {
     label: "Conductor Schedule Objective",
     description: "Assign and optionally execute currently runnable tasks from an objective DAG",
     parameters: Type.Object({
-      objectiveId: Type.String({ description: "Objective ID" }),
+      objectiveId: Type.Optional(Type.String({ description: "Objective ID" })),
+      objectiveIds: Type.Optional(Type.Array(Type.String({ description: "Objective IDs to consider" }))),
       maxConcurrency: Type.Optional(Type.Number({ description: "Maximum runnable tasks to schedule; defaults to 1" })),
       executeRuns: Type.Optional(Type.Boolean({ description: "Also execute assigned runnable tasks" })),
     }),
@@ -938,6 +940,25 @@ export default function conductorExtension(pi: ExtensionAPI) {
       const gate = createGateForRepo(ctx.cwd, params);
       return {
         content: [{ type: "text", text: `created gate ${gate.gateId}: ${gate.requestedDecision}` }],
+        details: { gate },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_resolve_gate_as_human",
+    label: "Conductor Resolve Gate As Human",
+    description: "Trusted host/UI pathway to resolve a gate with verified human identity",
+    parameters: Type.Object({
+      gateId: Type.String({ description: "Gate ID" }),
+      status: Type.Union([Type.Literal("approved"), Type.Literal("rejected"), Type.Literal("canceled")]),
+      resolutionReason: Type.String({ description: "Reason for the gate decision" }),
+      humanId: Type.String({ description: "Trusted human identifier supplied by the host/UI" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const gate = resolveGateFromTrustedHumanForRepo(ctx.cwd, params);
+      return {
+        content: [{ type: "text", text: `resolved gate ${gate.gateId} as human: ${gate.status}` }],
         details: { gate },
       };
     },

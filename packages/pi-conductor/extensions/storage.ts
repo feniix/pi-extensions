@@ -299,7 +299,10 @@ const projectMutationLocks = new Map<string, Promise<void>>();
 function acquireRunFileLock(projectKey: string): () => void {
   const lockPath = getRunLockFile(projectKey);
   ensureDir(dirname(lockPath));
-  const fd = openSync(lockPath, "w");
+  if (existsSync(lockPath)) {
+    throw new Error(`Conductor state for project ${projectKey} is locked`);
+  }
+  const fd = openSync(lockPath, "wx");
   writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }));
   return () => {
     closeSync(fd);
@@ -1164,7 +1167,11 @@ export function readArtifactContentForRepo(
       )
     : null;
   const readRoot =
-    typeof metadataRoot === "string" ? resolve(metadataRoot) : resolve(worker?.worktreePath ?? normalizedRoot);
+    artifact.metadata.root === "storage"
+      ? (run?.storageDir ?? getConductorProjectDir(deriveProjectKey(normalizedRoot)))
+      : typeof metadataRoot === "string"
+        ? resolve(metadataRoot)
+        : resolve(worker?.worktreePath ?? normalizedRoot);
   if (typeof metadataRoot === "string" && (!worker?.worktreePath || resolve(worker.worktreePath) !== readRoot)) {
     throw new Error(`Artifact ${artifact.artifactId} declares an untrusted worktree root`);
   }

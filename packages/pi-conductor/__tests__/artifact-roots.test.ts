@@ -21,6 +21,25 @@ describe("conductor artifact root classification", () => {
     if (existsSync(repoRoot)) rmSync(repoRoot, { recursive: true, force: true });
   });
 
+  it("reads storage-root artifacts relative to conductor storage", () => {
+    const run = getOrCreateRunForRepo(repoRoot);
+    writeFileSync(join(run.storageDir, "stored.txt"), "from storage", "utf-8");
+    const updated = addConductorArtifact(run, {
+      artifactId: "artifact-storage-root",
+      type: "log",
+      ref: "stored.txt",
+      resourceRefs: {},
+      producer: { type: "test", id: "test" },
+      metadata: { root: "storage" },
+    });
+    writeRun(updated);
+
+    expect(readArtifactContentForRepo(repoRoot, "artifact-storage-root")).toMatchObject({
+      content: "from storage",
+      diagnostic: null,
+    });
+  });
+
   it("reads local artifacts relative to a trusted worker worktree root", () => {
     const task = createTaskForRepo(repoRoot, { title: "Artifact root", prompt: "Read from worker root" });
     const workerRoot = join(repoRoot, "worker-root");

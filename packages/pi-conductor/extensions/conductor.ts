@@ -910,17 +910,23 @@ export async function runNextActionForRepo(
 
 export async function scheduleObjectiveForRepo(
   repoRoot: string,
-  input: { objectiveId: string; maxConcurrency?: number; executeRuns?: boolean },
+  input: { objectiveId?: string; objectiveIds?: string[]; maxConcurrency?: number; executeRuns?: boolean },
 ): Promise<{
-  objectiveId: string;
+  objectiveId: string | null;
   assigned: TaskRecord[];
   executed: Array<{ taskId: string; result: unknown }>;
   skipped: string[];
 }> {
   const maxConcurrency = Math.max(1, Math.min(input.maxConcurrency ?? 1, 10));
-  const dag = buildObjectiveDagForRepo(repoRoot, input.objectiveId);
+  const initialRun = getOrCreateRunForRepo(repoRoot);
+  const objectiveIds =
+    input.objectiveIds ??
+    (input.objectiveId ? [input.objectiveId] : initialRun.objectives.map((objective) => objective.objectiveId));
+  const runnableTaskIds = objectiveIds.flatMap((objectiveId) =>
+    buildObjectiveDagForRepo(repoRoot, objectiveId).runnableNow.slice(0, 1),
+  );
   const run = getOrCreateRunForRepo(repoRoot);
-  const runnableTasks = dag.runnableNow
+  const runnableTasks = runnableTaskIds
     .map((taskId) => run.tasks.find((task) => task.taskId === taskId))
     .filter((task): task is TaskRecord => Boolean(task))
     .filter((task) => task.state === "ready" || task.state === "assigned")
@@ -947,7 +953,7 @@ export async function scheduleObjectiveForRepo(
       executed.push({ taskId: currentTask.taskId, result });
     }
   }
-  return { objectiveId: input.objectiveId, assigned, executed, skipped };
+  return { objectiveId: input.objectiveId ?? null, assigned, executed, skipped };
 }
 
 export async function schedulerTickForRepo(
