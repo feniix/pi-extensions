@@ -1,53 +1,41 @@
 # @feniix/pi-conductor
 
-Long-lived multi-session worker orchestration for Pi.
+Agent-native local control plane for Pi worker orchestration.
 
-## Status
-
-Implemented for the `pi-extensions` workspace, based on:
-- `docs/prd/PRD-002-pi-conductor-persistent-resumable-workers.md`
-- `docs/prd/PRD-003-pi-conductor-single-worker-run.md`
-- `docs/adr/ADR-0001-sdk-first-worker-runtime.md`
-- `docs/adr/ADR-0002-conductor-project-scoped-storage.md`
-- `docs/adr/ADR-0003-continuity-based-worktree-reuse.md`
-- `docs/adr/ADR-0004-minimal-conductor-local-git-gh-layer.md`
-- `docs/adr/ADR-0006-agent-session-based-foreground-run-execution.md`
-- `docs/adr/ADR-0007-single-worker-run-before-multi-worker-orchestration.md`
-- `docs/adr/ADR-0011-conductor-run-extension-binding-and-preflight-policy.md`
-
-PRD-001 remains in the repo as the original design document and is now superseded.
+`pi-conductor` manages durable project-scoped workers, tasks, runs, gates, artifacts, and events. It keeps conductor-owned state outside the repository, uses `@feniix/worktrees-core` for managed git worktrees, and treats execution backends as evidence sources rather than canonical state owners.
 
 ## Current capabilities
 
-`pi-conductor` currently provides:
-- deterministic project-key derivation
-- conductor-managed project storage
-- one worker record per named workstream
-- worker git worktree creation and recovery
-- real persisted Pi session linkage
-- a SessionManager-backed runtime boundary for worker creation, resume, recovery, and summary refresh
-- AgentSession-based foreground worker execution through `/conductor run <worker-name> <task>`
-- persisted runtime metadata (`sessionId`, `lastResumedAt`, backend)
-- persisted per-worker `lastRun` metadata for started/completed/error/aborted runs
-- explicit worker resume against persisted worktree/session metadata
-- task updates, run-aware task mutation, and session-derived summaries
-- lifecycle controls for `idle`, `running`, `blocked`, `ready_for_pr`, and `done`
-- health-aware status output distinguishing healthy, stale, and broken workers
-- status output that includes worktree path, session file, runtime metadata, and last-run state
-- broken-state detection and targeted recovery
-- targeted worker cleanup
-- minimal PR preparation flow:
-  - commit
-  - push
-  - create PR
-  - explicit preflight checks for remote and `gh`
-  - persist partial success/failure state
+- Deterministic project-key derivation and conductor-managed project storage.
+- Versioned JSON control-plane records with atomic writes, invariant validation, per-project mutation serialization, revisions, and append-only events.
+- First-class durable resources:
+  - `Worker`: worktree/session/runtime readiness.
+  - `Task`: durable work intent, assignment, lifecycle, progress, artifacts, gates, and run history.
+  - `Run`: execution attempts, backend linkage, leases, heartbeats, terminal status, summaries, and artifacts.
+  - `Gate`: durable review/input/approval/destructive-cleanup decisions.
+  - `Artifact`: evidence references for logs, completion reports, test results, changed files, PR evidence, and notes.
+  - `Event`: transition/progress/reconciliation audit history.
+- Worker git worktree creation, recovery, cleanup, and branch management via `@feniix/worktrees-core`.
+- Persisted Pi session linkage through `SessionManager`.
+- Native AgentSession-backed task execution with run-scoped child tools:
+  - `conductor_child_progress`
+  - `conductor_child_complete`
+- Explicit semantic completion: a backend exit or final assistant message is not enough to mark a task complete. Missing child completion becomes `needs_review` with a review gate.
+- Lease heartbeats and reconciliation for stale/crashed runs.
+- Gate-protected risky operations:
+  - PR creation requires an approved `ready_for_pr` gate.
+  - Worker cleanup requires an approved `destructive_cleanup` gate.
+- Optional `pi-subagents` backend availability inspection. Conductor remains canonical state owner.
+- Legacy worker command/tool surface remains during the transition, but new model-callable tools are the primary orchestration surface.
 
 ## Command surface
 
-Primary operator UX is the `/conductor` command group:
+Primary inspection/debug UX is the `/conductor` command group:
 
 ```text
+/conductor get project|workers|tasks|runs|gates|events|artifacts
+/conductor create worker <worker-name>
+/conductor create task <title> <prompt>
 /conductor status
 /conductor start <worker-name>
 /conductor task <worker-name> <task>
@@ -66,7 +54,27 @@ There is also a convenience `/conductor-status` command.
 
 ## Tool surface
 
-Registered tools:
+Resource/control-plane tools:
+
+- `conductor_get_project`
+- `conductor_backend_status`
+- `conductor_reconcile_project`
+- `conductor_list_events`
+- `conductor_list_artifacts`
+- `conductor_list_workers`
+- `conductor_create_worker`
+- `conductor_create_task`
+- `conductor_assign_task`
+- `conductor_delegate_task`
+- `conductor_start_task_run`
+- `conductor_run_task`
+- `conductor_create_gate`
+- `conductor_resolve_gate`
+- `conductor_child_progress`
+- `conductor_child_complete`
+
+Transition/legacy worker tools still registered:
+
 - `conductor_status`
 - `conductor_start`
 - `conductor_task_update`
@@ -85,23 +93,17 @@ Registered tools:
 `pi-conductor` does **not** supervise always-on autonomous worker agents.
 
 Instead, it uses a narrow Pi SDK runtime seam around persisted sessions:
-- create a worker session when a worker is created
-- reopen that session on `/conductor resume`
-- run one foreground task in the existing worker session lineage via `/conductor run`
-- record runtime metadata and last-run outcome in conductor state
-- derive summaries from the worker session history
 
-`/conductor run` is intentionally synchronous foreground execution. It runs one task in one existing worker, waits for completion, persists the outcome, and returns. It is not a background scheduler, daemon, or multi-worker orchestrator.
+1. Create a worker worktree/session.
+2. Create and assign durable tasks.
+3. Start a durable run with a scoped task contract.
+4. Execute through the native `AgentSession` backend.
+5. Let the child report progress/completion through scoped tools.
+6. Persist artifacts/events/gates and reconcile leases safely.
 
-Worker runs use a curated non-interactive execution surface rather than broad ambient inheritance. The run path performs best-effort model/provider preflight before the worker is persisted as `running`, reuses the worker worktree and session file, and records:
-- `success`
-- `error`
-- `aborted`
-- or an intentionally preserved in-progress/stuck signal when a process dies mid-run (`lifecycle=running` with `lastRun.finishedAt=null`)
+The native backend uses curated tools and explicit conductor child tools. Backend status is runtime evidence, not semantic completion. If the child exits without `conductor_child_complete`, conductor records a partial run and opens a review gate.
 
-In this package, `/conductor resume` still intentionally normalizes the worker lifecycle back to `idle`. Resume means “reopen and relink the persisted worker session”, not “reattach to an always-running autonomous worker”.
-
-This keeps the worker model durable today while leaving room for future multi-worker or subprocess-backed backends.
+Optional backend adapters such as `pi-subagents` may be used later, but they do not own canonical state.
 
 ## Development
 
@@ -110,6 +112,7 @@ From the repo root:
 ```bash
 npm run typecheck
 npm run test
+npx biome ci packages/pi-conductor
 ```
 
 Manual testing:
