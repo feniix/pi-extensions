@@ -172,6 +172,7 @@ export function buildRunScopedConductorTools(input: {
         runId: Type.String(),
         taskId: Type.String(),
         progress: Type.String(),
+        idempotencyKey: Type.Optional(Type.String()),
         artifact: Type.Optional(
           Type.Object({
             type: artifactTypeSchema,
@@ -220,6 +221,7 @@ export function buildRunScopedConductorTools(input: {
           Type.Literal("aborted"),
         ]),
         completionSummary: Type.String(),
+        idempotencyKey: Type.Optional(Type.String()),
         artifact: Type.Optional(
           Type.Object({
             type: artifactTypeSchema,

@@ -251,6 +251,64 @@ describe("storage helpers", () => {
     expect(queryConductorEvents(run, { type: "task.progress", limit: 1 }).hasMore).toBe(true);
   });
 
+  it("deduplicates child progress and completion by idempotency key", () => {
+    let run = addWorker(
+      createEmptyRun("abc", "/repo"),
+      createWorkerRecord({
+        workerId: "worker-1",
+        name: "backend",
+        branch: "conductor/backend",
+        worktreePath: "/repo/.worktrees/backend",
+        sessionFile: "/tmp/session.jsonl",
+      }),
+    );
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+
+    const progressed = recordTaskProgress(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      progress: "halfway",
+      idempotencyKey: "progress-1",
+    });
+    const duplicateProgress = recordTaskProgress(progressed, {
+      runId: "run-1",
+      taskId: "task-1",
+      progress: "halfway replay",
+      idempotencyKey: "progress-1",
+    });
+    expect(duplicateProgress.events).toHaveLength(progressed.events.length);
+    expect(duplicateProgress.tasks[0]?.latestProgress).toBe("halfway");
+
+    const completed = recordTaskCompletion(duplicateProgress, {
+      runId: "run-1",
+      taskId: "task-1",
+      status: "succeeded",
+      completionSummary: "done",
+      idempotencyKey: "complete-1",
+    });
+    const duplicateCompletion = recordTaskCompletion(completed, {
+      runId: "run-1",
+      taskId: "task-1",
+      status: "failed",
+      completionSummary: "late replay",
+      idempotencyKey: "complete-1",
+    });
+
+    expect(duplicateCompletion.events).toHaveLength(completed.events.length);
+    expect(duplicateCompletion.runs[0]).toMatchObject({ status: "succeeded", completionSummary: "done" });
+  });
+
   it("audits duplicate completion after terminal runs without changing task state", () => {
     let run = addWorker(
       createEmptyRun("abc", "/repo"),

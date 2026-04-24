@@ -760,6 +760,22 @@ export function addConductorArtifact(
   });
 }
 
+function hasIdempotentEvent(
+  run: RunRecord,
+  input: { runId: string; taskId: string; eventType: string; idempotencyKey?: string },
+): boolean {
+  return Boolean(
+    input.idempotencyKey &&
+      run.events.some(
+        (event) =>
+          event.type === input.eventType &&
+          event.resourceRefs.runId === input.runId &&
+          event.resourceRefs.taskId === input.taskId &&
+          event.payload.idempotencyKey === input.idempotencyKey,
+      ),
+  );
+}
+
 function getActiveRunForTask(normalized: RunRecord, input: { runId: string; taskId: string }): RunAttemptRecord {
   const runAttempt = normalized.runs.find((entry) => entry.runId === input.runId);
   if (!runAttempt) {
@@ -787,11 +803,15 @@ export function recordTaskProgress(
     runId: string;
     taskId: string;
     progress: string;
+    idempotencyKey?: string;
     artifact?: { type: ArtifactType; ref: string; metadata?: Record<string, unknown> };
   },
 ): RunRecord {
   const normalized = normalizeProjectRecord(run);
   const now = new Date().toISOString();
+  if (hasIdempotentEvent(normalized, { ...input, eventType: "run.progress_reported" })) {
+    return normalized;
+  }
   const existingRun = normalized.runs.find((entry) => entry.runId === input.runId);
   if (existingRun?.taskId === input.taskId && existingRun.finishedAt) {
     return appendConductorEvent(normalized, {
@@ -846,7 +866,7 @@ export function recordTaskProgress(
       workerId: runAttempt.workerId,
       runId: input.runId,
     },
-    payload: { progress: input.progress, artifactIds },
+    payload: { progress: input.progress, artifactIds, idempotencyKey: input.idempotencyKey ?? null },
   });
 }
 
@@ -857,10 +877,14 @@ export function recordTaskCompletion(
     taskId: string;
     status: RunStatus;
     completionSummary: string;
+    idempotencyKey?: string;
     artifact?: { type: ArtifactType; ref: string; metadata?: Record<string, unknown> };
   },
 ): RunRecord {
   const normalized = normalizeProjectRecord(run);
+  if (hasIdempotentEvent(normalized, { ...input, eventType: "run.completed" })) {
+    return normalized;
+  }
   const existingRun = normalized.runs.find((entry) => entry.runId === input.runId);
   if (existingRun?.taskId === input.taskId && existingRun.finishedAt) {
     return appendConductorEvent(normalized, {
@@ -904,12 +928,19 @@ export function recordTaskCompletion(
     runId: input.runId,
     status: input.status,
     completionSummary: input.completionSummary,
+    idempotencyKey: input.idempotencyKey,
   });
 }
 
 export function completeTaskRun(
   run: RunRecord,
-  input: { runId: string; status: RunStatus; completionSummary?: string | null; errorMessage?: string | null },
+  input: {
+    runId: string;
+    status: RunStatus;
+    completionSummary?: string | null;
+    errorMessage?: string | null;
+    idempotencyKey?: string;
+  },
 ): RunRecord {
   const normalized = normalizeProjectRecord(run);
   const now = new Date().toISOString();
@@ -955,7 +986,11 @@ export function completeTaskRun(
       workerId: runAttempt.workerId,
       runId: input.runId,
     },
-    payload: { status: input.status, completionSummary: input.completionSummary ?? null },
+    payload: {
+      status: input.status,
+      completionSummary: input.completionSummary ?? null,
+      idempotencyKey: input.idempotencyKey ?? null,
+    },
   });
 }
 

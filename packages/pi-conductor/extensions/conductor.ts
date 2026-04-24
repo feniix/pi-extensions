@@ -117,6 +117,7 @@ export function recordTaskProgressForRepo(
     runId: string;
     taskId: string;
     progress: string;
+    idempotencyKey?: string;
     artifact?: {
       type: "note" | "test_result" | "changed_files" | "log" | "completion_report" | "pr_evidence" | "other";
       ref: string;
@@ -141,6 +142,7 @@ export function recordTaskCompletionForRepo(
     taskId: string;
     status: "succeeded" | "partial" | "blocked" | "failed" | "aborted";
     completionSummary: string;
+    idempotencyKey?: string;
     artifact?: {
       type: "note" | "test_result" | "changed_files" | "log" | "completion_report" | "pr_evidence" | "other";
       ref: string;

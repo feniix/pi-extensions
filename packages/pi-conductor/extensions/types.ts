@@ -213,6 +213,7 @@ export interface ConductorProgressReportInput {
   runId: string;
   taskId: string;
   progress: string;
+  idempotencyKey?: string;
   artifact?: { type: ArtifactType; ref: string; metadata?: Record<string, unknown> };
 }
 
@@ -221,6 +222,7 @@ export interface ConductorCompletionReportInput {
   taskId: string;
   status: "succeeded" | "partial" | "blocked" | "failed" | "aborted";
   completionSummary: string;
+  idempotencyKey?: string;
   artifact?: { type: ArtifactType; ref: string; metadata?: Record<string, unknown> };
 }
 
