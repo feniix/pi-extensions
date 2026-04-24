@@ -469,6 +469,73 @@ export default function conductorExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "conductor_cleanup_worker",
+    label: "Conductor Cleanup Worker",
+    description: "Gate-protected cleanup for a named worker, its worktree, session link, and branch",
+    parameters: Type.Object({
+      name: Type.String({ description: "Worker name" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const worker = removeWorkerForRepo(ctx.cwd, params.name);
+      return {
+        content: [{ type: "text", text: `removed worker ${worker.name} [${worker.workerId}]` }],
+        details: { workerId: worker.workerId },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_commit_worker",
+    label: "Conductor Commit Worker",
+    description: "Commit all current changes in a worker worktree",
+    parameters: Type.Object({
+      name: Type.String({ description: "Worker name" }),
+      message: Type.String({ description: "Commit message" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const worker = commitWorkerForRepo(ctx.cwd, params.name, params.message);
+      return {
+        content: [{ type: "text", text: `committed worker ${worker.name}: ${params.message}` }],
+        details: { workerId: worker.workerId, commitSucceeded: worker.pr.commitSucceeded },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_push_worker",
+    label: "Conductor Push Worker",
+    description: "Push a worker branch to origin",
+    parameters: Type.Object({
+      name: Type.String({ description: "Worker name" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const worker = pushWorkerForRepo(ctx.cwd, params.name);
+      return {
+        content: [{ type: "text", text: `pushed worker ${worker.name} on branch ${worker.branch}` }],
+        details: { workerId: worker.workerId, pushSucceeded: worker.pr.pushSucceeded },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_create_worker_pr",
+    label: "Conductor Create Worker PR",
+    description: "Gate-protected GitHub PR creation for a worker branch",
+    parameters: Type.Object({
+      name: Type.String({ description: "Worker name" }),
+      title: Type.String({ description: "PR title" }),
+      body: Type.Optional(Type.String({ description: "Optional PR body" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const worker = createWorkerPrForRepo(ctx.cwd, params.name, params.title, params.body);
+      return {
+        content: [{ type: "text", text: `created PR for ${worker.name}: ${worker.pr.url}` }],
+        details: { workerId: worker.workerId, pr: worker.pr },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "conductor_status",
     label: "Conductor Status",
     description: "Show the current pi-conductor project namespace and worker status",
