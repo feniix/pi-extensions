@@ -74,6 +74,45 @@ export interface ConductorNextAction {
   confidence: "high" | "medium" | "low";
 }
 
+export type EvidenceBundlePurpose = "task_review" | "pr_readiness" | "handoff";
+export type ReadinessPurpose = "task_review" | "pr_readiness";
+export type ReadinessStatus = "ready" | "blocked" | "needs_review" | "not_ready";
+
+export interface EvidenceBundle {
+  purpose: EvidenceBundlePurpose;
+  generatedAt: string;
+  resourceRefs: ConductorResourceRefs;
+  worker: WorkerRecord | null;
+  tasks: TaskRecord[];
+  runs: RunAttemptRecord[];
+  gates: GateRecord[];
+  artifacts: ArtifactRecord[];
+  events?: ConductorEvent[];
+  pr: WorkerPrState | null;
+  summary: {
+    taskCount: number;
+    runCount: number;
+    openGateCount: number;
+    artifactCount: number;
+    terminalRunCount: number;
+    completedTaskCount: number;
+    needsReviewTaskCount: number;
+    blockedTaskCount: number;
+    failedTaskCount: number;
+  };
+  persistedArtifact?: ArtifactRecord;
+}
+
+export interface ReadinessCheck {
+  purpose: ReadinessPurpose;
+  status: ReadinessStatus;
+  generatedAt: string;
+  resourceRefs: ConductorResourceRefs;
+  bundle: EvidenceBundle;
+  blockers: Array<{ code: string; message: string; resourceRefs?: ConductorResourceRefs }>;
+  warnings: Array<{ code: string; message: string; resourceRefs?: ConductorResourceRefs }>;
+}
+
 export interface ConductorNextActionsResponse {
   project: {
     projectKey: string;

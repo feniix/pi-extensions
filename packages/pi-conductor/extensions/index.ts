@@ -6,7 +6,9 @@ import { inspectConductorBackends } from "./backends.js";
 import { runConductorCommand } from "./commands.js";
 import {
   assignTaskForRepo,
+  buildEvidenceBundleForRepo,
   cancelTaskRunForRepo,
+  checkReadinessForRepo,
   commitWorkerForRepo,
   createGateForRepo,
   createTaskForRepo,
@@ -168,6 +170,65 @@ export default function conductorExtension(pi: ExtensionAPI) {
             .join("\n")
         : `No conductor actions recommended: ${recommendations.summary.headline}`;
       return { content: [{ type: "text", text }], details: recommendations };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_build_evidence_bundle",
+    label: "Conductor Build Evidence Bundle",
+    description: "Build a task/worker-scoped evidence bundle for review or PR readiness",
+    parameters: Type.Object({
+      workerId: Type.Optional(Type.String()),
+      workerName: Type.Optional(Type.String()),
+      taskId: Type.Optional(Type.String()),
+      runId: Type.Optional(Type.String()),
+      purpose: Type.Optional(
+        Type.Union([Type.Literal("task_review"), Type.Literal("pr_readiness"), Type.Literal("handoff")]),
+      ),
+      includeEvents: Type.Optional(Type.Boolean()),
+      persistArtifact: Type.Optional(Type.Boolean()),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const bundle = buildEvidenceBundleForRepo(ctx.cwd, params);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `evidence bundle ${bundle.purpose}: tasks=${bundle.summary.taskCount} runs=${bundle.summary.runCount} artifacts=${bundle.summary.artifactCount} openGates=${bundle.summary.openGateCount}`,
+          },
+        ],
+        details: { bundle },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_check_readiness",
+    label: "Conductor Check Readiness",
+    description: "Evaluate whether a task or worker is ready for review or PR publication",
+    parameters: Type.Object({
+      workerId: Type.Optional(Type.String()),
+      workerName: Type.Optional(Type.String()),
+      taskId: Type.Optional(Type.String()),
+      purpose: Type.Union([Type.Literal("task_review"), Type.Literal("pr_readiness")]),
+      requireCompletionReport: Type.Optional(Type.Boolean()),
+      requireTestEvidence: Type.Optional(Type.Boolean()),
+      requireNoOpenGates: Type.Optional(Type.Boolean()),
+      requireCommit: Type.Optional(Type.Boolean()),
+      requirePush: Type.Optional(Type.Boolean()),
+      requireApprovedReadyForPrGate: Type.Optional(Type.Boolean()),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const readiness = checkReadinessForRepo(ctx.cwd, params);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `${readiness.purpose}: ${readiness.status} blockers=${readiness.blockers.length} warnings=${readiness.warnings.length}`,
+          },
+        ],
+        details: { readiness },
+      };
     },
   });
 
