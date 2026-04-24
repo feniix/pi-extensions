@@ -465,6 +465,10 @@ function mapWorkerRunStatusToRunStatus(status: WorkerRunResult["status"]): "succ
   }
 }
 
+function createGateId(): string {
+  return `gate-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export async function runTaskForRepo(repoRoot: string, taskId: string): Promise<WorkerRunResult> {
   const started = startTaskRunForRepo(repoRoot, { taskId });
   let currentRun = getOrCreateRunForRepo(repoRoot);
@@ -498,13 +502,23 @@ export async function runTaskForRepo(repoRoot: string, taskId: string): Promise<
   currentRun = getOrCreateRunForRepo(repoRoot);
   const runAttempt = currentRun.runs.find((entry) => entry.runId === started.run.runId);
   if (runAttempt && !runAttempt.finishedAt) {
+    const semanticStatus =
+      runtimeResult.status === "success" ? "partial" : mapWorkerRunStatusToRunStatus(runtimeResult.status);
     const completedRun = completeTaskRun(currentRun, {
       runId: started.run.runId,
-      status: mapWorkerRunStatusToRunStatus(runtimeResult.status),
+      status: semanticStatus,
       completionSummary: runtimeResult.finalText,
       errorMessage: runtimeResult.errorMessage,
     });
     writeRun(completedRun);
+    if (runtimeResult.status === "success") {
+      createGateForRepo(repoRoot, {
+        gateId: createGateId(),
+        type: "needs_review",
+        resourceRefs: { taskId, runId: started.run.runId, workerId: worker.workerId },
+        requestedDecision: `Review task ${taskId}: native worker exited without explicit conductor_child_complete`,
+      });
+    }
   }
 
   return {

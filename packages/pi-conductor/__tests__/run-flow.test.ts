@@ -134,6 +134,25 @@ describe("worker run flows", () => {
     expect(persisted.events.map((event) => event.type)).toContain("run.completed");
   });
 
+  it("requires review when a durable task run exits without explicit child completion", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Review task", prompt: "Do work" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    runtimeMocks.runWorkerPromptRuntime.mockResolvedValueOnce({
+      status: "success",
+      finalText: "I think it is done",
+      errorMessage: null,
+      sessionId: "run-session-review",
+    });
+
+    await runTaskForRepo(repoDir, task.taskId);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+    expect(persisted.runs[0]).toMatchObject({ status: "partial", completionSummary: "I think it is done" });
+    expect(persisted.gates[0]).toMatchObject({ type: "needs_review", status: "open" });
+  });
+
   it("fails fast on preflight without mutating currentTask or lifecycle", async () => {
     await createWorkerForRepo(repoDir, "backend");
     updateWorkerTaskForRepo(repoDir, "backend", "old task");
