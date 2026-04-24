@@ -19,7 +19,7 @@ import { formatRunStatus } from "./status.js";
 function getUsage(): string {
   return [
     "usage:",
-    "  /conductor get workers|tasks|project",
+    "  /conductor get project|workers|tasks|runs|gates|events|artifacts",
     "  /conductor create worker <worker-name>",
     "  /conductor create task <title> <prompt>",
     "  /conductor status",
@@ -64,6 +64,33 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
                 `${task.title} [${task.taskId}] state=${task.state} assignedWorker=${task.assignedWorkerId ?? "none"}`,
             )
             .join("\n");
+    }
+    if (resource === "runs") {
+      return run.runs.length === 0
+        ? "runs: none"
+        : run.runs
+            .map(
+              (attempt) =>
+                `${attempt.runId} task=${attempt.taskId} worker=${attempt.workerId} status=${attempt.status}`,
+            )
+            .join("\n");
+    }
+    if (resource === "gates") {
+      return run.gates.length === 0
+        ? "gates: none"
+        : run.gates
+            .map((gate) => `${gate.gateId} type=${gate.type} status=${gate.status} decision=${gate.requestedDecision}`)
+            .join("\n");
+    }
+    if (resource === "events") {
+      return run.events.length === 0
+        ? "events: none"
+        : run.events.map((event) => `#${event.sequence} ${event.type} ${event.occurredAt}`).join("\n");
+    }
+    if (resource === "artifacts") {
+      return run.artifacts.length === 0
+        ? "artifacts: none"
+        : run.artifacts.map((artifact) => `${artifact.artifactId} ${artifact.type} ${artifact.ref}`).join("\n");
     }
     return `${getUsage()}\n\nerror: unknown resource '${resource ?? ""}'`;
   }

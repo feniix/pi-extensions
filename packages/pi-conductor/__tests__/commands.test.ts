@@ -52,6 +52,23 @@ describe("runConductorCommand", () => {
     expect(workers).toContain("backend");
   });
 
+  it("shows resource-shaped run, gate, event, and artifact inspection commands", async () => {
+    const project = await runConductorCommand(repoDir, "get project");
+    expect(project).toContain("events:");
+
+    const runs = await runConductorCommand(repoDir, "get runs");
+    expect(runs).toBe("runs: none");
+
+    const gates = await runConductorCommand(repoDir, "get gates");
+    expect(gates).toBe("gates: none");
+
+    const events = await runConductorCommand(repoDir, "get events");
+    expect(events).toBe("events: none");
+
+    const artifacts = await runConductorCommand(repoDir, "get artifacts");
+    expect(artifacts).toBe("artifacts: none");
+  });
+
   it("creates a worker from the start subcommand", async () => {
     const text = await runConductorCommand(repoDir, "start backend");
     expect(text).toContain("created worker");
