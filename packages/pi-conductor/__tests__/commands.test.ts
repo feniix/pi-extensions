@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runConductorCommand } from "../extensions/commands.js";
-import { getOrCreateRunForRepo, resolveGateForRepo } from "../extensions/conductor.js";
+import {
+  assignTaskForRepo,
+  getOrCreateRunForRepo,
+  resolveGateForRepo,
+  startTaskRunForRepo,
+} from "../extensions/conductor.js";
 
 describe("runConductorCommand", () => {
   let repoDir: string;
@@ -51,6 +56,23 @@ describe("runConductorCommand", () => {
 
     const workers = await runConductorCommand(repoDir, "get workers");
     expect(workers).toContain("backend");
+  });
+
+  it("shows individual worker, task, and run resources", async () => {
+    await runConductorCommand(repoDir, "create worker backend");
+    await runConductorCommand(repoDir, "create task Build Implement it");
+    const run = getOrCreateRunForRepo(repoDir);
+    const worker = run.workers[0];
+    const task = run.tasks[0];
+    if (!worker || !task) {
+      throw new Error("test resources missing");
+    }
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+
+    await expect(runConductorCommand(repoDir, `get worker ${worker.name}`)).resolves.toContain(worker.workerId);
+    await expect(runConductorCommand(repoDir, `get task ${task.taskId}`)).resolves.toContain("state=running");
+    await expect(runConductorCommand(repoDir, `get run ${started.run.runId}`)).resolves.toContain("status=running");
   });
 
   it("shows resource-shaped run, gate, event, and artifact inspection commands", async () => {

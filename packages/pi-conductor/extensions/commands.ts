@@ -20,7 +20,7 @@ import { formatRunStatus } from "./status.js";
 function getUsage(): string {
   return [
     "usage:",
-    "  /conductor get project|workers|tasks|runs|gates|events|artifacts",
+    "  /conductor get project|workers|worker <id-or-name>|tasks|task <task-id>|runs|run <run-id>|gates|events|artifacts",
     "  /conductor create worker <worker-name>",
     "  /conductor create task <title> <prompt>",
     "  /conductor status",
@@ -47,7 +47,7 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
 
   const [subcommand, ...rest] = trimmed.split(/\s+/);
   if (subcommand === "get") {
-    const [resource] = rest;
+    const [resource, idOrName] = rest;
     const run = reconcileWorkerHealth(getOrCreateRunForRepo(cwd));
     if (resource === "project") {
       return formatRunStatus(run);
@@ -56,6 +56,12 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
       return run.workers.length === 0
         ? "workers: none"
         : run.workers.map((worker) => `${worker.name} [${worker.workerId}] state=${worker.lifecycle}`).join("\n");
+    }
+    if (resource === "worker") {
+      const worker = run.workers.find((entry) => entry.workerId === idOrName || entry.name === idOrName);
+      return worker
+        ? `${worker.name} [${worker.workerId}] state=${worker.lifecycle} branch=${worker.branch ?? "none"} worktree=${worker.worktreePath ?? "none"}`
+        : `worker not found: ${idOrName ?? ""}`;
     }
     if (resource === "tasks") {
       return run.tasks.length === 0
@@ -67,6 +73,12 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
             )
             .join("\n");
     }
+    if (resource === "task") {
+      const task = run.tasks.find((entry) => entry.taskId === idOrName);
+      return task
+        ? `${task.title} [${task.taskId}] state=${task.state} assignedWorker=${task.assignedWorkerId ?? "none"} activeRun=${task.activeRunId ?? "none"}`
+        : `task not found: ${idOrName ?? ""}`;
+    }
     if (resource === "runs") {
       return run.runs.length === 0
         ? "runs: none"
@@ -76,6 +88,12 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
                 `${attempt.runId} task=${attempt.taskId} worker=${attempt.workerId} status=${attempt.status}`,
             )
             .join("\n");
+    }
+    if (resource === "run") {
+      const attempt = run.runs.find((entry) => entry.runId === idOrName);
+      return attempt
+        ? `${attempt.runId} task=${attempt.taskId} worker=${attempt.workerId} status=${attempt.status} backend=${attempt.backend}`
+        : `run not found: ${idOrName ?? ""}`;
     }
     if (resource === "gates") {
       return run.gates.length === 0
