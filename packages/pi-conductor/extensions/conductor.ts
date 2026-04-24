@@ -1,5 +1,6 @@
 import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
+import { type ConductorBackendsStatus, inspectConductorBackends } from "./backends.js";
 import {
   commitAllChanges,
   createPullRequest,
@@ -20,6 +21,7 @@ import {
   addConductorArtifact,
   addTask,
   addWorker,
+  appendConductorEvent,
   assignTaskToWorker,
   cancelTaskRun,
   completeTaskRun,
@@ -207,7 +209,14 @@ export function resolveGateForRepo(
 
 export function startTaskRunForRepo(
   repoRoot: string,
-  input: { taskId: string; workerId?: string; leaseSeconds?: number; runId?: string },
+  input: {
+    taskId: string;
+    workerId?: string;
+    leaseSeconds?: number;
+    runId?: string;
+    backend?: RunAttemptRecord["backend"];
+    inspectBackends?: () => ConductorBackendsStatus;
+  },
 ): { run: RunAttemptRecord; taskContract: TaskContractInput } {
   const run = getOrCreateRunForRepo(repoRoot);
   const task = run.tasks.find((entry) => entry.taskId === input.taskId);
@@ -218,12 +227,31 @@ export function startTaskRunForRepo(
   if (!workerId) {
     throw new Error(`Task ${input.taskId} is not assigned to a worker`);
   }
+  const backend = input.backend ?? "native";
+  if (backend === "pi-subagents") {
+    const status = (input.inspectBackends ?? inspectConductorBackends)().piSubagents;
+    const withEvent = appendConductorEvent(run, {
+      actor: { type: "backend", id: "pi-subagents" },
+      type: "backend.unavailable",
+      resourceRefs: { projectKey: run.projectKey, taskId: input.taskId, workerId },
+      payload: {
+        backend,
+        diagnostic: status.available
+          ? "pi-subagents dispatch adapter is not implemented yet"
+          : (status.diagnostic ?? "pi-subagents backend is unavailable"),
+      },
+    });
+    writeRun(withEvent);
+    throw new Error(
+      `pi-subagents backend unavailable: ${status.available ? "dispatch adapter is not implemented yet" : (status.diagnostic ?? "not available")}`,
+    );
+  }
   const runId = input.runId ?? createRunId();
   const updatedRun = startTaskRun(run, {
     runId,
     taskId: input.taskId,
     workerId,
-    backend: "native",
+    backend,
     leaseExpiresAt: leaseExpiryFromNow(input.leaseSeconds ?? 900),
   });
   writeRun(updatedRun);

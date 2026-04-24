@@ -77,6 +77,33 @@ describe("conductor service", () => {
     expect(run.events.map((event) => event.type)).toEqual(["task.created", "task.assigned"]);
   });
 
+  it("fails closed when an unsupported backend is requested", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Subagent task", prompt: "Do it elsewhere" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    expect(() =>
+      startTaskRunForRepo(repoDir, {
+        taskId: task.taskId,
+        workerId: worker.workerId,
+        backend: "pi-subagents",
+        inspectBackends: () => ({
+          native: { available: true, canonicalStateOwner: "conductor", diagnostic: null },
+          piSubagents: {
+            available: false,
+            canonicalStateOwner: "conductor",
+            diagnostic: "not installed in test",
+          },
+        }),
+      }),
+    ).toThrow(/pi-subagents backend unavailable/i);
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.runs).toHaveLength(0);
+    expect(run.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null });
+    expect(run.events.at(-1)).toMatchObject({ type: "backend.unavailable" });
+  });
+
   it("starts an assigned durable task run through conductor service helpers", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const task = createTaskForRepo(repoDir, { title: "Add run ledger", prompt: "Implement durable runs" });
