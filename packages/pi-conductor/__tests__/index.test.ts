@@ -15,6 +15,7 @@ describe("pi-conductor extension", () => {
     expect(extension).toContain('name: "conductor_get_objective"');
     expect(extension).toContain('name: "conductor_create_objective"');
     expect(extension).toContain('name: "conductor_update_objective"');
+    expect(extension).toContain('name: "conductor_plan_objective"');
     expect(extension).toContain('name: "conductor_link_task_to_objective"');
     expect(extension).toContain('name: "conductor_list_workers"');
     expect(extension).toContain('name: "conductor_list_tasks"');

@@ -20,6 +20,7 @@ import {
   getNextActionsForRepo,
   getOrCreateRunForRepo,
   linkTaskToObjectiveForRepo,
+  planObjectiveForRepo,
   pushWorkerForRepo,
   reconcileProjectForRepo,
   reconcileWorkerHealth,
@@ -222,6 +223,35 @@ export default function conductorExtension(pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: `updated objective ${objective.objectiveId}: status=${objective.status}` }],
         details: { objective },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_plan_objective",
+    label: "Conductor Plan Objective",
+    description: "Expand an objective into an ordered durable task plan created atomically",
+    parameters: Type.Object({
+      objectiveId: Type.String({ description: "Objective ID" }),
+      tasks: Type.Array(
+        Type.Object({
+          title: Type.String({ description: "Task title" }),
+          prompt: Type.String({ description: "Task prompt/body" }),
+          dependsOn: Type.Optional(Type.Array(Type.String({ description: "Title or ID of a dependency task" }))),
+        }),
+      ),
+      rationale: Type.Optional(Type.String({ description: "Why this task breakdown is appropriate" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = planObjectiveForRepo(ctx.cwd, params);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `planned objective ${result.objective.objectiveId}: created ${result.tasks.length} tasks`,
+          },
+        ],
+        details: result,
       };
     },
   });

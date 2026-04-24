@@ -35,7 +35,7 @@ describe("computeNextActions", () => {
     });
   });
 
-  it("recommends creating a scoped task for an active objective without tasks", () => {
+  it("recommends planning scoped tasks for an active objective without tasks", () => {
     const run = addObjective(
       createEmptyRun("abc", "/repo"),
       createObjectiveRecord({ objectiveId: "objective-1", title: "Autonomous MVP", prompt: "Ship it" }),
@@ -45,15 +45,11 @@ describe("computeNextActions", () => {
 
     expect(result.actions[0]).toMatchObject({
       priority: "high",
-      kind: "create_task",
+      kind: "plan_objective",
       resourceRefs: { objectiveId: "objective-1" },
       toolCall: {
-        name: "conductor_create_task",
-        params: {
-          title: "Next task for Autonomous MVP",
-          prompt: "<derive the next concrete task for this objective>",
-          objectiveId: "objective-1",
-        },
+        name: "conductor_plan_objective",
+        params: { objectiveId: "objective-1", tasks: "<derive an ordered task list for this objective>" },
       },
     });
   });

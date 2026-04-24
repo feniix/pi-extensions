@@ -50,6 +50,7 @@ export type ConductorNextActionKind =
   | "recover_worker"
   | "create_worker"
   | "create_task"
+  | "plan_objective"
   | "assign_task"
   | "run_task"
   | "wait_for_run"
@@ -105,6 +106,11 @@ export interface EvidenceBundle {
     failedTaskCount: number;
   };
   persistedArtifact?: ArtifactRecord;
+}
+
+export interface ObjectivePlanResult {
+  objective: ObjectiveRecord;
+  tasks: TaskRecord[];
 }
 
 export interface ReadinessCheck {

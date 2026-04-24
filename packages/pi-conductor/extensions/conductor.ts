@@ -63,6 +63,7 @@ import type {
   EvidenceBundlePurpose,
   GateRecord,
   GateStatus,
+  ObjectivePlanResult,
   ObjectiveRecord,
   ObjectiveStatus,
   ReadinessCheck,
@@ -97,7 +98,7 @@ const terminalRunStatuses = new Set([
 
 function nextAction(input: Omit<ConductorNextAction, "actionId">): ConductorNextAction {
   const refs = input.resourceRefs;
-  const actionId = [input.kind, refs.workerId, refs.taskId, refs.runId, refs.gateId, refs.artifactId]
+  const actionId = [input.kind, refs.objectiveId, refs.workerId, refs.taskId, refs.runId, refs.gateId, refs.artifactId]
     .filter(Boolean)
     .join(":");
   return { ...input, actionId };
@@ -139,16 +140,15 @@ export function computeNextActions(
       actions.push(
         nextAction({
           priority: "high",
-          kind: "create_task",
-          title: `Create the first task for objective ${objective.title}`,
-          rationale: "The objective is active but has no scoped tasks for workers to execute.",
+          kind: "plan_objective",
+          title: `Plan executable tasks for objective ${objective.title}`,
+          rationale: "The objective is active but has no scoped task plan for workers to execute.",
           resourceRefs: { projectKey: run.projectKey, objectiveId: objective.objectiveId },
           toolCall: {
-            name: "conductor_create_task",
+            name: "conductor_plan_objective",
             params: {
-              title: `Next task for ${objective.title}`,
-              prompt: "<derive the next concrete task for this objective>",
               objectiveId: objective.objectiveId,
+              tasks: "<derive an ordered task list for this objective>",
             },
           },
           requiresHuman: false,
@@ -543,6 +543,48 @@ export function linkTaskToObjectiveForRepo(repoRoot: string, objectiveId: string
     throw new Error(`Objective ${objectiveId} disappeared during link`);
   }
   return objective;
+}
+
+export function planObjectiveForRepo(
+  repoRoot: string,
+  input: {
+    objectiveId: string;
+    tasks: Array<{ title: string; prompt: string; dependsOn?: string[] }>;
+    rationale?: string;
+  },
+): ObjectivePlanResult {
+  if (input.tasks.length === 0) {
+    throw new Error("Objective plan must include at least one task");
+  }
+  let run = getOrCreateRunForRepo(repoRoot);
+  const objective = run.objectives.find((entry) => entry.objectiveId === input.objectiveId);
+  if (!objective) {
+    throw new Error(`Objective ${input.objectiveId} not found`);
+  }
+  const createdTasks: TaskRecord[] = [];
+  for (const taskInput of input.tasks) {
+    const dependencyText = taskInput.dependsOn?.length ? `\n\nDepends on: ${taskInput.dependsOn.join(", ")}` : "";
+    const task = createTaskRecord({
+      taskId: createTaskId(),
+      title: taskInput.title,
+      prompt: `${taskInput.prompt}${dependencyText}`,
+      objectiveId: input.objectiveId,
+    });
+    run = linkTaskToObjective(addTask(run, task), input.objectiveId, task.taskId);
+    createdTasks.push(task);
+  }
+  run = appendConductorEvent(run, {
+    actor: { type: "parent_agent", id: "conductor" },
+    type: "objective.planned",
+    resourceRefs: { projectKey: run.projectKey, objectiveId: input.objectiveId },
+    payload: { taskIds: createdTasks.map((task) => task.taskId), rationale: input.rationale ?? null },
+  });
+  writeRun(run);
+  const updatedObjective = run.objectives.find((entry) => entry.objectiveId === input.objectiveId);
+  if (!updatedObjective) {
+    throw new Error(`Objective ${input.objectiveId} disappeared during planning`);
+  }
+  return { objective: updatedObjective, tasks: createdTasks };
 }
 
 export function createTaskForRepo(
