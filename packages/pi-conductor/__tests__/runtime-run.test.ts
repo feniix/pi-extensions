@@ -33,6 +33,7 @@ describe("worker run runtime helpers", () => {
     expect(prompt).toContain("conductor_child_complete");
     expect(prompt).toContain("conductor_child_progress");
     expect(prompt).toContain("conductor_child_create_gate");
+    expect(prompt).toContain("idempotencyKey");
   });
 
   it("builds run-scoped conductor tools for native child sessions", async () => {

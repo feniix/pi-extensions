@@ -251,6 +251,7 @@ export function buildTaskContractPrompt(input: TaskContractInput): string {
         "Report progress with conductor_child_progress when meaningful milestones happen.",
         "Attach evidence through the artifact field on conductor_child_progress or conductor_child_complete.",
         "If you are blocked or need input/review, create a scoped gate with conductor_child_create_gate.",
+        "Include a stable idempotencyKey on progress and completion tool calls when retrying or after tool-call uncertainty.",
         "When finished, call conductor_child_complete with succeeded, partial, blocked, failed, or aborted status.",
       ].join("\n")
     : "Explicit conductor completion tools are unavailable for this backend; finish with a concise outcome summary and expect parent review.";
