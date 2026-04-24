@@ -117,6 +117,44 @@ export default function conductorExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "conductor_list_events",
+    label: "Conductor List Events",
+    description: "List recent durable conductor events for the current repository",
+    parameters: Type.Object({
+      limit: Type.Optional(Type.Number({ description: "Maximum events to return; defaults to 20" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const run = getOrCreateRunForRepo(ctx.cwd);
+      const limit = Math.max(1, Math.min(params.limit ?? 20, 100));
+      const events = run.events.slice(-limit);
+      const text =
+        events.length === 0
+          ? "no conductor events"
+          : events.map((event) => `#${event.sequence} ${event.type} ${event.occurredAt}`).join("\n");
+      return { content: [{ type: "text", text }], details: { events } };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_list_artifacts",
+    label: "Conductor List Artifacts",
+    description: "List durable conductor artifacts for the current repository",
+    parameters: Type.Object({
+      limit: Type.Optional(Type.Number({ description: "Maximum artifacts to return; defaults to 20" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const run = getOrCreateRunForRepo(ctx.cwd);
+      const limit = Math.max(1, Math.min(params.limit ?? 20, 100));
+      const artifacts = run.artifacts.slice(-limit);
+      const text =
+        artifacts.length === 0
+          ? "no conductor artifacts"
+          : artifacts.map((artifact) => `${artifact.artifactId} ${artifact.type} ${artifact.ref}`).join("\n");
+      return { content: [{ type: "text", text }], details: { artifacts } };
+    },
+  });
+
+  pi.registerTool({
     name: "conductor_list_workers",
     label: "Conductor List Workers",
     description: "List durable pi-conductor workers for the current repository",
