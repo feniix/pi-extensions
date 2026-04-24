@@ -225,6 +225,40 @@ export function startTaskRunForRepo(
   };
 }
 
+export async function delegateTaskForRepo(
+  repoRoot: string,
+  input: { title: string; prompt: string; workerName: string; startRun?: boolean; leaseSeconds?: number },
+): Promise<{
+  worker: WorkerRecord;
+  task: TaskRecord;
+  run: RunAttemptRecord | null;
+  taskContract: TaskContractInput | null;
+}> {
+  const initialRun = getOrCreateRunForRepo(repoRoot);
+  const worker =
+    initialRun.workers.find((entry) => entry.name === input.workerName) ??
+    (await createWorkerForRepo(repoRoot, input.workerName));
+  const task = createTaskForRepo(repoRoot, { title: input.title, prompt: input.prompt });
+  const assigned = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
+
+  if (!input.startRun) {
+    return { worker, task: assigned, run: null, taskContract: null };
+  }
+
+  const started = startTaskRunForRepo(repoRoot, {
+    taskId: assigned.taskId,
+    workerId: worker.workerId,
+    leaseSeconds: input.leaseSeconds,
+  });
+  const current = getOrCreateRunForRepo(repoRoot);
+  return {
+    worker,
+    task: current.tasks.find((entry) => entry.taskId === assigned.taskId) ?? assigned,
+    run: started.run,
+    taskContract: started.taskContract,
+  };
+}
+
 export async function createWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
   const run = getOrCreateRunForRepo(repoRoot);
   const workerId = createWorkerId();

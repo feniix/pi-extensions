@@ -7,6 +7,7 @@ import {
   assignTaskForRepo,
   createTaskForRepo,
   createWorkerForRepo,
+  delegateTaskForRepo,
   getOrCreateRunForRepo,
   startTaskRunForRepo,
 } from "../extensions/conductor.js";
@@ -91,6 +92,34 @@ describe("conductor service", () => {
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.tasks[0]).toMatchObject({ state: "running", activeRunId: started.run.runId });
+  });
+
+  it("delegates a task through the parent-agent happy path", async () => {
+    const delegated = await delegateTaskForRepo(repoDir, {
+      title: "Happy path",
+      prompt: "Implement the happy path",
+      workerName: "backend",
+      startRun: true,
+      leaseSeconds: 300,
+    });
+
+    expect(delegated.worker.name).toBe("backend");
+    expect(delegated.task).toMatchObject({
+      title: "Happy path",
+      state: "running",
+      assignedWorkerId: delegated.worker.workerId,
+    });
+    expect(delegated.run).toMatchObject({
+      taskId: delegated.task.taskId,
+      workerId: delegated.worker.workerId,
+      status: "running",
+    });
+    expect(delegated.taskContract).toMatchObject({ taskId: delegated.task.taskId, runId: delegated.run?.runId });
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers).toHaveLength(1);
+    expect(run.tasks).toHaveLength(1);
+    expect(run.runs).toHaveLength(1);
   });
 
   it("creates a worker, worktree, and persisted worker record", async () => {

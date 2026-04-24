@@ -11,6 +11,7 @@ import {
   createTaskForRepo,
   createWorkerForRepo,
   createWorkerPrForRepo,
+  delegateTaskForRepo,
   getOrCreateRunForRepo,
   pushWorkerForRepo,
   reconcileWorkerHealth,
@@ -238,24 +239,31 @@ export default function conductorExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "conductor_delegate_task",
     label: "Conductor Delegate Task",
-    description: "Create a task and assign it to an existing or newly-created worker in one model-friendly step",
+    description: "Create, assign, and optionally start a task in one parent-agent delegation step",
     parameters: Type.Object({
       title: Type.String({ description: "Task title" }),
       prompt: Type.String({ description: "Task prompt/body" }),
       workerName: Type.String({ description: "Worker name to use or create" }),
+      startRun: Type.Optional(Type.Boolean({ description: "Start a durable run immediately; defaults to true" })),
+      leaseSeconds: Type.Optional(Type.Number({ description: "Run lease duration in seconds; defaults to 900" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const run = getOrCreateRunForRepo(ctx.cwd);
-      const worker =
-        run.workers.find((entry) => entry.name === params.workerName) ??
-        (await createWorkerForRepo(ctx.cwd, params.workerName));
-      const task = createTaskForRepo(ctx.cwd, { title: params.title, prompt: params.prompt });
-      const assigned = assignTaskForRepo(ctx.cwd, task.taskId, worker.workerId);
+      const delegated = await delegateTaskForRepo(ctx.cwd, {
+        title: params.title,
+        prompt: params.prompt,
+        workerName: params.workerName,
+        startRun: params.startRun ?? true,
+        leaseSeconds: params.leaseSeconds,
+      });
+      const runText = delegated.run ? ` and started run ${delegated.run.runId}` : "";
       return {
         content: [
-          { type: "text", text: `delegated task ${assigned.taskId} to worker ${worker.name} [${worker.workerId}]` },
+          {
+            type: "text",
+            text: `delegated task ${delegated.task.taskId} to worker ${delegated.worker.name} [${delegated.worker.workerId}]${runText}`,
+          },
         ],
-        details: { task: assigned, worker },
+        details: delegated,
       };
     },
   });
