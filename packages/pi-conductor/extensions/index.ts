@@ -29,7 +29,7 @@ import {
 } from "./conductor.js";
 import { deriveProjectKey } from "./project-key.js";
 import { formatRunStatus } from "./status.js";
-import { createEmptyRun, queryConductorEvents, readRun, writeRun } from "./storage.js";
+import { createEmptyRun, queryConductorArtifacts, queryConductorEvents, readRun, writeRun } from "./storage.js";
 
 function findRepoRoot(cwd: string): string | null {
   try {
@@ -156,6 +156,16 @@ export default function conductorExtension(pi: ExtensionAPI) {
     },
   });
 
+  const artifactTypeSchema = Type.Union([
+    Type.Literal("note"),
+    Type.Literal("test_result"),
+    Type.Literal("changed_files"),
+    Type.Literal("log"),
+    Type.Literal("completion_report"),
+    Type.Literal("pr_evidence"),
+    Type.Literal("other"),
+  ]);
+
   pi.registerTool({
     name: "conductor_list_events",
     label: "Conductor List Events",
@@ -183,19 +193,24 @@ export default function conductorExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "conductor_list_artifacts",
     label: "Conductor List Artifacts",
-    description: "List durable conductor artifacts for the current repository",
+    description: "List durable conductor artifacts with resource filters and bounded pagination",
     parameters: Type.Object({
-      limit: Type.Optional(Type.Number({ description: "Maximum artifacts to return; defaults to 20" })),
+      limit: Type.Optional(Type.Number({ description: "Maximum artifacts to return; defaults to 20, max 100" })),
+      afterIndex: Type.Optional(Type.Number({ description: "Exclusive artifact index cursor" })),
+      type: Type.Optional(artifactTypeSchema),
+      workerId: Type.Optional(Type.String()),
+      taskId: Type.Optional(Type.String()),
+      runId: Type.Optional(Type.String()),
+      gateId: Type.Optional(Type.String()),
+      artifactId: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const run = getOrCreateRunForRepo(ctx.cwd);
-      const limit = Math.max(1, Math.min(params.limit ?? 20, 100));
-      const artifacts = run.artifacts.slice(-limit);
+      const page = queryConductorArtifacts(getOrCreateRunForRepo(ctx.cwd), params);
       const text =
-        artifacts.length === 0
+        page.artifacts.length === 0
           ? "no conductor artifacts"
-          : artifacts.map((artifact) => `${artifact.artifactId} ${artifact.type} ${artifact.ref}`).join("\n");
-      return { content: [{ type: "text", text }], details: { artifacts } };
+          : page.artifacts.map((artifact) => `${artifact.artifactId} ${artifact.type} ${artifact.ref}`).join("\n");
+      return { content: [{ type: "text", text }], details: page };
     },
   });
 

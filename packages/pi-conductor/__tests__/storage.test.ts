@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  addConductorArtifact,
   addTask,
   addWorker,
   appendConductorEvent,
@@ -15,6 +16,7 @@ import {
   finishWorkerRun,
   getConductorProjectDir,
   mutateRun,
+  queryConductorArtifacts,
   queryConductorEvents,
   readRun,
   reconcileRunLeases,
@@ -380,6 +382,31 @@ describe("storage helpers", () => {
 
     expect(audited.tasks[0]).toMatchObject({ state: "completed", latestProgress: null });
     expect(audited.events.at(-1)).toMatchObject({ type: "task.progress_rejected" });
+  });
+
+  it("queries artifacts with filters and pagination", () => {
+    let run = createEmptyRun("abc", "/repo");
+    run = addConductorArtifact(run, {
+      artifactId: "artifact-1",
+      type: "log",
+      ref: "progress://run-1/1",
+      resourceRefs: { taskId: "task-1", runId: "run-1" },
+      producer: { type: "child_run", id: "run-1" },
+    });
+    run = addConductorArtifact(run, {
+      artifactId: "artifact-2",
+      type: "completion_report",
+      ref: "completion://run-1",
+      resourceRefs: { taskId: "task-1", runId: "run-1" },
+      producer: { type: "child_run", id: "run-1" },
+    });
+
+    const page = queryConductorArtifacts(run, { taskId: "task-1", type: "log", limit: 1 });
+
+    expect(page.artifacts.map((artifact) => artifact.artifactId)).toEqual(["artifact-1"]);
+    expect(page.lastIndex).toBe(1);
+    expect(page.hasMore).toBe(false);
+    expect(queryConductorArtifacts(run, { limit: 1 }).hasMore).toBe(true);
   });
 
   it("rejects unsafe local artifact refs", () => {
