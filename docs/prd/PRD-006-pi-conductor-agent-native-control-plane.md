@@ -806,6 +806,9 @@ Then the README describes conductor as agent-first durable orchestration
 | `docs/prd/PRD-003-pi-conductor-single-worker-run.md`                                  | Foundation: native foreground run primitive this PRD generalizes into backend-backed task runs. |
 | `docs/brainstorms/2026-04-24-pi-conductor-agent-native-control-plane-requirements.md` | Source requirements: captures the full-control-plane direction and user constraints.            |
 | `docs/ideation/2026-04-24-pi-conductor-agent-native-orchestration-ideation.md`        | Source ideation: explores agent-native orchestration options and rejected directions.           |
+| `docs/adr/ADR-0012-conductor-owned-state-replaceable-backends.md`                     | Records the canonical-state and backend-adapter architecture decision.                          |
+| `docs/adr/ADR-0013-explicit-child-completion-task-outcome.md`                         | Records the explicit semantic completion and needs-review fallback decision.                    |
+| `docs/adr/ADR-0014-trusted-human-approval-high-risk-gates.md`                         | Records the trusted-human-only approval boundary for high-risk gates.                           |
 | `packages/pi-conductor/README.md`                                                     | Must be updated by implementation to reflect the new model.                                     |
 | `packages/pi-conductor/extensions/*`                                                  | Primary implementation area.                                                                    |
 
@@ -817,6 +820,7 @@ Then the README describes conductor as agent-first durable orchestration
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
 | 2026-04-24 | Initial draft                                                                                                                                                                                                                                    | feniix |
 | 2026-04-24 | Marked implemented and recorded as-built scope: objectives, DAGs, scheduler policy/fairness/capacity, trusted human approval UI, granular events, locked persistence, gate hardening, evidence/readiness surfaces, and audit-preserving cleanup. | feniix |
+| 2026-04-24 | Linked as-built ADRs for conductor-owned state/backends, explicit child completion, and trusted human approval gates.                                                                                                                            | feniix |
 
 ---
 
