@@ -15,12 +15,16 @@
   "type": "module",
   "files": [
     "extensions/",
+    "skills/",
     "README.md",
     "LICENSE"
   ],
   "pi": {
     "extensions": [
       "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "peerDependencies": {

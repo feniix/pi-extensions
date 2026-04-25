@@ -77,6 +77,17 @@ describe("pi-conductor extension", () => {
     expect(extension).toContain('name: "conductor_create_worker_pr"');
   });
 
+  it("packages conductor workflow skills", () => {
+    const packageJson = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8"));
+    const gateReviewSkill = readFileSync(join(__dirname, "../skills/conductor-gate-review/SKILL.md"), "utf-8");
+    const orchestrationSkill = readFileSync(join(__dirname, "../skills/conductor-orchestration/SKILL.md"), "utf-8");
+
+    expect(packageJson.files).toContain("skills/");
+    expect(packageJson.pi.skills).toEqual(["./skills"]);
+    expect(gateReviewSkill).toContain("/conductor human dashboard");
+    expect(orchestrationSkill).toContain('policy: "execute"');
+  });
+
   it("hides legacy worker tools unless compatibility is enabled", () => {
     const names = collectToolNames();
     expect(names).toContain("conductor_get_project");
