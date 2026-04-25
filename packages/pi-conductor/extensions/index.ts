@@ -190,7 +190,9 @@ function truncatePlainLine(line: string, width: number): string {
 async function chooseHumanGateAction(
   ui: HumanGateDecisionUi,
   review: HumanGateReview,
+  input: { includePacket?: boolean } = {},
 ): Promise<HumanGateDashboardAction | null> {
+  const includePacket = input.includePacket ?? true;
   if (!ui.custom && !ui.select) {
     ui.notify("trusted human gate approval requires a selectable UI", "error");
     return null;
@@ -201,7 +203,15 @@ async function chooseHumanGateAction(
       const fg = (color: string, text: string) => themeLike.fg?.(color, text) ?? text;
       const bold = (text: string) => themeLike.bold?.(text) ?? text;
       const actions: Array<{ value: HumanGateDashboardAction; label: string; description: string }> = [
-        { value: "packet", label: "Open review packet", description: "Inspect the full markdown review packet" },
+        ...(includePacket
+          ? [
+              {
+                value: "packet" as const,
+                label: "Open review packet",
+                description: "Inspect the full markdown review packet",
+              },
+            ]
+          : []),
         { value: "approve", label: "Approve gate", description: "Allow the gated operation to proceed" },
         { value: "reject", label: "Reject gate", description: "Block the gated operation" },
         { value: "cancel", label: "Cancel", description: "Leave the gate open" },
@@ -243,7 +253,12 @@ async function chooseHumanGateAction(
     return action ?? null;
   }
 
-  const decision = await ui.select?.(review.prompt, ["Open review packet", "Approve gate", "Reject gate", "Cancel"]);
+  const decision = await ui.select?.(review.prompt, [
+    ...(includePacket ? ["Open review packet"] : []),
+    "Approve gate",
+    "Reject gate",
+    "Cancel",
+  ]);
   if (decision === "Open review packet") return "packet";
   if (decision === "Approve gate") return "approve";
   if (decision === "Reject gate") return "reject";
@@ -307,14 +322,10 @@ async function resolveHumanGateDecision(
   ui: HumanGateDecisionUi,
 ) {
   const review = buildHumanGateReview(cwd, gateId);
-  let action = await chooseHumanGateAction(ui, review);
+  let action = await chooseHumanGateAction(ui, review, { includePacket: Boolean(ui.editor) });
   while (action === "packet") {
-    if (!ui.editor) {
-      ui.notify("opening the conductor review packet requires editor UI support", "error");
-      return;
-    }
-    await ui.editor("Conductor gate review packet", review.prompt);
-    action = await chooseHumanGateAction(ui, review);
+    await ui.editor?.("Conductor gate review packet", review.prompt);
+    action = await chooseHumanGateAction(ui, review, { includePacket: Boolean(ui.editor) });
   }
   if (!action || action === "cancel") {
     ui.notify(`left gate ${gateId} open`, "info");
@@ -369,8 +380,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
       const humanQueue = trimmed.match(/^human\s+gates(?:\s+(.+))?$/);
       if (humanQueue) {
         if (!ctx.hasUI) {
-          console.error("error: trusted human gate queue requires interactive UI");
-          return;
+          throw new Error("trusted human gate queue requires interactive UI");
         }
         const run = getOrCreateRunForRepo(ctx.cwd);
         const gates = run.gates.filter((gate) => gate.status === "open");
@@ -391,8 +401,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
       if (humanApproval) {
         const gateId = humanApproval[1];
         if (!ctx.hasUI) {
-          console.error("error: trusted human gate approval requires interactive UI");
-          return;
+          throw new Error("trusted human gate approval requires interactive UI");
         }
         const run = getOrCreateRunForRepo(ctx.cwd);
         const gate = run.gates.find((entry) => entry.gateId === gateId);

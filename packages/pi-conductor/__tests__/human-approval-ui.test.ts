@@ -18,7 +18,7 @@ type CommandContext = {
         done: (value: T) => void,
       ) => { render: (width: number) => string[]; handleInput?: (data: string) => void },
     ) => Promise<T | undefined> | T | undefined;
-    select?: (message: string) => Promise<string> | string;
+    select?: (message: string, options?: string[]) => Promise<string> | string;
     editor?: (title: string, text: string) => Promise<string | undefined> | string | undefined;
     input?: (message: string, placeholder?: string) => Promise<string | undefined> | string | undefined;
     notify: (message: string, level?: string) => void;
@@ -154,7 +154,6 @@ describe("trusted human gate approval UI", () => {
             },
           );
           dashboardText = component.render(100).join("\n");
-          component.handleInput?.("\u001b[B");
           component.handleInput?.("\r");
           return result;
         },
@@ -211,7 +210,6 @@ describe("trusted human gate approval UI", () => {
             component.handleInput?.("\r");
           } else {
             dashboardText = component.render(100).join("\n");
-            component.handleInput?.("\u001b[B");
             component.handleInput?.("\r");
           }
           return result;
@@ -265,6 +263,36 @@ describe("trusted human gate approval UI", () => {
     });
   });
 
+  it("reports empty and cancelled gate queues without changing gates", async () => {
+    const notifications: string[] = [];
+
+    await conductorHandler()("human gates", {
+      cwd: repoRoot,
+      hasUI: true,
+      ui: { notify: (message: string) => notifications.push(message) },
+    });
+    expect(notifications).toContain("no open conductor gates");
+
+    const gate = createGateForRepo(repoRoot, {
+      type: "needs_input",
+      resourceRefs: {},
+      requestedDecision: "Choose?",
+    });
+    await conductorHandler()("human gates", {
+      cwd: repoRoot,
+      hasUI: true,
+      ui: {
+        select: async () => "Cancel",
+        notify: (message: string) => notifications.push(message),
+      },
+    });
+
+    expect(notifications).toContain("left conductor gates unchanged");
+    expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === gate.gateId)).toMatchObject({
+      status: "open",
+    });
+  });
+
   it("reports missing UI capabilities instead of silently no-oping", async () => {
     const gate = createGateForRepo(repoRoot, {
       type: "needs_input",
@@ -284,6 +312,44 @@ describe("trusted human gate approval UI", () => {
     expect(notifications).toContain("trusted human gate approval requires a selectable UI");
     expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === gate.gateId)).toMatchObject({
       status: "open",
+    });
+  });
+
+  it("does not offer packet action when editor support is unavailable", async () => {
+    const gate = createGateForRepo(repoRoot, {
+      type: "needs_review",
+      resourceRefs: {},
+      requestedDecision: "Review before merge",
+    });
+    let dashboardText = "";
+
+    await conductorHandler()(`human decide gate ${gate.gateId}`, {
+      cwd: repoRoot,
+      hasUI: true,
+      ui: {
+        custom: async <T>(factory: Parameters<NonNullable<CommandContext["ui"]["custom"]>>[0]) => {
+          let result: T | undefined;
+          const component = factory(
+            { requestRender: () => undefined },
+            { fg: (_color, text) => text, bold: (text) => text },
+            undefined,
+            (value) => {
+              result = value as T;
+            },
+          );
+          dashboardText = component.render(100).join("\n");
+          component.handleInput?.("\r");
+          return result;
+        },
+        input: async () => "approved without packet action",
+        notify: () => undefined,
+      },
+    });
+
+    expect(dashboardText).not.toContain("Open review packet");
+    expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === gate.gateId)).toMatchObject({
+      status: "approved",
+      resolutionReason: "approved without packet action",
     });
   });
 
@@ -392,6 +458,29 @@ describe("trusted human gate approval UI", () => {
       status: "approved",
       resolutionReason: "reviewed full packet",
     });
+  });
+
+  it("rejects non-UI human gate commands with machine-detectable failures", async () => {
+    const gate = createGateForRepo(repoRoot, {
+      type: "needs_input",
+      resourceRefs: {},
+      requestedDecision: "Needs UI",
+    });
+
+    await expect(
+      conductorHandler()(`human decide gate ${gate.gateId}`, {
+        cwd: repoRoot,
+        hasUI: false,
+        ui: { notify: () => undefined },
+      }),
+    ).rejects.toThrow("trusted human gate approval requires interactive UI");
+    await expect(
+      conductorHandler()("human gates", {
+        cwd: repoRoot,
+        hasUI: false,
+        ui: { notify: () => undefined },
+      }),
+    ).rejects.toThrow("trusted human gate queue requires interactive UI");
   });
 
   it("can reject or cancel a gate without exposing model human approval tools", async () => {

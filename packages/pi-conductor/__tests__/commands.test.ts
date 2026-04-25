@@ -44,6 +44,13 @@ describe("runConductorCommand", () => {
     expect(text).toContain("workers: 0");
   });
 
+  it("documents trusted human gate commands in usage", async () => {
+    const text = await runConductorCommand(repoDir, "help");
+    expect(text).toContain("/conductor human gates [reason]");
+    expect(text).toContain("/conductor human decide gate <gate-id> [reason]");
+    expect(text).toContain("conductor_list_gates");
+  });
+
   it("supports resource-shaped worker and task inspection commands", async () => {
     const workerText = await runConductorCommand(repoDir, "create worker backend");
     expect(workerText).toContain("created worker backend");
