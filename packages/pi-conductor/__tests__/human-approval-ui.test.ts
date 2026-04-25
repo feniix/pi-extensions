@@ -118,12 +118,71 @@ describe("trusted human gate approval UI", () => {
 
     expect(dashboardText).toContain("Conductor Gate Approval Dashboard");
     expect(dashboardText).toContain("Evidence:");
+    expect(dashboardText).toContain("Artifacts: none");
     expect(dashboardText).toContain("Review Packet Preview");
     expect(dashboardText).toContain("Conductor Human Review Packet");
     expect(dashboardText).toContain("Approve gate");
     expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === gate.gateId)).toMatchObject({
       status: "approved",
       resolutionReason: "approved from dashboard",
+    });
+  });
+
+  it("can browse open gates before opening the approval dashboard", async () => {
+    const firstGate = createGateForRepo(repoRoot, {
+      type: "needs_input",
+      resourceRefs: {},
+      requestedDecision: "First gate",
+    });
+    const secondGate = createGateForRepo(repoRoot, {
+      type: "destructive_cleanup",
+      resourceRefs: {},
+      requestedDecision: "Second gate",
+    });
+    let queueText = "";
+    let dashboardText = "";
+    let customCall = 0;
+
+    await conductorHandler()("human gates approved from queue", {
+      cwd: repoRoot,
+      hasUI: true,
+      ui: {
+        custom: async <T>(factory: Parameters<NonNullable<CommandContext["ui"]["custom"]>>[0]) => {
+          customCall += 1;
+          let result: T | undefined;
+          const component = factory(
+            { requestRender: () => undefined },
+            { fg: (_color, text) => text, bold: (text) => text },
+            undefined,
+            (value) => {
+              result = value as T;
+            },
+          );
+          if (customCall === 1) {
+            queueText = component.render(100).join("\n");
+            component.handleInput?.("\u001b[B");
+            component.handleInput?.("\r");
+          } else {
+            dashboardText = component.render(100).join("\n");
+            component.handleInput?.("\u001b[B");
+            component.handleInput?.("\r");
+          }
+          return result;
+        },
+        notify: () => undefined,
+      },
+    });
+
+    expect(queueText).toContain("Conductor Gate Queue");
+    expect(queueText).toContain(firstGate.gateId);
+    expect(queueText).toContain(secondGate.gateId);
+    expect(dashboardText).toContain("Conductor Gate Approval Dashboard");
+    expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === secondGate.gateId)).toMatchObject({
+      status: "approved",
+      resolutionReason: "approved from queue",
+    });
+    expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === firstGate.gateId)).toMatchObject({
+      status: "open",
     });
   });
 

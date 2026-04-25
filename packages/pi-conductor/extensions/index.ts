@@ -59,6 +59,7 @@ import {
   readRun,
   writeRun,
 } from "./storage.js";
+import type { ArtifactRecord, GateRecord } from "./types.js";
 
 function findRepoRoot(cwd: string): string | null {
   try {
@@ -85,6 +86,26 @@ type HumanGateReview = {
   dashboardLines: string[];
 };
 
+type HumanGateDecisionUi = {
+  custom?: <T>(
+    factory: (
+      tui: { requestRender: () => void },
+      theme: unknown,
+      keybindings: unknown,
+      done: (value: T) => void,
+    ) => unknown,
+    options?: unknown,
+  ) => Promise<T | undefined> | T | undefined;
+  select?: (message: string, options: string[]) => Promise<string | undefined> | string | undefined;
+  editor?: (title: string, text: string) => Promise<string | undefined> | string | undefined;
+  input?: (message: string, placeholder?: string) => Promise<string | undefined> | string | undefined;
+  notify: (message: string, level?: string) => void;
+};
+
+function summarizeArtifact(artifact: ArtifactRecord): string {
+  return `${artifact.artifactId} [${artifact.type}] ${artifact.ref}`;
+}
+
 function buildHumanGateReview(cwd: string, gateId: string): HumanGateReview {
   const run = getOrCreateRunForRepo(cwd);
   const gate = run.gates.find((entry) => entry.gateId === gateId);
@@ -93,6 +114,7 @@ function buildHumanGateReview(cwd: string, gateId: string): HumanGateReview {
   const evidence = buildEvidenceBundleForRepo(cwd, { ...refs, purpose: "handoff", includeEvents: true });
   const timeline = buildResourceTimelineForRepo(cwd, { ...refs, gateId, limit: 10, includeArtifacts: true });
   const review = prepareHumanReviewForRepo(cwd, { objectiveId: refs.objectiveId, taskId: refs.taskId });
+  const artifacts = evidence.artifacts.slice(-5).map(summarizeArtifact);
   const readiness =
     gate.operation === "create_worker_pr" || gate.type === "ready_for_pr"
       ? checkReadinessForRepo(cwd, { ...refs, purpose: "pr_readiness" })
@@ -102,6 +124,8 @@ function buildHumanGateReview(cwd: string, gateId: string): HumanGateReview {
   const readinessText = readiness
     ? `${readiness.status}: blockers=${readiness.blockers.length} warnings=${readiness.warnings.length}`
     : "not applicable";
+  const blockerLines = readiness?.blockers.map((blocker) => `- ${blocker.message}`) ?? [];
+  const warningLines = readiness?.warnings.map((warning) => `- ${warning.message}`) ?? [];
   const eventLines = timeline.events.slice(-10).map((event) => `#${event.sequence} ${event.type}`);
   const reviewPreview = review.markdown.split("\n").slice(0, 8);
   const dashboardLines = [
@@ -114,6 +138,9 @@ function buildHumanGateReview(cwd: string, gateId: string): HumanGateReview {
     `Evidence: tasks=${evidence.tasks.length} runs=${evidence.runs.length} gates=${evidence.gates.length} artifacts=${evidence.artifacts.length}`,
     evidence.pr?.url ? `PR: ${evidence.pr.url}` : null,
     eventLines.length > 0 ? `Recent: ${eventLines.slice(-3).join(" | ")}` : "Recent: no recent events",
+    artifacts.length > 0 ? `Artifacts: ${artifacts.slice(0, 3).join(" | ")}` : "Artifacts: none",
+    blockerLines.length > 0 ? `Blockers: ${blockerLines.slice(0, 2).join(" | ")}` : null,
+    warningLines.length > 0 ? `Warnings: ${warningLines.slice(0, 2).join(" | ")}` : null,
     "",
     "Review Packet Preview",
     ...reviewPreview,
@@ -138,6 +165,15 @@ function buildHumanGateReview(cwd: string, gateId: string): HumanGateReview {
     "Timeline",
     eventLines.join("\n") || "no recent events",
     "",
+    "Artifacts",
+    artifacts.join("\n") || "none",
+    "",
+    "Blockers",
+    blockerLines.join("\n") || "none",
+    "",
+    "Warnings",
+    warningLines.join("\n") || "none",
+    "",
     "Review Packet",
     review.markdown,
   ]
@@ -152,18 +188,7 @@ function truncatePlainLine(line: string, width: number): string {
 }
 
 async function chooseHumanGateAction(
-  ui: {
-    custom?: <T>(
-      factory: (
-        tui: { requestRender: () => void },
-        theme: unknown,
-        keybindings: unknown,
-        done: (value: T) => void,
-      ) => unknown,
-      options?: unknown,
-    ) => Promise<T | undefined> | T | undefined;
-    select?: (message: string, options: string[]) => Promise<string | undefined> | string | undefined;
-  },
+  ui: HumanGateDecisionUi,
   review: HumanGateReview,
 ): Promise<HumanGateDashboardAction | null> {
   if (ui.custom) {
@@ -221,6 +246,82 @@ async function chooseHumanGateAction(
   return decision ? "cancel" : null;
 }
 
+async function chooseHumanGateFromQueue(ui: HumanGateDecisionUi, gates: GateRecord[]): Promise<string | null> {
+  if (gates.length === 0) return null;
+  if (ui.custom) {
+    const gateId = await ui.custom<string | null>((tui, theme, _keybindings, done) => {
+      const themeLike = theme as { fg?: (color: string, text: string) => string; bold?: (text: string) => string };
+      const fg = (color: string, text: string) => themeLike.fg?.(color, text) ?? text;
+      const bold = (text: string) => themeLike.bold?.(text) ?? text;
+      let selected = 0;
+      return {
+        render(width: number): string[] {
+          const plainLines = [
+            "Conductor Gate Queue",
+            "",
+            ...gates.map((gate, index) => {
+              const prefix = index === selected ? "› " : "  ";
+              return `${prefix}${gate.gateId} [${gate.type}] ${gate.operation} — ${gate.requestedDecision}`;
+            }),
+            "",
+            "↑↓ navigate • enter review • esc cancel",
+          ];
+          return plainLines.map((line, index) => {
+            const truncated = truncatePlainLine(line, width);
+            if (index === 0) return fg("accent", bold(truncated));
+            if (truncated.startsWith("› ")) return fg("accent", truncated);
+            if (truncated.startsWith("↑↓")) return fg("dim", truncated);
+            return truncated;
+          });
+        },
+        handleInput(data: string): void {
+          if (data === "\u001b[A" || data === "k") selected = (selected + gates.length - 1) % gates.length;
+          if (data === "\u001b[B" || data === "j") selected = (selected + 1) % gates.length;
+          if (data === "\r" || data === "\n") done(gates[selected]?.gateId ?? null);
+          if (data === "\u001b" || data === "\u0003") done(null);
+          tui.requestRender();
+        },
+        invalidate(): void {},
+      };
+    });
+    return gateId ?? null;
+  }
+  const labels = gates.map((gate) => `${gate.gateId} [${gate.type}] ${gate.requestedDecision}`);
+  const selected = await ui.select?.("Select a conductor gate to review", [...labels, "Cancel"]);
+  if (!selected || selected === "Cancel") return null;
+  return gates[labels.indexOf(selected)]?.gateId ?? null;
+}
+
+async function resolveHumanGateDecision(
+  cwd: string,
+  gateId: string,
+  reasonArg: string | undefined,
+  ui: HumanGateDecisionUi,
+) {
+  const review = buildHumanGateReview(cwd, gateId);
+  let action = await chooseHumanGateAction(ui, review);
+  while (action === "packet") {
+    await ui.editor?.("Conductor gate review packet", review.prompt);
+    action = await chooseHumanGateAction(ui, review);
+  }
+  if (!action || action === "cancel") {
+    ui.notify(`left gate ${gateId} open`, "info");
+    return;
+  }
+  const status = action === "reject" ? "rejected" : "approved";
+  const defaultReason = status === "approved" ? "Approved from pi conductor UI" : "Rejected from pi conductor UI";
+  const reason =
+    reasonArg?.trim() || (await ui.input?.("Reason for this gate decision", defaultReason)) || defaultReason;
+  const humanId = `ui:${process.env.USER ?? "local-human"}`;
+  const resolved = resolveGateFromTrustedHumanForRepo(cwd, {
+    gateId,
+    status,
+    humanId,
+    resolutionReason: reason,
+  });
+  ui.notify(`${status} gate ${resolved.gateId} as trusted human`, "info");
+}
+
 function getStatusText(cwd: string): string {
   const repoRoot = findRepoRoot(cwd);
   if (!repoRoot) {
@@ -253,6 +354,27 @@ export default function conductorExtension(pi: ExtensionAPI) {
     description: "Manage pi-conductor workers and PR preparation",
     handler: async (args, ctx) => {
       const trimmed = args.trim();
+      const humanQueue = trimmed.match(/^human\s+gates(?:\s+(.+))?$/);
+      if (humanQueue) {
+        if (!ctx.hasUI) {
+          console.log("error: trusted human gate queue requires interactive UI");
+          return;
+        }
+        const run = getOrCreateRunForRepo(ctx.cwd);
+        const gates = run.gates.filter((gate) => gate.status === "open");
+        if (gates.length === 0) {
+          ctx.ui.notify("no open conductor gates", "info");
+          return;
+        }
+        const ui = ctx.ui as unknown as HumanGateDecisionUi;
+        const gateId = await chooseHumanGateFromQueue(ui, gates);
+        if (!gateId) {
+          ctx.ui.notify("left conductor gates unchanged", "info");
+          return;
+        }
+        await resolveHumanGateDecision(ctx.cwd, gateId, humanQueue[1], ui);
+        return;
+      }
       const humanApproval = trimmed.match(/^human\s+(?:approve|decide)\s+gate\s+(\S+)(?:\s+(.+))?$/);
       if (humanApproval) {
         const gateId = humanApproval[1];
@@ -266,45 +388,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
           ctx.ui.notify(`gate not found: ${gateId}`, "error");
           return;
         }
-        const review = buildHumanGateReview(ctx.cwd, gateId);
-        const ui = ctx.ui as unknown as {
-          custom?: <T>(
-            factory: (
-              tui: { requestRender: () => void },
-              theme: unknown,
-              keybindings: unknown,
-              done: (value: T) => void,
-            ) => unknown,
-            options?: unknown,
-          ) => Promise<T | undefined> | T | undefined;
-          select?: (message: string, options: string[]) => Promise<string | undefined> | string | undefined;
-          editor?: (title: string, text: string) => Promise<string | undefined> | string | undefined;
-          input?: (message: string, placeholder?: string) => Promise<string | undefined> | string | undefined;
-          notify: typeof ctx.ui.notify;
-        };
-        let action = await chooseHumanGateAction(ui, review);
-        while (action === "packet") {
-          await ui.editor?.("Conductor gate review packet", review.prompt);
-          action = await chooseHumanGateAction(ui, review);
-        }
-        if (!action || action === "cancel") {
-          ctx.ui.notify(`left gate ${gateId} open`, "info");
-          return;
-        }
-        const status = action === "reject" ? "rejected" : "approved";
-        const defaultReason = status === "approved" ? "Approved from pi conductor UI" : "Rejected from pi conductor UI";
-        const reason =
-          humanApproval[2]?.trim() ||
-          (await ui.input?.("Reason for this gate decision", defaultReason)) ||
-          defaultReason;
-        const humanId = `ui:${process.env.USER ?? "local-human"}`;
-        const resolved = resolveGateFromTrustedHumanForRepo(ctx.cwd, {
-          gateId,
-          status,
-          humanId,
-          resolutionReason: reason,
-        });
-        ctx.ui.notify(`${status} gate ${resolved.gateId} as trusted human`, "info");
+        await resolveHumanGateDecision(ctx.cwd, gateId, humanApproval[2], ctx.ui as unknown as HumanGateDecisionUi);
         return;
       }
       const text = await runConductorCommand(ctx.cwd, args);

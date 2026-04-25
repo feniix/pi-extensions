@@ -52,6 +52,7 @@ Primary inspection/debug UX is the `/conductor` command group:
 /conductor status
 /conductor history [project|worker|task|run|gate|artifact] [id] [--after N] [--limit N]
 /conductor reconcile [--dry-run]
+/conductor human gates [reason]
 /conductor human approve gate <gate-id> [reason]
 /conductor human decide gate <gate-id> [reason]
 ```
@@ -184,7 +185,7 @@ conductor_list_artifacts({ taskId })
 conductor_read_artifact({ artifactId, maxBytes: 8192 })
 ```
 
-Human-only approval gates such as `ready_for_pr` and `destructive_cleanup` are surfaced for review but are not safe autonomous actions. The model-facing `conductor_resolve_gate` tool resolves only as a parent agent. Trusted human decisions come through the interactive host/UI command `/conductor human decide gate <gate-id> [reason]`, which opens a keyboard-navigable approval dashboard when the host supports custom UI components, falls back to standard dialogs otherwise, and shows gate context, readiness, evidence, timeline, and a human review packet before approve/reject/cancel.
+Human-only approval gates such as `ready_for_pr` and `destructive_cleanup` are surfaced for review but are not safe autonomous actions. The model-facing `conductor_resolve_gate` tool resolves only as a parent agent. Trusted human decisions come through the interactive host/UI commands `/conductor human gates` or `/conductor human decide gate <gate-id> [reason]`, which open keyboard-navigable gate queue and approval dashboards when the host supports custom UI components, fall back to standard dialogs otherwise, and show gate context, readiness, blockers, warnings, artifact summaries, timeline, and a human review packet before approve/reject/cancel.
 
 ## Development
 
