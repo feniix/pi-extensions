@@ -1,0 +1,32 @@
+{
+  "lastChangelogVersion": "0.70.0",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.5",
+  "pi-code-reasoning": {
+    "maxBytes": 51200,
+    "maxLines": 2000
+  },
+  "pi-exa": {
+    "enabledTools": [
+      "web_search_exa",
+      "web_fetch_exa",
+      "web_answer_exa",
+      "web_find_similar_exa",
+      "web_research_exa"
+   ],
+   "advancedEnabled": true,
+   "researchEnabled": true
+  },
+  "pi-ref-tools": {
+    "url": "https://api.ref.tools/mcp",
+    "timeoutMs": 30000,
+    "protocolVersion": "2025-06-18",
+    "maxBytes": 51200,
+    "maxLines": 2000
+  },
+  "pi-sequential-thinking": {
+    "storageDir": null,
+    "maxBytes": 51200,
+    "maxLines": 2000
+  }
+}
