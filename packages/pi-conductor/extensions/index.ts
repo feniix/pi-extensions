@@ -85,6 +85,7 @@ function buildHumanGatePrompt(cwd: string, gateId: string): string {
   const refs = gate.resourceRefs;
   const evidence = buildEvidenceBundleForRepo(cwd, { ...refs, purpose: "handoff", includeEvents: true });
   const timeline = buildResourceTimelineForRepo(cwd, { ...refs, gateId, limit: 10, includeArtifacts: true });
+  const review = prepareHumanReviewForRepo(cwd, { objectiveId: refs.objectiveId, taskId: refs.taskId });
   const readiness =
     gate.operation === "create_worker_pr" || gate.type === "ready_for_pr"
       ? checkReadinessForRepo(cwd, { ...refs, purpose: "pr_readiness" })
@@ -115,6 +116,9 @@ function buildHumanGatePrompt(cwd: string, gateId: string): string {
       .slice(-10)
       .map((event) => `#${event.sequence} ${event.type}`)
       .join("\n") || "no recent events",
+    "",
+    "Review Packet",
+    review.markdown,
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -168,21 +172,35 @@ export default function conductorExtension(pi: ExtensionAPI) {
         const prompt = buildHumanGatePrompt(ctx.cwd, gateId);
         const ui = ctx.ui as unknown as {
           select?: (message: string, options: string[]) => Promise<string | undefined> | string | undefined;
+          editor?: (title: string, text: string) => Promise<string | undefined> | string | undefined;
+          input?: (message: string, placeholder?: string) => Promise<string | undefined> | string | undefined;
           notify: typeof ctx.ui.notify;
         };
-        const decision = await ui.select?.(prompt, ["Approve gate", "Reject gate", "Cancel"]);
+        let decision = await ui.select?.(prompt, ["Open review packet", "Approve gate", "Reject gate", "Cancel"]);
+        if (decision === "Open review packet") {
+          await ui.editor?.("Conductor gate review packet", prompt);
+          decision = await ui.select?.("Choose a trusted human decision for the conductor gate", [
+            "Approve gate",
+            "Reject gate",
+            "Cancel",
+          ]);
+        }
         if (!decision || decision === "Cancel") {
           ctx.ui.notify(`left gate ${gateId} open`, "info");
           return;
         }
         const status = decision === "Reject gate" ? "rejected" : "approved";
         const defaultReason = status === "approved" ? "Approved from pi conductor UI" : "Rejected from pi conductor UI";
+        const reason =
+          humanApproval[2]?.trim() ||
+          (await ui.input?.("Reason for this gate decision", defaultReason)) ||
+          defaultReason;
         const humanId = `ui:${process.env.USER ?? "local-human"}`;
         const resolved = resolveGateFromTrustedHumanForRepo(ctx.cwd, {
           gateId,
           status,
           humanId,
-          resolutionReason: humanApproval[2]?.trim() || defaultReason,
+          resolutionReason: reason,
         });
         ctx.ui.notify(`${status} gate ${resolved.gateId} as trusted human`, "info");
         return;

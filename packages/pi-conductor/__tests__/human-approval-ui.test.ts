@@ -8,7 +8,12 @@ import conductorExtension from "../extensions/index.js";
 type CommandContext = {
   cwd: string;
   hasUI: boolean;
-  ui: { select?: (message: string) => Promise<string> | string; notify: (message: string, level?: string) => void };
+  ui: {
+    select?: (message: string) => Promise<string> | string;
+    editor?: (title: string, text: string) => Promise<string | undefined> | string | undefined;
+    input?: (message: string, placeholder?: string) => Promise<string | undefined> | string | undefined;
+    notify: (message: string, level?: string) => void;
+  };
 };
 
 type CommandHandler = (args: string, ctx: CommandContext) => Promise<void>;
@@ -66,8 +71,39 @@ describe("trusted human gate approval UI", () => {
     expect(prompt).toContain("Readiness");
     expect(prompt).toContain("Evidence");
     expect(prompt).toContain("Timeline");
+    expect(prompt).toContain("Review Packet");
     const resolved = getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === gate.gateId);
     expect(resolved).toMatchObject({ status: "approved", resolvedBy: { type: "human" } });
+  });
+
+  it("can open a full review packet and collect a decision reason", async () => {
+    const gate = createGateForRepo(repoRoot, {
+      type: "needs_review",
+      resourceRefs: {},
+      requestedDecision: "Review before merge",
+    });
+    const decisions = ["Open review packet", "Approve gate"];
+    let editorText = "";
+
+    await conductorHandler()(`human decide gate ${gate.gateId}`, {
+      cwd: repoRoot,
+      hasUI: true,
+      ui: {
+        select: async () => decisions.shift() ?? "Cancel",
+        editor: async (_title: string, text: string) => {
+          editorText = text;
+          return text;
+        },
+        input: async () => "reviewed full packet",
+        notify: () => undefined,
+      },
+    });
+
+    expect(editorText).toContain("Conductor Human Review Packet");
+    expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === gate.gateId)).toMatchObject({
+      status: "approved",
+      resolutionReason: "reviewed full packet",
+    });
   });
 
   it("can reject or cancel a gate without exposing model human approval tools", async () => {
