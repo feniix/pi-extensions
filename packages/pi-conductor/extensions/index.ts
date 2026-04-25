@@ -78,10 +78,17 @@ function shouldRegisterLegacyWorkerTools(): boolean {
   return process.env.PI_CONDUCTOR_ENABLE_LEGACY_WORKER_TOOLS === "1";
 }
 
-function buildHumanGatePrompt(cwd: string, gateId: string): string {
+type HumanGateDashboardAction = "packet" | "approve" | "reject" | "cancel";
+
+type HumanGateReview = {
+  prompt: string;
+  dashboardLines: string[];
+};
+
+function buildHumanGateReview(cwd: string, gateId: string): HumanGateReview {
   const run = getOrCreateRunForRepo(cwd);
   const gate = run.gates.find((entry) => entry.gateId === gateId);
-  if (!gate) return `Gate not found: ${gateId}`;
+  if (!gate) return { prompt: `Gate not found: ${gateId}`, dashboardLines: [`Gate not found: ${gateId}`] };
   const refs = gate.resourceRefs;
   const evidence = buildEvidenceBundleForRepo(cwd, { ...refs, purpose: "handoff", includeEvents: true });
   const timeline = buildResourceTimelineForRepo(cwd, { ...refs, gateId, limit: 10, includeArtifacts: true });
@@ -92,7 +99,26 @@ function buildHumanGatePrompt(cwd: string, gateId: string): string {
       : refs.taskId
         ? checkReadinessForRepo(cwd, { ...refs, purpose: "task_review" })
         : null;
-  return [
+  const readinessText = readiness
+    ? `${readiness.status}: blockers=${readiness.blockers.length} warnings=${readiness.warnings.length}`
+    : "not applicable";
+  const eventLines = timeline.events.slice(-10).map((event) => `#${event.sequence} ${event.type}`);
+  const reviewPreview = review.markdown.split("\n").slice(0, 8);
+  const dashboardLines = [
+    "Conductor Gate Approval",
+    `Gate: ${gate.gateId}`,
+    `Type: ${gate.type}`,
+    `Operation: ${gate.operation}`,
+    `Decision: ${gate.requestedDecision}`,
+    `Readiness: ${readinessText}`,
+    `Evidence: tasks=${evidence.tasks.length} runs=${evidence.runs.length} gates=${evidence.gates.length} artifacts=${evidence.artifacts.length}`,
+    evidence.pr?.url ? `PR: ${evidence.pr.url}` : null,
+    eventLines.length > 0 ? `Recent: ${eventLines.slice(-3).join(" | ")}` : "Recent: no recent events",
+    "",
+    "Review Packet Preview",
+    ...reviewPreview,
+  ].filter((line): line is string => line !== null);
+  const prompt = [
     `Gate ${gate.gateId}`,
     `Type: ${gate.type}`,
     `Status: ${gate.status}`,
@@ -103,25 +129,96 @@ function buildHumanGatePrompt(cwd: string, gateId: string): string {
     gate.expiresAt ? `Expires: ${gate.expiresAt}` : null,
     "",
     "Readiness",
-    readiness
-      ? `${readiness.status}: blockers=${readiness.blockers.length} warnings=${readiness.warnings.length}`
-      : "not applicable",
+    readinessText,
     "",
     "Evidence",
     `tasks=${evidence.tasks.length} runs=${evidence.runs.length} gates=${evidence.gates.length} artifacts=${evidence.artifacts.length}`,
     evidence.pr?.url ? `pr=${evidence.pr.url}` : null,
     "",
     "Timeline",
-    timeline.events
-      .slice(-10)
-      .map((event) => `#${event.sequence} ${event.type}`)
-      .join("\n") || "no recent events",
+    eventLines.join("\n") || "no recent events",
     "",
     "Review Packet",
     review.markdown,
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
+  return { prompt, dashboardLines };
+}
+
+function truncatePlainLine(line: string, width: number): string {
+  if (width <= 0) return "";
+  return line.length > width ? `${line.slice(0, Math.max(0, width - 1))}…` : line;
+}
+
+async function chooseHumanGateAction(
+  ui: {
+    custom?: <T>(
+      factory: (
+        tui: { requestRender: () => void },
+        theme: unknown,
+        keybindings: unknown,
+        done: (value: T) => void,
+      ) => unknown,
+      options?: unknown,
+    ) => Promise<T | undefined> | T | undefined;
+    select?: (message: string, options: string[]) => Promise<string | undefined> | string | undefined;
+  },
+  review: HumanGateReview,
+): Promise<HumanGateDashboardAction | null> {
+  if (ui.custom) {
+    const action = await ui.custom<HumanGateDashboardAction>((tui, theme, _keybindings, done) => {
+      const themeLike = theme as { fg?: (color: string, text: string) => string; bold?: (text: string) => string };
+      const fg = (color: string, text: string) => themeLike.fg?.(color, text) ?? text;
+      const bold = (text: string) => themeLike.bold?.(text) ?? text;
+      const actions: Array<{ value: HumanGateDashboardAction; label: string; description: string }> = [
+        { value: "packet", label: "Open review packet", description: "Inspect the full markdown review packet" },
+        { value: "approve", label: "Approve gate", description: "Allow the gated operation to proceed" },
+        { value: "reject", label: "Reject gate", description: "Block the gated operation" },
+        { value: "cancel", label: "Cancel", description: "Leave the gate open" },
+      ];
+      let selected = 0;
+      return {
+        render(width: number): string[] {
+          const plainLines = [
+            "Conductor Gate Approval Dashboard",
+            "",
+            ...review.dashboardLines,
+            "",
+            "Decision",
+            ...actions.map((item, index) => {
+              const prefix = index === selected ? "› " : "  ";
+              return `${prefix}${item.label} — ${item.description}`;
+            }),
+            "",
+            "↑↓ navigate • enter choose • esc cancel",
+          ];
+          return plainLines.map((line, index) => {
+            const truncated = truncatePlainLine(line, width);
+            if (index === 0) return fg("accent", bold(truncated));
+            if (truncated === "Decision" || truncated.startsWith("↑↓")) return fg("dim", truncated);
+            if (truncated.startsWith("› ")) return fg("accent", truncated);
+            return truncated;
+          });
+        },
+        handleInput(data: string): void {
+          if (data === "\u001b[A" || data === "k") selected = (selected + actions.length - 1) % actions.length;
+          if (data === "\u001b[B" || data === "j") selected = (selected + 1) % actions.length;
+          if (data === "\r" || data === "\n") done(actions[selected]?.value ?? "cancel");
+          if (data === "\u001b" || data === "\u0003") done("cancel");
+          tui.requestRender();
+        },
+        invalidate(): void {},
+      };
+    });
+    return action ?? null;
+  }
+
+  const decision = await ui.select?.(review.prompt, ["Open review packet", "Approve gate", "Reject gate", "Cancel"]);
+  if (decision === "Open review packet") return "packet";
+  if (decision === "Approve gate") return "approve";
+  if (decision === "Reject gate") return "reject";
+  return decision ? "cancel" : null;
 }
 
 function getStatusText(cwd: string): string {
@@ -169,27 +266,32 @@ export default function conductorExtension(pi: ExtensionAPI) {
           ctx.ui.notify(`gate not found: ${gateId}`, "error");
           return;
         }
-        const prompt = buildHumanGatePrompt(ctx.cwd, gateId);
+        const review = buildHumanGateReview(ctx.cwd, gateId);
         const ui = ctx.ui as unknown as {
+          custom?: <T>(
+            factory: (
+              tui: { requestRender: () => void },
+              theme: unknown,
+              keybindings: unknown,
+              done: (value: T) => void,
+            ) => unknown,
+            options?: unknown,
+          ) => Promise<T | undefined> | T | undefined;
           select?: (message: string, options: string[]) => Promise<string | undefined> | string | undefined;
           editor?: (title: string, text: string) => Promise<string | undefined> | string | undefined;
           input?: (message: string, placeholder?: string) => Promise<string | undefined> | string | undefined;
           notify: typeof ctx.ui.notify;
         };
-        let decision = await ui.select?.(prompt, ["Open review packet", "Approve gate", "Reject gate", "Cancel"]);
-        if (decision === "Open review packet") {
-          await ui.editor?.("Conductor gate review packet", prompt);
-          decision = await ui.select?.("Choose a trusted human decision for the conductor gate", [
-            "Approve gate",
-            "Reject gate",
-            "Cancel",
-          ]);
+        let action = await chooseHumanGateAction(ui, review);
+        while (action === "packet") {
+          await ui.editor?.("Conductor gate review packet", review.prompt);
+          action = await chooseHumanGateAction(ui, review);
         }
-        if (!decision || decision === "Cancel") {
+        if (!action || action === "cancel") {
           ctx.ui.notify(`left gate ${gateId} open`, "info");
           return;
         }
-        const status = decision === "Reject gate" ? "rejected" : "approved";
+        const status = action === "reject" ? "rejected" : "approved";
         const defaultReason = status === "approved" ? "Approved from pi conductor UI" : "Rejected from pi conductor UI";
         const reason =
           humanApproval[2]?.trim() ||

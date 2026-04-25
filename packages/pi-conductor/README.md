@@ -184,7 +184,7 @@ conductor_list_artifacts({ taskId })
 conductor_read_artifact({ artifactId, maxBytes: 8192 })
 ```
 
-Human-only approval gates such as `ready_for_pr` and `destructive_cleanup` are surfaced for review but are not safe autonomous actions. The model-facing `conductor_resolve_gate` tool resolves only as a parent agent. Trusted human decisions come through the interactive host/UI command `/conductor human decide gate <gate-id> [reason]`, which shows gate context, readiness, evidence, timeline, and a human review packet before approve/reject/cancel.
+Human-only approval gates such as `ready_for_pr` and `destructive_cleanup` are surfaced for review but are not safe autonomous actions. The model-facing `conductor_resolve_gate` tool resolves only as a parent agent. Trusted human decisions come through the interactive host/UI command `/conductor human decide gate <gate-id> [reason]`, which opens a keyboard-navigable approval dashboard when the host supports custom UI components, falls back to standard dialogs otherwise, and shows gate context, readiness, evidence, timeline, and a human review packet before approve/reject/cancel.
 
 ## Development
 
