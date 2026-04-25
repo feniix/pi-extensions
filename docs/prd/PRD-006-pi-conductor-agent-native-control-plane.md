@@ -804,6 +804,7 @@ Then the README describes conductor as agent-first durable orchestration
 | `docs/prd/PRD-001-pi-conductor-mvp.md`                                                | Superseded predecessor: original broad conductor concept.                                       |
 | `docs/prd/PRD-002-pi-conductor-persistent-resumable-workers.md`                       | Foundation: persistent worker/worktree/session model this PRD evolves.                          |
 | `docs/prd/PRD-003-pi-conductor-single-worker-run.md`                                  | Foundation: native foreground run primitive this PRD generalizes into backend-backed task runs. |
+| `docs/research/2026-04-24-pi-conductor-agent-native-control-plane-research.md`        | Prior-art research for durable workflow/control-plane and multi-agent orchestration patterns.   |
 | `docs/brainstorms/2026-04-24-pi-conductor-agent-native-control-plane-requirements.md` | Source requirements: captures the full-control-plane direction and user constraints.            |
 | `docs/ideation/2026-04-24-pi-conductor-agent-native-orchestration-ideation.md`        | Source ideation: explores agent-native orchestration options and rejected directions.           |
 | `docs/adr/ADR-0012-conductor-owned-state-replaceable-backends.md`                     | Records the canonical-state and backend-adapter architecture decision.                          |
@@ -821,6 +822,7 @@ Then the README describes conductor as agent-first durable orchestration
 | 2026-04-24 | Initial draft                                                                                                                                                                                                                                    | feniix |
 | 2026-04-24 | Marked implemented and recorded as-built scope: objectives, DAGs, scheduler policy/fairness/capacity, trusted human approval UI, granular events, locked persistence, gate hardening, evidence/readiness surfaces, and audit-preserving cleanup. | feniix |
 | 2026-04-24 | Linked as-built ADRs for conductor-owned state/backends, explicit child completion, and trusted human approval gates.                                                                                                                            | feniix |
+| 2026-04-24 | Linked prior-art research and organized source planning artifacts.                                                                                                                                                                               | feniix |
 
 ---
 
