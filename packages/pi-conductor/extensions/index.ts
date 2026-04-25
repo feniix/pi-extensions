@@ -103,6 +103,7 @@ function buildHumanGateReview(cwd: string, gateId: string): HumanGateReview {
     ? `${readiness.status}: blockers=${readiness.blockers.length} warnings=${readiness.warnings.length}`
     : "not applicable";
   const eventLines = timeline.events.slice(-10).map((event) => `#${event.sequence} ${event.type}`);
+  const reviewPreview = review.markdown.split("\n").slice(0, 8);
   const dashboardLines = [
     "Conductor Gate Approval",
     `Gate: ${gate.gateId}`,
@@ -113,6 +114,9 @@ function buildHumanGateReview(cwd: string, gateId: string): HumanGateReview {
     `Evidence: tasks=${evidence.tasks.length} runs=${evidence.runs.length} gates=${evidence.gates.length} artifacts=${evidence.artifacts.length}`,
     evidence.pr?.url ? `PR: ${evidence.pr.url}` : null,
     eventLines.length > 0 ? `Recent: ${eventLines.slice(-3).join(" | ")}` : "Recent: no recent events",
+    "",
+    "Review Packet Preview",
+    ...reviewPreview,
   ].filter((line): line is string => line !== null);
   const prompt = [
     `Gate ${gate.gateId}`,
@@ -176,27 +180,32 @@ async function chooseHumanGateAction(
       let selected = 0;
       return {
         render(width: number): string[] {
-          const body = [
-            fg("accent", bold("Conductor Gate Approval Dashboard")),
+          const plainLines = [
+            "Conductor Gate Approval Dashboard",
             "",
             ...review.dashboardLines,
             "",
-            fg("dim", "Decision"),
+            "Decision",
             ...actions.map((item, index) => {
               const prefix = index === selected ? "› " : "  ";
-              const label = index === selected ? fg("accent", item.label) : item.label;
-              return `${prefix}${label} — ${item.description}`;
+              return `${prefix}${item.label} — ${item.description}`;
             }),
             "",
-            fg("dim", "↑↓ navigate • enter choose • esc cancel"),
+            "↑↓ navigate • enter choose • esc cancel",
           ];
-          return body.map((line) => truncatePlainLine(line, width));
+          return plainLines.map((line, index) => {
+            const truncated = truncatePlainLine(line, width);
+            if (index === 0) return fg("accent", bold(truncated));
+            if (truncated === "Decision" || truncated.startsWith("↑↓")) return fg("dim", truncated);
+            if (truncated.startsWith("› ")) return fg("accent", truncated);
+            return truncated;
+          });
         },
         handleInput(data: string): void {
           if (data === "\u001b[A" || data === "k") selected = (selected + actions.length - 1) % actions.length;
           if (data === "\u001b[B" || data === "j") selected = (selected + 1) % actions.length;
           if (data === "\r" || data === "\n") done(actions[selected]?.value ?? "cancel");
-          if (data === "\u001b") done("cancel");
+          if (data === "\u001b" || data === "\u0003") done("cancel");
           tui.requestRender();
         },
         invalidate(): void {},

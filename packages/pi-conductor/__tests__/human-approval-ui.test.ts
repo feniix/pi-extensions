@@ -118,10 +118,89 @@ describe("trusted human gate approval UI", () => {
 
     expect(dashboardText).toContain("Conductor Gate Approval Dashboard");
     expect(dashboardText).toContain("Evidence:");
+    expect(dashboardText).toContain("Review Packet Preview");
+    expect(dashboardText).toContain("Conductor Human Review Packet");
     expect(dashboardText).toContain("Approve gate");
     expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === gate.gateId)).toMatchObject({
       status: "approved",
       resolutionReason: "approved from dashboard",
+    });
+  });
+
+  it("supports custom dashboard packet, reject, and cancel actions", async () => {
+    const gate = createGateForRepo(repoRoot, {
+      type: "needs_review",
+      resourceRefs: {},
+      requestedDecision: "Review before merge",
+    });
+    const customChoices = ["packet", "reject"];
+    let editorText = "";
+
+    await conductorHandler()(`human decide gate ${gate.gateId}`, {
+      cwd: repoRoot,
+      hasUI: true,
+      ui: {
+        custom: async <T>(factory: Parameters<NonNullable<CommandContext["ui"]["custom"]>>[0]) => {
+          let result: T | undefined;
+          const component = factory(
+            { requestRender: () => undefined },
+            { fg: (_color, text) => text, bold: (text) => text },
+            undefined,
+            (value) => {
+              result = value as T;
+            },
+          );
+          const choice = customChoices.shift();
+          if (choice === "packet") component.handleInput?.("\r");
+          if (choice === "reject") {
+            component.handleInput?.("\u001b[B");
+            component.handleInput?.("\u001b[B");
+            component.handleInput?.("\r");
+          }
+          return result;
+        },
+        editor: async (_title: string, text: string) => {
+          editorText = text;
+          return text;
+        },
+        input: async () => "rejected after packet review",
+        notify: () => undefined,
+      },
+    });
+
+    expect(editorText).toContain("Conductor Human Review Packet");
+    expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === gate.gateId)).toMatchObject({
+      status: "rejected",
+      resolutionReason: "rejected after packet review",
+    });
+
+    const cancelGate = createGateForRepo(repoRoot, {
+      type: "needs_input",
+      resourceRefs: {},
+      requestedDecision: "Cancel?",
+    });
+    await conductorHandler()(`human decide gate ${cancelGate.gateId}`, {
+      cwd: repoRoot,
+      hasUI: true,
+      ui: {
+        custom: async <T>(factory: Parameters<NonNullable<CommandContext["ui"]["custom"]>>[0]) => {
+          let result: T | undefined;
+          const component = factory(
+            { requestRender: () => undefined },
+            { fg: (_color, text) => text, bold: (text) => text },
+            undefined,
+            (value) => {
+              result = value as T;
+            },
+          );
+          component.handleInput?.("\u001b");
+          return result;
+        },
+        notify: () => undefined,
+      },
+    });
+    expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === cancelGate.gateId)).toMatchObject({
+      status: "open",
     });
   });
 
