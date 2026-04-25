@@ -2,8 +2,9 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createGateForRepo, getOrCreateRunForRepo } from "../extensions/conductor.js";
+import { createGateForRepo, createTaskForRepo, getOrCreateRunForRepo } from "../extensions/conductor.js";
 import conductorExtension from "../extensions/index.js";
+import { addConductorArtifact, writeRun } from "../extensions/storage.js";
 
 type CommandContext = {
   cwd: string;
@@ -82,6 +83,52 @@ describe("trusted human gate approval UI", () => {
     expect(prompt).toContain("Review Packet");
     const resolved = getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === gate.gateId);
     expect(resolved).toMatchObject({ status: "approved", resolvedBy: { type: "human" } });
+  });
+
+  it("shows concrete artifact and blocker details in the approval dashboard", async () => {
+    const task = createTaskForRepo(repoRoot, { title: "Review me", prompt: "Needs review" });
+    writeRun(
+      addConductorArtifact(getOrCreateRunForRepo(repoRoot), {
+        artifactId: "artifact-dashboard-test",
+        type: "test_result",
+        ref: "test://dashboard",
+        resourceRefs: { taskId: task.taskId },
+        producer: { type: "test", id: "test" },
+      }),
+    );
+    const gate = createGateForRepo(repoRoot, {
+      type: "needs_review",
+      resourceRefs: { taskId: task.taskId },
+      requestedDecision: "Review task?",
+    });
+    let dashboardText = "";
+
+    await conductorHandler()(`human decide gate ${gate.gateId}`, {
+      cwd: repoRoot,
+      hasUI: true,
+      ui: {
+        custom: async <T>(factory: Parameters<NonNullable<CommandContext["ui"]["custom"]>>[0]) => {
+          let result: T | undefined;
+          const component = factory(
+            { requestRender: () => undefined },
+            { fg: (_color, text) => text, bold: (text) => text },
+            undefined,
+            (value) => {
+              result = value as T;
+            },
+          );
+          dashboardText = component.render(120).join("\n");
+          component.handleInput?.("\u001b");
+          return result;
+        },
+        notify: () => undefined,
+      },
+    });
+
+    expect(dashboardText).toContain("artifact-dashboard-test");
+    expect(dashboardText).toContain("test://dashboard");
+    expect(dashboardText).toContain("Blockers:");
+    expect(dashboardText).toContain("Task is ready");
   });
 
   it("prefers a custom approval dashboard when the host supports it", async () => {
@@ -182,6 +229,60 @@ describe("trusted human gate approval UI", () => {
       resolutionReason: "approved from queue",
     });
     expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === firstGate.gateId)).toMatchObject({
+      status: "open",
+    });
+  });
+
+  it("can browse open gates with the select fallback", async () => {
+    const firstGate = createGateForRepo(repoRoot, {
+      type: "needs_input",
+      resourceRefs: {},
+      requestedDecision: "First gate",
+    });
+    const secondGate = createGateForRepo(repoRoot, {
+      type: "needs_review",
+      resourceRefs: {},
+      requestedDecision: "Second gate",
+    });
+    const secondLabel = `${secondGate.gateId} [${secondGate.type}] ${secondGate.requestedDecision}`;
+    const decisions = [secondLabel, "Approve gate"];
+
+    await conductorHandler()("human gates approved via select", {
+      cwd: repoRoot,
+      hasUI: true,
+      ui: {
+        select: async () => decisions.shift() ?? "Cancel",
+        notify: () => undefined,
+      },
+    });
+
+    expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === secondGate.gateId)).toMatchObject({
+      status: "approved",
+      resolutionReason: "approved via select",
+    });
+    expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === firstGate.gateId)).toMatchObject({
+      status: "open",
+    });
+  });
+
+  it("reports missing UI capabilities instead of silently no-oping", async () => {
+    const gate = createGateForRepo(repoRoot, {
+      type: "needs_input",
+      resourceRefs: {},
+      requestedDecision: "Needs UI",
+    });
+    const notifications: string[] = [];
+
+    await conductorHandler()(`human decide gate ${gate.gateId}`, {
+      cwd: repoRoot,
+      hasUI: true,
+      ui: {
+        notify: (message: string) => notifications.push(message),
+      },
+    });
+
+    expect(notifications).toContain("trusted human gate approval requires a selectable UI");
+    expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === gate.gateId)).toMatchObject({
       status: "open",
     });
   });

@@ -191,6 +191,10 @@ async function chooseHumanGateAction(
   ui: HumanGateDecisionUi,
   review: HumanGateReview,
 ): Promise<HumanGateDashboardAction | null> {
+  if (!ui.custom && !ui.select) {
+    ui.notify("trusted human gate approval requires a selectable UI", "error");
+    return null;
+  }
   if (ui.custom) {
     const action = await ui.custom<HumanGateDashboardAction>((tui, theme, _keybindings, done) => {
       const themeLike = theme as { fg?: (color: string, text: string) => string; bold?: (text: string) => string };
@@ -248,6 +252,10 @@ async function chooseHumanGateAction(
 
 async function chooseHumanGateFromQueue(ui: HumanGateDecisionUi, gates: GateRecord[]): Promise<string | null> {
   if (gates.length === 0) return null;
+  if (!ui.custom && !ui.select) {
+    ui.notify("trusted human gate queue requires a selectable UI", "error");
+    return null;
+  }
   if (ui.custom) {
     const gateId = await ui.custom<string | null>((tui, theme, _keybindings, done) => {
       const themeLike = theme as { fg?: (color: string, text: string) => string; bold?: (text: string) => string };
@@ -301,7 +309,11 @@ async function resolveHumanGateDecision(
   const review = buildHumanGateReview(cwd, gateId);
   let action = await chooseHumanGateAction(ui, review);
   while (action === "packet") {
-    await ui.editor?.("Conductor gate review packet", review.prompt);
+    if (!ui.editor) {
+      ui.notify("opening the conductor review packet requires editor UI support", "error");
+      return;
+    }
+    await ui.editor("Conductor gate review packet", review.prompt);
     action = await chooseHumanGateAction(ui, review);
   }
   if (!action || action === "cancel") {
@@ -357,7 +369,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
       const humanQueue = trimmed.match(/^human\s+gates(?:\s+(.+))?$/);
       if (humanQueue) {
         if (!ctx.hasUI) {
-          console.log("error: trusted human gate queue requires interactive UI");
+          console.error("error: trusted human gate queue requires interactive UI");
           return;
         }
         const run = getOrCreateRunForRepo(ctx.cwd);
@@ -379,7 +391,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
       if (humanApproval) {
         const gateId = humanApproval[1];
         if (!ctx.hasUI) {
-          console.log("error: trusted human gate approval requires interactive UI");
+          console.error("error: trusted human gate approval requires interactive UI");
           return;
         }
         const run = getOrCreateRunForRepo(ctx.cwd);
