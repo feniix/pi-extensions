@@ -35,7 +35,7 @@ function getUsage(): string {
     "  /conductor history [project|worker|task|run|gate|artifact] [id] [--after N] [--limit N]",
     "  /conductor reconcile [--dry-run]",
     "  /conductor human gates [reason]",
-    "  /conductor human dashboard [reason]",
+    "  /conductor human dashboard",
     "  /conductor human decide gate <gate-id> [reason]",
     "  /conductor human approve gate <gate-id> [reason]",
     "  human gate commands require interactive UI; non-UI callers should inspect with conductor_list_gates and evidence/readiness tools",

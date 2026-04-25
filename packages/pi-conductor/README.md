@@ -54,7 +54,7 @@ Primary inspection/debug UX is the `/conductor` command group:
 /conductor history [project|worker|task|run|gate|artifact] [id] [--after N] [--limit N]
 /conductor reconcile [--dry-run]
 /conductor human gates [reason]
-/conductor human dashboard [reason]
+/conductor human dashboard
 /conductor human approve gate <gate-id> [reason]
 /conductor human decide gate <gate-id> [reason]
 ```

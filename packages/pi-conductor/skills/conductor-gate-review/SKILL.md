@@ -13,7 +13,7 @@ Use this workflow to inspect conductor gates without weakening the trusted-human
 - Treat `ready_for_pr`, `destructive_cleanup`, and `approval_required` as trusted-human decisions.
 - Use `conductor_resolve_gate` only for parent-agent decisions such as reject/cancel or non-human-safe resolutions.
 - For human approval, direct the user to the interactive host command path:
-  - `/conductor human dashboard [reason]` for a persistent gate queue/review loop.
+  - `/conductor human dashboard` for a persistent gate queue/review loop that prompts per decision.
   - `/conductor human gates [reason]` to pick one open gate from the queue.
   - `/conductor human decide gate <gate-id> [reason]` when the gate ID is already known.
 
