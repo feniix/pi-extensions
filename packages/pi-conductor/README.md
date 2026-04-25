@@ -40,6 +40,7 @@ Agent-native local control plane for Pi worker orchestration.
 - Optional `pi-subagents` backend detection. Conductor remains canonical state owner; `pi-subagents` dispatch fails closed unless a trusted host injects an explicit dispatcher.
 - Granular instrumentation events for scheduler ticks/actions, backend dispatch, worker recovery/resume/summary/cleanup, git commit/push, PR creation, gates, runs, tasks, objectives, artifacts, and lifecycle changes.
 - Legacy worker model tools are hidden by default; legacy slash mutations hard-error with guidance toward resource-native tools.
+- Packaged workflow skills help parent agents use conductor safely for objective orchestration and gate review.
 
 ## Command surface
 
@@ -53,6 +54,7 @@ Primary inspection/debug UX is the `/conductor` command group:
 /conductor history [project|worker|task|run|gate|artifact] [id] [--after N] [--limit N]
 /conductor reconcile [--dry-run]
 /conductor human gates [reason]
+/conductor human dashboard
 /conductor human approve gate <gate-id> [reason]
 /conductor human decide gate <gate-id> [reason]
 ```
@@ -111,6 +113,11 @@ Resource/control-plane tools:
 - `conductor_push_worker`
 - `conductor_create_worker_pr`
 
+Packaged skills:
+
+- `conductor-orchestration` — plan, schedule, execute, monitor, and review durable conductor objectives.
+- `conductor-gate-review` — inspect gate evidence/readiness and route high-risk decisions through trusted human UI.
+
 Runtime-injected child tools, available only inside native worker task runs:
 
 - `conductor_child_progress`
@@ -150,9 +157,11 @@ The native backend uses curated tools and explicit conductor child tools. Backen
 
 Optional backend adapters such as `pi-subagents` may be used later, but they do not own canonical state. The current `pi-subagents` adapter fails closed unless a trusted host injects an explicit dispatcher; injected dispatch records backend run evidence through `backend.dispatch_*` events while conductor owns task/run state.
 
-## LLM orchestration examples
+## Workflow recipes
 
-Create and plan an objective, then let conductor take the safest next step:
+### Plan and execute an objective
+
+Create and plan an objective, inspect the dependency graph, preview safe scheduler decisions, then execute intentionally:
 
 ```text
 conductor_create_objective({ title: "Ship feature", prompt: "Implement and verify the feature" })
@@ -164,13 +173,17 @@ conductor_scheduler_tick({ maxActions: 4, maxRuns: 2, fairness: "round_robin", p
 conductor_schedule_objective({ objectiveId, maxConcurrency: 2, policy: "safe" })
 ```
 
-Inspect dependency scheduling for parallel-safe work:
+### Inspect dependency scheduling for parallel-safe work
+
+Use the objective DAG before dispatching multi-task work or when explaining why a task is not runnable yet:
 
 ```text
 conductor_objective_dag({ objectiveId })
 ```
 
-Assess a task before review or PR preparation:
+### Review a task before PR preparation
+
+Build a compact review packet, check readiness, and gather evidence before asking a human to approve a risky operation:
 
 ```text
 conductor_assess_task({ taskId, requireTestEvidence: true })
@@ -178,14 +191,38 @@ conductor_diagnose_blockers({ taskId })
 conductor_prepare_human_review({ objectiveId })
 ```
 
-Read bounded local artifact evidence safely:
+### Read bounded local artifact evidence safely
+
+Use artifact IDs/refs from evidence bundles or timelines; conductor rejects unsafe traversal, symlink escapes, binary reads, and unsupported refs:
 
 ```text
 conductor_list_artifacts({ taskId })
 conductor_read_artifact({ artifactId, maxBytes: 8192 })
 ```
 
-Human-only approval gates such as `ready_for_pr` and `destructive_cleanup` are surfaced for review but are not safe autonomous actions. The model-facing `conductor_resolve_gate` tool resolves only as a parent agent. Trusted human decisions come through the interactive host/UI commands `/conductor human gates` or `/conductor human decide gate <gate-id> [reason]`, which open keyboard-navigable gate queue and approval dashboards when the host supports custom UI components, fall back to standard dialogs otherwise, and show gate context, readiness, blockers, warnings, artifact summaries, timeline, and a human review packet before approve/reject/cancel. Non-UI automation should inspect gates and evidence with `conductor_list_gates`, `conductor_prepare_human_review`, `conductor_check_readiness`, `conductor_build_evidence_bundle`, and `conductor_resource_timeline`; trusted high-risk approval still requires the interactive human command path.
+### Review and resolve human gates
+
+Human-only approval gates such as `ready_for_pr` and `destructive_cleanup` are surfaced for review but are not safe autonomous actions. The model-facing `conductor_resolve_gate` tool resolves only as a parent agent. Trusted human decisions come through the interactive host/UI commands `/conductor human dashboard`, `/conductor human gates`, or `/conductor human decide gate <gate-id> [reason]`.
+
+Prefer the persistent dashboard when multiple gates may need review:
+
+```text
+/conductor human dashboard
+```
+
+The dashboard keeps the gate queue open across decisions, refreshes after each approval/rejection, shows the selected gate's readiness, blockers, warnings, artifacts, recent timeline, and review packet preview, and then opens the full approval dashboard for approve/reject/cancel. Hosts with custom UI support get keyboard navigation; other interactive hosts fall back to standard select/editor/input dialogs.
+
+For non-UI automation, inspect gates and evidence without approving as a human:
+
+```text
+conductor_list_gates({ status: "open" })
+conductor_prepare_human_review({ taskId })
+conductor_check_readiness({ taskId, purpose: "pr_readiness" })
+conductor_build_evidence_bundle({ taskId, includeEvents: true })
+conductor_resource_timeline({ taskId, includeArtifacts: true })
+```
+
+Trusted high-risk approval still requires the interactive human command path.
 
 ## Development
 
