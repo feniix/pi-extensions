@@ -80,6 +80,7 @@ function shouldRegisterLegacyWorkerTools(): boolean {
 }
 
 type HumanGateDashboardAction = "packet" | "approve" | "reject" | "cancel";
+type HumanGateDecisionResult = "resolved" | "unchanged";
 
 type HumanGateReview = {
   prompt: string;
@@ -265,7 +266,11 @@ async function chooseHumanGateAction(
   return decision ? "cancel" : null;
 }
 
-async function chooseHumanGateFromQueue(ui: HumanGateDecisionUi, gates: GateRecord[]): Promise<string | null> {
+async function chooseHumanGateFromQueue(
+  ui: HumanGateDecisionUi,
+  gates: GateRecord[],
+  input: { cwd?: string } = {},
+): Promise<string | null> {
   if (gates.length === 0) return null;
   if (!ui.custom && !ui.select) {
     ui.notify("trusted human gate queue requires a selectable UI", "error");
@@ -279,13 +284,20 @@ async function chooseHumanGateFromQueue(ui: HumanGateDecisionUi, gates: GateReco
       let selected = 0;
       return {
         render(width: number): string[] {
+          const selectedGate = gates[selected];
+          const selectedReview =
+            input.cwd && selectedGate ? buildHumanGateReview(input.cwd, selectedGate.gateId) : null;
+          const previewLines = selectedReview
+            ? ["", "Selected Gate", ...selectedReview.dashboardLines.slice(1, 14)]
+            : [];
           const plainLines = [
-            "Conductor Gate Queue",
+            "Conductor Gate Queue Dashboard",
             "",
             ...gates.map((gate, index) => {
               const prefix = index === selected ? "› " : "  ";
               return `${prefix}${gate.gateId} [${gate.type}] ${gate.operation} — ${gate.requestedDecision}`;
             }),
+            ...previewLines,
             "",
             "↑↓ navigate • enter review • esc cancel",
           ];
@@ -320,7 +332,7 @@ async function resolveHumanGateDecision(
   gateId: string,
   reasonArg: string | undefined,
   ui: HumanGateDecisionUi,
-) {
+): Promise<HumanGateDecisionResult> {
   const review = buildHumanGateReview(cwd, gateId);
   let action = await chooseHumanGateAction(ui, review, { includePacket: Boolean(ui.editor) });
   while (action === "packet") {
@@ -329,7 +341,7 @@ async function resolveHumanGateDecision(
   }
   if (!action || action === "cancel") {
     ui.notify(`left gate ${gateId} open`, "info");
-    return;
+    return "unchanged";
   }
   const status = action === "reject" ? "rejected" : "approved";
   const defaultReason = status === "approved" ? "Approved from pi conductor UI" : "Rejected from pi conductor UI";
@@ -343,6 +355,33 @@ async function resolveHumanGateDecision(
     resolutionReason: reason,
   });
   ui.notify(`${status} gate ${resolved.gateId} as trusted human`, "info");
+  return "resolved";
+}
+
+async function openHumanGateQueueDashboard(cwd: string, reasonArg: string | undefined, ui: HumanGateDecisionUi) {
+  let resolvedCount = 0;
+  while (true) {
+    const run = getOrCreateRunForRepo(cwd);
+    const gates = run.gates.filter((gate) => gate.status === "open");
+    if (gates.length === 0) {
+      ui.notify(
+        resolvedCount === 0 ? "no open conductor gates" : `resolved ${resolvedCount} conductor gate(s)`,
+        "info",
+      );
+      return;
+    }
+    const gateId = await chooseHumanGateFromQueue(ui, gates, { cwd });
+    if (!gateId) {
+      ui.notify(
+        resolvedCount === 0 ? "left conductor gates unchanged" : `resolved ${resolvedCount} conductor gate(s)`,
+        "info",
+      );
+      return;
+    }
+    const result = await resolveHumanGateDecision(cwd, gateId, reasonArg, ui);
+    if (result !== "resolved") return;
+    resolvedCount += 1;
+  }
 }
 
 function getStatusText(cwd: string): string {
@@ -377,6 +416,14 @@ export default function conductorExtension(pi: ExtensionAPI) {
     description: "Manage pi-conductor workers and PR preparation",
     handler: async (args, ctx) => {
       const trimmed = args.trim();
+      const humanDashboard = trimmed.match(/^human\s+dashboard(?:\s+(.+))?$/);
+      if (humanDashboard) {
+        if (!ctx.hasUI) {
+          throw new Error("trusted human gate dashboard requires interactive UI");
+        }
+        await openHumanGateQueueDashboard(ctx.cwd, humanDashboard[1], ctx.ui as unknown as HumanGateDecisionUi);
+        return;
+      }
       const humanQueue = trimmed.match(/^human\s+gates(?:\s+(.+))?$/);
       if (humanQueue) {
         if (!ctx.hasUI) {
@@ -389,7 +436,7 @@ export default function conductorExtension(pi: ExtensionAPI) {
           return;
         }
         const ui = ctx.ui as unknown as HumanGateDecisionUi;
-        const gateId = await chooseHumanGateFromQueue(ui, gates);
+        const gateId = await chooseHumanGateFromQueue(ui, gates, { cwd: ctx.cwd });
         if (!gateId) {
           ctx.ui.notify("left conductor gates unchanged", "info");
           return;

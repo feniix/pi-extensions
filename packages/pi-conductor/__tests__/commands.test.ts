@@ -47,6 +47,7 @@ describe("runConductorCommand", () => {
   it("documents trusted human gate commands in usage", async () => {
     const text = await runConductorCommand(repoDir, "help");
     expect(text).toContain("/conductor human gates [reason]");
+    expect(text).toContain("/conductor human dashboard [reason]");
     expect(text).toContain("/conductor human decide gate <gate-id> [reason]");
     expect(text).toContain("conductor_list_gates");
   });

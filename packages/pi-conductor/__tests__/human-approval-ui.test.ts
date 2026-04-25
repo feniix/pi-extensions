@@ -231,6 +231,64 @@ describe("trusted human gate approval UI", () => {
     });
   });
 
+  it("keeps a persistent human dashboard open across multiple gate decisions", async () => {
+    const firstGate = createGateForRepo(repoRoot, {
+      type: "needs_input",
+      resourceRefs: {},
+      requestedDecision: "First gate",
+    });
+    const secondGate = createGateForRepo(repoRoot, {
+      type: "needs_review",
+      resourceRefs: {},
+      requestedDecision: "Second gate",
+    });
+    const dashboardTexts: string[] = [];
+    let customCall = 0;
+    const notifications: string[] = [];
+
+    await conductorHandler()("human dashboard accepted in dashboard", {
+      cwd: repoRoot,
+      hasUI: true,
+      ui: {
+        custom: async <T>(factory: Parameters<NonNullable<CommandContext["ui"]["custom"]>>[0]) => {
+          customCall += 1;
+          let result: T | undefined;
+          const component = factory(
+            { requestRender: () => undefined },
+            { fg: (_color, text) => text, bold: (text) => text },
+            undefined,
+            (value) => {
+              result = value as T;
+            },
+          );
+          const text = component.render(120).join("\n");
+          dashboardTexts.push(text);
+          if (text.includes("Conductor Gate Queue Dashboard")) {
+            component.handleInput?.("\r");
+          } else {
+            component.handleInput?.("\r");
+          }
+          return result;
+        },
+        notify: (message: string) => notifications.push(message),
+      },
+    });
+
+    expect(customCall).toBe(4);
+    expect(dashboardTexts[0]).toContain("Selected Gate");
+    expect(dashboardTexts[0]).toContain(firstGate.gateId);
+    expect(dashboardTexts[2]).toContain(secondGate.gateId);
+    expect(notifications).toContain("resolved 2 conductor gate(s)");
+    expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === firstGate.gateId)).toMatchObject({
+      status: "approved",
+      resolutionReason: "accepted in dashboard",
+    });
+    expect(getOrCreateRunForRepo(repoRoot).gates.find((entry) => entry.gateId === secondGate.gateId)).toMatchObject({
+      status: "approved",
+      resolutionReason: "accepted in dashboard",
+    });
+  });
+
   it("can browse open gates with the select fallback", async () => {
     const firstGate = createGateForRepo(repoRoot, {
       type: "needs_input",
@@ -481,6 +539,13 @@ describe("trusted human gate approval UI", () => {
         ui: { notify: () => undefined },
       }),
     ).rejects.toThrow("trusted human gate queue requires interactive UI");
+    await expect(
+      conductorHandler()("human dashboard", {
+        cwd: repoRoot,
+        hasUI: false,
+        ui: { notify: () => undefined },
+      }),
+    ).rejects.toThrow("trusted human gate dashboard requires interactive UI");
   });
 
   it("can reject or cancel a gate without exposing model human approval tools", async () => {
