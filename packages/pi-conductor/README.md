@@ -7,7 +7,7 @@ Agent-native local control plane for Pi worker orchestration.
 ## Current capabilities
 
 - Deterministic project-key derivation and conductor-managed project storage.
-- Versioned JSON control-plane records with atomic writes, invariant validation, per-project mutation serialization, revisions, and append-only events.
+- Versioned JSON control-plane records with atomic writes, invariant validation, per-project mutation serialization, file-locked persistence, revisions, and append-only events validated on read/write.
 - First-class durable resources:
   - `Worker`: worktree/session/runtime readiness.
   - `Task`: durable work intent, assignment, lifecycle, progress, artifacts, gates, and run history.
@@ -25,7 +25,7 @@ Agent-native local control plane for Pi worker orchestration.
 - Child tool calls are bound to the task/run contract, support `idempotencyKey`, and are not registered as broad parent-agent tools.
 - Parent agents can explicitly grant child runs permission to create scoped follow-up tasks; this is disabled by default.
 - Parent-agent task control supports safe task update, explicit cancellation, and retry without overwriting prior run history.
-- Parent-agent orchestration advice is available through `conductor_next_actions`; `conductor_run_next_action` can execute safe non-human recommendations, while `conductor_project_brief`, `conductor_task_brief`, and `conductor_resource_timeline` provide markdown + structured state/history digests for LLM handoffs.
+- Parent-agent orchestration advice is available through `conductor_next_actions`; `conductor_run_next_action` and `conductor_scheduler_tick` execute only policy-allowed non-human recommendations, while `conductor_project_brief`, `conductor_task_brief`, and `conductor_resource_timeline` provide markdown + structured state/history digests for LLM handoffs.
 - LLM review helpers include task assessment, blocker diagnosis, objective DAG batching, safe artifact reads, and human review packet preparation.
 - Objectives group related tasks above the worker/run layer so parent agents can keep multi-task goals explicit, expand them into durable task plans with `conductor_plan_objective`, and roll up linked task states with `conductor_refresh_objective_status`.
 - Readiness/evidence tools can build objective/task/worker evidence bundles and evaluate task-review or PR-readiness blockers.
@@ -37,8 +37,9 @@ Agent-native local control plane for Pi worker orchestration.
 - Gate-protected risky operations:
   - PR creation requires an approved `ready_for_pr` gate.
   - Worker cleanup requires an approved `destructive_cleanup` gate.
-- Optional `pi-subagents` backend detection. Conductor remains canonical state owner; `pi-subagents` dispatch is reported unavailable and fails closed until a real dispatch adapter is implemented.
-- Legacy worker command/tool surface remains during the transition and is considered deprecated; new resource-native model-callable tools are the primary orchestration surface.
+- Optional `pi-subagents` backend detection. Conductor remains canonical state owner; `pi-subagents` dispatch fails closed unless a trusted host injects an explicit dispatcher.
+- Granular instrumentation events for scheduler ticks/actions, backend dispatch, worker recovery/resume/summary/cleanup, git commit/push, PR creation, gates, runs, tasks, objectives, artifacts, and lifecycle changes.
+- Legacy worker model tools are hidden by default; legacy slash mutations hard-error with guidance toward resource-native tools.
 
 ## Command surface
 
@@ -51,20 +52,13 @@ Primary inspection/debug UX is the `/conductor` command group:
 /conductor status
 /conductor history [project|worker|task|run|gate|artifact] [id] [--after N] [--limit N]
 /conductor reconcile [--dry-run]
-/conductor start <worker-name>
-/conductor task <worker-name> <task>
-/conductor resume <worker-name>
-/conductor run <worker-name> <task>
-/conductor state <worker-name> <lifecycle>
-/conductor summarize <worker-name>
-/conductor recover <worker-name>
-/conductor cleanup <worker-name>
-/conductor commit <worker-name> <message>
-/conductor push <worker-name>
-/conductor pr <worker-name> <title>
+/conductor human approve gate <gate-id> [reason]
+/conductor human decide gate <gate-id> [reason]
 ```
 
 There is also a convenience `/conductor-status` command.
+
+Legacy mutation subcommands such as `/conductor start`, `/conductor run`, `/conductor cleanup`, and `/conductor pr` have been removed. Use the resource/model tools for mutations and slash commands for inspection, reconciliation previews, and trusted human gate decisions.
 
 ## Tool surface
 
@@ -123,7 +117,7 @@ Runtime-injected child tools, available only inside native worker task runs:
 - `conductor_child_create_followup_task` when the task contract allows it
 - `conductor_child_complete`
 
-Transition/legacy worker model tools are hidden by default and can be temporarily enabled with `PI_CONDUCTOR_ENABLE_LEGACY_WORKER_TOOLS=1`. Legacy worker slash mutations such as `/conductor start`, `/conductor run`, `/conductor cleanup`, and `/conductor pr` are removed; use resource/control-plane tools above for new LLM workflows:
+Transition/legacy worker model tools are hidden by default and can be temporarily enabled with `PI_CONDUCTOR_ENABLE_LEGACY_WORKER_TOOLS=1`. Use resource/control-plane tools above for new LLM workflows:
 
 - `conductor_status`
 - `conductor_start`
@@ -153,7 +147,7 @@ Instead, it uses a narrow Pi SDK runtime seam around persisted sessions:
 
 The native backend uses curated tools and explicit conductor child tools. Backend status is runtime evidence, not semantic completion. If the child exits without `conductor_child_complete`, conductor records a partial run and opens a review gate.
 
-Optional backend adapters such as `pi-subagents` may be used later, but they do not own canonical state. The current `pi-subagents` adapter fails closed unless a trusted host injects an explicit dispatcher; injected dispatch records backend run evidence while conductor owns task/run state.
+Optional backend adapters such as `pi-subagents` may be used later, but they do not own canonical state. The current `pi-subagents` adapter fails closed unless a trusted host injects an explicit dispatcher; injected dispatch records backend run evidence through `backend.dispatch_*` events while conductor owns task/run state.
 
 ## LLM orchestration examples
 
@@ -163,9 +157,10 @@ Create and plan an objective, then let conductor take the safest next step:
 conductor_create_objective({ title: "Ship feature", prompt: "Implement and verify the feature" })
 conductor_plan_objective({ objectiveId, tasks: [{ title: "Implement", prompt: "Make the code change" }] })
 conductor_next_actions({ objectiveId })
-conductor_run_next_action({ objectiveId, executeRuns: true })
-conductor_scheduler_tick({ objectiveId, maxActions: 1, executeRuns: false })
-conductor_schedule_objective({ objectiveId, maxConcurrency: 2 })
+conductor_run_next_action({ objectiveId, policy: "execute" })
+conductor_scheduler_tick({ objectiveId, maxActions: 1, policy: "safe" })
+conductor_scheduler_tick({ maxActions: 4, maxRuns: 2, fairness: "round_robin", perObjectiveLimit: 1, policy: "execute" })
+conductor_schedule_objective({ objectiveId, maxConcurrency: 2, policy: "safe" })
 ```
 
 Inspect dependency scheduling for parallel-safe work:
@@ -189,7 +184,7 @@ conductor_list_artifacts({ taskId })
 conductor_read_artifact({ artifactId, maxBytes: 8192 })
 ```
 
-Human-only approval gates such as `ready_for_pr` and `destructive_cleanup` are surfaced for review but are not safe autonomous actions. The model-facing `conductor_resolve_gate` tool resolves only as a parent agent; trusted human approval must come from a host/UI path.
+Human-only approval gates such as `ready_for_pr` and `destructive_cleanup` are surfaced for review but are not safe autonomous actions. The model-facing `conductor_resolve_gate` tool resolves only as a parent agent. Trusted human decisions come through the interactive host/UI command `/conductor human decide gate <gate-id> [reason]`, which shows gate context, readiness, evidence, timeline, and a human review packet before approve/reject/cancel.
 
 ## Development
 
