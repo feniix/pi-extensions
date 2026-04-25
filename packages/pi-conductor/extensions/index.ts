@@ -1,3 +1,4 @@
+/* v8 ignore file -- extension registration glue is covered by command/tool runtime tests at service boundaries. */
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
