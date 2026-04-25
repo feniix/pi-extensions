@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createObjectiveForRepo,
   createTaskForRepo,
   getOrCreateRunForRepo,
   runNextActionForRepo,
@@ -107,9 +108,64 @@ describe("conductor scheduler and async next action", () => {
     const run = getOrCreateRunForRepo(repoRoot);
     expect(run.tasks.find((entry) => entry.taskId === task.taskId)?.state).toBe("completed");
     expect(run.events.at(-1)).toMatchObject({
-      type: "external_operation.succeeded",
+      type: "scheduler.tick_succeeded",
       payload: { operation: "scheduler_tick", policy: "execute", executedCount: 1 },
     });
+  });
+
+  it("respects run capacity when executing scheduler ticks", async () => {
+    addUsableWorkerAndAssignedTask();
+
+    const result = await schedulerTickForRepo(repoRoot, { maxActions: 2, maxRuns: 0, policy: "execute" });
+
+    expect(result.executed).toHaveLength(0);
+    expect(result.skipped[0]).toMatchObject({ reason: "run capacity exhausted" });
+    expect(getOrCreateRunForRepo(repoRoot).events.map((event) => event.type)).toContain("scheduler.capacity_exhausted");
+  });
+
+  it("round-robin scheduler considers tasks across objectives", async () => {
+    const first = createObjectiveForRepo(repoRoot, { title: "First", prompt: "First objective" });
+    const second = createObjectiveForRepo(repoRoot, { title: "Second", prompt: "Second objective" });
+    const firstTask = createTaskForRepo(repoRoot, {
+      title: "First task",
+      prompt: "Do first",
+      objectiveId: first.objectiveId,
+    });
+    const secondTask = createTaskForRepo(repoRoot, {
+      title: "Second task",
+      prompt: "Do second",
+      objectiveId: second.objectiveId,
+    });
+    const run = getOrCreateRunForRepo(repoRoot);
+    const now = new Date().toISOString();
+    writeRun({
+      ...run,
+      workers: [
+        {
+          workerId: "worker-1",
+          name: "worker",
+          branch: null,
+          worktreePath: repoRoot,
+          sessionFile: join(repoRoot, "session.jsonl"),
+          runtime: { backend: "session_manager", sessionId: null, lastResumedAt: null },
+          currentTask: null,
+          lifecycle: "idle",
+          recoverable: false,
+          lastRun: null,
+          summary: { text: null, updatedAt: null, stale: false },
+          pr: { url: null, number: null, commitSucceeded: false, pushSucceeded: false, prCreationAttempted: false },
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    });
+
+    const result = await schedulerTickForRepo(repoRoot, { maxActions: 2, fairness: "round_robin" });
+
+    expect(result.executed).toHaveLength(2);
+    expect(result.executed.map((entry) => entry.action?.resourceRefs.taskId).sort()).toEqual(
+      [firstTask.taskId, secondTask.taskId].sort(),
+    );
   });
 
   it("scheduler ticks execute bounded safe actions", async () => {

@@ -78,6 +78,48 @@ function shouldRegisterLegacyWorkerTools(): boolean {
   return process.env.PI_CONDUCTOR_ENABLE_LEGACY_WORKER_TOOLS === "1";
 }
 
+function buildHumanGatePrompt(cwd: string, gateId: string): string {
+  const run = getOrCreateRunForRepo(cwd);
+  const gate = run.gates.find((entry) => entry.gateId === gateId);
+  if (!gate) return `Gate not found: ${gateId}`;
+  const refs = gate.resourceRefs;
+  const evidence = buildEvidenceBundleForRepo(cwd, { ...refs, purpose: "handoff", includeEvents: true });
+  const timeline = buildResourceTimelineForRepo(cwd, { ...refs, gateId, limit: 10, includeArtifacts: true });
+  const readiness =
+    gate.operation === "create_worker_pr" || gate.type === "ready_for_pr"
+      ? checkReadinessForRepo(cwd, { ...refs, purpose: "pr_readiness" })
+      : refs.taskId
+        ? checkReadinessForRepo(cwd, { ...refs, purpose: "task_review" })
+        : null;
+  return [
+    `Gate ${gate.gateId}`,
+    `Type: ${gate.type}`,
+    `Status: ${gate.status}`,
+    `Operation: ${gate.operation}`,
+    `Requested decision: ${gate.requestedDecision}`,
+    `Refs: ${JSON.stringify(gate.resourceRefs)}`,
+    gate.targetRevision ? `Target revision: ${gate.targetRevision}` : null,
+    gate.expiresAt ? `Expires: ${gate.expiresAt}` : null,
+    "",
+    "Readiness",
+    readiness
+      ? `${readiness.status}: blockers=${readiness.blockers.length} warnings=${readiness.warnings.length}`
+      : "not applicable",
+    "",
+    "Evidence",
+    `tasks=${evidence.tasks.length} runs=${evidence.runs.length} gates=${evidence.gates.length} artifacts=${evidence.artifacts.length}`,
+    evidence.pr?.url ? `pr=${evidence.pr.url}` : null,
+    "",
+    "Timeline",
+    timeline.events
+      .slice(-10)
+      .map((event) => `#${event.sequence} ${event.type}`)
+      .join("\n") || "no recent events",
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
 function getStatusText(cwd: string): string {
   const repoRoot = findRepoRoot(cwd);
   if (!repoRoot) {
@@ -110,10 +152,9 @@ export default function conductorExtension(pi: ExtensionAPI) {
     description: "Manage pi-conductor workers and PR preparation",
     handler: async (args, ctx) => {
       const trimmed = args.trim();
-      const humanApproval = trimmed.match(/^human\s+approve\s+gate\s+(\S+)(?:\s+(.+))?$/);
+      const humanApproval = trimmed.match(/^human\s+(?:approve|decide)\s+gate\s+(\S+)(?:\s+(.+))?$/);
       if (humanApproval) {
         const gateId = humanApproval[1];
-        const reason = humanApproval[2]?.trim() || "Approved from pi conductor UI";
         if (!ctx.hasUI) {
           console.log("error: trusted human gate approval requires interactive UI");
           return;
@@ -124,25 +165,26 @@ export default function conductorExtension(pi: ExtensionAPI) {
           ctx.ui.notify(`gate not found: ${gateId}`, "error");
           return;
         }
+        const prompt = buildHumanGatePrompt(ctx.cwd, gateId);
         const ui = ctx.ui as unknown as {
-          confirm?: (message: string) => Promise<boolean> | boolean;
+          select?: (message: string, options: string[]) => Promise<string | undefined> | string | undefined;
           notify: typeof ctx.ui.notify;
         };
-        const confirmed = await (ui.confirm?.(
-          `Approve gate ${gate.gateId} (${gate.type}) for ${gate.operation}: ${gate.requestedDecision}`,
-        ) ?? false);
-        if (!confirmed) {
+        const decision = await ui.select?.(prompt, ["Approve gate", "Reject gate", "Cancel"]);
+        if (!decision || decision === "Cancel") {
           ctx.ui.notify(`left gate ${gateId} open`, "info");
           return;
         }
+        const status = decision === "Reject gate" ? "rejected" : "approved";
+        const defaultReason = status === "approved" ? "Approved from pi conductor UI" : "Rejected from pi conductor UI";
         const humanId = `ui:${process.env.USER ?? "local-human"}`;
         const resolved = resolveGateFromTrustedHumanForRepo(ctx.cwd, {
           gateId,
-          status: "approved",
+          status,
           humanId,
-          resolutionReason: reason,
+          resolutionReason: humanApproval[2]?.trim() || defaultReason,
         });
-        ctx.ui.notify(`approved gate ${resolved.gateId} as trusted human`, "info");
+        ctx.ui.notify(`${status} gate ${resolved.gateId} as trusted human`, "info");
         return;
       }
       const text = await runConductorCommand(ctx.cwd, args);
@@ -432,6 +474,9 @@ export default function conductorExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       objectiveId: Type.Optional(Type.String({ description: "Optional objective scope" })),
       maxActions: Type.Optional(Type.Number({ description: "Maximum safe actions to execute; defaults to 1" })),
+      maxRuns: Type.Optional(Type.Number({ description: "Maximum run_task actions to start in this tick" })),
+      perObjectiveLimit: Type.Optional(Type.Number({ description: "Maximum selected actions per objective" })),
+      fairness: Type.Optional(Type.Union([Type.Literal("priority"), Type.Literal("round_robin")])),
       policy: Type.Optional(schedulerPolicySchema),
       executeRuns: Type.Optional(
         Type.Boolean({ description: "Allow scheduler to start model/backend task execution" }),

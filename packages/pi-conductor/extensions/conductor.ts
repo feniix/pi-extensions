@@ -58,6 +58,7 @@ import {
 } from "./storage.js";
 import type {
   ConductorActor,
+  ConductorEventType,
   ConductorNextAction,
   ConductorNextActionPriority,
   ConductorNextActionsResponse,
@@ -84,6 +85,7 @@ import type {
 } from "./types.js";
 
 export type SchedulerPolicyName = "safe" | "execute";
+export type SchedulerFairness = "priority" | "round_robin";
 
 function resolveSchedulerPolicy(input: { policy?: SchedulerPolicyName; executeRuns?: boolean }): {
   policy: SchedulerPolicyName;
@@ -104,13 +106,41 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function eventTypeForOperation(status: "succeeded" | "failed", operation: unknown): ConductorEventType {
+  const suffix = status === "succeeded" ? "succeeded" : "failed";
+  switch (operation) {
+    case "scheduler_tick_started":
+      return "scheduler.tick_started";
+    case "scheduler_tick":
+      return status === "succeeded" ? "scheduler.tick_succeeded" : "scheduler.tick_failed";
+    case "dispatch_task_run":
+      return status === "succeeded" ? "backend.dispatch_succeeded" : "backend.dispatch_failed";
+    case "resume_worker":
+      return status === "succeeded" ? "worker.resume_succeeded" : "worker.resume_failed";
+    case "refresh_worker_summary":
+      return status === "succeeded" ? "worker.summary_refreshed" : "worker.summary_refresh_failed";
+    case "commit_worker":
+      return `worker.commit_${suffix}` as ConductorEventType;
+    case "push_worker":
+      return `worker.push_${suffix}` as ConductorEventType;
+    case "create_worker_pr":
+      return status === "succeeded" ? "worker.pr_created" : "worker.pr_failed";
+    case "recover_worker":
+      return status === "succeeded" ? "worker.recovery_succeeded" : "worker.recovery_failed";
+    case "cleanup_worker":
+      return status === "succeeded" ? "worker.cleanup_succeeded" : "worker.cleanup_failed";
+    default:
+      return status === "succeeded" ? "external_operation.succeeded" : "external_operation.failed";
+  }
+}
+
 function appendExternalOperationEvent(
   run: RunRecord,
   input: { status: "succeeded" | "failed"; resourceRefs?: ConductorResourceRefs; payload: Record<string, unknown> },
 ): RunRecord {
   return appendConductorEvent(run, {
     actor: { type: "system", id: "conductor" },
-    type: input.status === "succeeded" ? "external_operation.succeeded" : "external_operation.failed",
+    type: eventTypeForOperation(input.status, input.payload.operation),
     resourceRefs: { projectKey: run.projectKey, ...(input.resourceRefs ?? {}) },
     payload: input.payload,
   });
@@ -890,21 +920,14 @@ export function prepareHumanReviewForRepo(
   return { markdown, objective, task, nextActions, blockers };
 }
 
-export async function runNextActionForRepo(
+async function executeConductorAction(
   repoRoot: string,
-  input: { objectiveId?: string; executeRuns?: boolean; policy?: SchedulerPolicyName } = {},
-): Promise<{ executed: boolean; reason: string | null; action: ConductorNextAction | null; result: unknown }> {
-  const schedulerPolicy = resolveSchedulerPolicy(input);
-  const recommendation = getNextActionsForRepo(repoRoot, {
-    objectiveId: input.objectiveId,
-    maxActions: 1,
-    reconcile: false,
-  });
-  const action = recommendation.actions[0] ?? null;
-  if (!action) return { executed: false, reason: "no action", action, result: null };
+  action: ConductorNextAction,
+  input: { executeRuns: boolean },
+): Promise<{ executed: boolean; reason: string | null; action: ConductorNextAction; result: unknown }> {
   if (action.requiresHuman) return { executed: false, reason: "action requires human", action, result: null };
   if (action.destructive) return { executed: false, reason: "action is destructive", action, result: null };
-  const mediumConfidenceAllowed = new Set(["retry_task", "refresh_objective_status"]);
+  const mediumConfidenceAllowed = new Set(["assign_task", "retry_task", "refresh_objective_status"]);
   if (action.confidence !== "high" && action.kind !== "plan_objective" && !mediumConfidenceAllowed.has(action.kind)) {
     return { executed: false, reason: "action confidence is not high", action, result: null };
   }
@@ -928,7 +951,7 @@ export async function runNextActionForRepo(
     return { executed: true, reason: null, action, result: reconcileProjectForRepo(repoRoot, { dryRun: false }) };
   }
   if (action.kind === "run_task" && typeof action.toolCall?.params.taskId === "string") {
-    if (!schedulerPolicy.executeRuns) {
+    if (!input.executeRuns) {
       return { executed: false, reason: "run execution disabled by scheduler policy", action, result: null };
     }
     return {
@@ -967,6 +990,19 @@ export async function runNextActionForRepo(
     };
   }
   return { executed: false, reason: `unsupported action ${action.kind}`, action, result: null };
+}
+
+export async function runNextActionForRepo(
+  repoRoot: string,
+  input: { objectiveId?: string; executeRuns?: boolean; policy?: SchedulerPolicyName } = {},
+): Promise<{ executed: boolean; reason: string | null; action: ConductorNextAction | null; result: unknown }> {
+  const schedulerPolicy = resolveSchedulerPolicy(input);
+  const action =
+    getNextActionsForRepo(repoRoot, { objectiveId: input.objectiveId, maxActions: 1, reconcile: false }).actions[0] ??
+    null;
+  return action
+    ? executeConductorAction(repoRoot, action, schedulerPolicy)
+    : { executed: false, reason: "no action", action, result: null };
 }
 
 export async function scheduleObjectiveForRepo(
@@ -1024,28 +1060,128 @@ export async function scheduleObjectiveForRepo(
   return { objectiveId: input.objectiveId ?? null, assigned, executed, skipped };
 }
 
+function objectiveKeyForAction(action: ConductorNextAction, taskObjectiveIds: Map<string, string | null>): string {
+  return (
+    action.resourceRefs.objectiveId ??
+    (action.resourceRefs.taskId ? taskObjectiveIds.get(action.resourceRefs.taskId) : null) ??
+    "project"
+  );
+}
+
+function roundRobinActions(
+  actions: ConductorNextAction[],
+  taskObjectiveIds: Map<string, string | null>,
+): ConductorNextAction[] {
+  const buckets = new Map<string, ConductorNextAction[]>();
+  for (const action of actions) {
+    const key = objectiveKeyForAction(action, taskObjectiveIds);
+    buckets.set(key, [...(buckets.get(key) ?? []), action]);
+  }
+  const ordered: ConductorNextAction[] = [];
+  while ([...buckets.values()].some((bucket) => bucket.length > 0)) {
+    for (const bucket of buckets.values()) {
+      const action = bucket.shift();
+      if (action) ordered.push(action);
+    }
+  }
+  return ordered;
+}
+
+function recordSchedulerActionEvent(
+  repoRoot: string,
+  type: ConductorEventType,
+  action: ConductorNextAction | null,
+  payload: Record<string, unknown>,
+): void {
+  mutateRepoRunSync(repoRoot, (run) =>
+    appendConductorEvent(run, {
+      actor: { type: "system", id: "conductor" },
+      type,
+      resourceRefs: { projectKey: run.projectKey, ...(action?.resourceRefs ?? {}) },
+      payload: { actionId: action?.actionId ?? null, actionKind: action?.kind ?? null, ...payload },
+    }),
+  );
+}
+
 export async function schedulerTickForRepo(
   repoRoot: string,
-  input: { objectiveId?: string; maxActions?: number; executeRuns?: boolean; policy?: SchedulerPolicyName } = {},
+  input: {
+    objectiveId?: string;
+    maxActions?: number;
+    maxRuns?: number;
+    perObjectiveLimit?: number;
+    fairness?: SchedulerFairness;
+    executeRuns?: boolean;
+    policy?: SchedulerPolicyName;
+  } = {},
 ): Promise<{
   executed: Array<{ action: ConductorNextAction | null; result: unknown }>;
   skipped: Array<{ action: ConductorNextAction | null; reason: string | null }>;
 }> {
   const schedulerPolicy = resolveSchedulerPolicy(input);
   const maxActions = Math.max(1, Math.min(input.maxActions ?? 1, 10));
+  const maxRuns = Math.max(0, Math.min(input.maxRuns ?? maxActions, maxActions));
+  const perObjectiveLimit = Math.max(1, Math.min(input.perObjectiveLimit ?? maxActions, maxActions));
+  const fairness = input.fairness ?? "priority";
   const executed: Array<{ action: ConductorNextAction | null; result: unknown }> = [];
   const skipped: Array<{ action: ConductorNextAction | null; reason: string | null }> = [];
+  recordExternalOperationEvent(repoRoot, {
+    status: "succeeded",
+    resourceRefs: { objectiveId: input.objectiveId },
+    payload: { operation: "scheduler_tick_started", policy: schedulerPolicy.policy, fairness, maxActions, maxRuns },
+  });
   try {
-    for (let index = 0; index < maxActions; index += 1) {
-      const result = await runNextActionForRepo(repoRoot, {
-        objectiveId: input.objectiveId,
-        executeRuns: schedulerPolicy.executeRuns,
-      });
-      if (!result.executed) {
-        skipped.push({ action: result.action, reason: result.reason });
-        break;
+    const runSnapshot = getOrCreateRunForRepo(repoRoot);
+    const taskObjectiveIds = new Map(runSnapshot.tasks.map((task) => [task.taskId, task.objectiveId]));
+    const actions = getNextActionsForRepo(repoRoot, {
+      objectiveId: input.objectiveId,
+      maxActions: 100,
+      reconcile: false,
+    }).actions;
+    const ordered = fairness === "round_robin" ? roundRobinActions(actions, taskObjectiveIds) : actions;
+    const objectiveCounts = new Map<string, number>();
+    let runSelections = 0;
+    const selected: ConductorNextAction[] = [];
+    for (const action of ordered) {
+      const objectiveKey = objectiveKeyForAction(action, taskObjectiveIds);
+      if ((objectiveCounts.get(objectiveKey) ?? 0) >= perObjectiveLimit) {
+        skipped.push({ action, reason: "per-objective scheduler limit reached" });
+        continue;
       }
-      executed.push({ action: result.action, result: result.result });
+      if (action.kind === "run_task") {
+        if (!schedulerPolicy.executeRuns) {
+          skipped.push({ action, reason: "run execution disabled by scheduler policy" });
+          continue;
+        }
+        if (runSelections >= maxRuns) {
+          skipped.push({ action, reason: "run capacity exhausted" });
+          continue;
+        }
+        runSelections += 1;
+      }
+      selected.push(action);
+      objectiveCounts.set(objectiveKey, (objectiveCounts.get(objectiveKey) ?? 0) + 1);
+      if (selected.length >= maxActions) break;
+    }
+    for (const action of selected) {
+      recordSchedulerActionEvent(repoRoot, "scheduler.action_selected", action, {
+        fairness,
+        policy: schedulerPolicy.policy,
+      });
+      const result = await executeConductorAction(repoRoot, action, schedulerPolicy);
+      if (result.executed) {
+        executed.push({ action, result: result.result });
+      } else {
+        skipped.push({ action, reason: result.reason });
+        recordSchedulerActionEvent(repoRoot, "scheduler.action_skipped", action, { reason: result.reason });
+      }
+    }
+    for (const entry of skipped) {
+      if (entry.action)
+        recordSchedulerActionEvent(repoRoot, "scheduler.action_skipped", entry.action, { reason: entry.reason });
+      if (entry.reason?.includes("capacity")) {
+        recordSchedulerActionEvent(repoRoot, "scheduler.capacity_exhausted", entry.action, { reason: entry.reason });
+      }
     }
     recordExternalOperationEvent(repoRoot, {
       status: "succeeded",
@@ -1053,8 +1189,11 @@ export async function schedulerTickForRepo(
       payload: {
         operation: "scheduler_tick",
         policy: schedulerPolicy.policy,
+        fairness,
         executeRuns: schedulerPolicy.executeRuns,
         maxActions,
+        maxRuns,
+        perObjectiveLimit,
         executedCount: executed.length,
         skippedCount: skipped.length,
         executedActions: executed.map((entry) => entry.action?.kind ?? null),
@@ -1069,7 +1208,7 @@ export async function schedulerTickForRepo(
       payload: {
         operation: "scheduler_tick",
         policy: schedulerPolicy.policy,
-        executeRuns: schedulerPolicy.executeRuns,
+        fairness,
         maxActions,
         errorMessage: errorMessage(error),
       },
