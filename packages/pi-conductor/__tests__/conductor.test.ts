@@ -3,7 +3,19 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createWorkerForRepo, getOrCreateRunForRepo } from "../extensions/conductor.js";
+import {
+  assignTaskForRepo,
+  cancelTaskRunForRepo,
+  createFollowUpTaskForRepo,
+  createTaskForRepo,
+  createWorkerForRepo,
+  delegateTaskForRepo,
+  getOrCreateRunForRepo,
+  reconcileProjectForRepo,
+  retryTaskForRepo,
+  startTaskRunForRepo,
+  updateTaskForRepo,
+} from "../extensions/conductor.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
   if (value == null) {
@@ -44,6 +56,200 @@ describe("conductor service", () => {
     expect(run.repoRoot).toBe(repoDir);
     expect(run.workers).toEqual([]);
     expect(readFileSync(join(run.storageDir, "run.json"), "utf-8")).toContain("projectKey");
+  });
+
+  it("creates and assigns durable tasks through conductor service helpers", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, {
+      title: "Add task ledger",
+      prompt: "Implement durable task records",
+    });
+
+    expect(task.title).toBe("Add task ledger");
+    expect(task.state).toBe("ready");
+
+    const assigned = assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    expect(assigned.state).toBe("assigned");
+    expect(assigned.assignedWorkerId).toBe(worker.workerId);
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.tasks).toHaveLength(1);
+    expect(run.tasks[0]?.taskId).toBe(task.taskId);
+    expect(run.events.map((event) => event.type)).toEqual(["worker.created", "task.created", "task.assigned"]);
+  });
+
+  it("lets allowed child runs create follow-up tasks", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Primary", prompt: "Do it" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, {
+      taskId: task.taskId,
+      workerId: worker.workerId,
+      allowFollowUpTasks: true,
+    });
+
+    expect(started.taskContract.allowFollowUpTasks).toBe(true);
+    const followUp = createFollowUpTaskForRepo(repoDir, {
+      runId: started.run.runId,
+      taskId: task.taskId,
+      title: "Follow-up",
+      prompt: "Do more",
+    });
+
+    expect(followUp).toMatchObject({ title: "Follow-up", prompt: "Do more", state: "ready" });
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.tasks).toHaveLength(2);
+    expect(run.events.map((event) => event.type)).toContain("task.followup_created");
+  });
+
+  it("fails closed when an unsupported backend is requested", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Subagent task", prompt: "Do it elsewhere" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    expect(() =>
+      startTaskRunForRepo(repoDir, {
+        taskId: task.taskId,
+        workerId: worker.workerId,
+        backend: "pi-subagents",
+        inspectBackends: () => ({
+          native: {
+            available: true,
+            canonicalStateOwner: "conductor",
+            capabilities: {
+              canStartRun: true,
+              canRunForeground: true,
+              supportsScopedChildTools: true,
+              requiresReviewOnExit: true,
+            },
+            diagnostic: null,
+          },
+          piSubagents: {
+            available: false,
+            canonicalStateOwner: "conductor",
+            capabilities: {
+              canStartRun: false,
+              canRunForeground: false,
+              supportsScopedChildTools: false,
+              requiresReviewOnExit: true,
+            },
+            diagnostic: "not installed in test",
+          },
+        }),
+      }),
+    ).toThrow(/pi-subagents backend unavailable/i);
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.runs).toHaveLength(0);
+    expect(run.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null });
+    expect(run.events.at(-1)).toMatchObject({ type: "backend.unavailable" });
+  });
+
+  it("starts an assigned durable task run through conductor service helpers", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Add run ledger", prompt: "Implement durable runs" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId, leaseSeconds: 300 });
+
+    expect(started.run.taskId).toBe(task.taskId);
+    expect(started.run.workerId).toBe(worker.workerId);
+    expect(started.run.status).toBe("running");
+    expect(started.taskContract).toMatchObject({
+      taskId: task.taskId,
+      runId: started.run.runId,
+      goal: "Implement durable runs",
+      explicitCompletionTools: true,
+    });
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.tasks[0]).toMatchObject({ state: "running", activeRunId: started.run.runId });
+  });
+
+  it("delegates a task through the parent-agent happy path", async () => {
+    const delegated = await delegateTaskForRepo(repoDir, {
+      title: "Happy path",
+      prompt: "Implement the happy path",
+      workerName: "backend",
+      startRun: true,
+      leaseSeconds: 300,
+    });
+
+    expect(delegated.worker.name).toBe("backend");
+    expect(delegated.task).toMatchObject({
+      title: "Happy path",
+      state: "running",
+      assignedWorkerId: delegated.worker.workerId,
+    });
+    expect(delegated.run).toMatchObject({
+      taskId: delegated.task.taskId,
+      workerId: delegated.worker.workerId,
+      status: "running",
+    });
+    expect(delegated.taskContract).toMatchObject({ taskId: delegated.task.taskId, runId: delegated.run?.runId });
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers).toHaveLength(1);
+    expect(run.tasks).toHaveLength(1);
+    expect(run.runs).toHaveLength(1);
+  });
+
+  it("updates durable tasks through conductor service helpers", () => {
+    const task = createTaskForRepo(repoDir, { title: "Original", prompt: "Do it" });
+
+    const updated = updateTaskForRepo(repoDir, { taskId: task.taskId, title: "Updated", prompt: "Do it better" });
+
+    expect(updated).toMatchObject({ title: "Updated", prompt: "Do it better", revision: 2 });
+    expect(getOrCreateRunForRepo(repoDir).events.map((event) => event.type)).toContain("task.updated");
+  });
+
+  it("cancels and retries task runs through conductor service helpers", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Retry task", prompt: "Do it" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+
+    const canceled = cancelTaskRunForRepo(repoDir, {
+      runId: started.run.runId,
+      reason: "obsolete attempt",
+    });
+    expect(canceled.runs[0]).toMatchObject({ status: "aborted" });
+    expect(canceled.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
+
+    const retried = retryTaskForRepo(repoDir, { taskId: task.taskId, leaseSeconds: 300 });
+    expect(retried.run.runId).not.toBe(started.run.runId);
+    expect(retried.run).toMatchObject({ taskId: task.taskId, workerId: worker.workerId, status: "running" });
+    expect(retried.taskContract).toMatchObject({ taskId: task.taskId, runId: retried.run.runId });
+    expect(getOrCreateRunForRepo(repoDir).tasks[0]?.runIds).toHaveLength(2);
+  });
+
+  it("reconciles project leases and persists safe state transitions", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Lease task", prompt: "Do it" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId, leaseSeconds: -1 });
+
+    const reconciled = reconcileProjectForRepo(repoDir, { now: "2999-01-01T00:00:00.000Z" });
+
+    expect(reconciled.runs[0]).toMatchObject({ status: "stale" });
+    expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+    expect(getOrCreateRunForRepo(repoDir).events.map((event) => event.type)).toContain("run.lease_expired");
+  });
+
+  it("supports read-only project reconciliation dry runs", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Lease task", prompt: "Do it" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId, leaseSeconds: -1 });
+
+    const preview = reconcileProjectForRepo(repoDir, { now: "2999-01-01T00:00:00.000Z", dryRun: true });
+
+    expect(preview.runs[0]).toMatchObject({ status: "stale" });
+    expect(preview.tasks[0]).toMatchObject({ state: "needs_review" });
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.runs[0]).toMatchObject({ status: "running" });
+    expect(persisted.tasks[0]).toMatchObject({ state: "running" });
+    expect(persisted.events.map((event) => event.type)).not.toContain("run.lease_expired");
   });
 
   it("creates a worker, worktree, and persisted worker record", async () => {

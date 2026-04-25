@@ -65,7 +65,7 @@ export function recreateManagedWorktree(
 export function removeManagedWorktree(repoRoot: string, worktreePath: string): void {
   pruneWorktrees(repoRoot);
   try {
-    removeWorktree({ cwd: repoRoot, path: worktreePath, force: true });
+    removeWorktree({ cwd: repoRoot, path: worktreePath, force: true, validateOnForce: true });
   } catch {
     pruneWorktrees(repoRoot);
   }

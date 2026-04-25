@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildRunScopedConductorTools,
+  buildTaskContractPrompt,
   extractFinalAssistantText,
   mapStopReasonToRunOutcome,
   preflightWorkerRunRuntime,
@@ -13,6 +15,177 @@ describe("worker run runtime helpers", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+  it("builds an explicit task contract prompt for child worker runs", () => {
+    const prompt = buildTaskContractPrompt({
+      taskId: "task-1",
+      runId: "run-1",
+      taskRevision: 2,
+      goal: "Implement durable tasks",
+      constraints: ["Do not publish a PR"],
+      explicitCompletionTools: true,
+    });
+
+    expect(prompt).toContain("task-1");
+    expect(prompt).toContain("run-1");
+    expect(prompt).toContain("revision 2");
+    expect(prompt).toContain("Implement durable tasks");
+    expect(prompt).toContain("Do not publish a PR");
+    expect(prompt).toContain("conductor_child_complete");
+    expect(prompt).toContain("conductor_child_progress");
+    expect(prompt).toContain("conductor_child_create_gate");
+    expect(prompt).toContain("idempotencyKey");
+    expect(prompt).not.toContain("conductor_child_create_followup_task");
+  });
+
+  it("includes follow-up task instructions only when allowed", () => {
+    const prompt = buildTaskContractPrompt({
+      taskId: "task-1",
+      runId: "run-1",
+      taskRevision: 2,
+      goal: "Implement durable tasks",
+      explicitCompletionTools: true,
+      allowFollowUpTasks: true,
+    });
+
+    expect(prompt).toContain("conductor_child_create_followup_task");
+  });
+
+  it("builds run-scoped conductor tools for native child sessions", async () => {
+    const progressCalls: unknown[] = [];
+    const completeCalls: unknown[] = [];
+    const gateCalls: unknown[] = [];
+    const tools = buildRunScopedConductorTools({
+      onConductorProgress: async (params) => {
+        progressCalls.push(params);
+      },
+      onConductorComplete: async (params) => {
+        completeCalls.push(params);
+      },
+      onConductorGate: async (params) => {
+        gateCalls.push(params);
+      },
+    });
+
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "conductor_child_progress",
+      "conductor_child_create_gate",
+      "conductor_child_complete",
+    ]);
+
+    await tools[0]?.execute?.(
+      "call-1",
+      { runId: "run-1", taskId: "task-1", progress: "half done" } as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+    );
+    await tools[1]?.execute?.(
+      "call-2",
+      {
+        runId: "run-1",
+        taskId: "task-1",
+        type: "needs_input",
+        requestedDecision: "Which database should I use?",
+      } as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+    );
+    await tools[2]?.execute?.(
+      "call-3",
+      {
+        runId: "run-1",
+        taskId: "task-1",
+        status: "succeeded",
+        completionSummary: "done",
+      } as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+    );
+
+    expect(progressCalls).toEqual([{ runId: "run-1", taskId: "task-1", progress: "half done" }]);
+    expect(gateCalls).toEqual([
+      { runId: "run-1", taskId: "task-1", type: "needs_input", requestedDecision: "Which database should I use?" },
+    ]);
+    expect(completeCalls).toEqual([
+      { runId: "run-1", taskId: "task-1", status: "succeeded", completionSummary: "done" },
+    ]);
+  });
+
+  it("adds a scoped follow-up task tool only when the task contract allows it", async () => {
+    const followUpCalls: unknown[] = [];
+    const tools = buildRunScopedConductorTools({
+      taskContract: {
+        taskId: "task-1",
+        runId: "run-1",
+        taskRevision: 1,
+        goal: "Do it",
+        explicitCompletionTools: true,
+        allowFollowUpTasks: true,
+      },
+      onConductorFollowUpTask: async (params) => {
+        followUpCalls.push(params);
+      },
+    });
+
+    expect(tools.map((tool) => tool.name)).toContain("conductor_child_create_followup_task");
+    const followUpTool = tools.find((tool) => tool.name === "conductor_child_create_followup_task");
+    await followUpTool?.execute?.(
+      "call-1",
+      { runId: "run-1", taskId: "task-1", title: "Follow up", prompt: "Do the follow-up" } as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+    );
+
+    expect(followUpCalls).toEqual([
+      { runId: "run-1", taskId: "task-1", title: "Follow up", prompt: "Do the follow-up" },
+    ]);
+    expect(
+      buildRunScopedConductorTools({
+        taskContract: {
+          taskId: "task-1",
+          runId: "run-1",
+          taskRevision: 1,
+          goal: "Do it",
+          explicitCompletionTools: true,
+        },
+      }).map((tool) => tool.name),
+    ).not.toContain("conductor_child_create_followup_task");
+  });
+
+  it("rejects scoped child tool calls for another task or run", async () => {
+    const tools = buildRunScopedConductorTools({
+      taskContract: {
+        taskId: "task-1",
+        runId: "run-1",
+        taskRevision: 1,
+        goal: "Do it",
+        explicitCompletionTools: true,
+      },
+    });
+
+    await expect(
+      tools[0]?.execute?.(
+        "call-1",
+        { runId: "other-run", taskId: "task-1", progress: "spoofed" } as never,
+        undefined as never,
+        undefined as never,
+        undefined as never,
+      ),
+    ).rejects.toThrow(/not scoped/i);
+    await expect(
+      tools[2]?.execute?.(
+        "call-2",
+        { runId: "run-1", taskId: "other-task", status: "succeeded", completionSummary: "spoofed" } as never,
+        undefined as never,
+        undefined as never,
+        undefined as never,
+      ),
+    ).rejects.toThrow(/not scoped/i);
+  });
+
   it("maps Pi stop reasons to conductor run outcomes", () => {
     expect(mapStopReasonToRunOutcome("stop")).toEqual({ status: "success", errorMessage: null });
     expect(mapStopReasonToRunOutcome("aborted")).toEqual({ status: "aborted", errorMessage: null });

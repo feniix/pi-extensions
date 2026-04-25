@@ -19,8 +19,11 @@ vi.mock("../extensions/runtime.js", async (importOriginal) => {
 });
 
 import {
+  assignTaskForRepo,
+  createTaskForRepo,
   createWorkerForRepo,
   getOrCreateRunForRepo,
+  runTaskForRepo,
   runWorkerForRepo,
   updateWorkerLifecycleForRepo,
   updateWorkerTaskForRepo,
@@ -95,6 +98,61 @@ describe("worker run flows", () => {
     });
   });
 
+  it("runs a durable assigned task with scoped child progress and completion", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Durable task", prompt: "Implement the durable flow" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(
+      async ({ taskContract, onConductorProgress, onConductorComplete }) => {
+        expect(taskContract).toMatchObject({ taskId: task.taskId, goal: "Implement the durable flow" });
+        await onConductorProgress?.({
+          runId: taskContract.runId,
+          taskId: task.taskId,
+          progress: "halfway",
+          artifact: { type: "log", ref: "progress://halfway" },
+        });
+        await onConductorComplete?.({
+          runId: taskContract.runId,
+          taskId: task.taskId,
+          status: "succeeded",
+          completionSummary: "done with evidence",
+          artifact: { type: "completion_report", ref: "completion://done" },
+        });
+        return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-durable" };
+      },
+    );
+
+    const result = await runTaskForRepo(repoDir, task.taskId);
+
+    expect(result.status).toBe("success");
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "completed", latestProgress: "halfway", activeRunId: null });
+    expect(persisted.runs[0]).toMatchObject({ status: "succeeded", completionSummary: "done with evidence" });
+    expect(persisted.artifacts.map((artifact) => artifact.type)).toEqual(["log", "completion_report"]);
+    expect(persisted.events.map((event) => event.type)).toContain("run.progress_reported");
+    expect(persisted.events.map((event) => event.type)).toContain("run.completed");
+  });
+
+  it("requires review when a durable task run exits without explicit child completion", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Review task", prompt: "Do work" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    runtimeMocks.runWorkerPromptRuntime.mockResolvedValueOnce({
+      status: "success",
+      finalText: "I think it is done",
+      errorMessage: null,
+      sessionId: "run-session-review",
+    });
+
+    await runTaskForRepo(repoDir, task.taskId);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+    expect(persisted.runs[0]).toMatchObject({ status: "partial", completionSummary: "I think it is done" });
+    expect(persisted.gates[0]).toMatchObject({ type: "needs_review", status: "open" });
+  });
+
   it("fails fast on preflight without mutating currentTask or lifecycle", async () => {
     await createWorkerForRepo(repoDir, "backend");
     updateWorkerTaskForRepo(repoDir, "backend", "old task");
@@ -126,6 +184,50 @@ describe("worker run flows", () => {
     });
 
     await runWorkerForRepo(repoDir, "backend", "record session id early");
+  });
+
+  it("does not drop concurrent conductor state when persisting early session id", async () => {
+    await createWorkerForRepo(repoDir, "backend");
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async ({ onSessionReady }) => {
+      const concurrentTask = createTaskForRepo(repoDir, {
+        title: "Concurrent task",
+        prompt: "Preserve this task while recording session id",
+      });
+
+      await onSessionReady?.("run-session-early");
+
+      const duringRun = getOrCreateRunForRepo(repoDir);
+      expect(duringRun.tasks.some((entry) => entry.taskId === concurrentTask.taskId)).toBe(true);
+      expect(duringRun.workers[0]?.lastRun?.sessionId).toBe("run-session-early");
+
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-early" };
+    });
+
+    await runWorkerForRepo(repoDir, "backend", "record session id without stale write");
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks).toHaveLength(1);
+    expect(persisted.tasks[0]?.title).toBe("Concurrent task");
+  });
+
+  it("does not drop conductor state added while finishing a worker run", async () => {
+    await createWorkerForRepo(repoDir, "backend");
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async () => {
+      const concurrentTask = createTaskForRepo(repoDir, {
+        title: "Runtime-added task",
+        prompt: "Preserve this task when finishing worker run",
+      });
+
+      expect(getOrCreateRunForRepo(repoDir).tasks.some((entry) => entry.taskId === concurrentTask.taskId)).toBe(true);
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-finish" };
+    });
+
+    await runWorkerForRepo(repoDir, "backend", "finish without stale write");
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks).toHaveLength(1);
+    expect(persisted.tasks[0]?.title).toBe("Runtime-added task");
+    expect(persisted.workers[0]?.lastRun).toMatchObject({ status: "success", sessionId: "run-session-finish" });
   });
 
   it("marks errored runs blocked and persists the run error message", async () => {

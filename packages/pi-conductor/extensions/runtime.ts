@@ -5,14 +5,21 @@ import {
   AuthStorage,
   createAgentSession,
   createExtensionRuntime,
+  defineTool,
   ModelRegistry,
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
+import { Type } from "typebox";
 import { generateWorkerSummaryFromSession } from "./summaries.js";
 import type {
+  ConductorCompletionReportInput,
+  ConductorFollowUpTaskInput,
+  ConductorGateReportInput,
+  ConductorProgressReportInput,
   RuntimeRunContext,
   RuntimeRunPreflightContext,
   RuntimeRunResult,
+  TaskContractInput,
   WorkerRunStatus,
   WorkerRuntimeState,
 } from "./types.js";
@@ -130,6 +137,172 @@ export function extractFinalAssistantText(messages: unknown[]): string | null {
   return null;
 }
 
+const artifactTypeSchema = Type.Union([
+  Type.Literal("note"),
+  Type.Literal("test_result"),
+  Type.Literal("changed_files"),
+  Type.Literal("log"),
+  Type.Literal("completion_report"),
+  Type.Literal("pr_evidence"),
+  Type.Literal("other"),
+]);
+
+export function buildRunScopedConductorTools(input: {
+  taskContract?: TaskContractInput;
+  onConductorProgress?: (params: ConductorProgressReportInput) => void | Promise<void>;
+  onConductorComplete?: (params: ConductorCompletionReportInput) => void | Promise<void>;
+  onConductorGate?: (params: ConductorGateReportInput) => void | Promise<void>;
+  onConductorFollowUpTask?: (params: ConductorFollowUpTaskInput) => void | Promise<void>;
+}) {
+  function assertScoped(params: { runId: string; taskId: string }): void {
+    if (!input.taskContract) {
+      return;
+    }
+    if (params.runId !== input.taskContract.runId || params.taskId !== input.taskContract.taskId) {
+      throw new Error(
+        `Child conductor tool call is not scoped to run ${input.taskContract.runId} task ${input.taskContract.taskId}`,
+      );
+    }
+  }
+
+  const tools = [
+    defineTool({
+      name: "conductor_child_progress",
+      label: "Conductor Child Progress",
+      description: "Report scoped progress for the current conductor task run",
+      parameters: Type.Object({
+        runId: Type.String(),
+        taskId: Type.String(),
+        progress: Type.String(),
+        idempotencyKey: Type.Optional(Type.String()),
+        artifact: Type.Optional(
+          Type.Object({
+            type: artifactTypeSchema,
+            ref: Type.String(),
+            metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),
+          }),
+        ),
+      }),
+      execute: async (_toolCallId, params) => {
+        assertScoped(params);
+        await input.onConductorProgress?.(params as ConductorProgressReportInput);
+        return { content: [{ type: "text", text: `recorded progress for task ${params.taskId}` }], details: params };
+      },
+    }),
+    defineTool({
+      name: "conductor_child_create_gate",
+      label: "Conductor Child Create Gate",
+      description: "Request scoped input or review for the current conductor task run",
+      parameters: Type.Object({
+        runId: Type.String(),
+        taskId: Type.String(),
+        type: Type.Union([Type.Literal("needs_input"), Type.Literal("needs_review")]),
+        requestedDecision: Type.String(),
+      }),
+      execute: async (_toolCallId, params) => {
+        assertScoped(params);
+        await input.onConductorGate?.(params as ConductorGateReportInput);
+        return {
+          content: [{ type: "text", text: `created ${params.type} gate for task ${params.taskId}` }],
+          details: params,
+        };
+      },
+    }),
+    ...(input.taskContract?.allowFollowUpTasks
+      ? [
+          defineTool({
+            name: "conductor_child_create_followup_task",
+            label: "Conductor Child Create Follow-Up Task",
+            description: "Create a scoped follow-up task requested by the current conductor task run",
+            parameters: Type.Object({
+              runId: Type.String(),
+              taskId: Type.String(),
+              title: Type.String(),
+              prompt: Type.String(),
+            }),
+            execute: async (_toolCallId, params) => {
+              assertScoped(params);
+              await input.onConductorFollowUpTask?.(params as ConductorFollowUpTaskInput);
+              return {
+                content: [{ type: "text", text: `created follow-up task request from ${params.taskId}` }],
+                details: params,
+              };
+            },
+          }),
+        ]
+      : []),
+    defineTool({
+      name: "conductor_child_complete",
+      label: "Conductor Child Complete",
+      description: "Complete the current conductor task run with a scoped semantic outcome",
+      parameters: Type.Object({
+        runId: Type.String(),
+        taskId: Type.String(),
+        status: Type.Union([
+          Type.Literal("succeeded"),
+          Type.Literal("partial"),
+          Type.Literal("blocked"),
+          Type.Literal("failed"),
+          Type.Literal("aborted"),
+        ]),
+        completionSummary: Type.String(),
+        idempotencyKey: Type.Optional(Type.String()),
+        artifact: Type.Optional(
+          Type.Object({
+            type: artifactTypeSchema,
+            ref: Type.String(),
+            metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),
+          }),
+        ),
+      }),
+      execute: async (_toolCallId, params) => {
+        assertScoped(params);
+        await input.onConductorComplete?.(params as ConductorCompletionReportInput);
+        return {
+          content: [{ type: "text", text: `completed task ${params.taskId} with ${params.status}` }],
+          details: params,
+        };
+      },
+    }),
+  ];
+  return tools;
+}
+
+export function buildTaskContractPrompt(input: TaskContractInput): string {
+  const constraints = input.constraints?.length
+    ? input.constraints.map((constraint) => `- ${constraint}`).join("\n")
+    : "- No additional constraints were provided.";
+  const followUpInstruction = input.allowFollowUpTasks
+    ? "If you discover follow-up work that should be tracked separately, call conductor_child_create_followup_task."
+    : null;
+  const completion = input.explicitCompletionTools
+    ? [
+        "Report progress with conductor_child_progress when meaningful milestones happen.",
+        "Attach evidence through the artifact field on conductor_child_progress or conductor_child_complete.",
+        "If you are blocked or need input/review, create a scoped gate with conductor_child_create_gate.",
+        ...(followUpInstruction ? [followUpInstruction] : []),
+        "Include a stable idempotencyKey on progress and completion tool calls when retrying or after tool-call uncertainty.",
+        "When finished, call conductor_child_complete with succeeded, partial, blocked, failed, or aborted status.",
+      ].join("\n")
+    : "Explicit conductor completion tools are unavailable for this backend; finish with a concise outcome summary and expect parent review.";
+
+  return [
+    "# pi-conductor task contract",
+    `Task ID: ${input.taskId}`,
+    `Run ID: ${input.runId}`,
+    `Task revision ${input.taskRevision}`,
+    "",
+    "## Goal",
+    input.goal,
+    "",
+    "## Constraints",
+    constraints,
+    "",
+    "## Completion contract",
+    completion,
+  ].join("\n");
+}
+
 export async function preflightWorkerRunRuntime(input: RuntimeRunPreflightContext): Promise<void> {
   if (!input.worktreePath || !existsSync(input.worktreePath)) {
     throw new Error("Worker worktree is not available for a foreground run");
@@ -156,13 +329,14 @@ export async function runWorkerPromptRuntime(input: RuntimeRunContext): Promise<
     modelRegistry,
     resourceLoader,
     tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
+    customTools: input.taskContract ? buildRunScopedConductorTools(input) : [],
   });
 
   try {
     await session.bindExtensions({});
     await input.onSessionReady?.(session.sessionId);
 
-    await session.prompt(input.task);
+    await session.prompt(input.taskContract ? buildTaskContractPrompt(input.taskContract) : input.task);
 
     const finalAssistant = [...session.messages].reverse().find(isAssistantMessage);
     if (!finalAssistant) {
