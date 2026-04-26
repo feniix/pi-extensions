@@ -72,12 +72,9 @@ describeCliE2E("pi-conductor CLI e2e", () => {
     expect(output).toContain("workers: 0");
   });
 
-  it("creates, resumes, and inspects a worker through the real pi CLI", () => {
-    const created = runPiConductorCommand(repoDir, conductorHome, "/conductor start backend");
+  it("creates and inspects a worker through the real pi CLI", () => {
+    const created = runPiConductorCommand(repoDir, conductorHome, "/conductor create worker backend");
     expect(created).toContain("created worker backend");
-
-    const resumed = runPiConductorCommand(repoDir, conductorHome, "/conductor resume backend");
-    expect(resumed).toContain("resumed worker backend");
 
     const status = runPiConductorCommand(repoDir, conductorHome, "/conductor status");
     expect(status).toContain("workers: 1");
@@ -85,23 +82,21 @@ describeCliE2E("pi-conductor CLI e2e", () => {
     expect(status).toContain("runtime=session_manager");
     expect(status).toContain("lastResumedAt=");
     expect(status).toContain("worktree=");
-    expect(status).toContain("session=");
   });
 
-  it("summarizes and cleans up a worker through the real pi CLI", () => {
-    const created = runPiConductorCommand(repoDir, conductorHome, "/conductor start backend");
-    expect(created).toContain("created worker backend");
+  it("creates a task and inspects it through the real pi CLI", () => {
+    runPiConductorCommand(repoDir, conductorHome, "/conductor create worker backend");
+    const created = runPiConductorCommand(
+      repoDir,
+      conductorHome,
+      "/conductor create task Add-ledger Implement durable tasks",
+    );
+    expect(created).toContain("created task Add-ledger");
 
-    const summarized = runPiConductorCommand(repoDir, conductorHome, "/conductor summarize backend");
-    expect(summarized).toContain("refreshed summary for backend");
+    const tasks = runPiConductorCommand(repoDir, conductorHome, "/conductor get tasks");
+    expect(tasks).toContain("Add-ledger");
 
-    const statusWithSummary = runPiConductorCommand(repoDir, conductorHome, "/conductor status");
-    expect(statusWithSummary).toContain("summary=fresh:");
-
-    const cleanedUp = runPiConductorCommand(repoDir, conductorHome, "/conductor cleanup backend");
-    expect(cleanedUp).toContain("removed worker backend");
-
-    const finalStatus = runPiConductorCommand(repoDir, conductorHome, "/conductor status");
-    expect(finalStatus).toContain("workers: 0");
+    const status = runPiConductorCommand(repoDir, conductorHome, "/conductor status");
+    expect(status).toContain("tasks:");
   });
 });

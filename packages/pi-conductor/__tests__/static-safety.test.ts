@@ -41,6 +41,71 @@ function collectWriteRunCallSites(paths: string[]): string[] {
 }
 
 describe("pi-conductor static safety guards", () => {
+  it("keeps the extension entrypoint thin and free of tool registration details", () => {
+    const source = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
+    expect(source.split("\n").length).toBeLessThan(180);
+    expect(source).not.toContain("registerTool(");
+    expect(source).toContain("registerConductorTools(");
+  });
+
+  it("keeps model tool registration split by control-plane domain", () => {
+    const extensionDir = join(__dirname, "../extensions");
+    const registrar = readFileSync(join(extensionDir, "tools.ts"), "utf-8");
+    expect(registrar.split("\n").length).toBeLessThan(120);
+    expect(registrar).not.toContain("pi.registerTool(");
+
+    for (const file of [
+      "tools/project-tools.ts",
+      "tools/objective-tools.ts",
+      "tools/task-tools.ts",
+      "tools/gate-tools.ts",
+      "tools/evidence-tools.ts",
+      "tools/worker-tools.ts",
+    ]) {
+      expect(readFileSync(join(extensionDir, file), "utf-8").split("\n").length).toBeLessThan(420);
+    }
+  });
+
+  it("keeps storage validation in a dedicated schema boundary", () => {
+    const extensionDir = join(__dirname, "../extensions");
+    const storageSource = readFileSync(join(extensionDir, "storage.ts"), "utf-8");
+    const validationSource = readFileSync(join(extensionDir, "storage-validation.ts"), "utf-8");
+    const normalizeSource = readFileSync(join(extensionDir, "storage-normalize.ts"), "utf-8");
+
+    expect(storageSource.split("\n").length).toBeLessThan(1600);
+    expect(storageSource).toContain('from "./storage-validation.js"');
+    expect(storageSource).toContain('from "./storage-normalize.js"');
+    expect(storageSource).not.toContain("conductorEventTypes");
+    expect(validationSource.split("\n").length).toBeLessThan(420);
+    expect(normalizeSource.split("\n").length).toBeLessThan(120);
+  });
+
+  it("keeps next-action recommendation planning in a pure conductor module", () => {
+    const extensionDir = join(__dirname, "../extensions");
+    const conductorSource = readFileSync(join(extensionDir, "conductor.ts"), "utf-8");
+    const nextActionsSource = readFileSync(join(extensionDir, "next-actions.ts"), "utf-8");
+
+    expect(conductorSource.split("\n").length).toBeLessThan(2300);
+    expect(conductorSource).toContain('from "./next-actions.js"');
+    expect(conductorSource).not.toContain("function sortNextActions");
+    expect(conductorSource).not.toContain("export function computeNextActions");
+    expect(nextActionsSource).toContain("export function computeNextActions");
+    expect(nextActionsSource.split("\n").length).toBeLessThan(420);
+  });
+
+  it("keeps scheduler action selection separate from scheduler side effects", () => {
+    const extensionDir = join(__dirname, "../extensions");
+    const conductorSource = readFileSync(join(extensionDir, "conductor.ts"), "utf-8");
+    const schedulerSource = readFileSync(join(extensionDir, "scheduler-selection.ts"), "utf-8");
+
+    expect(conductorSource.split("\n").length).toBeLessThan(2200);
+    expect(conductorSource).toContain('from "./scheduler-selection.js"');
+    expect(conductorSource).not.toContain("function roundRobinActions");
+    expect(conductorSource).not.toContain("function objectiveKeyForAction");
+    expect(schedulerSource).toContain("export function selectSchedulerActions");
+    expect(schedulerSource.split("\n").length).toBeLessThan(140);
+  });
+
   it("does not expose trusted-human gate approval as a model tool", () => {
     const tools = collectTools();
     const toolNames = tools.map((tool) => tool.name).sort();
@@ -67,7 +132,6 @@ describe("pi-conductor static safety guards", () => {
     ]);
 
     expect(sites).toEqual([
-      "index.ts:getStatusText",
       "storage.ts:mutateRun",
       "storage.ts:mutateRunWithFileLock",
       "storage.ts:mutateRunWithFileLockSync",

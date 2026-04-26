@@ -115,6 +115,23 @@ describe("runConductorCommand", () => {
     expect(text).toContain("task.created");
   });
 
+  it("returns helpful errors for missing create inputs", async () => {
+    const missingWorker = await runConductorCommand(repoDir, "create worker");
+    expect(missingWorker).toContain("error: missing worker name");
+
+    const missingTask = await runConductorCommand(repoDir, "create task");
+    expect(missingTask).toContain("error: missing task title or prompt");
+
+    const badCreate = await runConductorCommand(repoDir, "create something");
+    expect(badCreate).toContain("error: unknown resource 'something'");
+  });
+
+  it("returns usage for unknown /conductor get resources", async () => {
+    const response = await runConductorCommand(repoDir, "get not-real");
+    expect(response).toContain("error: unknown resource 'not-real'");
+    expect(response).toContain("usage:");
+  });
+
   it("previews reconciliation from the reconcile command without persisting", async () => {
     await runConductorCommand(repoDir, "create worker backend");
     const text = await runConductorCommand(repoDir, "reconcile --dry-run");
@@ -122,18 +139,11 @@ describe("runConductorCommand", () => {
     expect(text).toContain("changed=");
   });
 
-  it("rejects removed legacy worker slash mutations", async () => {
-    const text = await runConductorCommand(repoDir, "start backend");
-
-    expect(text).toContain("legacy /conductor start was removed");
-    expect(text).toContain("conductor_create_worker");
-  });
-
   it("requires resource tools for gate-protected worker cleanup", async () => {
     await runConductorCommand(repoDir, "create worker backend");
 
-    const removedCleanup = await runConductorCommand(repoDir, "cleanup backend");
-    expect(removedCleanup).toContain("legacy /conductor cleanup was removed");
+    const unsupportedMutation = await runConductorCommand(repoDir, "destroy backend");
+    expect(unsupportedMutation).toContain("error: unknown subcommand 'destroy'");
     expect(getOrCreateRunForRepo(repoDir).gates).toHaveLength(0);
 
     const worker = getOrCreateRunForRepo(repoDir).workers[0];

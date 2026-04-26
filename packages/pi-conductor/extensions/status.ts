@@ -1,32 +1,11 @@
 import { getConductorProjectDir } from "./storage.js";
 import type { RunRecord, WorkerRecord } from "./types.js";
 
-function getWorkerHealth(worker: WorkerRecord): "healthy" | "stale" | "broken" {
+function getWorkerHealth(worker: WorkerRecord): "healthy" | "broken" {
   if (worker.lifecycle === "broken") {
     return "broken";
   }
-  if (worker.summary.stale || worker.lifecycle === "done") {
-    return "stale";
-  }
   return "healthy";
-}
-
-function formatLastRunStatus(worker: WorkerRecord): string {
-  if (!worker.lastRun) {
-    return "lastRun=none";
-  }
-
-  const status =
-    worker.lastRun.status ??
-    (worker.lifecycle === "running" && worker.lastRun.finishedAt === null ? "running" : "unknown");
-  return [
-    `lastRun=${status}`,
-    `runTask=${worker.lastRun.task}`,
-    `runSessionId=${worker.lastRun.sessionId ?? "none"}`,
-    `runStartedAt=${worker.lastRun.startedAt}`,
-    `runFinishedAt=${worker.lastRun.finishedAt ?? "none"}`,
-    `runError=${worker.lastRun.errorMessage ?? "none"}`,
-  ].join(" ");
 }
 
 export function formatRunStatus(run: RunRecord): string {
@@ -53,15 +32,11 @@ export function formatRunStatus(run: RunRecord): string {
   }
 
   for (const worker of run.workers) {
-    const summary = worker.summary.text
-      ? `${worker.summary.stale ? "stale" : "fresh"}: ${worker.summary.text}`
-      : "none";
     lines.push(
       `- ${worker.name} [${worker.workerId}] ` +
         `health=${getWorkerHealth(worker)} ` +
         `state=${worker.lifecycle} ` +
         `recoverable=${worker.recoverable} ` +
-        `task=${worker.currentTask ?? "none"} ` +
         `branch=${worker.branch ?? "none"} ` +
         `worktree=${worker.worktreePath ?? "none"} ` +
         `session=${worker.sessionFile ?? "none"} ` +
@@ -71,9 +46,7 @@ export function formatRunStatus(run: RunRecord): string {
         `pr=${worker.pr.url ?? "none"} ` +
         `commit=${worker.pr.commitSucceeded} ` +
         `push=${worker.pr.pushSucceeded} ` +
-        `prAttempted=${worker.pr.prCreationAttempted} ` +
-        `summary=${summary} ` +
-        `${formatLastRunStatus(worker)}`,
+        `prAttempted=${worker.pr.prCreationAttempted}`,
     );
   }
 

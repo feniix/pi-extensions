@@ -9,10 +9,7 @@ import {
   createWorkerForRepo,
   getOrCreateRunForRepo,
   recordTaskCompletionForRepo,
-  recoverWorkerForRepo,
-  resumeWorkerForRepo,
   startTaskRunForRepo,
-  updateWorkerLifecycleForRepo,
 } from "../extensions/conductor.js";
 
 describe("worker lifecycle flows", () => {
@@ -38,38 +35,6 @@ describe("worker lifecycle flows", () => {
         rmSync(dir, { recursive: true, force: true });
       }
     }
-  });
-
-  it("resumes a healthy worker using its persisted worktree and session linkage", async () => {
-    const created = await createWorkerForRepo(repoDir, "backend");
-    const resumed = await resumeWorkerForRepo(repoDir, "backend");
-    expect(resumed.workerId).toBe(created.workerId);
-    expect(resumed.worktreePath).toBe(created.worktreePath);
-    expect(resumed.sessionFile).toBe(created.sessionFile);
-    expect(resumed.runtime.sessionId).toBe(created.runtime.sessionId);
-    expect(resumed.runtime.lastResumedAt).toBeTruthy();
-  });
-
-  it("emits lifecycle events when a worker lifecycle changes", async () => {
-    const worker = await createWorkerForRepo(repoDir, "backend");
-
-    updateWorkerLifecycleForRepo(repoDir, "backend", "blocked");
-
-    const event = getOrCreateRunForRepo(repoDir).events.at(-1);
-    expect(event).toMatchObject({
-      type: "worker.lifecycle_changed",
-      resourceRefs: { workerId: worker.workerId },
-      payload: { previousLifecycle: "idle", lifecycle: "blocked", name: "backend" },
-    });
-  });
-
-  it("does not emit lifecycle events for no-op lifecycle updates", async () => {
-    await createWorkerForRepo(repoDir, "backend");
-    const before = getOrCreateRunForRepo(repoDir).events.length;
-
-    updateWorkerLifecycleForRepo(repoDir, "backend", "idle");
-
-    expect(getOrCreateRunForRepo(repoDir).events).toHaveLength(before);
   });
 
   it("emits lifecycle events for implicit durable task run transitions", async () => {
@@ -100,52 +65,5 @@ describe("worker lifecycle flows", () => {
         }),
       ]),
     );
-  });
-
-  it("updates a worker lifecycle to blocked, ready_for_pr, and done", async () => {
-    await createWorkerForRepo(repoDir, "backend");
-    expect(updateWorkerLifecycleForRepo(repoDir, "backend", "blocked").lifecycle).toBe("blocked");
-    expect(updateWorkerLifecycleForRepo(repoDir, "backend", "ready_for_pr").lifecycle).toBe("ready_for_pr");
-    expect(updateWorkerLifecycleForRepo(repoDir, "backend", "done").lifecycle).toBe("done");
-    expect(getOrCreateRunForRepo(repoDir).workers[0]?.lifecycle).toBe("done");
-  });
-
-  it("preserves interrupted lastRun metadata when lifecycle is manually reset or recovered", async () => {
-    const worker = await createWorkerForRepo(repoDir, "backend");
-    const run = getOrCreateRunForRepo(repoDir);
-    const existingWorker = run.workers[0];
-    if (!existingWorker) {
-      throw new Error("expected worker to exist");
-    }
-    run.workers[0] = {
-      ...existingWorker,
-      lifecycle: "running",
-      lastRun: {
-        task: "half finished task",
-        status: null,
-        startedAt: "2026-04-21T00:00:00.000Z",
-        finishedAt: null,
-        errorMessage: null,
-        sessionId: "run-session-stuck",
-      },
-    };
-
-    const { writeRun } = await import("../extensions/storage.js");
-    writeRun(run);
-
-    const reset = updateWorkerLifecycleForRepo(repoDir, "backend", "idle");
-    expect(reset.lifecycle).toBe("idle");
-    expect(reset.lastRun?.finishedAt).toBeNull();
-    expect(reset.lastRun?.status).toBeNull();
-    expect(reset.lastRun?.sessionId).toBe("run-session-stuck");
-
-    if (worker.sessionFile && existsSync(worker.sessionFile)) {
-      rmSync(worker.sessionFile, { force: true });
-    }
-    const recovered = await recoverWorkerForRepo(repoDir, "backend");
-    expect(recovered.lifecycle).toBe("idle");
-    expect(recovered.lastRun?.finishedAt).toBeNull();
-    expect(recovered.lastRun?.status).toBeNull();
-    expect(recovered.lastRun?.sessionId).toBe("run-session-stuck");
   });
 });

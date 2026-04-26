@@ -13,15 +13,15 @@ import {
   validatePrPreconditions,
   validatePushPreconditions,
 } from "./git-pr.js";
+import { computeNextActions, incompleteDependenciesForTask } from "./next-actions.js";
 import { deriveProjectKey } from "./project-key.js";
 import {
   createWorkerSessionRuntime,
   preflightWorkerRunRuntime,
   recoverWorkerSessionRuntime,
-  resumeWorkerSessionRuntime,
   runWorkerPromptRuntime,
-  summarizeWorkerSessionRuntime,
 } from "./runtime.js";
+import { type SchedulerFairness, type SchedulerPolicyName, selectSchedulerActions } from "./scheduler-selection.js";
 import {
   addConductorArtifact,
   addObjective,
@@ -35,7 +35,6 @@ import {
   createObjectiveRecord,
   createTaskRecord,
   createWorkerRecord,
-  finishWorkerRun,
   linkTaskToObjective,
   markConductorGateUsed,
   mutateRunWithFileLockSync,
@@ -45,14 +44,8 @@ import {
   recordTaskProgress,
   removeWorker,
   resolveConductorGate,
-  setWorkerLifecycle,
   setWorkerPrState,
-  setWorkerRunSessionId,
-  setWorkerRuntimeState,
-  setWorkerSummary,
-  setWorkerTask,
   startTaskRun,
-  startWorkerRun,
   updateObjective,
   updateTask,
 } from "./storage.js";
@@ -60,7 +53,6 @@ import type {
   ConductorActor,
   ConductorEventType,
   ConductorNextAction,
-  ConductorNextActionPriority,
   ConductorNextActionsResponse,
   ConductorProjectBrief,
   ConductorResourceRefs,
@@ -79,13 +71,12 @@ import type {
   RunRecord,
   TaskContractInput,
   TaskRecord,
-  WorkerLifecycleState,
   WorkerRecord,
   WorkerRunResult,
 } from "./types.js";
 
-export type SchedulerPolicyName = "safe" | "execute";
-export type SchedulerFairness = "priority" | "round_robin";
+export { computeNextActions } from "./next-actions.js";
+export type { SchedulerFairness, SchedulerPolicyName } from "./scheduler-selection.js";
 
 function resolveSchedulerPolicy(input: { policy?: SchedulerPolicyName; executeRuns?: boolean }): {
   policy: SchedulerPolicyName;
@@ -115,10 +106,6 @@ function eventTypeForOperation(status: "succeeded" | "failed", operation: unknow
       return status === "succeeded" ? "scheduler.tick_succeeded" : "scheduler.tick_failed";
     case "dispatch_task_run":
       return status === "succeeded" ? "backend.dispatch_succeeded" : "backend.dispatch_failed";
-    case "resume_worker":
-      return status === "succeeded" ? "worker.resume_succeeded" : "worker.resume_failed";
-    case "refresh_worker_summary":
-      return status === "succeeded" ? "worker.summary_refreshed" : "worker.summary_refresh_failed";
     case "commit_worker":
       return `worker.commit_${suffix}` as ConductorEventType;
     case "push_worker":
@@ -160,369 +147,6 @@ import {
   removeManagedBranch,
   removeManagedWorktree,
 } from "./worktrees.js";
-
-const priorityRank: Record<ConductorNextActionPriority, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-const terminalRunStatuses = new Set([
-  "succeeded",
-  "partial",
-  "blocked",
-  "failed",
-  "aborted",
-  "stale",
-  "interrupted",
-  "unknown_dispatch",
-]);
-
-function nextAction(input: Omit<ConductorNextAction, "actionId">): ConductorNextAction {
-  const refs = input.resourceRefs;
-  const actionId = [input.kind, refs.objectiveId, refs.workerId, refs.taskId, refs.runId, refs.gateId, refs.artifactId]
-    .filter(Boolean)
-    .join(":");
-  return { ...input, actionId };
-}
-
-function incompleteDependenciesForTask(run: RunRecord, task: TaskRecord): TaskRecord[] {
-  const dependencies = task.dependsOnTaskIds
-    .map((taskId) => run.tasks.find((entry) => entry.taskId === taskId))
-    .filter((entry): entry is TaskRecord => Boolean(entry));
-  return dependencies.filter((entry) => entry.state !== "completed");
-}
-
-function isUsableIdleWorker(worker: WorkerRecord): boolean {
-  return (
-    worker.lifecycle === "idle" && !worker.recoverable && Boolean(worker.worktreePath) && Boolean(worker.sessionFile)
-  );
-}
-
-function sortNextActions(actions: ConductorNextAction[]): ConductorNextAction[] {
-  return [...actions].sort(
-    (left, right) =>
-      priorityRank[left.priority] - priorityRank[right.priority] || left.actionId.localeCompare(right.actionId),
-  );
-}
-
-export function computeNextActions(
-  run: RunRecord,
-  input: {
-    now?: string;
-    maxActions?: number;
-    includeLowPriority?: boolean;
-    includePrActions?: boolean;
-    includeHumanGateActions?: boolean;
-    objectiveId?: string;
-    reconciledPreview?: boolean;
-  } = {},
-): ConductorNextActionsResponse {
-  const now = input.now ?? new Date().toISOString();
-  const maxActions = Math.max(1, Math.min(input.maxActions ?? 10, 25));
-  const actions: ConductorNextAction[] = [];
-  const objectiveTaskIds = input.objectiveId
-    ? new Set(run.objectives.find((objective) => objective.objectiveId === input.objectiveId)?.taskIds ?? [])
-    : null;
-  const isInObjectiveScope = (refs: ConductorResourceRefs): boolean => {
-    if (!input.objectiveId) return true;
-    return (
-      refs.objectiveId === input.objectiveId ||
-      (refs.taskId !== undefined && Boolean(objectiveTaskIds?.has(refs.taskId)))
-    );
-  };
-  const scopedTasks = input.objectiveId
-    ? run.tasks.filter((task) => task.objectiveId === input.objectiveId || Boolean(objectiveTaskIds?.has(task.taskId)))
-    : run.tasks;
-  const openGates = run.gates.filter((gate) => gate.status === "open" && isInObjectiveScope(gate.resourceRefs));
-  const activeRuns = run.runs.filter(
-    (attempt) =>
-      !attempt.finishedAt &&
-      !terminalRunStatuses.has(attempt.status) &&
-      (!input.objectiveId || Boolean(objectiveTaskIds?.has(attempt.taskId))),
-  );
-  const usableWorkers = run.workers.filter(isUsableIdleWorker);
-
-  for (const objective of run.objectives.filter(
-    (entry) => !input.objectiveId || entry.objectiveId === input.objectiveId,
-  )) {
-    if (["active", "draft"].includes(objective.status) && objective.taskIds.length === 0) {
-      actions.push(
-        nextAction({
-          priority: "high",
-          kind: "plan_objective",
-          title: `Plan executable tasks for objective ${objective.title}`,
-          rationale: "The objective is active but has no scoped task plan for workers to execute.",
-          resourceRefs: { projectKey: run.projectKey, objectiveId: objective.objectiveId },
-          toolCall: {
-            name: "conductor_plan_objective",
-            params: {
-              objectiveId: objective.objectiveId,
-              tasks: "<derive an ordered task list for this objective>",
-            },
-          },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "medium",
-        }),
-      );
-    }
-  }
-
-  if (!input.objectiveId && run.workers.length === 0) {
-    actions.push(
-      nextAction({
-        priority: run.tasks.length === 0 ? "medium" : "high",
-        kind: "create_worker",
-        title: "Create the first conductor worker",
-        rationale: "The project has no usable workers, so tasks cannot run.",
-        resourceRefs: { projectKey: run.projectKey },
-        toolCall: { name: "conductor_create_worker", params: { name: "worker-1" } },
-        requiresHuman: false,
-        destructive: false,
-        blockedBy: [],
-        confidence: "medium",
-      }),
-    );
-  }
-
-  for (const attempt of activeRuns) {
-    if (attempt.leaseExpiresAt && attempt.leaseExpiresAt <= now) {
-      actions.push(
-        nextAction({
-          priority: "critical",
-          kind: "reconcile_project",
-          title: `Reconcile expired run ${attempt.runId}`,
-          rationale: "The run lease has expired but the run is not terminal.",
-          resourceRefs: {
-            projectKey: run.projectKey,
-            taskId: attempt.taskId,
-            workerId: attempt.workerId,
-            runId: attempt.runId,
-          },
-          toolCall: { name: "conductor_reconcile_project", params: { dryRun: false } },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "high",
-        }),
-      );
-    } else if (input.includeLowPriority) {
-      actions.push(
-        nextAction({
-          priority: "low",
-          kind: "wait_for_run",
-          title: `Wait for active run ${attempt.runId}`,
-          rationale: "The run is active and its lease has not expired.",
-          resourceRefs: {
-            projectKey: run.projectKey,
-            taskId: attempt.taskId,
-            workerId: attempt.workerId,
-            runId: attempt.runId,
-          },
-          toolCall: { name: "conductor_list_events", params: { runId: attempt.runId, limit: 20 } },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "high",
-        }),
-      );
-    }
-  }
-
-  for (const gate of openGates) {
-    const refs = { ...gate.resourceRefs, gateId: gate.gateId };
-    if (["approval_required", "ready_for_pr", "destructive_cleanup"].includes(gate.type)) {
-      if (input.includeHumanGateActions ?? true) {
-        actions.push(
-          nextAction({
-            priority: gate.type === "destructive_cleanup" ? "critical" : "high",
-            kind: "await_human_gate",
-            title: `Human decision required for ${gate.type} gate ${gate.gateId}`,
-            rationale: "This gate type requires a human actor for approval.",
-            resourceRefs: refs,
-            toolCall: null,
-            requiresHuman: true,
-            destructive: gate.type === "destructive_cleanup",
-            blockedBy: [{ gateId: gate.gateId }],
-            confidence: "high",
-          }),
-        );
-      }
-    } else {
-      actions.push(
-        nextAction({
-          priority: gate.type === "needs_input" ? "high" : "medium",
-          kind: "resolve_gate",
-          title: `Resolve ${gate.type} gate ${gate.gateId}`,
-          rationale: gate.requestedDecision,
-          resourceRefs: refs,
-          toolCall: {
-            name: "conductor_resolve_gate",
-            params: {
-              gateId: gate.gateId,
-              status: "approved",
-              resolutionReason: "<parent decision required>",
-              actorId: "parent",
-              actorType: "parent_agent",
-            },
-          },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [{ gateId: gate.gateId }],
-          confidence: "medium",
-        }),
-      );
-    }
-  }
-
-  for (const worker of run.workers) {
-    if (worker.lifecycle === "broken" || worker.recoverable) {
-      actions.push(
-        nextAction({
-          priority: "high",
-          kind: "recover_worker",
-          title: `Recover worker ${worker.name}`,
-          rationale: "The worker is broken or recoverable.",
-          resourceRefs: { projectKey: run.projectKey, workerId: worker.workerId },
-          toolCall: { name: "conductor_recover_worker", params: { name: worker.name } },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "high",
-        }),
-      );
-    }
-  }
-
-  for (const task of scopedTasks) {
-    const assignedWorker = run.workers.find((worker) => worker.workerId === task.assignedWorkerId);
-    if (task.activeRunId) {
-      continue;
-    }
-    if (task.state === "ready" && !task.assignedWorkerId && usableWorkers[0]) {
-      actions.push(
-        nextAction({
-          priority: "medium",
-          kind: "assign_task",
-          title: `Assign ready task ${task.taskId}`,
-          rationale: "The task is ready and an idle usable worker exists.",
-          resourceRefs: { projectKey: run.projectKey, taskId: task.taskId, workerId: usableWorkers[0].workerId },
-          toolCall: {
-            name: "conductor_assign_task",
-            params: { taskId: task.taskId, workerId: usableWorkers[0].workerId },
-          },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "medium",
-        }),
-      );
-    }
-    const incompleteDependencies = incompleteDependenciesForTask(run, task);
-    if (task.state === "assigned" && incompleteDependencies.length > 0) {
-      actions.push(
-        nextAction({
-          priority: "high",
-          kind: "wait_for_dependency",
-          title: `Wait for dependencies before running task ${task.taskId}`,
-          rationale: "The task is assigned but one or more dependency tasks are not completed.",
-          resourceRefs: {
-            projectKey: run.projectKey,
-            taskId: task.taskId,
-            workerId: task.assignedWorkerId ?? undefined,
-          },
-          toolCall: { name: "conductor_task_brief", params: { taskId: task.taskId } },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: incompleteDependencies.map((dependency) => ({ taskId: dependency.taskId })),
-          confidence: "high",
-        }),
-      );
-      continue;
-    }
-    if (task.state === "assigned" && assignedWorker && isUsableIdleWorker(assignedWorker)) {
-      actions.push(
-        nextAction({
-          priority: "high",
-          kind: "run_task",
-          title: `Run assigned task ${task.taskId}`,
-          rationale: "The task is assigned and the worker is idle.",
-          resourceRefs: { projectKey: run.projectKey, taskId: task.taskId, workerId: assignedWorker.workerId },
-          toolCall: { name: "conductor_run_task", params: { taskId: task.taskId } },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "high",
-        }),
-      );
-    }
-    if (
-      ["blocked", "failed", "needs_review", "canceled"].includes(task.state) &&
-      assignedWorker &&
-      isUsableIdleWorker(assignedWorker)
-    ) {
-      actions.push(
-        nextAction({
-          priority: "medium",
-          kind: "retry_task",
-          title: `Retry task ${task.taskId}`,
-          rationale: `The task is ${task.state} and has an idle assigned worker.`,
-          resourceRefs: { projectKey: run.projectKey, taskId: task.taskId, workerId: assignedWorker.workerId },
-          toolCall: { name: "conductor_retry_task", params: { taskId: task.taskId } },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "medium",
-        }),
-      );
-    }
-  }
-
-  const filtered = input.includeLowPriority ? actions : actions.filter((action) => action.priority !== "low");
-  const sorted = sortNextActions(filtered);
-  const returned = sorted.slice(0, maxActions);
-  const highestPriority = returned[0]?.priority ?? null;
-  const status =
-    run.workers.length === 0 && run.tasks.length === 0
-      ? "empty"
-      : returned.some((action) => action.priority === "critical")
-        ? "blocked"
-        : returned.length > 0
-          ? "actionable"
-          : openGates.length > 0 || activeRuns.length > 0
-            ? "waiting"
-            : "healthy_idle";
-  const headline =
-    status === "empty"
-      ? "No conductor workers or tasks exist yet."
-      : status === "blocked"
-        ? "Critical conductor maintenance or gate decisions are required."
-        : status === "actionable"
-          ? "Parent orchestration can proceed with recommended tool calls."
-          : status === "waiting"
-            ? "No safe immediate parent action; waiting on active runs or human gates."
-            : "Project is healthy and idle.";
-  return {
-    project: {
-      projectKey: run.projectKey,
-      repoRoot: run.repoRoot,
-      schemaVersion: run.schemaVersion,
-      revision: run.revision,
-      reconciledPreview: input.reconciledPreview ?? false,
-      counts: {
-        workers: run.workers.length,
-        tasks: scopedTasks.length,
-        runs: run.runs.length,
-        gates: run.gates.length,
-        artifacts: run.artifacts.length,
-        events: run.events.length,
-      },
-    },
-    summary: { status, headline, totalActions: sorted.length, returnedActions: returned.length, highestPriority },
-    actions: returned,
-    omitted: {
-      count: Math.max(0, sorted.length - returned.length),
-      reason: sorted.length > returned.length ? "maxActions" : null,
-    },
-  };
-}
 
 function refsMatchFilter(refs: ConductorResourceRefs, filter: ConductorResourceRefs): boolean {
   return (["objectiveId", "workerId", "taskId", "runId", "gateId", "artifactId"] as const).some(
@@ -924,6 +548,7 @@ async function executeConductorAction(
   repoRoot: string,
   action: ConductorNextAction,
   input: { executeRuns: boolean },
+  signal?: AbortSignal,
 ): Promise<{ executed: boolean; reason: string | null; action: ConductorNextAction; result: unknown }> {
   if (action.requiresHuman) return { executed: false, reason: "action requires human", action, result: null };
   if (action.destructive) return { executed: false, reason: "action is destructive", action, result: null };
@@ -958,7 +583,7 @@ async function executeConductorAction(
       executed: true,
       reason: null,
       action,
-      result: await runTaskForRepo(repoRoot, action.toolCall.params.taskId),
+      result: await runTaskForRepo(repoRoot, action.toolCall.params.taskId, signal),
     };
   }
   if (action.kind === "retry_task" && typeof action.toolCall?.params.taskId === "string") {
@@ -995,13 +620,14 @@ async function executeConductorAction(
 export async function runNextActionForRepo(
   repoRoot: string,
   input: { objectiveId?: string; executeRuns?: boolean; policy?: SchedulerPolicyName } = {},
+  signal?: AbortSignal,
 ): Promise<{ executed: boolean; reason: string | null; action: ConductorNextAction | null; result: unknown }> {
   const schedulerPolicy = resolveSchedulerPolicy(input);
   const action =
     getNextActionsForRepo(repoRoot, { objectiveId: input.objectiveId, maxActions: 1, reconcile: false }).actions[0] ??
     null;
   return action
-    ? executeConductorAction(repoRoot, action, schedulerPolicy)
+    ? executeConductorAction(repoRoot, action, schedulerPolicy, signal)
     : { executed: false, reason: "no action", action, result: null };
 }
 
@@ -1014,6 +640,7 @@ export async function scheduleObjectiveForRepo(
     executeRuns?: boolean;
     policy?: SchedulerPolicyName;
   },
+  signal?: AbortSignal,
 ): Promise<{
   objectiveId: string | null;
   assigned: TaskRecord[];
@@ -1042,49 +669,22 @@ export async function scheduleObjectiveForRepo(
   const executed: Array<{ taskId: string; result: unknown }> = [];
   const skipped: string[] = [];
   for (const task of runnableTasks) {
-    let currentTask = task;
-    if (!currentTask.assignedWorkerId) {
+    let schedulableTask = task;
+    if (!schedulableTask.assignedWorkerId) {
       const worker = idleWorkers.shift();
       if (!worker) {
         skipped.push(task.taskId);
         continue;
       }
-      currentTask = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
-      assigned.push(currentTask);
+      schedulableTask = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
+      assigned.push(schedulableTask);
     }
     if (schedulerPolicy.executeRuns) {
-      const result = await runTaskForRepo(repoRoot, currentTask.taskId);
-      executed.push({ taskId: currentTask.taskId, result });
+      const result = await runTaskForRepo(repoRoot, schedulableTask.taskId, signal);
+      executed.push({ taskId: schedulableTask.taskId, result });
     }
   }
   return { objectiveId: input.objectiveId ?? null, assigned, executed, skipped };
-}
-
-function objectiveKeyForAction(action: ConductorNextAction, taskObjectiveIds: Map<string, string | null>): string {
-  return (
-    action.resourceRefs.objectiveId ??
-    (action.resourceRefs.taskId ? taskObjectiveIds.get(action.resourceRefs.taskId) : null) ??
-    "project"
-  );
-}
-
-function roundRobinActions(
-  actions: ConductorNextAction[],
-  taskObjectiveIds: Map<string, string | null>,
-): ConductorNextAction[] {
-  const buckets = new Map<string, ConductorNextAction[]>();
-  for (const action of actions) {
-    const key = objectiveKeyForAction(action, taskObjectiveIds);
-    buckets.set(key, [...(buckets.get(key) ?? []), action]);
-  }
-  const ordered: ConductorNextAction[] = [];
-  while ([...buckets.values()].some((bucket) => bucket.length > 0)) {
-    for (const bucket of buckets.values()) {
-      const action = bucket.shift();
-      if (action) ordered.push(action);
-    }
-  }
-  return ordered;
 }
 
 function recordSchedulerActionEvent(
@@ -1114,6 +714,7 @@ export async function schedulerTickForRepo(
     executeRuns?: boolean;
     policy?: SchedulerPolicyName;
   } = {},
+  signal?: AbortSignal,
 ): Promise<{
   executed: Array<{ action: ConductorNextAction | null; result: unknown }>;
   skipped: Array<{ action: ConductorNextAction | null; reason: string | null }>;
@@ -1138,37 +739,22 @@ export async function schedulerTickForRepo(
       maxActions: 100,
       reconcile: false,
     }).actions;
-    const ordered = fairness === "round_robin" ? roundRobinActions(actions, taskObjectiveIds) : actions;
-    const objectiveCounts = new Map<string, number>();
-    let runSelections = 0;
-    const selected: ConductorNextAction[] = [];
-    for (const action of ordered) {
-      const objectiveKey = objectiveKeyForAction(action, taskObjectiveIds);
-      if ((objectiveCounts.get(objectiveKey) ?? 0) >= perObjectiveLimit) {
-        skipped.push({ action, reason: "per-objective scheduler limit reached" });
-        continue;
-      }
-      if (action.kind === "run_task") {
-        if (!schedulerPolicy.executeRuns) {
-          skipped.push({ action, reason: "run execution disabled by scheduler policy" });
-          continue;
-        }
-        if (runSelections >= maxRuns) {
-          skipped.push({ action, reason: "run capacity exhausted" });
-          continue;
-        }
-        runSelections += 1;
-      }
-      selected.push(action);
-      objectiveCounts.set(objectiveKey, (objectiveCounts.get(objectiveKey) ?? 0) + 1);
-      if (selected.length >= maxActions) break;
-    }
-    for (const action of selected) {
+    const selection = selectSchedulerActions({
+      actions,
+      taskObjectiveIds,
+      maxActions,
+      maxRuns,
+      perObjectiveLimit,
+      fairness,
+      executeRuns: schedulerPolicy.executeRuns,
+    });
+    skipped.push(...selection.skipped);
+    for (const action of selection.selected) {
       recordSchedulerActionEvent(repoRoot, "scheduler.action_selected", action, {
         fairness,
         policy: schedulerPolicy.policy,
       });
-      const result = await executeConductorAction(repoRoot, action, schedulerPolicy);
+      const result = await executeConductorAction(repoRoot, action, schedulerPolicy, signal);
       if (result.executed) {
         executed.push({ action, result: result.result });
       } else {
@@ -2073,103 +1659,6 @@ export async function createWorkerForRepo(repoRoot: string, workerName: string):
   return worker;
 }
 
-export function updateWorkerTaskForRepo(repoRoot: string, workerName: string, task: string): WorkerRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const worker = run.workers.find((entry) => entry.name === workerName);
-  if (!worker) {
-    throw new Error(`Worker named ${workerName} not found`);
-  }
-  const updatedRun = mutateRepoRunSync(repoRoot, (latest) =>
-    setWorkerLifecycle(setWorkerTask(latest, worker.workerId, task), worker.workerId, "idle"),
-  );
-  const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
-  if (!updatedWorker) {
-    throw new Error(`Worker named ${workerName} disappeared during task update`);
-  }
-  return updatedWorker;
-}
-
-export async function resumeWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
-  const run = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
-  const worker = run.workers.find((entry) => entry.name === workerName);
-  if (!worker) {
-    throw new Error(`Worker named ${workerName} not found`);
-  }
-  if (worker.lifecycle === "broken") {
-    throw new Error(`Worker named ${workerName} is broken and must be recovered before resume`);
-  }
-  if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
-    throw new Error(`Worker named ${workerName} does not have a valid session file`);
-  }
-
-  let runtime: Awaited<ReturnType<typeof resumeWorkerSessionRuntime>>;
-  try {
-    runtime = await resumeWorkerSessionRuntime(worker.sessionFile);
-  } catch (error) {
-    recordExternalOperationEvent(repoRoot, {
-      status: "failed",
-      resourceRefs: { workerId: worker.workerId },
-      payload: {
-        operation: "resume_worker",
-        name: worker.name,
-        sessionFile: worker.sessionFile,
-        errorMessage: errorMessage(error),
-      },
-    });
-    throw error;
-  }
-  // Resume in the current MVP means "reopen and re-link the persisted worker
-  // session" rather than "continue an autonomous running agent". For that
-  // reason, resume intentionally normalizes the worker back to idle.
-  const withEvent = mutateRepoRunSync(repoRoot, (latest) =>
-    appendExternalOperationEvent(
-      setWorkerLifecycle(
-        setWorkerRuntimeState(latest, worker.workerId, {
-          sessionFile: runtime.sessionFile,
-          sessionId: runtime.sessionId,
-          lastResumedAt: runtime.lastResumedAt,
-        }),
-        worker.workerId,
-        "idle",
-      ),
-      {
-        status: "succeeded",
-        resourceRefs: { workerId: worker.workerId },
-        payload: {
-          operation: "resume_worker",
-          name: worker.name,
-          sessionFile: runtime.sessionFile,
-          sessionId: runtime.sessionId,
-          lastResumedAt: runtime.lastResumedAt,
-          lifecycle: "idle",
-        },
-      },
-    ),
-  );
-  return withEvent.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
-}
-
-export function updateWorkerLifecycleForRepo(
-  repoRoot: string,
-  workerName: string,
-  lifecycle: WorkerLifecycleState,
-): WorkerRecord {
-  if (lifecycle === "broken") {
-    throw new Error("Broken lifecycle is reserved for detected health failures");
-  }
-  const run = getOrCreateRunForRepo(repoRoot);
-  const worker = run.workers.find((entry) => entry.name === workerName);
-  if (!worker) {
-    throw new Error(`Worker named ${workerName} not found`);
-  }
-  const updatedRun = mutateRepoRunSync(repoRoot, (latest) => setWorkerLifecycle(latest, worker.workerId, lifecycle));
-  const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
-  if (!updatedWorker) {
-    throw new Error(`Worker named ${workerName} disappeared during lifecycle update`);
-  }
-  return updatedWorker;
-}
-
 export function reconcileProjectForRepo(repoRoot: string, input: { now?: string; dryRun?: boolean } = {}): RunRecord {
   const healthReconciled = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
   const leaseReconciled = reconcileRunLeases(healthReconciled, input);
@@ -2198,50 +1687,6 @@ export function reconcileWorkerHealth(run: RunRecord): RunRecord {
     workers,
     updatedAt: new Date().toISOString(),
   };
-}
-
-export async function refreshWorkerSummaryForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const worker = run.workers.find((entry) => entry.name === workerName);
-  if (!worker) {
-    throw new Error(`Worker named ${workerName} not found`);
-  }
-  if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
-    throw new Error(`Worker named ${workerName} does not have a valid session file`);
-  }
-  let summaryText: string;
-  try {
-    summaryText = await summarizeWorkerSessionRuntime(worker.sessionFile);
-  } catch (error) {
-    recordExternalOperationEvent(repoRoot, {
-      status: "failed",
-      resourceRefs: { workerId: worker.workerId },
-      payload: {
-        operation: "refresh_worker_summary",
-        name: worker.name,
-        sessionFile: worker.sessionFile,
-        errorMessage: errorMessage(error),
-      },
-    });
-    throw error;
-  }
-  const updatedRun = mutateRepoRunSync(repoRoot, (latest) =>
-    appendExternalOperationEvent(setWorkerSummary(latest, worker.workerId, summaryText), {
-      status: "succeeded",
-      resourceRefs: { workerId: worker.workerId },
-      payload: {
-        operation: "refresh_worker_summary",
-        name: worker.name,
-        sessionFile: worker.sessionFile,
-        summaryLength: summaryText.length,
-      },
-    }),
-  );
-  const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
-  if (!updatedWorker) {
-    throw new Error(`Worker named ${workerName} disappeared during summary refresh`);
-  }
-  return updatedWorker;
 }
 
 export function removeWorkerForRepo(repoRoot: string, workerName: string): WorkerRecord {
@@ -2458,7 +1903,7 @@ export function createWorkerPrForRepo(
     }
     throw new Error(`Worker ${worker.name} requires an approved ready_for_pr gate before PR creation`);
   }
-  const prBody = body?.trim() || worker.summary.text || worker.currentTask || `PR for ${worker.name}`;
+  const prBody = body?.trim() || `PR for ${worker.name}`;
   try {
     validatePrPreconditions(run.repoRoot);
   } catch (error) {
@@ -2567,7 +2012,7 @@ function createGateId(): string {
   return `gate-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export async function runTaskForRepo(repoRoot: string, taskId: string): Promise<WorkerRunResult> {
+export async function runTaskForRepo(repoRoot: string, taskId: string, signal?: AbortSignal): Promise<WorkerRunResult> {
   const started = startTaskRunForRepo(repoRoot, { taskId });
   const currentRun = getOrCreateRunForRepo(repoRoot);
   const worker = currentRun.workers.find((entry) => entry.workerId === started.run.workerId);
@@ -2588,6 +2033,7 @@ export async function runTaskForRepo(repoRoot: string, taskId: string): Promise<
     worktreePath: worker.worktreePath,
     sessionFile: worker.sessionFile,
     task: task.prompt,
+    signal,
     taskContract: started.taskContract,
     onConductorProgress: async (progress) => {
       recordTaskProgressForRepo(repoRoot, progress);
@@ -2639,100 +2085,6 @@ export async function runTaskForRepo(repoRoot: string, taskId: string): Promise<
     errorMessage: runtimeResult.errorMessage,
     sessionId: runtimeResult.sessionId,
   };
-}
-
-export async function runWorkerForRepo(repoRoot: string, workerName: string, task: string): Promise<WorkerRunResult> {
-  const run = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
-  const worker = run.workers.find((entry) => entry.name === workerName);
-  if (!worker) {
-    throw new Error(`Worker named ${workerName} not found`);
-  }
-  if (worker.lifecycle === "broken") {
-    throw new Error(`Worker named ${workerName} is broken and must recover the worker first`);
-  }
-  if (worker.lifecycle === "running") {
-    throw new Error(`Worker named ${workerName} is already running and cannot accept overlapping runs`);
-  }
-  if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
-    throw new Error(`Worker named ${workerName} is missing its session file; recover the worker first`);
-  }
-  if (!worker.worktreePath || !existsSync(worker.worktreePath)) {
-    throw new Error(`Worker named ${workerName} is missing its worktree; recover the worker first`);
-  }
-
-  await preflightWorkerRunRuntime({
-    worktreePath: worker.worktreePath,
-    sessionFile: worker.sessionFile,
-  });
-
-  mutateRepoRunSync(repoRoot, (latest) => {
-    const reconciled = reconcileWorkerHealth(latest);
-    const latestWorker = reconciled.workers.find((entry) => entry.workerId === worker.workerId);
-    if (!latestWorker) {
-      throw new Error(`Worker named ${workerName} not found`);
-    }
-    if (latestWorker.lifecycle === "broken") {
-      throw new Error(`Worker named ${workerName} is broken and must recover the worker first`);
-    }
-    if (latestWorker.lifecycle === "running") {
-      throw new Error(`Worker named ${workerName} is already running and cannot accept overlapping runs`);
-    }
-    return startWorkerRun(reconciled, latestWorker.workerId, { task, sessionId: null });
-  });
-
-  try {
-    const runtimeResult = await runWorkerPromptRuntime({
-      worktreePath: worker.worktreePath,
-      sessionFile: worker.sessionFile,
-      task,
-      onSessionReady: async (sessionId) => {
-        mutateRepoRunSync(repoRoot, (latest) => setWorkerRunSessionId(latest, worker.workerId, sessionId));
-      },
-    });
-
-    mutateRepoRunSync(repoRoot, (latest) => {
-      let nextRun = latest;
-      const latestWorker = nextRun.workers.find((entry) => entry.workerId === worker.workerId);
-      if (runtimeResult.sessionId && latestWorker?.lastRun?.sessionId !== runtimeResult.sessionId) {
-        nextRun = setWorkerRunSessionId(nextRun, worker.workerId, runtimeResult.sessionId);
-      }
-      return finishWorkerRun(nextRun, worker.workerId, {
-        status: runtimeResult.status,
-        errorMessage: runtimeResult.errorMessage,
-      });
-    });
-
-    return {
-      workerName: worker.name,
-      status: runtimeResult.status,
-      finalText: runtimeResult.finalText,
-      errorMessage: runtimeResult.errorMessage,
-      sessionId: runtimeResult.sessionId,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-
-    try {
-      mutateRepoRunSync(repoRoot, (latest) =>
-        finishWorkerRun(latest, worker.workerId, {
-          status: "error",
-          errorMessage: message,
-        }),
-      );
-    } catch (persistenceError) {
-      const persistenceMessage =
-        persistenceError instanceof Error ? persistenceError.message : String(persistenceError);
-      throw new Error(`${message} (Additionally failed to persist worker run error state: ${persistenceMessage})`);
-    }
-
-    return {
-      workerName: worker.name,
-      status: "error",
-      finalText: null,
-      errorMessage: message,
-      sessionId: null,
-    };
-  }
 }
 
 export async function recoverWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {

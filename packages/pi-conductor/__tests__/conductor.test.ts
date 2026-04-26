@@ -211,7 +211,7 @@ describe("conductor service", () => {
 
     const canceled = cancelTaskRunForRepo(repoDir, {
       runId: started.run.runId,
-      reason: "obsolete attempt",
+      reason: "superseded attempt",
     });
     expect(canceled.runs[0]).toMatchObject({ status: "aborted" });
     expect(canceled.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });

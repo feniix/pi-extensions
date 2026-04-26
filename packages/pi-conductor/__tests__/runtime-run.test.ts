@@ -3,18 +3,40 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRegistry } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const codingAgentMocks = vi.hoisted(() => ({
+  createAgentSession: vi.fn(),
+  openSession: vi.fn(),
+}));
+
+vi.mock("@mariozechner/pi-coding-agent", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@mariozechner/pi-coding-agent")>();
+  return {
+    ...actual,
+    SessionManager: {
+      ...actual.SessionManager,
+      open: codingAgentMocks.openSession,
+    },
+    createAgentSession: codingAgentMocks.createAgentSession,
+  };
+});
+
 import {
   buildRunScopedConductorTools,
   buildTaskContractPrompt,
   extractFinalAssistantText,
   mapStopReasonToRunOutcome,
   preflightWorkerRunRuntime,
+  runWorkerPromptRuntime,
 } from "../extensions/runtime.js";
 
 describe("worker run runtime helpers", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    codingAgentMocks.openSession.mockReset();
+    codingAgentMocks.createAgentSession.mockReset();
   });
+
   it("builds an explicit task contract prompt for child worker runs", () => {
     const prompt = buildTaskContractPrompt({
       taskId: "task-1",
@@ -239,5 +261,112 @@ describe("worker run runtime helpers", () => {
         },
       ]),
     ).toBeNull();
+  });
+
+  it("returns aborted status when a running prompt is cancelled", async () => {
+    const worktreePath = mkdtempSync(join(tmpdir(), "pi-conductor-runtime-"));
+    const sessionFile = join(worktreePath, "session.jsonl");
+    writeFileSync(sessionFile, "{}\n", "utf-8");
+    codingAgentMocks.openSession.mockReturnValue({} as never);
+
+    let continuePrompt: (() => void) | null = null;
+    let resolvePromptStarted: (() => void) | null = null;
+    const promptStarted = new Promise<void>((resolve) => {
+      resolvePromptStarted = resolve;
+    });
+    const session = {
+      sessionId: "run-session-abort",
+      messages: [] as unknown[],
+      bindExtensions: vi.fn(async () => {}),
+      prompt: vi.fn(async () => {
+        resolvePromptStarted?.();
+        await new Promise<void>((resolve) => {
+          continuePrompt = resolve;
+        });
+        throw new Error("interrupted");
+      }),
+      abort: vi.fn(async () => {
+        continuePrompt?.();
+      }),
+      dispose: vi.fn(),
+    };
+    codingAgentMocks.createAgentSession.mockResolvedValue({ session });
+
+    const controller = new AbortController();
+    const runtime = runWorkerPromptRuntime({ worktreePath, sessionFile, task: "do work", signal: controller.signal });
+    await promptStarted;
+    controller.abort();
+
+    const result = await runtime;
+
+    expect(result.status).toBe("aborted");
+    expect(result.sessionId).toBe("run-session-abort");
+    expect(session.abort).toHaveBeenCalledTimes(1);
+    expect(session.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores assistant messages that were present before prompt execution", async () => {
+    const worktreePath = mkdtempSync(join(tmpdir(), "pi-conductor-runtime-"));
+    const sessionFile = join(worktreePath, "session.jsonl");
+    writeFileSync(sessionFile, "{}\n", "utf-8");
+    codingAgentMocks.openSession.mockReturnValue({} as never);
+
+    const session = {
+      sessionId: "run-session-stale",
+      messages: [
+        { role: "assistant", content: [{ type: "text", text: "stale pre-run summary" }], stopReason: "stop" },
+      ] as unknown[],
+      bindExtensions: vi.fn(async () => {}),
+      prompt: vi.fn(async () => {
+        session.messages.push({ role: "user", content: [{ type: "text", text: "still in progress" }] });
+      }),
+      abort: vi.fn(async () => {}),
+      dispose: vi.fn(),
+    };
+    codingAgentMocks.createAgentSession.mockResolvedValue({ session });
+
+    const result = await runWorkerPromptRuntime({ worktreePath, sessionFile, task: "do work" });
+
+    expect(result.status).toBe("error");
+    expect(result.errorMessage).toBe("Run finished without a terminal assistant message");
+    expect(result.sessionId).toBe("run-session-stale");
+  });
+
+  it("fails preflight when no model provider is configured", async () => {
+    vi.spyOn(ModelRegistry, "create").mockReturnValue({ getAvailable: () => [] } as unknown as ModelRegistry);
+
+    const worktreePath = mkdtempSync(join(tmpdir(), "pi-conductor-runtime-"));
+    const sessionFile = join(worktreePath, "session.jsonl");
+    writeFileSync(sessionFile, "{}\n", "utf-8");
+
+    await expect(preflightWorkerRunRuntime({ worktreePath, sessionFile })).rejects.toThrow(
+      /No usable model or provider configuration/,
+    );
+  });
+
+  it("returns successful outcome from assistant final state and text extraction", async () => {
+    const worktreePath = mkdtempSync(join(tmpdir(), "pi-conductor-runtime-"));
+    const sessionFile = join(worktreePath, "session.jsonl");
+    writeFileSync(sessionFile, "{}\n", "utf-8");
+    codingAgentMocks.openSession.mockReturnValue({} as never);
+
+    const session = {
+      sessionId: "run-session-success",
+      messages: [] as unknown[],
+      bindExtensions: vi.fn(async () => {}),
+      prompt: vi.fn(async () => {
+        session.messages.push({ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done now" }] });
+      }),
+      abort: vi.fn(async () => {}),
+      dispose: vi.fn(),
+    };
+    codingAgentMocks.createAgentSession.mockResolvedValue({ session });
+
+    const result = await runWorkerPromptRuntime({ worktreePath, sessionFile, task: "do work" });
+
+    expect(result.status).toBe("success");
+    expect(result.finalText).toBe("done now");
+    expect(result.errorMessage).toBeNull();
+    expect(result.sessionId).toBe("run-session-success");
   });
 });

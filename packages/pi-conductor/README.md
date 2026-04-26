@@ -38,8 +38,8 @@ Agent-native local control plane for Pi worker orchestration.
   - PR creation requires an approved `ready_for_pr` gate.
   - Worker cleanup requires an approved `destructive_cleanup` gate.
 - Optional `pi-subagents` backend detection. Conductor remains canonical state owner; `pi-subagents` dispatch fails closed unless a trusted host injects an explicit dispatcher.
-- Granular instrumentation events for scheduler ticks/actions, backend dispatch, worker recovery/resume/summary/cleanup, git commit/push, PR creation, gates, runs, tasks, objectives, artifacts, and lifecycle changes.
-- Legacy worker model tools are hidden by default; legacy slash mutations hard-error with guidance toward resource-native tools.
+- Granular instrumentation events for scheduler ticks/actions, backend dispatch, worker recovery/cleanup, git commit/push, PR creation, gates, runs, tasks, objectives, artifacts, and lifecycle changes.
+- Only resource-native control-plane tools are available.
 - Packaged workflow skills help parent agents use conductor safely for objective orchestration and gate review.
 
 ## Command surface
@@ -59,9 +59,7 @@ Primary inspection/debug UX is the `/conductor` command group:
 /conductor human decide gate <gate-id> [reason]
 ```
 
-There is also a convenience `/conductor-status` command.
-
-Legacy mutation subcommands such as `/conductor start`, `/conductor run`, `/conductor cleanup`, and `/conductor pr` have been removed. Use the resource/model tools for mutations and slash commands for inspection, reconciliation previews, and trusted human gate decisions.
+Slash commands are for inspection, reconciliation previews, and trusted human gate decisions. Use the resource/model tools for mutations.
 
 ## Tool surface
 
@@ -125,20 +123,7 @@ Runtime-injected child tools, available only inside native worker task runs:
 - `conductor_child_create_followup_task` when the task contract allows it
 - `conductor_child_complete`
 
-Transition/legacy worker model tools are hidden by default and can be temporarily enabled with `PI_CONDUCTOR_ENABLE_LEGACY_WORKER_TOOLS=1`. Use resource/control-plane tools above for new LLM workflows:
-
-- `conductor_status`
-- `conductor_start`
-- `conductor_task_update`
-- `conductor_recover`
-- `conductor_summary_refresh`
-- `conductor_cleanup`
-- `conductor_resume`
-- `conductor_run`
-- `conductor_lifecycle_update`
-- `conductor_commit`
-- `conductor_push`
-- `conductor_pr_create`
+Worker mutation shortcuts are not part of the command surface.
 
 ## Runtime model
 
