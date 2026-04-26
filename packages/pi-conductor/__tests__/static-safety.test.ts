@@ -106,6 +106,21 @@ describe("pi-conductor static safety guards", () => {
     expect(schedulerSource.split("\n").length).toBeLessThan(140);
   });
 
+  it("keeps objective planning and status logic outside the conductor orchestrator", () => {
+    const extensionDir = join(__dirname, "../extensions");
+    const conductorSource = readFileSync(join(extensionDir, "conductor.ts"), "utf-8");
+    const objectiveSource = readFileSync(join(extensionDir, "objective-service.ts"), "utf-8");
+    const repoRunSource = readFileSync(join(extensionDir, "repo-run.ts"), "utf-8");
+
+    expect(conductorSource).toContain('from "./objective-service.js"');
+    expect(conductorSource).toContain('from "./repo-run.js"');
+    expect(conductorSource).not.toContain("function validateObjectivePlanTasks");
+    expect(conductorSource).not.toContain("export function createObjectiveForRepo");
+    expect(objectiveSource).toContain("export function planObjectiveForRepo");
+    expect(objectiveSource.split("\n").length).toBeLessThan(240);
+    expect(repoRunSource.split("\n").length).toBeLessThan(80);
+  });
+
   it("does not expose trusted-human gate approval as a model tool", () => {
     const tools = collectTools();
     const toolNames = tools.map((tool) => tool.name).sort();
