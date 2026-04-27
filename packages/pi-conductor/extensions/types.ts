@@ -235,6 +235,7 @@ export type ConductorEventType =
   | "scheduler.tick_started"
   | "scheduler.tick_succeeded"
   | "task.assigned"
+  | "task.canceled"
   | "task.completion_rejected"
   | "task.created"
   | "task.followup_created"

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   assignTaskForRepo,
+  cancelActiveWorkForRepo,
   cancelTaskRunForRepo,
   createFollowUpTaskForRepo,
   createTaskForRepo,
@@ -13,6 +14,9 @@ import {
   getOrCreateRunForRepo,
   reconcileProjectForRepo,
   retryTaskForRepo,
+  runParallelWorkForRepo,
+  runTaskForRepo,
+  runWorkForRepo,
   startTaskRunForRepo,
   updateTaskForRepo,
 } from "../extensions/conductor.js";
@@ -192,6 +196,188 @@ describe("conductor service", () => {
     expect(run.workers).toHaveLength(1);
     expect(run.tasks).toHaveLength(1);
     expect(run.runs).toHaveLength(1);
+  });
+
+  it("cancels active conductor work without requiring run IDs", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Cancelable", prompt: "Do it" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
+
+    const canceled = cancelActiveWorkForRepo(repoDir, { reason: "human pressed escape" });
+
+    expect(canceled.canceledRuns).toEqual([started.run.runId]);
+    expect(canceled.canceledTasks).toEqual([task.taskId]);
+    expect(canceled.project.runs[0]).toMatchObject({ status: "aborted", errorMessage: "human pressed escape" });
+    expect(canceled.project.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
+    expect(canceled.project.workers[0]).toMatchObject({ lifecycle: "idle" });
+  });
+
+  it("does not start parallel work when the orchestration signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let startedCount = 0;
+
+    const result = await runParallelWorkForRepo(
+      repoDir,
+      {
+        workerPrefix: "parallel",
+        tasks: [
+          { title: "First shard", prompt: "Do first shard" },
+          { title: "Second shard", prompt: "Do second shard" },
+        ],
+      },
+      controller.signal,
+      async (root, taskId) => {
+        startedCount += 1;
+        return runTaskForRepo(root, taskId, controller.signal);
+      },
+    );
+
+    expect(startedCount).toBe(0);
+    expect(result.canceledTasks).toHaveLength(2);
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.tasks.map((task) => task.state)).toEqual(["canceled", "canceled"]);
+    expect(run.runs).toHaveLength(0);
+  });
+
+  it("runs parallel work under one abortable orchestration boundary", async () => {
+    const controller = new AbortController();
+    let startedCount = 0;
+
+    const result = await runParallelWorkForRepo(
+      repoDir,
+      {
+        workerPrefix: "parallel",
+        tasks: [
+          { title: "First shard", prompt: "Do first shard" },
+          { title: "Second shard", prompt: "Do second shard" },
+        ],
+      },
+      controller.signal,
+      async (root, taskId) => {
+        const started = startTaskRunForRepo(root, { taskId });
+        startedCount += 1;
+        if (startedCount === 2) controller.abort();
+        return {
+          workerName: started.run.workerId,
+          status: "aborted",
+          finalText: null,
+          errorMessage: null,
+          sessionId: null,
+        };
+      },
+    );
+
+    expect(result.tasks.map((task) => task.title)).toEqual(["First shard", "Second shard"]);
+    expect(result.canceledRuns).toHaveLength(2);
+    expect(result.canceledTasks).toHaveLength(2);
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers.map((worker) => worker.lifecycle)).toEqual(["idle", "idle"]);
+    expect(run.tasks.map((task) => task.state)).toEqual(["canceled", "canceled"]);
+    expect(run.runs.map((attempt) => attempt.status)).toEqual(["aborted", "aborted"]);
+  });
+
+  it("runs small natural-language work as one conductor worker by default", async () => {
+    const result = await runWorkForRepo(
+      repoDir,
+      {
+        request: "Fix the typo in README.md",
+        tasks: [{ title: "Fix README typo", prompt: "Fix the typo in README.md", writeScope: ["README.md"] }],
+      },
+      undefined,
+      async () => ({ workerName: "single", status: "success", finalText: "done", errorMessage: null, sessionId: null }),
+    );
+
+    expect(result.decision).toMatchObject({
+      mode: "single",
+      reason: expect.stringMatching(/single/i),
+    });
+    expect(result.tasks.map((task) => task.title)).toEqual(["Fix README typo"]);
+    expect(result.parallel).toBeNull();
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers).toHaveLength(1);
+    expect(run.tasks).toHaveLength(1);
+  });
+
+  it("routes independent scoped work items to parallel workers", async () => {
+    const result = await runWorkForRepo(
+      repoDir,
+      {
+        request: "Deep dive these independent pi-conductor areas in parallel",
+        maxWorkers: 3,
+        tasks: [
+          { title: "Inspect README", prompt: "Inspect README.md", writeScope: ["README.md"] },
+          { title: "Inspect tests", prompt: "Inspect tests", writeScope: ["__tests__/"] },
+          { title: "Inspect runtime", prompt: "Inspect runtime", writeScope: ["extensions/runtime.ts"] },
+        ],
+      },
+      undefined,
+      async (_root, taskId) => ({
+        workerName: taskId,
+        status: "success",
+        finalText: "done",
+        errorMessage: null,
+        sessionId: null,
+      }),
+    );
+
+    expect(result.decision).toMatchObject({
+      mode: "parallel",
+      reason: expect.stringMatching(/independent/i),
+    });
+    expect(result.parallel?.results).toHaveLength(3);
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers.map((worker) => worker.name)).toEqual(["run-work-1", "run-work-2", "run-work-3"]);
+  });
+
+  it("does not split work with overlapping write scopes", async () => {
+    const result = await runWorkForRepo(
+      repoDir,
+      {
+        request: "Split the runtime refactor across workers",
+        tasks: [
+          { title: "Refactor runtime setup", prompt: "Refactor runtime setup", writeScope: ["extensions/runtime.ts"] },
+          { title: "Refactor runtime tests", prompt: "Refactor runtime tests", writeScope: ["extensions/runtime.ts"] },
+        ],
+      },
+      undefined,
+      async () => ({ workerName: "single", status: "success", finalText: "done", errorMessage: null, sessionId: null }),
+    );
+
+    expect(result.decision).toMatchObject({
+      mode: "single",
+      riskFlags: expect.arrayContaining(["overlapping_write_scope"]),
+    });
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]?.prompt).toContain("Refactor runtime setup");
+    expect(result.tasks[0]?.prompt).toContain("Refactor runtime tests");
+  });
+
+  it("plans dependent work as an objective instead of parallel fan-out", async () => {
+    const result = await runWorkForRepo(repoDir, {
+      request: "Implement the feature, then verify it",
+      execute: false,
+      tasks: [
+        { title: "Implement feature", prompt: "Implement the feature in the package", writeScope: ["extensions/"] },
+        {
+          title: "Verify feature",
+          prompt: "Verify the feature after implementation",
+          writeScope: ["__tests__/"],
+          dependsOn: ["Implement feature"],
+        },
+      ],
+    });
+
+    expect(result.decision).toMatchObject({
+      mode: "objective",
+      reason: expect.stringMatching(/depend/i),
+    });
+    expect(result.objective?.tasks.map((task) => task.title)).toEqual(["Implement feature", "Verify feature"]);
+    expect(result.parallel).toBeNull();
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.objectives).toHaveLength(1);
+    expect(run.tasks[1]?.dependsOnTaskIds).toEqual([run.tasks[0]?.taskId]);
   });
 
   it("updates durable tasks through conductor service helpers", () => {

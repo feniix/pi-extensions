@@ -10,7 +10,7 @@ import {
   validatePushPreconditions,
 } from "./git-pr.js";
 import { computeNextActions } from "./next-actions.js";
-import { planObjectiveForRepo } from "./objective-service.js";
+import { createObjectiveForRepo, planObjectiveForRepo, refreshObjectiveStatusForRepo } from "./objective-service.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
 import {
   createWorkerSessionRuntime,
@@ -32,6 +32,7 @@ import {
 } from "./storage.js";
 import {
   assignTaskForRepo,
+  cancelTaskRunForRepo,
   createFollowUpTaskForRepo,
   createTaskForRepo,
   recordTaskCompletionForRepo,
@@ -79,6 +80,29 @@ export {
   startTaskRunForRepo,
   updateTaskForRepo,
 } from "./task-service.js";
+
+export type ParallelWorkItemInput = {
+  title: string;
+  prompt: string;
+  workerName?: string;
+};
+
+export type ParallelWorkRunner = (repoRoot: string, taskId: string, signal?: AbortSignal) => Promise<WorkerRunResult>;
+
+export type WorkRoutingMode = "auto" | "single" | "parallel" | "objective";
+
+export type RunWorkItemInput = ParallelWorkItemInput & {
+  writeScope?: string[];
+  dependsOn?: string[];
+};
+
+export type WorkRoutingDecision = {
+  mode: Exclude<WorkRoutingMode, "auto">;
+  confidence: number;
+  reason: string;
+  tasks: RunWorkItemInput[];
+  riskFlags: string[];
+};
 
 function resolveSchedulerPolicy(input: { policy?: SchedulerPolicyName; executeRuns?: boolean }): {
   policy: SchedulerPolicyName;
@@ -837,6 +861,454 @@ export async function delegateTaskForRepo(
     run: started.run,
     taskContract: started.taskContract,
   };
+}
+
+export function cancelActiveWorkForRepo(
+  repoRoot: string,
+  input: {
+    reason?: string;
+    taskIds?: string[];
+    workerIds?: string[];
+  } = {},
+): { canceledRuns: string[]; canceledTasks: string[]; project: RunRecord } {
+  const reason = input.reason?.trim() || "Canceled active conductor work";
+  let project = getOrCreateRunForRepo(repoRoot);
+  const taskIds = new Set(input.taskIds ?? []);
+  const workerIds = new Set(input.workerIds ?? []);
+  const activeRuns = project.runs.filter(
+    (run) =>
+      !run.finishedAt &&
+      (taskIds.size === 0 || taskIds.has(run.taskId)) &&
+      (workerIds.size === 0 || workerIds.has(run.workerId)),
+  );
+  const canceledRuns: string[] = [];
+  const canceledTasks = new Set<string>();
+
+  for (const run of activeRuns) {
+    project = cancelTaskRunForRepo(repoRoot, { runId: run.runId, reason });
+    canceledRuns.push(run.runId);
+    canceledTasks.add(run.taskId);
+  }
+
+  const pending = cancelPendingWorkForRepo(repoRoot, { reason, taskIds, workerIds });
+  project = pending.project;
+  for (const taskId of pending.canceledTasks) canceledTasks.add(taskId);
+
+  return { canceledRuns, canceledTasks: [...canceledTasks], project };
+}
+
+export async function runParallelWorkForRepo(
+  repoRoot: string,
+  input: {
+    tasks: ParallelWorkItemInput[];
+    workerPrefix?: string;
+  },
+  signal?: AbortSignal,
+  runner: ParallelWorkRunner = runTaskForRepo,
+): Promise<{
+  workers: WorkerRecord[];
+  tasks: TaskRecord[];
+  results: Array<{
+    taskId: string;
+    status: "fulfilled" | "rejected";
+    result: WorkerRunResult | null;
+    error: string | null;
+  }>;
+  canceledRuns: string[];
+  canceledTasks: string[];
+}> {
+  if (input.tasks.length === 0) {
+    throw new Error("At least one parallel work item is required");
+  }
+  const workerPrefix = input.workerPrefix?.trim() || "parallel-worker";
+  const workers: WorkerRecord[] = [];
+  const tasks: TaskRecord[] = [];
+
+  for (const [index, item] of input.tasks.entries()) {
+    const title = item.title.trim();
+    const prompt = item.prompt.trim();
+    if (!title || !prompt) {
+      throw new Error(`Parallel work item ${index + 1} requires title and prompt`);
+    }
+    const workerName = item.workerName?.trim() || `${workerPrefix}-${index + 1}`;
+    const current = getOrCreateRunForRepo(repoRoot);
+    const worker =
+      current.workers.find((entry) => entry.name === workerName) ?? (await createWorkerForRepo(repoRoot, workerName));
+    const task = createTaskForRepo(repoRoot, { title, prompt });
+    const assigned = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
+    workers.push(worker);
+    tasks.push(assigned);
+  }
+
+  const cancelReason = "Parent conductor parallel work was interrupted";
+  const cancelOwnedWork = () =>
+    cancelActiveWorkForRepo(repoRoot, {
+      reason: cancelReason,
+      taskIds: tasks.map((task) => task.taskId),
+      workerIds: workers.map((worker) => worker.workerId),
+    });
+
+  let canceledRuns: string[] = [];
+  let canceledTasks: string[] = [];
+  const onAbort = () => {
+    const canceled = cancelOwnedWork();
+    canceledRuns = [...new Set([...canceledRuns, ...canceled.canceledRuns])];
+    canceledTasks = [...new Set([...canceledTasks, ...canceled.canceledTasks])];
+  };
+  signal?.addEventListener("abort", onAbort);
+  if (signal?.aborted) onAbort();
+
+  try {
+    if (signal?.aborted) {
+      return { workers, tasks, results: [], canceledRuns, canceledTasks };
+    }
+    const settled = await Promise.allSettled(tasks.map((task) => runner(repoRoot, task.taskId, signal)));
+    if (signal?.aborted) onAbort();
+    const results = settled.map((entry, index) =>
+      entry.status === "fulfilled"
+        ? { taskId: tasks[index]?.taskId ?? "", status: "fulfilled" as const, result: entry.value, error: null }
+        : {
+            taskId: tasks[index]?.taskId ?? "",
+            status: "rejected" as const,
+            result: null,
+            error: errorMessage(entry.reason),
+          },
+    );
+    return { workers, tasks, results, canceledRuns, canceledTasks };
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+function hasParallelIntent(request: string): boolean {
+  return /\b(parallel|split|many|multiple|workers|fan[- ]?out|deep[- ]?dive|all)\b/i.test(request);
+}
+
+function hasSingleIntent(request: string): boolean {
+  return /\b(single|one worker|do not split|don't split|dont split|same worker|small|typo)\b/i.test(request);
+}
+
+function deriveWorkTitle(request: string): string {
+  const trimmed = request.trim().replace(/\s+/g, " ");
+  if (!trimmed) {
+    return "Conductor work";
+  }
+  return trimmed.length > 80 ? `${trimmed.slice(0, 77)}...` : trimmed;
+}
+
+function normalizeRunWorkItems(input: { request: string; tasks?: RunWorkItemInput[] }): RunWorkItemInput[] {
+  const candidates = input.tasks?.length
+    ? input.tasks
+    : [{ title: deriveWorkTitle(input.request), prompt: input.request }];
+  return candidates.map((task, index) => ({
+    ...task,
+    title: task.title.trim() || `Work item ${index + 1}`,
+    prompt: task.prompt.trim() || input.request.trim(),
+    workerName: task.workerName?.trim() || undefined,
+    writeScope: task.writeScope?.map((scope) => scope.trim()).filter(Boolean),
+    dependsOn: task.dependsOn?.map((dependency) => dependency.trim()).filter(Boolean),
+  }));
+}
+
+function findOverlappingWriteScopes(tasks: RunWorkItemInput[]): boolean {
+  const seen = new Set<string>();
+  for (const task of tasks) {
+    for (const scope of task.writeScope ?? []) {
+      if (seen.has(scope)) {
+        return true;
+      }
+      seen.add(scope);
+    }
+  }
+  return false;
+}
+
+function combineWorkItems(tasks: RunWorkItemInput[], request: string): RunWorkItemInput {
+  if (tasks.length === 1 && tasks[0]) {
+    return tasks[0];
+  }
+  return {
+    title: deriveWorkTitle(request),
+    prompt: [
+      request.trim(),
+      "",
+      "Run these work items coherently in one conductor worker because splitting is unsafe:",
+      ...tasks.map((task, index) => `${index + 1}. ${task.title}\n${task.prompt}`),
+    ].join("\n"),
+    writeScope: [...new Set(tasks.flatMap((task) => task.writeScope ?? []))],
+    dependsOn: [...new Set(tasks.flatMap((task) => task.dependsOn ?? []))],
+  };
+}
+
+function capParallelWorkItems(tasks: RunWorkItemInput[], maxWorkers: number): RunWorkItemInput[] {
+  if (tasks.length <= maxWorkers) {
+    return tasks;
+  }
+  const buckets = Array.from({ length: maxWorkers }, () => [] as RunWorkItemInput[]);
+  for (const [index, task] of tasks.entries()) {
+    buckets[index % maxWorkers]?.push(task);
+  }
+  return buckets.map((bucket, index) => ({
+    title: bucket.length === 1 ? (bucket[0]?.title ?? `Work shard ${index + 1}`) : `Work shard ${index + 1}`,
+    prompt:
+      bucket.length === 1
+        ? (bucket[0]?.prompt ?? "")
+        : bucket.map((task, taskIndex) => `${taskIndex + 1}. ${task.title}\n${task.prompt}`).join("\n\n"),
+    workerName: bucket.length === 1 ? bucket[0]?.workerName : undefined,
+    writeScope: [...new Set(bucket.flatMap((task) => task.writeScope ?? []))],
+  }));
+}
+
+export function planWorkRouting(input: {
+  request: string;
+  mode?: WorkRoutingMode;
+  tasks?: RunWorkItemInput[];
+  maxWorkers?: number;
+}): WorkRoutingDecision {
+  const request = input.request.trim();
+  if (!request) {
+    throw new Error("conductor_run_work requires a natural-language request");
+  }
+  const maxWorkers = Math.max(1, Math.floor(input.maxWorkers ?? 4));
+  const tasks = normalizeRunWorkItems({ request, tasks: input.tasks });
+  const riskFlags: string[] = [];
+  const hasDependencies = tasks.some((task) => (task.dependsOn?.length ?? 0) > 0);
+  const hasScopeOverlap = findOverlappingWriteScopes(tasks);
+  if (hasScopeOverlap) {
+    riskFlags.push("overlapping_write_scope");
+  }
+  if (tasks.length > maxWorkers) {
+    riskFlags.push("worker_cap_applied");
+  }
+
+  const requestedMode = input.mode ?? "auto";
+  if (requestedMode === "single") {
+    return {
+      mode: "single",
+      confidence: 1,
+      reason: "Single-worker mode was requested explicitly.",
+      tasks: [combineWorkItems(tasks, request)],
+      riskFlags,
+    };
+  }
+  if (requestedMode === "objective" || hasDependencies) {
+    return {
+      mode: "objective",
+      confidence: requestedMode === "objective" ? 1 : 0.9,
+      reason:
+        requestedMode === "objective"
+          ? "Objective mode was requested explicitly."
+          : "Dependent work requires objective scheduling instead of parallel fan-out.",
+      tasks,
+      riskFlags,
+    };
+  }
+
+  if (tasks.length <= 1 || hasSingleIntent(request) || hasScopeOverlap || maxWorkers === 1) {
+    return {
+      mode: "single",
+      confidence: tasks.length <= 1 ? 0.95 : 0.8,
+      reason:
+        tasks.length <= 1
+          ? "Single coherent work item; splitting would add coordination overhead."
+          : "Work should stay in one worker because parallel splitting is unsafe or was discouraged.",
+      tasks: [combineWorkItems(tasks, request)],
+      riskFlags,
+    };
+  }
+
+  if (requestedMode === "parallel" || hasParallelIntent(request)) {
+    return {
+      mode: "parallel",
+      confidence: requestedMode === "parallel" ? 1 : 0.85,
+      reason: "Independent work items can run in parallel under one foreground cancellation boundary.",
+      tasks: capParallelWorkItems(tasks, maxWorkers),
+      riskFlags,
+    };
+  }
+
+  return {
+    mode: "single",
+    confidence: 0.65,
+    reason: "No explicit parallel intent; defaulting to one coherent worker.",
+    tasks: [combineWorkItems(tasks, request)],
+    riskFlags,
+  };
+}
+
+export async function runWorkForRepo(
+  repoRoot: string,
+  input: {
+    request: string;
+    mode?: WorkRoutingMode;
+    tasks?: RunWorkItemInput[];
+    workerPrefix?: string;
+    maxWorkers?: number;
+    execute?: boolean;
+  },
+  signal?: AbortSignal,
+  runner: ParallelWorkRunner = runTaskForRepo,
+): Promise<{
+  decision: WorkRoutingDecision;
+  workers: WorkerRecord[];
+  tasks: TaskRecord[];
+  single: { worker: WorkerRecord; task: TaskRecord; result: WorkerRunResult | null } | null;
+  parallel: Awaited<ReturnType<typeof runParallelWorkForRepo>> | null;
+  objective: {
+    objective: ReturnType<typeof createObjectiveForRepo>;
+    tasks: TaskRecord[];
+    schedule: Awaited<ReturnType<typeof scheduleObjectiveForRepo>> | null;
+  } | null;
+}> {
+  const decision = planWorkRouting(input);
+  const workerPrefix = input.workerPrefix?.trim() || "run-work";
+  const execute = input.execute ?? true;
+
+  if (decision.mode === "parallel") {
+    const parallel = await runParallelWorkForRepo(
+      repoRoot,
+      {
+        workerPrefix,
+        tasks: decision.tasks.map((task) => ({
+          title: task.title,
+          prompt: task.prompt,
+          workerName: task.workerName,
+        })),
+      },
+      signal,
+      runner,
+    );
+    return { decision, workers: parallel.workers, tasks: parallel.tasks, single: null, parallel, objective: null };
+  }
+
+  if (decision.mode === "objective") {
+    const objective = createObjectiveForRepo(repoRoot, {
+      title: deriveWorkTitle(input.request),
+      prompt: input.request,
+    });
+    const planned = planObjectiveForRepo(repoRoot, {
+      objectiveId: objective.objectiveId,
+      tasks: decision.tasks.map((task) => ({ title: task.title, prompt: task.prompt, dependsOn: task.dependsOn })),
+      rationale: decision.reason,
+    });
+    let workers: WorkerRecord[] = [];
+    if (execute) {
+      const current = getOrCreateRunForRepo(repoRoot);
+      workers = current.workers.filter(
+        (worker) => worker.lifecycle === "idle" && !worker.recoverable && worker.worktreePath && worker.sessionFile,
+      );
+      if (workers.length === 0) {
+        workers = [await createWorkerForRepo(repoRoot, `${workerPrefix}-objective-1`)];
+      }
+    }
+    const schedule = execute
+      ? await scheduleObjectiveForRepo(
+          repoRoot,
+          { objectiveId: objective.objectiveId, policy: "execute", maxConcurrency: input.maxWorkers },
+          signal,
+        )
+      : null;
+    const scheduledWorkerIds = new Set(schedule?.assigned.map((task) => task.assignedWorkerId).filter(Boolean));
+    return {
+      decision,
+      workers:
+        schedule && scheduledWorkerIds.size > 0
+          ? getOrCreateRunForRepo(repoRoot).workers.filter((worker) => scheduledWorkerIds.has(worker.workerId))
+          : workers,
+      tasks: planned.tasks,
+      single: null,
+      parallel: null,
+      objective: { ...planned, schedule },
+    };
+  }
+
+  const taskInput = decision.tasks[0];
+  if (!taskInput) {
+    throw new Error("conductor_run_work could not derive a work item");
+  }
+  const delegated = await delegateTaskForRepo(repoRoot, {
+    title: taskInput.title,
+    prompt: taskInput.prompt,
+    workerName: taskInput.workerName ?? `${workerPrefix}-1`,
+    startRun: false,
+  });
+  if (signal?.aborted) {
+    cancelActiveWorkForRepo(repoRoot, {
+      reason: "Parent conductor work was interrupted",
+      taskIds: [delegated.task.taskId],
+      workerIds: [delegated.worker.workerId],
+    });
+    return {
+      decision,
+      workers: [delegated.worker],
+      tasks: [delegated.task],
+      single: { worker: delegated.worker, task: delegated.task, result: null },
+      parallel: null,
+      objective: null,
+    };
+  }
+  const result = execute ? await runner(repoRoot, delegated.task.taskId, signal) : null;
+  return {
+    decision,
+    workers: [delegated.worker],
+    tasks: [delegated.task],
+    single: { worker: delegated.worker, task: delegated.task, result },
+    parallel: null,
+    objective: null,
+  };
+}
+
+function cancelPendingWorkForRepo(
+  repoRoot: string,
+  input: {
+    reason: string;
+    taskIds: Set<string>;
+    workerIds: Set<string>;
+  },
+): { canceledTasks: string[]; project: RunRecord } {
+  const cancelableStates = new Set<TaskRecord["state"]>(["draft", "ready", "assigned"]);
+  const canceledTasks: string[] = [];
+  const affectedObjectiveIds = new Set<string>();
+  let project = mutateRepoRunSync(repoRoot, (run) => {
+    const now = new Date().toISOString();
+    let updated = run;
+    const tasks = run.tasks.map((task) => {
+      const matchesTask = input.taskIds.size === 0 || input.taskIds.has(task.taskId);
+      const matchesWorker =
+        input.workerIds.size === 0 || (task.assignedWorkerId !== null && input.workerIds.has(task.assignedWorkerId));
+      if (!matchesTask || !matchesWorker || task.activeRunId || !cancelableStates.has(task.state)) {
+        return task;
+      }
+      canceledTasks.push(task.taskId);
+      if (task.objectiveId) affectedObjectiveIds.add(task.objectiveId);
+      return { ...task, state: "canceled" as const, activeRunId: null, updatedAt: now };
+    });
+    if (canceledTasks.length === 0) {
+      return run;
+    }
+    updated = { ...run, tasks, updatedAt: now };
+    for (const taskId of canceledTasks) {
+      const task = tasks.find((entry) => entry.taskId === taskId);
+      updated = appendConductorEvent(updated, {
+        actor: { type: "parent_agent", id: "conductor" },
+        type: "task.canceled",
+        resourceRefs: {
+          projectKey: run.projectKey,
+          taskId,
+          workerId: task?.assignedWorkerId ?? undefined,
+        },
+        payload: { reason: input.reason },
+      });
+    }
+    return updated;
+  });
+
+  for (const objectiveId of affectedObjectiveIds) {
+    refreshObjectiveStatusForRepo(repoRoot, objectiveId);
+    project = getOrCreateRunForRepo(repoRoot);
+  }
+
+  return { canceledTasks, project };
 }
 
 export async function createWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
