@@ -121,21 +121,26 @@ describe("durable task run flows", () => {
     const task = createTaskForRepo(repoDir, { title: "Cancelable task", prompt: "Do cancellable work" });
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
 
-    const signal = new AbortController().signal;
-    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async () => {
-      expect(signal.aborted).toBe(false);
+    const controller = new AbortController();
+    let runtimeSignal: AbortSignal | undefined;
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async (input) => {
+      runtimeSignal = input.signal;
+      expect(runtimeSignal).not.toBe(controller.signal);
+      expect(runtimeSignal?.aborted).toBe(false);
+      controller.abort();
+      expect(runtimeSignal?.aborted).toBe(true);
       return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-cancelable" };
     });
 
-    await runTaskForRepo(repoDir, task.taskId, signal);
+    await runTaskForRepo(repoDir, task.taskId, controller.signal);
 
     expect(runtimeMocks.runWorkerPromptRuntime).toHaveBeenCalledWith(
       expect.objectContaining({
-        signal,
         task: "Do cancellable work",
         worktreePath: worker.worktreePath,
         sessionFile: worker.sessionFile,
       }),
     );
+    expect(runtimeSignal?.aborted).toBe(true);
   });
 });

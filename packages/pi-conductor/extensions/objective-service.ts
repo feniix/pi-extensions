@@ -18,7 +18,7 @@ function createTaskId(): string {
   return `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function validateObjectivePlanTasks(tasks: Array<{ title: string; prompt: string; dependsOn?: string[] }>): void {
+function orderObjectivePlanTasks<T extends { title: string; prompt: string; dependsOn?: string[] }>(tasks: T[]): T[] {
   const titles = new Set<string>();
   for (const task of tasks) {
     const title = task.title.trim();
@@ -30,16 +30,40 @@ function validateObjectivePlanTasks(tasks: Array<{ title: string; prompt: string
       throw new Error(`Vague prompt for task '${title}' in objective plan`);
     }
   }
-  for (const task of tasks) {
+  const byTitle = new Map(tasks.map((task) => [task.title.trim(), task]));
+  const ordered: T[] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  const visit = (task: T) => {
+    const title = task.title.trim();
+    if (visited.has(title)) {
+      return;
+    }
+    if (visiting.has(title)) {
+      throw new Error(`Circular dependency involving task '${title}'`);
+    }
+    visiting.add(title);
     for (const dependency of task.dependsOn ?? []) {
-      if (!titles.has(dependency)) {
+      const dependencyTask = byTitle.get(dependency);
+      if (!dependencyTask) {
         throw new Error(`Unresolved dependency '${dependency}' for task '${task.title}'`);
       }
-      if (dependency === task.title) {
+      if (dependency === title) {
         throw new Error(`Task '${task.title}' cannot depend on itself`);
       }
+      visit(dependencyTask);
     }
+    visiting.delete(title);
+    visited.add(title);
+    ordered.push(task);
+  };
+
+  for (const task of tasks) {
+    visit(task);
   }
+
+  return ordered;
 }
 
 export function createObjectiveForRepo(repoRoot: string, input: { title: string; prompt: string }): ObjectiveRecord {
@@ -132,7 +156,7 @@ export function planObjectiveForRepo(
   if (input.tasks.length === 0) {
     throw new Error("Objective plan must include at least one task");
   }
-  validateObjectivePlanTasks(input.tasks);
+  const orderedTasks = orderObjectivePlanTasks(input.tasks);
   const createdTasks: TaskRecord[] = [];
   const updatedRun = mutateRepoRunSync(repoRoot, (run) => {
     const objective = run.objectives.find((entry) => entry.objectiveId === input.objectiveId);
@@ -140,19 +164,21 @@ export function planObjectiveForRepo(
       throw new Error(`Objective ${input.objectiveId} not found`);
     }
     let nextRun = run;
-    for (const taskInput of input.tasks) {
+    for (const taskInput of orderedTasks) {
       const dependencyText = taskInput.dependsOn?.length ? `\n\nDepends on: ${taskInput.dependsOn.join(", ")}` : "";
+      const dependsOnTaskIds = taskInput.dependsOn?.map((dependency) => {
+        const dependencyTask = createdTasks.find((task) => task.title === dependency || task.taskId === dependency);
+        if (!dependencyTask) {
+          throw new Error(`Unresolved dependency '${dependency}' for task '${taskInput.title}'`);
+        }
+        return dependencyTask.taskId;
+      });
       const task = createTaskRecord({
         taskId: createTaskId(),
         title: taskInput.title,
         prompt: `${taskInput.prompt}${dependencyText}`,
         objectiveId: input.objectiveId,
-        dependsOnTaskIds: taskInput.dependsOn
-          ?.map(
-            (dependency) =>
-              createdTasks.find((task) => task.title === dependency || task.taskId === dependency)?.taskId,
-          )
-          .filter((taskId): taskId is string => Boolean(taskId)),
+        dependsOnTaskIds,
       });
       nextRun = linkTaskToObjective(addTask(nextRun, task), input.objectiveId, task.taskId);
       createdTasks.push(task);

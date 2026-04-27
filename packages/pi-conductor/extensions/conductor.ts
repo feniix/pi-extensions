@@ -104,6 +104,65 @@ export type WorkRoutingDecision = {
   riskFlags: string[];
 };
 
+type LiveWorkAbortHandle = {
+  runId?: string;
+  taskId: string;
+  workerId?: string;
+  controller: AbortController;
+};
+
+const liveWorkAbortHandles = new Set<LiveWorkAbortHandle>();
+
+function createLinkedAbortController(parentSignal?: AbortSignal): {
+  controller: AbortController;
+  signal: AbortSignal;
+  dispose: () => void;
+} {
+  const controller = new AbortController();
+  if (!parentSignal) {
+    return { controller, signal: controller.signal, dispose: () => undefined };
+  }
+  const onAbort = () => controller.abort();
+  parentSignal.addEventListener("abort", onAbort);
+  if (parentSignal.aborted) {
+    onAbort();
+  }
+  return {
+    controller,
+    signal: controller.signal,
+    dispose: () => parentSignal.removeEventListener("abort", onAbort),
+  };
+}
+
+function registerLiveWorkAbortHandle(handle: LiveWorkAbortHandle): () => void {
+  liveWorkAbortHandles.add(handle);
+  return () => {
+    liveWorkAbortHandles.delete(handle);
+  };
+}
+
+function liveHandleMatchesFilter(
+  handle: LiveWorkAbortHandle,
+  filter: { runIds?: Set<string>; taskIds?: Set<string>; workerIds?: Set<string> },
+): boolean {
+  const runMatches = !filter.runIds || (handle.runId !== undefined && filter.runIds.has(handle.runId));
+  const taskMatches = !filter.taskIds || filter.taskIds.has(handle.taskId);
+  const workerMatches = !filter.workerIds || (handle.workerId !== undefined && filter.workerIds.has(handle.workerId));
+  return runMatches && taskMatches && workerMatches;
+}
+
+function abortLiveWorkForFilter(filter: {
+  runIds?: Set<string>;
+  taskIds?: Set<string>;
+  workerIds?: Set<string>;
+}): void {
+  for (const handle of liveWorkAbortHandles) {
+    if (liveHandleMatchesFilter(handle, filter) && !handle.controller.signal.aborted) {
+      handle.controller.abort();
+    }
+  }
+}
+
 function resolveSchedulerPolicy(input: { policy?: SchedulerPolicyName; executeRuns?: boolean }): {
   policy: SchedulerPolicyName;
   executeRuns: boolean;
@@ -883,6 +942,14 @@ export function cancelActiveWorkForRepo(
   );
   const canceledRuns: string[] = [];
   const canceledTasks = new Set<string>();
+  const liveTaskIds =
+    taskIds.size > 0 ? taskIds : activeRuns.length > 0 ? new Set(activeRuns.map((run) => run.taskId)) : undefined;
+  const liveWorkerIds =
+    workerIds.size > 0 ? workerIds : activeRuns.length > 0 ? new Set(activeRuns.map((run) => run.workerId)) : undefined;
+  abortLiveWorkForFilter({
+    taskIds: liveTaskIds,
+    workerIds: liveWorkerIds,
+  });
 
   for (const run of activeRuns) {
     project = cancelTaskRunForRepo(repoRoot, { runId: run.runId, reason });
@@ -921,20 +988,43 @@ export async function runParallelWorkForRepo(
     throw new Error("At least one parallel work item is required");
   }
   const workerPrefix = input.workerPrefix?.trim() || "parallel-worker";
-  const workers: WorkerRecord[] = [];
-  const tasks: TaskRecord[] = [];
-
-  for (const [index, item] of input.tasks.entries()) {
+  const items = input.tasks.map((item, index) => {
     const title = item.title.trim();
     const prompt = item.prompt.trim();
     if (!title || !prompt) {
       throw new Error(`Parallel work item ${index + 1} requires title and prompt`);
     }
-    const workerName = item.workerName?.trim() || `${workerPrefix}-${index + 1}`;
+    return {
+      title,
+      prompt,
+      workerName: item.workerName?.trim() || `${workerPrefix}-${index + 1}`,
+    };
+  });
+  const workerNames = new Set<string>();
+  for (const item of items) {
+    if (workerNames.has(item.workerName)) {
+      throw new Error(`Duplicate parallel worker name '${item.workerName}'`);
+    }
+    workerNames.add(item.workerName);
+  }
+  const workers: WorkerRecord[] = [];
+  const tasks: TaskRecord[] = [];
+
+  for (const item of items) {
     const current = getOrCreateRunForRepo(repoRoot);
-    const worker =
-      current.workers.find((entry) => entry.name === workerName) ?? (await createWorkerForRepo(repoRoot, workerName));
-    const task = createTaskForRepo(repoRoot, { title, prompt });
+    const existingWorker = current.workers.find((entry) => entry.name === item.workerName);
+    if (existingWorker) {
+      if (
+        existingWorker.lifecycle !== "idle" ||
+        existingWorker.recoverable ||
+        !existingWorker.worktreePath ||
+        !existingWorker.sessionFile
+      ) {
+        throw new Error(`Parallel worker '${item.workerName}' is not idle and ready for dispatch`);
+      }
+    }
+    const worker = existingWorker ?? (await createWorkerForRepo(repoRoot, item.workerName));
+    const task = createTaskForRepo(repoRoot, { title: item.title, prompt: item.prompt });
     const assigned = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
     workers.push(worker);
     tasks.push(assigned);
@@ -950,6 +1040,27 @@ export async function runParallelWorkForRepo(
 
   let canceledRuns: string[] = [];
   let canceledTasks: string[] = [];
+  const collectOwnedCanceledWork = () => {
+    const project = getOrCreateRunForRepo(repoRoot);
+    const taskIds = new Set(tasks.map((task) => task.taskId));
+    const workerIds = new Set(workers.map((worker) => worker.workerId));
+    canceledRuns = [
+      ...new Set([
+        ...canceledRuns,
+        ...project.runs
+          .filter((run) => taskIds.has(run.taskId) && workerIds.has(run.workerId) && run.status === "aborted")
+          .map((run) => run.runId),
+      ]),
+    ];
+    canceledTasks = [
+      ...new Set([
+        ...canceledTasks,
+        ...project.tasks
+          .filter((task) => taskIds.has(task.taskId) && task.state === "canceled")
+          .map((task) => task.taskId),
+      ]),
+    ];
+  };
   const onAbort = () => {
     const canceled = cancelOwnedWork();
     canceledRuns = [...new Set([...canceledRuns, ...canceled.canceledRuns])];
@@ -958,12 +1069,31 @@ export async function runParallelWorkForRepo(
   signal?.addEventListener("abort", onAbort);
   if (signal?.aborted) onAbort();
 
+  const liveControllers = tasks.map((task, index) => {
+    const linked = createLinkedAbortController(signal);
+    const unregister = registerLiveWorkAbortHandle({
+      taskId: task.taskId,
+      workerId: workers[index]?.workerId,
+      controller: linked.controller,
+    });
+    return {
+      signal: linked.signal,
+      dispose: () => {
+        unregister();
+        linked.dispose();
+      },
+    };
+  });
+
   try {
     if (signal?.aborted) {
       return { workers, tasks, results: [], canceledRuns, canceledTasks };
     }
-    const settled = await Promise.allSettled(tasks.map((task) => runner(repoRoot, task.taskId, signal)));
+    const settled = await Promise.allSettled(
+      tasks.map((task, index) => runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal)),
+    );
     if (signal?.aborted) onAbort();
+    collectOwnedCanceledWork();
     const results = settled.map((entry, index) =>
       entry.status === "fulfilled"
         ? { taskId: tasks[index]?.taskId ?? "", status: "fulfilled" as const, result: entry.value, error: null }
@@ -977,6 +1107,9 @@ export async function runParallelWorkForRepo(
     return { workers, tasks, results, canceledRuns, canceledTasks };
   } finally {
     signal?.removeEventListener("abort", onAbort);
+    for (const controller of liveControllers) {
+      controller.dispose();
+    }
   }
 }
 
@@ -1010,14 +1143,31 @@ function normalizeRunWorkItems(input: { request: string; tasks?: RunWorkItemInpu
   }));
 }
 
+function normalizeWriteScope(scope: string): string {
+  return scope.trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
+}
+
+function writeScopesOverlap(left: string, right: string): boolean {
+  const normalizedLeft = normalizeWriteScope(left);
+  const normalizedRight = normalizeWriteScope(right);
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+  return (
+    normalizedLeft === normalizedRight ||
+    normalizedLeft.startsWith(`${normalizedRight}/`) ||
+    normalizedRight.startsWith(`${normalizedLeft}/`)
+  );
+}
+
 function findOverlappingWriteScopes(tasks: RunWorkItemInput[]): boolean {
-  const seen = new Set<string>();
+  const seen: string[] = [];
   for (const task of tasks) {
     for (const scope of task.writeScope ?? []) {
-      if (seen.has(scope)) {
+      if (seen.some((knownScope) => writeScopesOverlap(knownScope, scope))) {
         return true;
       }
-      seen.add(scope);
+      seen.push(scope);
     }
   }
   return false;
@@ -1710,61 +1860,74 @@ export async function runTaskForRepo(repoRoot: string, taskId: string, signal?: 
 
   await preflightWorkerRunRuntime({ worktreePath: worker.worktreePath, sessionFile: worker.sessionFile });
 
-  const runtimeResult = await runWorkerPromptRuntime({
-    worktreePath: worker.worktreePath,
-    sessionFile: worker.sessionFile,
-    task: task.prompt,
-    signal,
-    taskContract: started.taskContract,
-    onConductorProgress: async (progress) => {
-      recordTaskProgressForRepo(repoRoot, progress);
-    },
-    onConductorComplete: async (completion) => {
-      recordTaskCompletionForRepo(repoRoot, completion);
-    },
-    onConductorGate: async (gate) => {
-      createGateForRepo(repoRoot, {
-        type: gate.type,
-        resourceRefs: { taskId: gate.taskId, runId: gate.runId, workerId: worker.workerId },
-        requestedDecision: gate.requestedDecision,
+  const linkedSignal = createLinkedAbortController(signal);
+  const unregisterLiveRun = registerLiveWorkAbortHandle({
+    runId: started.run.runId,
+    taskId,
+    workerId: worker.workerId,
+    controller: linkedSignal.controller,
+  });
+
+  try {
+    const runtimeResult = await runWorkerPromptRuntime({
+      worktreePath: worker.worktreePath,
+      sessionFile: worker.sessionFile,
+      task: task.prompt,
+      signal: linkedSignal.signal,
+      taskContract: started.taskContract,
+      onConductorProgress: async (progress) => {
+        recordTaskProgressForRepo(repoRoot, progress);
+      },
+      onConductorComplete: async (completion) => {
+        recordTaskCompletionForRepo(repoRoot, completion);
+      },
+      onConductorGate: async (gate) => {
+        createGateForRepo(repoRoot, {
+          type: gate.type,
+          resourceRefs: { taskId: gate.taskId, runId: gate.runId, workerId: worker.workerId },
+          requestedDecision: gate.requestedDecision,
+        });
+      },
+      onConductorFollowUpTask: async (followUp) => {
+        createFollowUpTaskForRepo(repoRoot, followUp);
+      },
+    });
+
+    let createdFallbackCompletion = false;
+    mutateRepoRunSync(repoRoot, (latest) => {
+      const runAttempt = latest.runs.find((entry) => entry.runId === started.run.runId);
+      if (!runAttempt || runAttempt.finishedAt) {
+        return latest;
+      }
+      const semanticStatus =
+        runtimeResult.status === "success" ? "partial" : mapWorkerRunStatusToRunStatus(runtimeResult.status);
+      createdFallbackCompletion = true;
+      return completeTaskRun(latest, {
+        runId: started.run.runId,
+        status: semanticStatus,
+        completionSummary: runtimeResult.finalText,
+        errorMessage: runtimeResult.errorMessage,
       });
-    },
-    onConductorFollowUpTask: async (followUp) => {
-      createFollowUpTaskForRepo(repoRoot, followUp);
-    },
-  });
-
-  let createdFallbackCompletion = false;
-  mutateRepoRunSync(repoRoot, (latest) => {
-    const runAttempt = latest.runs.find((entry) => entry.runId === started.run.runId);
-    if (!runAttempt || runAttempt.finishedAt) {
-      return latest;
+    });
+    if (createdFallbackCompletion && runtimeResult.status === "success") {
+      createGateForRepo(repoRoot, {
+        type: "needs_review",
+        resourceRefs: { taskId, runId: started.run.runId, workerId: worker.workerId },
+        requestedDecision: `Review task ${taskId}: native worker exited without explicit conductor_child_complete`,
+      });
     }
-    const semanticStatus =
-      runtimeResult.status === "success" ? "partial" : mapWorkerRunStatusToRunStatus(runtimeResult.status);
-    createdFallbackCompletion = true;
-    return completeTaskRun(latest, {
-      runId: started.run.runId,
-      status: semanticStatus,
-      completionSummary: runtimeResult.finalText,
-      errorMessage: runtimeResult.errorMessage,
-    });
-  });
-  if (createdFallbackCompletion && runtimeResult.status === "success") {
-    createGateForRepo(repoRoot, {
-      type: "needs_review",
-      resourceRefs: { taskId, runId: started.run.runId, workerId: worker.workerId },
-      requestedDecision: `Review task ${taskId}: native worker exited without explicit conductor_child_complete`,
-    });
-  }
 
-  return {
-    workerName: worker.name,
-    status: runtimeResult.status,
-    finalText: runtimeResult.finalText,
-    errorMessage: runtimeResult.errorMessage,
-    sessionId: runtimeResult.sessionId,
-  };
+    return {
+      workerName: worker.name,
+      status: runtimeResult.status,
+      finalText: runtimeResult.finalText,
+      errorMessage: runtimeResult.errorMessage,
+      sessionId: runtimeResult.sessionId,
+    };
+  } finally {
+    unregisterLiveRun();
+    linkedSignal.dispose();
+  }
 }
 
 export async function recoverWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {

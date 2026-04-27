@@ -170,6 +170,19 @@ describe("conductor service", () => {
     expect(run.tasks[0]).toMatchObject({ state: "running", activeRunId: started.run.runId });
   });
 
+  it("does not start two active runs on the same worker", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const first = createTaskForRepo(repoDir, { title: "First", prompt: "Do first work" });
+    const second = createTaskForRepo(repoDir, { title: "Second", prompt: "Do second work" });
+    assignTaskForRepo(repoDir, first.taskId, worker.workerId);
+    assignTaskForRepo(repoDir, second.taskId, worker.workerId);
+    startTaskRunForRepo(repoDir, { taskId: first.taskId, workerId: worker.workerId });
+
+    expect(() => startTaskRunForRepo(repoDir, { taskId: second.taskId, workerId: worker.workerId })).toThrow(
+      /cannot start another run/i,
+    );
+  });
+
   it("delegates a task through the parent-agent happy path", async () => {
     const delegated = await delegateTaskForRepo(repoDir, {
       title: "Happy path",
@@ -278,6 +291,59 @@ describe("conductor service", () => {
     expect(run.runs.map((attempt) => attempt.status)).toEqual(["aborted", "aborted"]);
   });
 
+  it("aborts live parallel runners when active work is canceled", async () => {
+    let runnerSignal: AbortSignal | undefined;
+
+    const result = await runParallelWorkForRepo(
+      repoDir,
+      {
+        workerPrefix: "parallel",
+        tasks: [{ title: "Cancelable shard", prompt: "Do cancelable shard" }],
+      },
+      undefined,
+      async (_root, _taskId, signal) => {
+        runnerSignal = signal;
+        const canceled = cancelActiveWorkForRepo(repoDir, { reason: "human asked to stop" });
+        expect(canceled.canceledTasks).toHaveLength(1);
+        expect(runnerSignal?.aborted).toBe(true);
+        return {
+          workerName: "parallel-1",
+          status: "aborted",
+          finalText: null,
+          errorMessage: "human asked to stop",
+          sessionId: null,
+        };
+      },
+    );
+
+    expect(result.canceledTasks).toHaveLength(1);
+    expect(runnerSignal?.aborted).toBe(true);
+  });
+
+  it("rejects duplicate worker names for parallel work before dispatch", async () => {
+    await expect(
+      runParallelWorkForRepo(repoDir, {
+        tasks: [
+          { title: "First shard", prompt: "Do first shard", workerName: "same-worker" },
+          { title: "Second shard", prompt: "Do second shard", workerName: "same-worker" },
+        ],
+      }),
+    ).rejects.toThrow(/duplicate parallel worker name/i);
+  });
+
+  it("rejects parallel reuse of a busy worker", async () => {
+    const worker = await createWorkerForRepo(repoDir, "busy-worker");
+    const task = createTaskForRepo(repoDir, { title: "Busy task", prompt: "Keep the worker busy" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+
+    await expect(
+      runParallelWorkForRepo(repoDir, {
+        tasks: [{ title: "New shard", prompt: "Do new shard", workerName: "busy-worker" }],
+      }),
+    ).rejects.toThrow(/not idle/i);
+  });
+
   it("runs small natural-language work as one conductor worker by default", async () => {
     const result = await runWorkForRepo(
       repoDir,
@@ -352,6 +418,31 @@ describe("conductor service", () => {
     expect(result.tasks).toHaveLength(1);
     expect(result.tasks[0]?.prompt).toContain("Refactor runtime setup");
     expect(result.tasks[0]?.prompt).toContain("Refactor runtime tests");
+  });
+
+  it("does not split work with nested write scopes", async () => {
+    const result = await runWorkForRepo(
+      repoDir,
+      {
+        request: "Split the runtime refactor across workers",
+        tasks: [
+          { title: "Refactor extensions", prompt: "Refactor extension modules", writeScope: ["extensions/"] },
+          {
+            title: "Refactor runtime",
+            prompt: "Refactor runtime module",
+            writeScope: ["extensions/runtime.ts"],
+          },
+        ],
+      },
+      undefined,
+      async () => ({ workerName: "single", status: "success", finalText: "done", errorMessage: null, sessionId: null }),
+    );
+
+    expect(result.decision).toMatchObject({
+      mode: "single",
+      riskFlags: expect.arrayContaining(["overlapping_write_scope"]),
+    });
+    expect(result.tasks).toHaveLength(1);
   });
 
   it("plans dependent work as an objective instead of parallel fan-out", async () => {

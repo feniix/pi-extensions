@@ -507,6 +507,9 @@ export function startTaskRun(
   if (!worker) {
     throw new Error(`Worker ${input.workerId} not found`);
   }
+  if (worker.lifecycle !== "idle") {
+    throw new Error(`Worker ${input.workerId} is ${worker.lifecycle} and cannot start another run`);
+  }
   if (normalized.runs.some((entry) => entry.runId === input.runId)) {
     throw new Error(`Run ${input.runId} already exists`);
   }

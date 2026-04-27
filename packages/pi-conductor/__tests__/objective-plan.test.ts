@@ -43,6 +43,23 @@ describe("conductor objective planning", () => {
     expect(getOrCreateRunForRepo(repoRoot).events.map((event) => event.type)).toContain("objective.planned");
   });
 
+  it("orders objective tasks before dependents even when input is reversed", () => {
+    const repoRoot = "/tmp/repo";
+    const objective = createObjectiveForRepo(repoRoot, { title: "Autonomous MVP", prompt: "Ship the control plane" });
+
+    const result = planObjectiveForRepo(repoRoot, {
+      objectiveId: objective.objectiveId,
+      tasks: [
+        { title: "Verify scheduler", prompt: "Verify scheduler behavior", dependsOn: ["Add scheduler"] },
+        { title: "Add scheduler", prompt: "Build a scheduler loop" },
+      ],
+    });
+
+    expect(result.tasks.map((task) => task.title)).toEqual(["Add scheduler", "Verify scheduler"]);
+    expect(result.tasks[1]?.dependsOnTaskIds).toEqual([result.tasks[0]?.taskId]);
+    expect(getOrCreateRunForRepo(repoRoot).tasks[1]?.dependsOnTaskIds).toEqual([result.tasks[0]?.taskId]);
+  });
+
   it("rejects empty plans", () => {
     const repoRoot = "/tmp/repo";
     const objective = createObjectiveForRepo(repoRoot, { title: "Autonomous MVP", prompt: "Ship the control plane" });

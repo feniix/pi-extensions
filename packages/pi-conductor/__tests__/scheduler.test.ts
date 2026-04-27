@@ -178,27 +178,31 @@ describe("conductor scheduler and async next action", () => {
     expect(result.executed[0]?.action?.kind).toBe("run_task");
   });
 
-  it("passes an abort signal through runNextActionForRepo to runtime execution", async () => {
+  it("passes a linked abort signal through runNextActionForRepo to runtime execution", async () => {
     const controller = new AbortController();
     addUsableWorkerAndAssignedTask();
 
     await runNextActionForRepo(repoRoot, { executeRuns: true }, controller.signal);
 
     expect(runtimeTracking.runWorkerPromptInputs).toHaveLength(1);
-    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).toBe(controller.signal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).not.toBe(controller.signal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal?.aborted).toBe(false);
   });
 
-  it("passes an abort signal through schedulerTickForRepo to runtime execution", async () => {
+  it("passes a linked abort signal through schedulerTickForRepo to runtime execution", async () => {
     const controller = new AbortController();
     addUsableWorkerAndAssignedTask();
 
     await schedulerTickForRepo(repoRoot, { maxActions: 1, executeRuns: true }, controller.signal);
 
     expect(runtimeTracking.runWorkerPromptInputs).toHaveLength(1);
-    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).toBe(controller.signal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).not.toBe(controller.signal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal?.aborted).toBe(false);
   });
 
-  it("passes an abort signal through scheduleObjectiveForRepo to runtime execution", async () => {
+  it("passes a linked abort signal through scheduleObjectiveForRepo to runtime execution", async () => {
     const objective = createObjectiveForRepo(repoRoot, { title: "Objective", prompt: "Prompt" });
     const task = createTaskForRepo(repoRoot, {
       title: "Run me",
@@ -219,7 +223,9 @@ describe("conductor scheduler and async next action", () => {
     );
 
     expect(runtimeTracking.runWorkerPromptInputs).toHaveLength(1);
-    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).toBe(controller.signal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).not.toBe(controller.signal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal?.aborted).toBe(false);
     expect(task).toBeTruthy();
   });
 
