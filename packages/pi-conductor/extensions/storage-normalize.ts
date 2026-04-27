@@ -1,6 +1,16 @@
-import type { GateOperation, GateRecord, RunRecord, TaskRecord, WorkerRecord } from "./types.js";
+import { normalizeRunRuntimeMetadata } from "./runtime-metadata.js";
+import type {
+  GateOperation,
+  GateRecord,
+  PersistedRunAttemptRecord,
+  PersistedRunRecord,
+  RunAttemptRecord,
+  RunRecord,
+  TaskRecord,
+  WorkerRecord,
+} from "./types.js";
 
-export function normalizeProjectRecord(run: RunRecord): RunRecord {
+export function normalizeProjectRecord(run: RunRecord | PersistedRunRecord): RunRecord {
   return {
     ...run,
     schemaVersion: run.schemaVersion,
@@ -9,7 +19,7 @@ export function normalizeProjectRecord(run: RunRecord): RunRecord {
     archivedWorkers: run.archivedWorkers.map(normalizeWorkerRecord),
     objectives: run.objectives,
     tasks: run.tasks.map(normalizeTaskRecord),
-    runs: run.runs,
+    runs: run.runs.map(normalizeRunAttemptRecord),
     gates: run.gates.map(normalizeGateRecord),
     artifacts: run.artifacts,
     events: run.events,
@@ -46,6 +56,13 @@ function normalizeTaskRecord(task: TaskRecord): TaskRecord {
     ...task,
     objectiveId: task.objectiveId,
     dependsOnTaskIds: task.dependsOnTaskIds,
+  };
+}
+
+function normalizeRunAttemptRecord(run: RunAttemptRecord | PersistedRunAttemptRecord): RunAttemptRecord {
+  return {
+    ...run,
+    runtime: normalizeRunRuntimeMetadata(run),
   };
 }
 

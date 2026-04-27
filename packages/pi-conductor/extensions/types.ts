@@ -3,6 +3,17 @@ export const CONDUCTOR_SCHEMA_VERSION = 1;
 export type WorkerLifecycleState = "idle" | "running" | "broken" | "archived";
 export type ObjectiveStatus = "draft" | "active" | "blocked" | "needs_review" | "completed" | "canceled";
 export type WorkerRunStatus = "success" | "error" | "aborted";
+export type RunRuntimeMode = "headless" | "tmux" | "iterm-tmux";
+export type RunRuntimeStatus =
+  | "unavailable"
+  | "starting"
+  | "running"
+  | "exited_success"
+  | "exited_error"
+  | "aborted"
+  | "unknown";
+export type RunRuntimeViewerStatus = "not_applicable" | "pending" | "opened" | "warning" | "unavailable";
+export type RunRuntimeCleanupStatus = "not_required" | "pending" | "succeeded" | "failed";
 
 export type TaskState =
   | "draft"
@@ -301,6 +312,30 @@ export interface TaskRecord {
   updatedAt: string;
 }
 
+export interface RunRuntimeMetadata {
+  mode: RunRuntimeMode;
+  status: RunRuntimeStatus;
+  sessionId: string | null;
+  cwd: string | null;
+  command: string | null;
+  runnerPid: number | null;
+  processGroupId: number | null;
+  tmux: {
+    socketPath: string | null;
+    sessionName: string | null;
+    windowId: string | null;
+    paneId: string | null;
+  } | null;
+  logPath: string | null;
+  viewerCommand: string | null;
+  viewerStatus: RunRuntimeViewerStatus;
+  diagnostics: string[];
+  heartbeatAt: string | null;
+  cleanupStatus: RunRuntimeCleanupStatus;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
 export interface RunAttemptRecord {
   runId: string;
   taskId: string;
@@ -310,6 +345,7 @@ export interface RunAttemptRecord {
   backend: "native" | "pi-subagents";
   backendRunId: string | null;
   sessionId: string | null;
+  runtime: RunRuntimeMetadata;
   leaseGeneration: number;
   leaseStartedAt: string | null;
   leaseExpiresAt: string | null;
@@ -394,6 +430,9 @@ export interface RunRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export type PersistedRunAttemptRecord = Omit<RunAttemptRecord, "runtime"> & { runtime?: RunRuntimeMetadata };
+export type PersistedRunRecord = Omit<RunRecord, "runs"> & { runs: PersistedRunAttemptRecord[] };
 
 export interface WorkerRunResult {
   workerName: string;

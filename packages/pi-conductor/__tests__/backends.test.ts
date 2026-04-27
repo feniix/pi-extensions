@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getConductorBackendAdapter, inspectConductorBackends } from "../extensions/backends.js";
+import {
+  getConductorBackendAdapter,
+  getConductorRuntimeModeStatus,
+  inspectConductorBackends,
+  inspectConductorRuntimeModes,
+} from "../extensions/backends.js";
 
 describe("conductor backend inspection", () => {
   it("always reports the native backend as available", () => {
@@ -31,6 +36,30 @@ describe("conductor backend inspection", () => {
     const piSubagents = getConductorBackendAdapter("pi-subagents", { resolvePackage: () => null });
     expect(piSubagents.preflight()).toMatchObject({ available: false, capabilities: { canStartRun: false } });
     expect(piSubagents.dispatch()).toMatchObject({ ok: false });
+  });
+
+  it("reports runtime mode availability without requiring tmux", () => {
+    const status = inspectConductorRuntimeModes();
+
+    expect(status.headless).toMatchObject({
+      mode: "headless",
+      available: true,
+      canonicalStateOwner: "conductor",
+      capabilities: { canStartRun: true, canSuperviseLiveOutput: false },
+    });
+    expect(status.tmux).toMatchObject({
+      mode: "tmux",
+      available: false,
+      capabilities: { canStartRun: false, canSuperviseLiveOutput: true, requiresExternalRunner: true },
+    });
+    expect(status["iterm-tmux"]).toMatchObject({
+      mode: "iterm-tmux",
+      available: false,
+      capabilities: { viewerOnly: true },
+    });
+    expect(status.itermTmux).toBe(status["iterm-tmux"]);
+    expect(getConductorRuntimeModeStatus("headless").available).toBe(true);
+    expect(getConductorRuntimeModeStatus("tmux").diagnostic).toMatch(/not implemented yet/i);
   });
 
   it("reports pi-subagents available when an explicit dispatcher is injected", async () => {

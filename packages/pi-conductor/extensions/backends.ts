@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import type { RunRuntimeMode } from "./types.js";
 
 export type ConductorBackendKind = "native" | "pi-subagents";
 
@@ -21,6 +22,26 @@ export interface ConductorBackendsStatus {
   native: ConductorBackendStatus;
   piSubagents: ConductorBackendStatus;
 }
+
+export interface ConductorRuntimeModeCapabilities {
+  canStartRun: boolean;
+  canSuperviseLiveOutput: boolean;
+  requiresExternalRunner: boolean;
+  viewerOnly: boolean;
+}
+
+export interface ConductorRuntimeModeStatus {
+  mode: RunRuntimeMode;
+  available: boolean;
+  canonicalStateOwner: "conductor";
+  capabilities: ConductorRuntimeModeCapabilities;
+  diagnostic: string | null;
+}
+
+export type ConductorRuntimeModesStatus = Record<RunRuntimeMode, ConductorRuntimeModeStatus> & {
+  /** @deprecated Use the runtime mode literal key `iterm-tmux`. */
+  itermTmux: ConductorRuntimeModeStatus;
+};
 
 export interface ConductorBackendDispatchResult {
   ok: boolean;
@@ -50,6 +71,27 @@ const unavailablePiSubagentsCapabilities: ConductorBackendCapabilities = {
   canRunForeground: false,
   supportsScopedChildTools: false,
   requiresReviewOnExit: true,
+};
+
+const headlessRuntimeCapabilities: ConductorRuntimeModeCapabilities = {
+  canStartRun: true,
+  canSuperviseLiveOutput: false,
+  requiresExternalRunner: false,
+  viewerOnly: false,
+};
+
+const unavailableVisibleRuntimeCapabilities: ConductorRuntimeModeCapabilities = {
+  canStartRun: false,
+  canSuperviseLiveOutput: true,
+  requiresExternalRunner: true,
+  viewerOnly: false,
+};
+
+const unavailableItermViewerCapabilities: ConductorRuntimeModeCapabilities = {
+  canStartRun: false,
+  canSuperviseLiveOutput: true,
+  requiresExternalRunner: true,
+  viewerOnly: true,
 };
 
 function resolvePiSubagents(input: { resolvePackage?: (specifier: string) => string | null } = {}): string | null {
@@ -90,6 +132,39 @@ export function inspectConductorBackends(
           : "Optional pi-subagents adapter is not installed or not resolvable from pi-conductor",
     },
   };
+}
+
+export function inspectConductorRuntimeModes(): ConductorRuntimeModesStatus {
+  const itermTmux: ConductorRuntimeModeStatus = {
+    mode: "iterm-tmux",
+    available: false,
+    canonicalStateOwner: "conductor",
+    capabilities: unavailableItermViewerCapabilities,
+    diagnostic: "iTerm2 viewer depends on the tmux supervised runtime adapter, which is not implemented yet",
+  };
+  return {
+    headless: {
+      mode: "headless",
+      available: true,
+      canonicalStateOwner: "conductor",
+      capabilities: headlessRuntimeCapabilities,
+      diagnostic: null,
+    },
+    tmux: {
+      mode: "tmux",
+      available: false,
+      canonicalStateOwner: "conductor",
+      capabilities: unavailableVisibleRuntimeCapabilities,
+      diagnostic: "tmux supervised runtime adapter is not implemented yet",
+    },
+    "iterm-tmux": itermTmux,
+    itermTmux,
+  };
+}
+
+export function getConductorRuntimeModeStatus(mode: RunRuntimeMode): ConductorRuntimeModeStatus {
+  const status = inspectConductorRuntimeModes();
+  return status[mode];
 }
 
 export function getConductorBackendAdapter(

@@ -4,12 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  assignTaskForRepo,
   buildProjectBriefForRepo,
   createGateForRepo,
   createObjectiveForRepo,
   createTaskForRepo,
   createWorkerForRepo,
+  getOrCreateRunForRepo,
+  startTaskRunForRepo,
 } from "../extensions/conductor.js";
+import { writeRun } from "../extensions/storage.js";
 
 describe("conductor project brief", () => {
   let repoDir: string;
@@ -34,13 +38,15 @@ describe("conductor project brief", () => {
   });
 
   it("builds an LLM-oriented project brief with counts, blockers, and next actions", async () => {
-    await createWorkerForRepo(repoDir, "backend");
+    const worker = await createWorkerForRepo(repoDir, "backend");
     const objective = createObjectiveForRepo(repoDir, { title: "Autonomous MVP", prompt: "Ship conductor autonomy" });
     const task = createTaskForRepo(repoDir, {
       title: "Build brief",
       prompt: "Summarize state",
       objectiveId: objective.objectiveId,
     });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
     createGateForRepo(repoDir, {
       type: "needs_input",
       resourceRefs: { objectiveId: objective.objectiveId, taskId: task.taskId },
@@ -56,7 +62,28 @@ describe("conductor project brief", () => {
       type: "needs_input",
       requestedDecision: "Which next action should run?",
     });
+    expect(brief.markdown).toContain(`- ${started.run.runId} task=${task.taskId}`);
+    expect(brief.markdown).toContain("runtimeMode=headless runtimeStatus=running");
     expect(brief.nextActions.length).toBeGreaterThan(0);
     expect(brief.recentEvents.length).toBeLessThanOrEqual(5);
+  });
+
+  it("does not surface terminal-status runs with missing finishedAt as active", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Corrupt terminal", prompt: "Summarize state" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
+    const run = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...run,
+      runs: run.runs.map((entry) =>
+        entry.runId === started.run.runId ? { ...entry, status: "failed", finishedAt: null } : entry,
+      ),
+    });
+
+    const brief = buildProjectBriefForRepo(repoDir, { maxActions: 3, recentEventLimit: 5 });
+
+    expect(brief.markdown).toContain("## Active Runs\n- none");
+    expect(brief.markdown).not.toContain(`cancel=conductor_cancel_task_run({"runId":"${started.run.runId}"`);
   });
 });

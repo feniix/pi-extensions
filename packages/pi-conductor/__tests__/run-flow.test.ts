@@ -15,15 +15,25 @@ vi.mock("../extensions/runtime.js", async (importOriginal) => {
     ...actual,
     preflightWorkerRunRuntime: runtimeMocks.preflightWorkerRunRuntime,
     runWorkerPromptRuntime: runtimeMocks.runWorkerPromptRuntime,
+    getWorkerRunRuntimeBackend: vi.fn((mode = "headless") => {
+      if (mode !== "headless") throw new Error(`${mode} runtime is not implemented yet`);
+      return {
+        mode,
+        preflight: runtimeMocks.preflightWorkerRunRuntime,
+        run: runtimeMocks.runWorkerPromptRuntime,
+      };
+    }),
   };
 });
 
 import {
   assignTaskForRepo,
+  cancelTaskRunForRepo,
   createTaskForRepo,
   createWorkerForRepo,
   getOrCreateRunForRepo,
   runTaskForRepo,
+  startTaskRunForRepo,
 } from "../extensions/conductor.js";
 
 describe("durable task run flows", () => {
@@ -114,6 +124,76 @@ describe("durable task run flows", () => {
     expect(persisted.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
     expect(persisted.runs[0]).toMatchObject({ status: "partial", completionSummary: "I think it is done" });
     expect(persisted.gates[0]).toMatchObject({ type: "needs_review", status: "open" });
+  });
+
+  it("does not create an active run when runtime preflight fails", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Preflight task", prompt: "Do work" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    runtimeMocks.preflightWorkerRunRuntime.mockRejectedValueOnce(new Error("preflight failed"));
+
+    await expect(runTaskForRepo(repoDir, task.taskId)).rejects.toThrow(/preflight failed/i);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null, runIds: [] });
+    expect(persisted.runs).toHaveLength(0);
+    expect(persisted.workers[0]).toMatchObject({ lifecycle: "idle" });
+  });
+
+  it("fails closed for explicit visible runtime start before creating a run", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Visible start", prompt: "Start visible work" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    expect(() => startTaskRunForRepo(repoDir, { taskId: task.taskId, runtimeMode: "tmux" })).toThrow(
+      /Runtime mode tmux unavailable/i,
+    );
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null, runIds: [] });
+    expect(persisted.runs).toHaveLength(0);
+  });
+
+  it("fails closed for explicit visible runtime execution before creating a run", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Visible task", prompt: "Do visible work" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    await expect(runTaskForRepo(repoDir, task.taskId, undefined, { runtimeMode: "tmux" })).rejects.toThrow(
+      /Runtime mode tmux unavailable/i,
+    );
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null, runIds: [] });
+    expect(persisted.runs).toHaveLength(0);
+  });
+
+  it("aborts live worker runtime when canceling a specific active run", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Cancelable run", prompt: "Do cancellable work" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    let runtimeSignal: AbortSignal | undefined;
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async (input) => {
+      runtimeSignal = input.signal;
+      expect(runtimeSignal?.aborted).toBe(false);
+      cancelTaskRunForRepo(repoDir, { runId: input.taskContract.runId, reason: "human canceled run" });
+      expect(runtimeSignal?.aborted).toBe(true);
+      return {
+        status: "aborted",
+        finalText: null,
+        errorMessage: "human canceled run",
+        sessionId: "run-session-aborted",
+      };
+    });
+
+    const result = await runTaskForRepo(repoDir, task.taskId);
+
+    expect(result.status).toBe("aborted");
+    expect(runtimeSignal?.aborted).toBe(true);
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
+    expect(persisted.runs[0]).toMatchObject({ status: "aborted", errorMessage: "human canceled run" });
   });
 
   it("forwards cancellation signals from tool callers into the worker runtime", async () => {

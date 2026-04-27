@@ -50,6 +50,28 @@ describe("conductor backend dispatch wrapper", () => {
     });
   }
 
+  it("marks a started pi-subagents run failed when dispatcher throws", async () => {
+    addWorker();
+    const task = createTaskForRepo(repoRoot, { title: "Dispatch failure", prompt: "Run externally" });
+    assignTaskForRepo(repoRoot, task.taskId, "worker-1");
+
+    await expect(
+      dispatchTaskRunForRepo(repoRoot, {
+        taskId: task.taskId,
+        backend: "pi-subagents",
+        resolvePackage: () => "/tmp/pi-subagents/package.json",
+        dispatcher: async () => {
+          throw new Error("transport exploded");
+        },
+      }),
+    ).rejects.toThrow(/transport exploded/i);
+
+    const persisted = getOrCreateRunForRepo(repoRoot);
+    expect(persisted.tasks[0]).toMatchObject({ state: "failed", activeRunId: null });
+    expect(persisted.runs[0]).toMatchObject({ status: "failed", completionSummary: "transport exploded" });
+    expect(persisted.events.map((event) => event.type)).toContain("backend.dispatch_failed");
+  });
+
   it("dispatches pi-subagents runs through an injected dispatcher", async () => {
     addWorker();
     const task = createTaskForRepo(repoRoot, { title: "Dispatch", prompt: "Run externally" });

@@ -154,15 +154,19 @@ export function registerProjectTools(pi: ExtensionAPI, findRepoRoot: (cwd: strin
   pi.registerTool({
     name: "conductor_backend_status",
     label: "Conductor Backend Status",
-    description: "Inspect native and optional pi-subagents backend adapter availability",
+    description: "Inspect native/pi-subagents backend and worker runtime mode availability",
     parameters: Type.Object({}),
     async execute() {
       const backendStatus = backends.inspectConductorBackends();
+      const runtimeStatus = backends.inspectConductorRuntimeModes();
       const text = [
         `native: available=${backendStatus.native.available}`,
         `pi-subagents: available=${backendStatus.piSubagents.available}${backendStatus.piSubagents.diagnostic ? ` (${backendStatus.piSubagents.diagnostic})` : ""}`,
+        `runtime headless: available=${runtimeStatus.headless.available}`,
+        `runtime tmux: available=${runtimeStatus.tmux.available}${runtimeStatus.tmux.diagnostic ? ` (${runtimeStatus.tmux.diagnostic})` : ""}`,
+        `runtime iterm-tmux: available=${runtimeStatus["iterm-tmux"].available}${runtimeStatus["iterm-tmux"].diagnostic ? ` (${runtimeStatus["iterm-tmux"].diagnostic})` : ""}`,
       ].join("\n");
-      return { content: [{ type: "text", text }], details: backendStatus };
+      return { content: [{ type: "text", text }], details: { ...backendStatus, runtimes: runtimeStatus } };
     },
   });
 }

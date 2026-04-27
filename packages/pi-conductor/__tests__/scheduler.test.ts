@@ -18,19 +18,29 @@ const runtimeTracking = vi.hoisted(() => ({
 
 vi.mock("../extensions/runtime.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../extensions/runtime.js")>();
+  const preflightWorkerRunRuntime = vi.fn(() => undefined);
+  const runWorkerPromptRuntime = vi.fn(async (input) => {
+    runtimeTracking.runWorkerPromptInputs.push(input);
+    await input.onConductorComplete?.({
+      runId: input.taskContract?.runId ?? "run-unknown",
+      taskId: input.taskContract?.taskId ?? "task-unknown",
+      status: "succeeded",
+      completionSummary: "done by scheduler",
+      artifact: { type: "completion_report", ref: "completion://scheduler" },
+    });
+    return { status: "success", finalText: "done", errorMessage: null, sessionId: "session-1" };
+  });
   return {
     ...actual,
-    preflightWorkerRunRuntime: vi.fn(() => undefined),
-    runWorkerPromptRuntime: vi.fn(async (input) => {
-      runtimeTracking.runWorkerPromptInputs.push(input);
-      await input.onConductorComplete?.({
-        runId: input.taskContract?.runId ?? "run-unknown",
-        taskId: input.taskContract?.taskId ?? "task-unknown",
-        status: "succeeded",
-        completionSummary: "done by scheduler",
-        artifact: { type: "completion_report", ref: "completion://scheduler" },
-      });
-      return { status: "success", finalText: "done", errorMessage: null, sessionId: "session-1" };
+    preflightWorkerRunRuntime,
+    runWorkerPromptRuntime,
+    getWorkerRunRuntimeBackend: vi.fn((mode = "headless") => {
+      if (mode !== "headless") throw new Error(`${mode} runtime is not implemented yet`);
+      return {
+        mode,
+        preflight: preflightWorkerRunRuntime,
+        run: runWorkerPromptRuntime,
+      };
     }),
   };
 });

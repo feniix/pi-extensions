@@ -191,6 +191,25 @@ describe("pi-conductor static safety guards", () => {
     expect(gateSource.split("\n").length).toBeLessThan(120);
   });
 
+  it("exposes runtimeMode on agent-facing run entrypoints", () => {
+    const tools = collectTools();
+    const runtimeAwareToolNames = [
+      "conductor_delegate_task",
+      "conductor_start_task_run",
+      "conductor_run_task",
+      "conductor_retry_task",
+      "conductor_run_work",
+      "conductor_run_parallel_work",
+      "conductor_schedule_objective",
+    ];
+
+    for (const name of runtimeAwareToolNames) {
+      const tool = tools.find((entry) => entry.name === name);
+      expect(JSON.stringify(tool?.parameters)).toContain("runtimeMode");
+      expect(JSON.stringify(tool?.parameters)).toContain("iterm-tmux");
+    }
+  });
+
   it("does not expose trusted-human gate approval as a model tool", () => {
     const tools = collectTools();
     const toolNames = tools.map((tool) => tool.name).sort();

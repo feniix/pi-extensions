@@ -9,6 +9,7 @@ import {
   createObjectiveForRepo,
   createTaskForRepo,
   createWorkerForRepo,
+  startTaskRunForRepo,
 } from "../extensions/conductor.js";
 
 describe("conductor task brief", () => {
@@ -42,6 +43,7 @@ describe("conductor task brief", () => {
       objectiveId: objective.objectiveId,
     });
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
 
     const brief = buildTaskBriefForRepo(repoDir, { taskId: task.taskId });
 
@@ -49,6 +51,8 @@ describe("conductor task brief", () => {
     expect(brief.task.taskId).toBe(task.taskId);
     expect(brief.objective?.objectiveId).toBe(objective.objectiveId);
     expect(brief.worker?.workerId).toBe(worker.workerId);
-    expect(brief.suggestedNextTool).toMatchObject({ name: "conductor_run_task", params: { taskId: task.taskId } });
+    expect(brief.markdown).toContain(`- ${started.run.runId} status=running`);
+    expect(brief.markdown).toContain("runtimeMode=headless runtimeStatus=running");
+    expect(brief.suggestedNextTool).toBeNull();
   });
 });

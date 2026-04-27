@@ -15,6 +15,7 @@ import type {
   ConductorFollowUpTaskInput,
   ConductorGateReportInput,
   ConductorProgressReportInput,
+  RunRuntimeMode,
   RuntimeRunContext,
   RuntimeRunPreflightContext,
   RuntimeRunResult,
@@ -25,6 +26,23 @@ import type {
 
 export interface WorkerRuntimeHandle extends WorkerRuntimeState {
   sessionFile: string | null;
+}
+
+export interface WorkerRunRuntimeBackend {
+  mode: RunRuntimeMode;
+  preflight(input: RuntimeRunPreflightContext): Promise<void>;
+  run(input: RuntimeRunContext): Promise<RuntimeRunResult>;
+}
+
+export function getWorkerRunRuntimeBackend(mode: RunRuntimeMode = "headless"): WorkerRunRuntimeBackend {
+  if (mode === "headless") {
+    return {
+      mode,
+      preflight: preflightWorkerRunRuntime,
+      run: runWorkerPromptRuntime,
+    };
+  }
+  throw new Error(`${mode} runtime is not implemented yet`);
 }
 
 function persistSessionFile(sessionManager: SessionManager, sessionFile: string): void {

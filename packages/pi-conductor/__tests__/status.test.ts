@@ -7,6 +7,7 @@ import {
   createEmptyRun,
   createTaskRecord,
   createWorkerRecord,
+  startTaskRun,
 } from "../extensions/storage.js";
 
 describe("formatRunStatus", () => {
@@ -39,6 +40,33 @@ describe("formatRunStatus", () => {
     expect(text).toContain(
       "- task Add ledger [task-1] state=assigned assignedWorker=worker-1 activeRun=none latestProgress=none",
     );
+  });
+
+  it("includes run runtime metadata", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: "/tmp/session.jsonl",
+    });
+    const task = createTaskRecord({ taskId: "task-1", title: "Add ledger", prompt: "Implement tasks" });
+    const withRun = startTaskRun(
+      assignTaskToWorker(addTask(addWorker(run, worker), task), task.taskId, worker.workerId),
+      {
+        runId: "run-1",
+        taskId: task.taskId,
+        workerId: worker.workerId,
+        backend: "native",
+        leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+      },
+    );
+
+    const text = formatRunStatus(withRun);
+
+    expect(text).toContain("- run run-1 task=task-1 worker=worker-1 status=running backend=native");
+    expect(text).toContain("runtimeMode=headless runtimeStatus=running viewer=not_applicable cleanup=not_required");
   });
 
   it("includes worker runtime and PR state", () => {

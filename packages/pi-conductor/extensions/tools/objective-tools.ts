@@ -3,6 +3,7 @@ import { Type } from "typebox";
 import * as conductor from "../conductor.js";
 
 const schedulerPolicySchema = Type.Union([Type.Literal("safe"), Type.Literal("execute")]);
+const runtimeModeSchema = Type.Union([Type.Literal("headless"), Type.Literal("tmux"), Type.Literal("iterm-tmux")]);
 export function registerObjectiveTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "conductor_list_objectives",
@@ -179,6 +180,7 @@ export function registerObjectiveTools(pi: ExtensionAPI): void {
       maxConcurrency: Type.Optional(Type.Number({ description: "Maximum runnable tasks to schedule; defaults to 1" })),
       policy: Type.Optional(schedulerPolicySchema),
       executeRuns: Type.Optional(Type.Boolean({ description: "Also execute assigned runnable tasks" })),
+      runtimeMode: Type.Optional(runtimeModeSchema),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const result = await conductor.scheduleObjectiveForRepo(ctx.cwd, params, _signal);

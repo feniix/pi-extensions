@@ -1,4 +1,4 @@
-import { type ConductorBackendsStatus, inspectConductorBackends } from "./backends.js";
+import { type ConductorBackendsStatus, getConductorRuntimeModeStatus, inspectConductorBackends } from "./backends.js";
 import { refreshObjectiveStatusForRepo } from "./objective-service.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
 import {
@@ -13,7 +13,7 @@ import {
   startTaskRun,
   updateTask,
 } from "./storage.js";
-import type { RunAttemptRecord, RunRecord, TaskContractInput, TaskRecord } from "./types.js";
+import type { RunAttemptRecord, RunRecord, RunRuntimeMode, TaskContractInput, TaskRecord } from "./types.js";
 
 function createTaskId(): string {
   return `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -131,6 +131,7 @@ export function startTaskRunForRepo(
     leaseSeconds?: number;
     runId?: string;
     backend?: RunAttemptRecord["backend"];
+    runtimeMode?: RunRuntimeMode;
     allowFollowUpTasks?: boolean;
     inspectBackends?: () => ConductorBackendsStatus;
   },
@@ -164,6 +165,11 @@ export function startTaskRunForRepo(
       `pi-subagents backend unavailable: ${status.available ? "dispatch adapter is not implemented yet" : (status.diagnostic ?? "not available")}`,
     );
   }
+  const runtimeMode = input.runtimeMode ?? "headless";
+  const runtimeStatus = getConductorRuntimeModeStatus(runtimeMode);
+  if (!runtimeStatus.available) {
+    throw new Error(`Runtime mode ${runtimeMode} unavailable: ${runtimeStatus.diagnostic ?? "not available"}`);
+  }
   const runId = input.runId ?? createRunId();
   const updatedRun = mutateRepoRunSync(repoRoot, (latest) =>
     startTaskRun(latest, {
@@ -171,6 +177,7 @@ export function startTaskRunForRepo(
       taskId: input.taskId,
       workerId,
       backend,
+      runtimeMode,
       leaseExpiresAt: leaseExpiryFromNow(input.leaseSeconds ?? 900),
     }),
   );
@@ -205,7 +212,7 @@ export function cancelTaskRunForRepo(repoRoot: string, input: { runId: string; r
 
 export function retryTaskForRepo(
   repoRoot: string,
-  input: { taskId: string; workerId?: string; leaseSeconds?: number },
+  input: { taskId: string; workerId?: string; leaseSeconds?: number; runtimeMode?: RunRuntimeMode },
 ): { run: RunAttemptRecord; taskContract: TaskContractInput } {
   const run = getOrCreateRunForRepo(repoRoot);
   const task = run.tasks.find((entry) => entry.taskId === input.taskId);

@@ -20,6 +20,7 @@ import {
   startTaskRunForRepo,
   updateTaskForRepo,
 } from "../extensions/conductor.js";
+import { writeRun } from "../extensions/storage.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
   if (value == null) {
@@ -211,6 +212,22 @@ describe("conductor service", () => {
     expect(run.runs).toHaveLength(1);
   });
 
+  it("fails closed when a delegated start requests an unavailable runtime mode", async () => {
+    await expect(
+      delegateTaskForRepo(repoDir, {
+        title: "Visible delegated work",
+        prompt: "Run visibly",
+        workerName: "visible-worker",
+        startRun: true,
+        runtimeMode: "tmux",
+      }),
+    ).rejects.toThrow(/Runtime mode tmux unavailable/i);
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null, runIds: [] });
+    expect(run.runs).toHaveLength(0);
+  });
+
   it("cancels active conductor work without requiring run IDs", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const task = createTaskForRepo(repoDir, { title: "Cancelable", prompt: "Do it" });
@@ -366,6 +383,49 @@ describe("conductor service", () => {
     expect(run.tasks).toHaveLength(1);
   });
 
+  it("passes runtimeMode through parallel work runners", async () => {
+    const seenRuntimeModes: Array<string | undefined> = [];
+
+    await runParallelWorkForRepo(
+      repoDir,
+      {
+        workerPrefix: "parallel",
+        runtimeMode: "tmux",
+        tasks: [
+          { title: "First shard", prompt: "Do first shard" },
+          { title: "Second shard", prompt: "Do second shard" },
+        ],
+      },
+      undefined,
+      async (_root, taskId, _signal, options) => {
+        seenRuntimeModes.push(options?.runtimeMode);
+        return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
+      },
+    );
+
+    expect(seenRuntimeModes).toEqual(["tmux", "tmux"]);
+  });
+
+  it("passes runtimeMode through single natural-language work runners", async () => {
+    let seenRuntimeMode: string | undefined;
+
+    await runWorkForRepo(
+      repoDir,
+      {
+        request: "Fix one focused issue",
+        runtimeMode: "iterm-tmux",
+        tasks: [{ title: "Fix one issue", prompt: "Fix it", writeScope: ["README.md"] }],
+      },
+      undefined,
+      async (_root, taskId, _signal, options) => {
+        seenRuntimeMode = options?.runtimeMode;
+        return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
+      },
+    );
+
+    expect(seenRuntimeMode).toBe("iterm-tmux");
+  });
+
   it("routes independent scoped work items to parallel workers", async () => {
     const result = await runWorkForRepo(
       repoDir,
@@ -480,6 +540,28 @@ describe("conductor service", () => {
     expect(getOrCreateRunForRepo(repoDir).events.map((event) => event.type)).toContain("task.updated");
   });
 
+  it("rejects canceling terminal-status runs even if finishedAt is missing", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Corrupt terminal", prompt: "Do it" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+    const run = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...run,
+      tasks: run.tasks.map((entry) =>
+        entry.taskId === task.taskId ? { ...entry, state: "failed", activeRunId: started.run.runId } : entry,
+      ),
+      runs: run.runs.map((entry) =>
+        entry.runId === started.run.runId ? { ...entry, status: "failed", finishedAt: null } : entry,
+      ),
+    });
+
+    const canceled = cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "stop" });
+
+    expect(canceled.runs[0]).toMatchObject({ status: "failed", finishedAt: null });
+    expect(canceled.events.at(-1)).toMatchObject({ type: "run.cancel_rejected" });
+  });
+
   it("cancels and retries task runs through conductor service helpers", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const task = createTaskForRepo(repoDir, { title: "Retry task", prompt: "Do it" });
@@ -492,6 +574,11 @@ describe("conductor service", () => {
     });
     expect(canceled.runs[0]).toMatchObject({ status: "aborted" });
     expect(canceled.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
+
+    expect(() => retryTaskForRepo(repoDir, { taskId: task.taskId, runtimeMode: "tmux" })).toThrow(
+      /Runtime mode tmux unavailable/i,
+    );
+    expect(getOrCreateRunForRepo(repoDir).tasks[0]?.runIds).toHaveLength(1);
 
     const retried = retryTaskForRepo(repoDir, { taskId: task.taskId, leaseSeconds: 300 });
     expect(retried.run.runId).not.toBe(started.run.runId);
