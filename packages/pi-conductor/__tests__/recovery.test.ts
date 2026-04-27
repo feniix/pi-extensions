@@ -9,6 +9,7 @@ import {
   reconcileWorkerHealth,
   recoverWorkerForRepo,
 } from "../extensions/conductor.js";
+import { writeRun } from "../extensions/storage.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
   if (value == null) {
@@ -63,6 +64,26 @@ describe("recovery flows", () => {
     expect(recovered.runtime.sessionId).toBeTruthy();
     expect(recovered.lifecycle).toBe("idle");
     expect(recovered.recoverable).toBe(false);
+  });
+
+  it("fails worker recovery when branch metadata is missing and records a recoverable failure", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const run = getOrCreateRunForRepo(repoDir);
+    const record = {
+      ...run,
+      workers: run.workers.map((entry) =>
+        entry.workerId === worker.workerId ? { ...entry, branch: null, worktreePath: null, recoverable: true } : entry,
+      ),
+    };
+    writeRun(record);
+    const target = record.workers.find((entry) => entry.workerId === worker.workerId);
+    if (!target) {
+      throw new Error("worker missing");
+    }
+
+    await expect(recoverWorkerForRepo(repoDir, worker.name)).rejects.toThrow(
+      /cannot be recovered without a valid branch/,
+    );
   });
 
   it("recreates a missing worktree during recovery", async () => {

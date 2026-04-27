@@ -10,7 +10,6 @@ import {
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import { generateWorkerSummaryFromSession } from "./summaries.js";
 import type {
   ConductorCompletionReportInput,
   ConductorFollowUpTaskInput,
@@ -322,24 +321,64 @@ export async function runWorkerPromptRuntime(input: RuntimeRunContext): Promise<
   const modelRegistry = getModelRegistryForRun();
   const authStorage = modelRegistry.authStorage;
   const resourceLoader = createMinimalRunResourceLoader();
+
+  if (input.signal?.aborted) {
+    return {
+      status: "aborted",
+      finalText: null,
+      errorMessage: null,
+      sessionId: null,
+    };
+  }
+
+  const customTools = input.taskContract ? buildRunScopedConductorTools(input) : [];
+  const enabledTools = ["read", "bash", "edit", "write", "grep", "find", "ls", ...customTools.map((tool) => tool.name)];
+
   const { session } = await createAgentSession({
     cwd: input.worktreePath,
     sessionManager,
     authStorage,
     modelRegistry,
     resourceLoader,
-    tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
-    customTools: input.taskContract ? buildRunScopedConductorTools(input) : [],
+    tools: enabledTools,
+    customTools,
   });
+
+  let unsubscribeAbortHandler: (() => void) | null = null;
+  if (input.signal) {
+    const onAbort = () => {
+      void session.abort().catch(() => undefined);
+    };
+    input.signal.addEventListener("abort", onAbort);
+    if (input.signal.aborted) {
+      onAbort();
+    }
+    unsubscribeAbortHandler = () => input.signal?.removeEventListener("abort", onAbort);
+  }
+
+  let initialMessageCount = 0;
+  let newMessages: unknown[] = [];
 
   try {
     await session.bindExtensions({});
     await input.onSessionReady?.(session.sessionId);
 
+    initialMessageCount = session.messages.length;
+
     await session.prompt(input.taskContract ? buildTaskContractPrompt(input.taskContract) : input.task);
 
-    const finalAssistant = [...session.messages].reverse().find(isAssistantMessage);
+    newMessages = session.messages.slice(initialMessageCount);
+    const finalAssistant = [...newMessages].reverse().find(isAssistantMessage);
     if (!finalAssistant) {
+      if (input.signal?.aborted) {
+        return {
+          status: "aborted",
+          finalText: null,
+          errorMessage: null,
+          sessionId: session.sessionId,
+        };
+      }
+
       return {
         status: "error",
         finalText: null,
@@ -349,7 +388,7 @@ export async function runWorkerPromptRuntime(input: RuntimeRunContext): Promise<
     }
 
     const mapped = mapStopReasonToRunOutcome(finalAssistant.stopReason);
-    const finalText = extractFinalAssistantText(session.messages);
+    const finalText = extractFinalAssistantText(newMessages);
     const errorMessage = mapped.errorMessage ?? finalAssistant.errorMessage ?? null;
 
     return {
@@ -359,6 +398,16 @@ export async function runWorkerPromptRuntime(input: RuntimeRunContext): Promise<
       sessionId: session.sessionId,
     };
   } catch (error) {
+    if (input.signal?.aborted) {
+      const messagesAfterStart = session.messages.slice(initialMessageCount);
+      return {
+        status: "aborted",
+        finalText: extractFinalAssistantText(messagesAfterStart),
+        errorMessage: null,
+        sessionId: session.sessionId,
+      };
+    }
+
     return {
       status: "error",
       finalText: null,
@@ -366,6 +415,7 @@ export async function runWorkerPromptRuntime(input: RuntimeRunContext): Promise<
       sessionId: session.sessionId,
     };
   } finally {
+    unsubscribeAbortHandler?.();
     session.dispose();
   }
 }
@@ -376,23 +426,8 @@ export async function createWorkerSessionRuntime(worktreePath: string): Promise<
   return buildRuntimeHandle(sessionManager, null);
 }
 
-export async function resumeWorkerSessionRuntime(sessionFile: string): Promise<WorkerRuntimeHandle> {
-  const sessionManager = SessionManager.open(sessionFile);
-  const lastResumedAt = new Date().toISOString();
-  await sessionManager.appendCustomEntry("pi-conductor_runtime_resume", {
-    resumedAt: lastResumedAt,
-  });
-  return buildRuntimeHandle(sessionManager, lastResumedAt);
-}
-
 export async function recoverWorkerSessionRuntime(worktreePath: string): Promise<WorkerRuntimeHandle> {
   // Recovery currently re-establishes a fresh persisted session for the worker.
   // Keep this as a named seam so recovery can diverge from plain creation later.
   return createWorkerSessionRuntime(worktreePath);
-}
-
-export async function summarizeWorkerSessionRuntime(sessionFile: string): Promise<string> {
-  // Keep summary generation behind the runtime seam so a future backend can
-  // replace raw session-file summarization without changing conductor flows.
-  return generateWorkerSummaryFromSession(sessionFile);
 }

@@ -7,9 +7,14 @@ import {
   createTaskForRepo,
   getOrCreateRunForRepo,
   runNextActionForRepo,
+  scheduleObjectiveForRepo,
   schedulerTickForRepo,
 } from "../extensions/conductor.js";
 import { writeRun } from "../extensions/storage.js";
+
+const runtimeTracking = vi.hoisted(() => ({
+  runWorkerPromptInputs: [] as Array<{ signal?: AbortSignal | undefined }>,
+}));
 
 vi.mock("../extensions/runtime.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../extensions/runtime.js")>();
@@ -17,6 +22,7 @@ vi.mock("../extensions/runtime.js", async (importOriginal) => {
     ...actual,
     preflightWorkerRunRuntime: vi.fn(() => undefined),
     runWorkerPromptRuntime: vi.fn(async (input) => {
+      runtimeTracking.runWorkerPromptInputs.push(input);
       await input.onConductorComplete?.({
         runId: input.taskContract?.runId ?? "run-unknown",
         taskId: input.taskContract?.taskId ?? "task-unknown",
@@ -37,6 +43,7 @@ describe("conductor scheduler and async next action", () => {
     conductorHome = mkdtempSync(join(tmpdir(), "pi-conductor-home-"));
     repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
     process.env.PI_CONDUCTOR_HOME = conductorHome;
+    runtimeTracking.runWorkerPromptInputs.length = 0;
   });
 
   afterEach(() => {
@@ -60,11 +67,8 @@ describe("conductor scheduler and async next action", () => {
           worktreePath: repoRoot,
           sessionFile: join(repoRoot, "session.jsonl"),
           runtime: { backend: "session_manager", sessionId: null, lastResumedAt: null },
-          currentTask: null,
           lifecycle: "idle",
           recoverable: false,
-          lastRun: null,
-          summary: { text: null, updatedAt: null, stale: false },
           pr: { url: null, number: null, commitSucceeded: false, pushSucceeded: false, prCreationAttempted: false },
           createdAt: now,
           updatedAt: now,
@@ -148,11 +152,8 @@ describe("conductor scheduler and async next action", () => {
           worktreePath: repoRoot,
           sessionFile: join(repoRoot, "session.jsonl"),
           runtime: { backend: "session_manager", sessionId: null, lastResumedAt: null },
-          currentTask: null,
           lifecycle: "idle",
           recoverable: false,
-          lastRun: null,
-          summary: { text: null, updatedAt: null, stale: false },
           pr: { url: null, number: null, commitSucceeded: false, pushSucceeded: false, prCreationAttempted: false },
           createdAt: now,
           updatedAt: now,
@@ -175,6 +176,57 @@ describe("conductor scheduler and async next action", () => {
 
     expect(result.executed).toHaveLength(1);
     expect(result.executed[0]?.action?.kind).toBe("run_task");
+  });
+
+  it("passes a linked abort signal through runNextActionForRepo to runtime execution", async () => {
+    const controller = new AbortController();
+    addUsableWorkerAndAssignedTask();
+
+    await runNextActionForRepo(repoRoot, { executeRuns: true }, controller.signal);
+
+    expect(runtimeTracking.runWorkerPromptInputs).toHaveLength(1);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).not.toBe(controller.signal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal?.aborted).toBe(false);
+  });
+
+  it("passes a linked abort signal through schedulerTickForRepo to runtime execution", async () => {
+    const controller = new AbortController();
+    addUsableWorkerAndAssignedTask();
+
+    await schedulerTickForRepo(repoRoot, { maxActions: 1, executeRuns: true }, controller.signal);
+
+    expect(runtimeTracking.runWorkerPromptInputs).toHaveLength(1);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).not.toBe(controller.signal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal?.aborted).toBe(false);
+  });
+
+  it("passes a linked abort signal through scheduleObjectiveForRepo to runtime execution", async () => {
+    const objective = createObjectiveForRepo(repoRoot, { title: "Objective", prompt: "Prompt" });
+    const task = createTaskForRepo(repoRoot, {
+      title: "Run me",
+      prompt: "Do work",
+      objectiveId: objective.objectiveId,
+    });
+    const controller = new AbortController();
+    addUsableWorkerAndAssignedTask();
+
+    await scheduleObjectiveForRepo(
+      repoRoot,
+      {
+        objectiveId: objective.objectiveId,
+        maxConcurrency: 1,
+        executeRuns: true,
+      },
+      controller.signal,
+    );
+
+    expect(runtimeTracking.runWorkerPromptInputs).toHaveLength(1);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).toBeInstanceOf(AbortSignal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).not.toBe(controller.signal);
+    expect(runtimeTracking.runWorkerPromptInputs[0]?.signal?.aborted).toBe(false);
+    expect(task).toBeTruthy();
   });
 
   it("scheduler ticks skip model execution unless explicitly enabled", async () => {

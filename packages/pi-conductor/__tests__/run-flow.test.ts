@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,12 +24,9 @@ import {
   createWorkerForRepo,
   getOrCreateRunForRepo,
   runTaskForRepo,
-  runWorkerForRepo,
-  updateWorkerLifecycleForRepo,
-  updateWorkerTaskForRepo,
 } from "../extensions/conductor.js";
 
-describe("worker run flows", () => {
+describe("durable task run flows", () => {
   let repoDir: string;
   let conductorHome: string;
 
@@ -62,40 +59,6 @@ describe("worker run flows", () => {
         rmSync(dir, { recursive: true, force: true });
       }
     }
-  });
-
-  it("runs a task in an existing worker session lineage and records success metadata", async () => {
-    const worker = await createWorkerForRepo(repoDir, "backend");
-    updateWorkerTaskForRepo(repoDir, "backend", "old task");
-
-    const result = await runWorkerForRepo(repoDir, "backend", "implement status output");
-
-    expect(result).toMatchObject({
-      workerName: "backend",
-      status: "success",
-      finalText: "implemented status output",
-    });
-    expect(runtimeMocks.preflightWorkerRunRuntime).toHaveBeenCalledWith({
-      worktreePath: worker.worktreePath,
-      sessionFile: worker.sessionFile,
-    });
-    expect(runtimeMocks.runWorkerPromptRuntime).toHaveBeenCalledWith(
-      expect.objectContaining({
-        worktreePath: worker.worktreePath,
-        sessionFile: worker.sessionFile,
-        task: "implement status output",
-      }),
-    );
-
-    const persisted = getOrCreateRunForRepo(repoDir).workers[0];
-    expect(persisted?.lifecycle).toBe("idle");
-    expect(persisted?.currentTask).toBe("implement status output");
-    expect(persisted?.lastRun).toMatchObject({
-      task: "implement status output",
-      status: "success",
-      errorMessage: null,
-      sessionId: "run-session-1",
-    });
   });
 
   it("runs a durable assigned task with scoped child progress and completion", async () => {
@@ -153,134 +116,31 @@ describe("worker run flows", () => {
     expect(persisted.gates[0]).toMatchObject({ type: "needs_review", status: "open" });
   });
 
-  it("fails fast on preflight without mutating currentTask or lifecycle", async () => {
-    await createWorkerForRepo(repoDir, "backend");
-    updateWorkerTaskForRepo(repoDir, "backend", "old task");
-    runtimeMocks.preflightWorkerRunRuntime.mockRejectedValueOnce(new Error("No usable model configured"));
-
-    await expect(runWorkerForRepo(repoDir, "backend", "new task")).rejects.toThrow("No usable model configured");
-
-    const persisted = getOrCreateRunForRepo(repoDir).workers[0];
-    expect(persisted?.currentTask).toBe("old task");
-    expect(persisted?.lifecycle).toBe("idle");
-    expect(persisted?.lastRun).toBeNull();
-    expect(runtimeMocks.runWorkerPromptRuntime).not.toHaveBeenCalled();
-  });
-
-  it("persists the execution session id as soon as the runtime session is created", async () => {
-    await createWorkerForRepo(repoDir, "backend");
-    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async ({ onSessionReady }) => {
-      await onSessionReady?.("run-session-early");
-      const duringRun = getOrCreateRunForRepo(repoDir).workers[0];
-      expect(duringRun?.lifecycle).toBe("running");
-      expect(duringRun?.lastRun?.finishedAt).toBeNull();
-      expect(duringRun?.lastRun?.sessionId).toBe("run-session-early");
-      return {
-        status: "success",
-        finalText: "done",
-        errorMessage: null,
-        sessionId: "run-session-early",
-      };
-    });
-
-    await runWorkerForRepo(repoDir, "backend", "record session id early");
-  });
-
-  it("does not drop concurrent conductor state when persisting early session id", async () => {
-    await createWorkerForRepo(repoDir, "backend");
-    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async ({ onSessionReady }) => {
-      const concurrentTask = createTaskForRepo(repoDir, {
-        title: "Concurrent task",
-        prompt: "Preserve this task while recording session id",
-      });
-
-      await onSessionReady?.("run-session-early");
-
-      const duringRun = getOrCreateRunForRepo(repoDir);
-      expect(duringRun.tasks.some((entry) => entry.taskId === concurrentTask.taskId)).toBe(true);
-      expect(duringRun.workers[0]?.lastRun?.sessionId).toBe("run-session-early");
-
-      return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-early" };
-    });
-
-    await runWorkerForRepo(repoDir, "backend", "record session id without stale write");
-
-    const persisted = getOrCreateRunForRepo(repoDir);
-    expect(persisted.tasks).toHaveLength(1);
-    expect(persisted.tasks[0]?.title).toBe("Concurrent task");
-  });
-
-  it("does not drop conductor state added while finishing a worker run", async () => {
-    await createWorkerForRepo(repoDir, "backend");
-    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async () => {
-      const concurrentTask = createTaskForRepo(repoDir, {
-        title: "Runtime-added task",
-        prompt: "Preserve this task when finishing worker run",
-      });
-
-      expect(getOrCreateRunForRepo(repoDir).tasks.some((entry) => entry.taskId === concurrentTask.taskId)).toBe(true);
-      return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-finish" };
-    });
-
-    await runWorkerForRepo(repoDir, "backend", "finish without stale write");
-
-    const persisted = getOrCreateRunForRepo(repoDir);
-    expect(persisted.tasks).toHaveLength(1);
-    expect(persisted.tasks[0]?.title).toBe("Runtime-added task");
-    expect(persisted.workers[0]?.lastRun).toMatchObject({ status: "success", sessionId: "run-session-finish" });
-  });
-
-  it("marks errored runs blocked and persists the run error message", async () => {
-    await createWorkerForRepo(repoDir, "backend");
-    runtimeMocks.runWorkerPromptRuntime.mockResolvedValueOnce({
-      status: "error",
-      finalText: null,
-      errorMessage: "model crashed",
-      sessionId: "run-session-2",
-    });
-
-    const result = await runWorkerForRepo(repoDir, "backend", "dangerous task");
-
-    expect(result.status).toBe("error");
-    const persisted = getOrCreateRunForRepo(repoDir).workers[0];
-    expect(persisted?.lifecycle).toBe("blocked");
-    expect(persisted?.lastRun).toMatchObject({
-      status: "error",
-      errorMessage: "model crashed",
-      sessionId: "run-session-2",
-    });
-  });
-
-  it("returns aborted runs to idle and preserves aborted metadata", async () => {
-    await createWorkerForRepo(repoDir, "backend");
-    runtimeMocks.runWorkerPromptRuntime.mockResolvedValueOnce({
-      status: "aborted",
-      finalText: "stopped early",
-      errorMessage: null,
-      sessionId: "run-session-3",
-    });
-
-    const result = await runWorkerForRepo(repoDir, "backend", "abortable task");
-
-    expect(result.status).toBe("aborted");
-    const persisted = getOrCreateRunForRepo(repoDir).workers[0];
-    expect(persisted?.lifecycle).toBe("idle");
-    expect(persisted?.lastRun).toMatchObject({
-      task: "abortable task",
-      status: "aborted",
-      sessionId: "run-session-3",
-    });
-  });
-
-  it("rejects already running workers and workers with missing session files", async () => {
+  it("forwards cancellation signals from tool callers into the worker runtime", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
-    updateWorkerLifecycleForRepo(repoDir, "backend", "running");
-    await expect(runWorkerForRepo(repoDir, "backend", "task")).rejects.toThrow(/already running/i);
+    const task = createTaskForRepo(repoDir, { title: "Cancelable task", prompt: "Do cancellable work" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
 
-    updateWorkerLifecycleForRepo(repoDir, "backend", "idle");
-    if (worker.sessionFile) {
-      unlinkSync(worker.sessionFile);
-    }
-    await expect(runWorkerForRepo(repoDir, "backend", "task")).rejects.toThrow(/recover the worker first/i);
+    const controller = new AbortController();
+    let runtimeSignal: AbortSignal | undefined;
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async (input) => {
+      runtimeSignal = input.signal;
+      expect(runtimeSignal).not.toBe(controller.signal);
+      expect(runtimeSignal?.aborted).toBe(false);
+      controller.abort();
+      expect(runtimeSignal?.aborted).toBe(true);
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-cancelable" };
+    });
+
+    await runTaskForRepo(repoDir, task.taskId, controller.signal);
+
+    expect(runtimeMocks.runWorkerPromptRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: "Do cancellable work",
+        worktreePath: worker.worktreePath,
+        sessionFile: worker.sessionFile,
+      }),
+    );
+    expect(runtimeSignal?.aborted).toBe(true);
   });
 });

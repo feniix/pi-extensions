@@ -14,7 +14,6 @@ import {
   createEmptyRun,
   createTaskRecord,
   createWorkerRecord,
-  finishWorkerRun,
   getConductorProjectDir,
   mutateRun,
   queryConductorArtifacts,
@@ -25,11 +24,8 @@ import {
   recordTaskCompletion,
   recordTaskProgress,
   resolveConductorGate,
-  setWorkerLifecycle,
-  setWorkerRunSessionId,
   setWorkerRuntimeState,
   startTaskRun,
-  startWorkerRun,
   updateTask,
   validateRunRecord,
   writeRun,
@@ -168,7 +164,6 @@ describe("storage helpers", () => {
       runIds: [],
     });
     expect(assigned.workers[0]?.lifecycle).toBe("idle");
-    expect(assigned.workers[0]?.currentTask).toBeNull();
   });
 
   it("starts and completes durable task runs without storing outcome on worker lifecycle", () => {
@@ -386,9 +381,9 @@ describe("storage helpers", () => {
       leaseExpiresAt: "2026-04-24T01:00:00.000Z",
     });
 
-    const canceled = cancelTaskRun(run, { runId: "run-1", reason: "Parent agent stopped obsolete work" });
+    const canceled = cancelTaskRun(run, { runId: "run-1", reason: "Parent agent stopped superseded work" });
 
-    expect(canceled.runs[0]).toMatchObject({ status: "aborted", errorMessage: "Parent agent stopped obsolete work" });
+    expect(canceled.runs[0]).toMatchObject({ status: "aborted", errorMessage: "Parent agent stopped superseded work" });
     expect(canceled.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
     expect(canceled.workers[0]?.lifecycle).toBe("idle");
     expect(canceled.events.map((event) => event.type)).toContain("run.canceled");
@@ -649,14 +644,11 @@ describe("storage helpers", () => {
     expect(worker.workerId).toBe("worker-1");
     expect(worker.name).toBe("backend");
     expect(worker.lifecycle).toBe("idle");
-    expect(worker.currentTask).toBeNull();
     expect(worker.recoverable).toBe(false);
-    expect(worker.summary.stale).toBe(false);
     expect(worker.pr.prCreationAttempted).toBe(false);
     expect(worker.runtime.backend).toBe("session_manager");
     expect(worker.runtime.sessionId).toBeNull();
     expect(worker.runtime.lastResumedAt).toBeNull();
-    expect(worker.lastRun).toBeNull();
   });
 
   it("appends events with monotonic sequence and revision metadata", () => {
@@ -767,7 +759,7 @@ describe("storage helpers", () => {
     expect(readdirSync(run.storageDir).filter((entry) => entry.includes(".tmp"))).toEqual([]);
   });
 
-  it("normalizes missing lastRun when reading older persisted workers", () => {
+  it("rejects persisted workers missing required fields", () => {
     const run = createEmptyRun("abc", "/tmp/repo");
     const worker = createWorkerRecord({
       workerId: "worker-1",
@@ -779,14 +771,14 @@ describe("storage helpers", () => {
 
     mkdirSync(run.storageDir, { recursive: true });
     const path = join(run.storageDir, "run.json");
-    const legacyWorker = JSON.parse(JSON.stringify(worker)) as Record<string, unknown>;
-    delete legacyWorker.lastRun;
+    const incompleteWorker = JSON.parse(JSON.stringify(worker)) as Record<string, unknown>;
+    delete incompleteWorker.runtime;
     writeFileSync(
       path,
       `${JSON.stringify(
         {
           ...run,
-          workers: [legacyWorker],
+          workers: [incompleteWorker],
         },
         null,
         2,
@@ -794,11 +786,10 @@ describe("storage helpers", () => {
       "utf-8",
     );
 
-    const persisted = readRun("abc");
-    expect(persisted?.workers[0]?.lastRun).toBeNull();
+    expect(() => readRun("abc")).toThrow(/missing required field runtime/);
   });
 
-  it("marks an existing summary stale when the worker lifecycle changes", () => {
+  it("rejects persisted workers with unsupported worker-owned run fields", () => {
     const run = createEmptyRun("abc", "/tmp/repo");
     const worker = createWorkerRecord({
       workerId: "worker-1",
@@ -807,88 +798,23 @@ describe("storage helpers", () => {
       worktreePath: "/tmp/repo/.worktrees/backend",
       sessionFile: null,
     });
-    worker.summary.text = "Half done";
-    worker.summary.updatedAt = new Date().toISOString();
 
-    const updated = setWorkerLifecycle({ ...run, workers: [worker] }, worker.workerId, "running");
-    expect(updated.workers[0]?.summary.stale).toBe(true);
-  });
-
-  it("marks a worker as running and persists lastRun metadata when a run starts", () => {
-    const run = createEmptyRun("abc", "/tmp/repo");
-    const worker = createWorkerRecord({
-      workerId: "worker-1",
-      name: "backend",
-      branch: "conductor/backend",
-      worktreePath: "/tmp/repo/.worktrees/backend",
-      sessionFile: "/tmp/session.jsonl",
-    });
-    worker.summary.text = "Half done";
-    worker.summary.updatedAt = new Date().toISOString();
-
-    const updated = startWorkerRun({ ...run, workers: [worker] }, worker.workerId, {
-      task: "implement status output",
-      sessionId: "run-session-1",
-    });
-
-    expect(updated.workers[0]?.lifecycle).toBe("running");
-    expect(updated.workers[0]?.currentTask).toBe("implement status output");
-    expect(updated.workers[0]?.summary.stale).toBe(true);
-    expect(updated.workers[0]?.lastRun).toMatchObject({
-      task: "implement status output",
-      status: null,
-      finishedAt: null,
-      errorMessage: null,
-      sessionId: "run-session-1",
-    });
-    expect(updated.workers[0]?.lastRun?.startedAt).toBeTruthy();
-  });
-
-  it("requires an active run before attaching a run session id", () => {
-    const run = createEmptyRun("abc", "/tmp/repo");
-    const worker = createWorkerRecord({
-      workerId: "worker-1",
-      name: "backend",
-      branch: "conductor/backend",
-      worktreePath: "/tmp/repo/.worktrees/backend",
-      sessionFile: "/tmp/session.jsonl",
-    });
-
-    expect(() => setWorkerRunSessionId({ ...run, workers: [worker] }, worker.workerId, "run-session-1")).toThrow(
-      /does not have an active lastRun/i,
+    mkdirSync(run.storageDir, { recursive: true });
+    const path = join(run.storageDir, "run.json");
+    writeFileSync(
+      path,
+      `${JSON.stringify(
+        {
+          ...run,
+          workers: [{ ...worker, workerRunShadow: { status: "running" } }],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf-8",
     );
-  });
 
-  it("completes a run with success, aborted, and error lifecycle semantics", () => {
-    const run = createEmptyRun("abc", "/tmp/repo");
-    const worker = createWorkerRecord({
-      workerId: "worker-1",
-      name: "backend",
-      branch: "conductor/backend",
-      worktreePath: "/tmp/repo/.worktrees/backend",
-      sessionFile: "/tmp/session.jsonl",
-    });
-    const started = startWorkerRun({ ...run, workers: [worker] }, worker.workerId, {
-      task: "implement status output",
-      sessionId: "run-session-1",
-    });
-
-    const succeeded = finishWorkerRun(started, worker.workerId, { status: "success" });
-    expect(succeeded.workers[0]?.lifecycle).toBe("idle");
-    expect(succeeded.workers[0]?.lastRun?.status).toBe("success");
-    expect(succeeded.workers[0]?.lastRun?.finishedAt).toBeTruthy();
-
-    const aborted = finishWorkerRun(started, worker.workerId, { status: "aborted" });
-    expect(aborted.workers[0]?.lifecycle).toBe("idle");
-    expect(aborted.workers[0]?.lastRun?.status).toBe("aborted");
-
-    const errored = finishWorkerRun(started, worker.workerId, {
-      status: "error",
-      errorMessage: "model unavailable",
-    });
-    expect(errored.workers[0]?.lifecycle).toBe("blocked");
-    expect(errored.workers[0]?.lastRun?.status).toBe("error");
-    expect(errored.workers[0]?.lastRun?.errorMessage).toBe("model unavailable");
+    expect(() => readRun("abc")).toThrow(/unsupported field workerRunShadow/);
   });
 
   it("does not persist sessionFile inside worker.runtime", () => {

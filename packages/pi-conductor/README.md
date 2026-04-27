@@ -25,6 +25,7 @@ Agent-native local control plane for Pi worker orchestration.
 - Child tool calls are bound to the task/run contract, support `idempotencyKey`, and are not registered as broad parent-agent tools.
 - Parent agents can explicitly grant child runs permission to create scoped follow-up tasks; this is disabled by default.
 - Parent-agent task control supports safe task update, explicit cancellation, and retry without overwriting prior run history.
+- Natural-language orchestration can create/reuse workers, create/assign tasks, run parallel work inside one foreground abort boundary, and cancel owned runs/tasks when the parent operation is interrupted.
 - Parent-agent orchestration advice is available through `conductor_next_actions`; `conductor_run_next_action` and `conductor_scheduler_tick` execute only policy-allowed non-human recommendations, while `conductor_project_brief`, `conductor_task_brief`, and `conductor_resource_timeline` provide markdown + structured state/history digests for LLM handoffs.
 - LLM review helpers include task assessment, blocker diagnosis, objective DAG batching, safe artifact reads, and human review packet preparation.
 - Objectives group related tasks above the worker/run layer so parent agents can keep multi-task goals explicit, expand them into durable task plans with `conductor_plan_objective`, and roll up linked task states with `conductor_refresh_objective_status`.
@@ -38,8 +39,8 @@ Agent-native local control plane for Pi worker orchestration.
   - PR creation requires an approved `ready_for_pr` gate.
   - Worker cleanup requires an approved `destructive_cleanup` gate.
 - Optional `pi-subagents` backend detection. Conductor remains canonical state owner; `pi-subagents` dispatch fails closed unless a trusted host injects an explicit dispatcher.
-- Granular instrumentation events for scheduler ticks/actions, backend dispatch, worker recovery/resume/summary/cleanup, git commit/push, PR creation, gates, runs, tasks, objectives, artifacts, and lifecycle changes.
-- Legacy worker model tools are hidden by default; legacy slash mutations hard-error with guidance toward resource-native tools.
+- Granular instrumentation events for scheduler ticks/actions, backend dispatch, worker recovery/cleanup, git commit/push, PR creation, gates, runs, tasks, objectives, artifacts, and lifecycle changes.
+- Only resource-native control-plane tools are available.
 - Packaged workflow skills help parent agents use conductor safely for objective orchestration and gate review.
 
 ## Command surface
@@ -59,9 +60,7 @@ Primary inspection/debug UX is the `/conductor` command group:
 /conductor human decide gate <gate-id> [reason]
 ```
 
-There is also a convenience `/conductor-status` command.
-
-Legacy mutation subcommands such as `/conductor start`, `/conductor run`, `/conductor cleanup`, and `/conductor pr` have been removed. Use the resource/model tools for mutations and slash commands for inspection, reconciliation previews, and trusted human gate decisions.
+Slash commands are for inspection, reconciliation previews, and trusted human gate decisions. Use the resource/model tools for mutations.
 
 ## Tool surface
 
@@ -73,6 +72,9 @@ Resource/control-plane tools:
 - `conductor_project_brief`
 - `conductor_task_brief`
 - `conductor_resource_timeline`
+- `conductor_run_work`
+- `conductor_run_parallel_work`
+- `conductor_cancel_active_work`
 - `conductor_run_next_action`
 - `conductor_assess_task`
 - `conductor_read_artifact`
@@ -125,20 +127,7 @@ Runtime-injected child tools, available only inside native worker task runs:
 - `conductor_child_create_followup_task` when the task contract allows it
 - `conductor_child_complete`
 
-Transition/legacy worker model tools are hidden by default and can be temporarily enabled with `PI_CONDUCTOR_ENABLE_LEGACY_WORKER_TOOLS=1`. Use resource/control-plane tools above for new LLM workflows:
-
-- `conductor_status`
-- `conductor_start`
-- `conductor_task_update`
-- `conductor_recover`
-- `conductor_summary_refresh`
-- `conductor_cleanup`
-- `conductor_resume`
-- `conductor_run`
-- `conductor_lifecycle_update`
-- `conductor_commit`
-- `conductor_push`
-- `conductor_pr_create`
+Worker mutation shortcuts are not part of the command surface.
 
 ## Runtime model
 
@@ -172,6 +161,37 @@ conductor_scheduler_tick({ objectiveId, maxActions: 1, policy: "safe" })
 conductor_scheduler_tick({ maxActions: 4, maxRuns: 2, fairness: "round_robin", perObjectiveLimit: 1, policy: "execute" })
 conductor_schedule_objective({ objectiveId, maxConcurrency: 2, policy: "safe" })
 ```
+
+### Run work from natural language
+
+When a parent agent receives a normal user request, it should call the high-level work router instead of asking the user for worker IDs, task IDs, run IDs, or exact conductor tool names. `conductor_run_work` decides whether to keep the work in one worker, fan out independent shards, or create an objective DAG for dependent work:
+
+```text
+conductor_run_work({
+  request: "Deep dive pi-conductor maintainability and verify it",
+  maxWorkers: 3,
+  tasks: [
+    { title: "Runtime review", prompt: "Inspect runtime/session behavior", writeScope: ["extensions/runtime.ts"] },
+    { title: "Tool review", prompt: "Inspect conductor tool ergonomics", writeScope: ["extensions/tools/"] },
+    { title: "Test review", prompt: "Inspect useful test coverage", writeScope: ["__tests__/"] }
+  ]
+})
+```
+
+The router is conservative. It splits only when work items are independent, have distinct scopes, and the request implies parallelism. It stays single-worker for small work, overlapping write scopes, or coherent refactors. It uses objective planning when candidate tasks declare dependencies.
+
+`conductor_run_parallel_work` remains the lower-level primitive for callers that already made a parallel-safe decision:
+
+```text
+conductor_run_parallel_work({
+  tasks: [
+    { title: "Backend shard", prompt: "Implement and verify the backend changes" },
+    { title: "Tests shard", prompt: "Add focused regression tests and report evidence" }
+  ]
+})
+```
+
+If the user interrupts or asks in natural language to stop conductor work, use `conductor_cancel_active_work({ reason: "user requested stop" })`. It cancels active runs and conductor-owned queued tasks without requiring run IDs.
 
 ### Inspect dependency scheduling for parallel-safe work
 

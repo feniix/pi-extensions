@@ -14,6 +14,12 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { deriveProjectKey } from "./project-key.js";
+import { defaultOperationForGate, normalizeProjectRecord } from "./storage-normalize.js";
+import { validateRunRecord } from "./storage-validation.js";
+
+export { queryConductorArtifacts, queryConductorEvents } from "./storage-query.js";
+export { validateRunRecord } from "./storage-validation.js";
+
 import type {
   ArtifactRecord,
   ArtifactType,
@@ -30,11 +36,8 @@ import type {
   RunRecord,
   RunStatus,
   TaskRecord,
-  WorkerLastRun,
-  WorkerLifecycleState,
   WorkerPrState,
   WorkerRecord,
-  WorkerRunStatus,
   WorkerRuntimeState,
 } from "./types.js";
 import { CONDUCTOR_SCHEMA_VERSION } from "./types.js";
@@ -67,312 +70,15 @@ function createEventId(sequence: number): string {
   return `event-${Date.now().toString(36)}-${sequence.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function normalizeProjectRecord(run: RunRecord): RunRecord {
-  return {
-    ...run,
-    schemaVersion: run.schemaVersion ?? CONDUCTOR_SCHEMA_VERSION,
-    revision: run.revision ?? 0,
-    workers: (run.workers ?? []).map(normalizeWorkerRecord),
-    archivedWorkers: (run.archivedWorkers ?? []).map(normalizeWorkerRecord),
-    objectives: run.objectives ?? [],
-    tasks: (run.tasks ?? []).map(normalizeTaskRecord),
-    runs: run.runs ?? [],
-    gates: (run.gates ?? []).map(normalizeGateRecord),
-    artifacts: run.artifacts ?? [],
-    events: run.events ?? [],
-  };
-}
-
-function defaultOperationForGate(type: GateRecord["type"]): GateOperation {
-  switch (type) {
-    case "ready_for_pr":
-      return "create_worker_pr";
-    case "destructive_cleanup":
-      return "destructive_cleanup";
-    case "needs_input":
-    case "needs_review":
-    case "approval_required":
-      return "resolve_blocker";
-    default:
-      return "generic";
-  }
-}
-
-function normalizeGateRecord(gate: GateRecord): GateRecord {
-  return {
-    ...gate,
-    operation: gate.operation ?? defaultOperationForGate(gate.type),
-    targetRevision: gate.targetRevision ?? null,
-    expiresAt: gate.expiresAt ?? null,
-    usedAt: gate.usedAt ?? null,
-  };
-}
-
-function normalizeTaskRecord(task: TaskRecord): TaskRecord {
-  return {
-    ...task,
-    objectiveId: task.objectiveId ?? null,
-    dependsOnTaskIds: task.dependsOnTaskIds ?? [],
-  };
-}
-
-function normalizeWorkerRecord(worker: WorkerRecord): WorkerRecord {
-  return {
-    ...worker,
-    runtime: worker.runtime ?? {
-      backend: "session_manager",
-      sessionId: null,
-      lastResumedAt: null,
-    },
-    lastRun: worker.lastRun ?? null,
-  };
-}
-
-const conductorEventTypes = new Set<ConductorEventType>([
-  "artifact.created",
-  "backend.dispatch_failed",
-  "backend.dispatch_succeeded",
-  "backend.unavailable",
-  "external_operation.failed",
-  "external_operation.succeeded",
-  "gate.created",
-  "gate.resolved",
-  "gate.used",
-  "objective.created",
-  "objective.planned",
-  "objective.status_refreshed",
-  "objective.task_linked",
-  "objective.updated",
-  "project.created",
-  "run.cancel_rejected",
-  "run.canceled",
-  "run.completed",
-  "run.heartbeat",
-  "run.lease_expired",
-  "run.progress_reported",
-  "run.started",
-  "scheduler.action_selected",
-  "scheduler.action_skipped",
-  "scheduler.capacity_exhausted",
-  "scheduler.tick_failed",
-  "scheduler.tick_started",
-  "scheduler.tick_succeeded",
-  "task.assigned",
-  "task.completion_rejected",
-  "task.created",
-  "task.followup_created",
-  "task.progress",
-  "task.progress_rejected",
-  "task.updated",
-  "worker.archived",
-  "worker.cleanup_failed",
-  "worker.cleanup_succeeded",
-  "worker.commit_failed",
-  "worker.commit_succeeded",
-  "worker.created",
-  "worker.lifecycle_changed",
-  "worker.pr_created",
-  "worker.pr_failed",
-  "worker.pr_updated",
-  "worker.push_failed",
-  "worker.push_succeeded",
-  "worker.recovery_failed",
-  "worker.recovery_succeeded",
-  "worker.resume_failed",
-  "worker.resume_succeeded",
-  "worker.summary_refresh_failed",
-  "worker.summary_refreshed",
-]);
-
-const conductorActorTypes = new Set<ConductorActor["type"]>([
-  "parent_agent",
-  "child_run",
-  "human",
-  "backend",
-  "system",
-  "test",
-]);
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function assertUnique(ids: string[], label: string): void {
-  const seen = new Set<string>();
-  for (const id of ids) {
-    if (seen.has(id)) {
-      throw new Error(`Duplicate ${label} ${id}`);
-    }
-    seen.add(id);
-  }
-}
-
-function assertRefsExist(
-  refs: ConductorResourceRefs,
-  indexes: ReturnType<typeof createResourceIndexes>,
-  context: string,
-): void {
-  if (refs.workerId && !indexes.workerIds.has(refs.workerId)) {
-    throw new Error(`${context} references missing worker ${refs.workerId}`);
-  }
-  if (refs.taskId && !indexes.taskIds.has(refs.taskId)) {
-    throw new Error(`${context} references missing task ${refs.taskId}`);
-  }
-  if (refs.runId && !indexes.runIds.has(refs.runId)) {
-    throw new Error(`${context} references missing run ${refs.runId}`);
-  }
-  if (refs.gateId && !indexes.gateIds.has(refs.gateId)) {
-    throw new Error(`${context} references missing gate ${refs.gateId}`);
-  }
-  if (refs.artifactId && !indexes.artifactIds.has(refs.artifactId)) {
-    throw new Error(`${context} references missing artifact ${refs.artifactId}`);
-  }
-  if (refs.objectiveId && !indexes.objectiveIds.has(refs.objectiveId)) {
-    throw new Error(`${context} references missing objective ${refs.objectiveId}`);
-  }
-}
-
-function createResourceIndexes(run: RunRecord) {
-  return {
-    workerIds: new Set([...run.workers, ...run.archivedWorkers].map((worker) => worker.workerId)),
-    taskIds: new Set(run.tasks.map((task) => task.taskId)),
-    runIds: new Set(run.runs.map((attempt) => attempt.runId)),
-    gateIds: new Set(run.gates.map((gate) => gate.gateId)),
-    artifactIds: new Set(run.artifacts.map((artifact) => artifact.artifactId)),
-    objectiveIds: new Set(run.objectives.map((objective) => objective.objectiveId)),
-  };
-}
-
-export function validateRunRecord(run: RunRecord): void {
-  const normalized = normalizeProjectRecord(run);
-  if (normalized.schemaVersion !== CONDUCTOR_SCHEMA_VERSION) {
-    throw new Error(`Unsupported conductor schemaVersion ${normalized.schemaVersion}`);
-  }
-  assertUnique(
-    [...normalized.workers, ...normalized.archivedWorkers].map((worker) => worker.workerId),
-    "workerId",
-  );
-  assertUnique(
-    normalized.workers.map((worker) => worker.name),
-    "worker name",
-  );
-  assertUnique(
-    normalized.objectives.map((objective) => objective.objectiveId),
-    "objectiveId",
-  );
-  assertUnique(
-    normalized.tasks.map((task) => task.taskId),
-    "taskId",
-  );
-  assertUnique(
-    normalized.runs.map((attempt) => attempt.runId),
-    "runId",
-  );
-  assertUnique(
-    normalized.gates.map((gate) => gate.gateId),
-    "gateId",
-  );
-  assertUnique(
-    normalized.artifacts.map((artifact) => artifact.artifactId),
-    "artifactId",
-  );
-
-  const indexes = createResourceIndexes(normalized);
-  for (const objective of normalized.objectives) {
-    for (const taskId of objective.taskIds) {
-      if (!indexes.taskIds.has(taskId)) {
-        throw new Error(`Objective ${objective.objectiveId} references missing task ${taskId}`);
-      }
-    }
-    for (const gateId of objective.gateIds) {
-      if (!indexes.gateIds.has(gateId)) {
-        throw new Error(`Objective ${objective.objectiveId} references missing gate ${gateId}`);
-      }
-    }
-    for (const artifactId of objective.artifactIds) {
-      if (!indexes.artifactIds.has(artifactId)) {
-        throw new Error(`Objective ${objective.objectiveId} references missing artifact ${artifactId}`);
-      }
-    }
-  }
-  for (const task of normalized.tasks) {
-    if (task.objectiveId && !indexes.objectiveIds.has(task.objectiveId)) {
-      throw new Error(`Task ${task.taskId} references missing objective ${task.objectiveId}`);
-    }
-    if (task.assignedWorkerId && !indexes.workerIds.has(task.assignedWorkerId)) {
-      throw new Error(`Task ${task.taskId} references missing worker ${task.assignedWorkerId}`);
-    }
-    if (task.activeRunId && !indexes.runIds.has(task.activeRunId)) {
-      throw new Error(`Task ${task.taskId} references missing run ${task.activeRunId}`);
-    }
-    for (const dependencyId of task.dependsOnTaskIds) {
-      if (!indexes.taskIds.has(dependencyId)) {
-        throw new Error(`Task ${task.taskId} references missing dependency ${dependencyId}`);
-      }
-    }
-    for (const runId of task.runIds) {
-      if (!indexes.runIds.has(runId)) {
-        throw new Error(`Task ${task.taskId} references missing run ${runId}`);
-      }
-    }
-  }
-  for (const attempt of normalized.runs) {
-    if (!indexes.taskIds.has(attempt.taskId)) {
-      throw new Error(`Run ${attempt.runId} references missing task ${attempt.taskId}`);
-    }
-    if (!indexes.workerIds.has(attempt.workerId)) {
-      throw new Error(`Run ${attempt.runId} references missing worker ${attempt.workerId}`);
-    }
-  }
-  for (const gate of normalized.gates) {
-    assertRefsExist(gate.resourceRefs, indexes, `Gate ${gate.gateId}`);
-  }
-  for (const artifact of normalized.artifacts) {
-    assertRefsExist(artifact.resourceRefs, indexes, `Artifact ${artifact.artifactId}`);
-  }
-  let previousSequence = 0;
-  for (const event of normalized.events) {
-    if (typeof event.eventId !== "string" || !event.eventId) {
-      throw new Error("Event has invalid eventId");
-    }
-    if (!conductorEventTypes.has(event.type)) {
-      throw new Error(`Event ${event.eventId} has invalid event type ${String(event.type)}`);
-    }
-    if (!event.actor || !conductorActorTypes.has(event.actor.type) || typeof event.actor.id !== "string") {
-      throw new Error(`Event ${event.eventId} has invalid actor type`);
-    }
-    if (!isPlainRecord(event.resourceRefs)) {
-      throw new Error(`Event ${event.eventId} has invalid resourceRefs`);
-    }
-    if (!isPlainRecord(event.payload)) {
-      throw new Error(`Event ${event.eventId} has invalid payload`);
-    }
-    if (typeof event.occurredAt !== "string" || !event.occurredAt) {
-      throw new Error(`Event ${event.eventId} has invalid occurredAt`);
-    }
-    if (event.schemaVersion !== CONDUCTOR_SCHEMA_VERSION) {
-      throw new Error(`Event ${event.eventId} has unsupported schemaVersion ${event.schemaVersion}`);
-    }
-    if (event.sequence <= previousSequence) {
-      throw new Error(`Event sequence ${event.sequence} is not greater than previous sequence ${previousSequence}`);
-    }
-    if (event.projectRevision <= 0) {
-      throw new Error(`Event ${event.eventId} has invalid projectRevision ${event.projectRevision}`);
-    }
-    previousSequence = event.sequence;
-    assertRefsExist(event.resourceRefs, indexes, `Event ${event.eventId}`);
-  }
-}
-
 export function readRun(projectKey: string): RunRecord | null {
   const path = getRunFile(projectKey);
   if (!existsSync(path)) {
     return null;
   }
   try {
-    const run = normalizeProjectRecord(JSON.parse(readFileSync(path, "utf-8")) as RunRecord);
+    const run = JSON.parse(readFileSync(path, "utf-8")) as RunRecord;
     validateRunRecord(run);
-    return run;
+    return normalizeProjectRecord(run);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to read conductor state for project ${projectKey} at ${path}: ${message}`);
@@ -380,8 +86,8 @@ export function readRun(projectKey: string): RunRecord | null {
 }
 
 export function writeRun(run: RunRecord): void {
+  validateRunRecord(run);
   const normalized = normalizeProjectRecord(run);
-  validateRunRecord(normalized);
   const path = getRunFile(normalized.projectKey);
   ensureDir(dirname(path));
   const tmpPath = `${path}.${process.pid}.${Date.now().toString(36)}.tmp`;
@@ -525,82 +231,6 @@ export function appendConductorEvent(
     revision: projectRevision,
     events: [...normalized.events, event],
     updatedAt: now,
-  };
-}
-
-export function queryConductorArtifacts(
-  run: RunRecord,
-  input: {
-    workerId?: string;
-    taskId?: string;
-    runId?: string;
-    gateId?: string;
-    artifactId?: string;
-    type?: ArtifactType;
-    afterIndex?: number;
-    limit?: number;
-  } = {},
-): { artifacts: ArtifactRecord[]; lastIndex: number | null; hasMore: boolean } {
-  const normalized = normalizeProjectRecord(run);
-  const limit = Math.max(1, Math.min(input.limit ?? 20, 100));
-  const filtered = normalized.artifacts
-    .map((artifact, index) => ({ artifact, index: index + 1 }))
-    .filter(({ artifact, index }) => {
-      if (input.afterIndex !== undefined && index <= input.afterIndex) {
-        return false;
-      }
-      if (input.type && artifact.type !== input.type) {
-        return false;
-      }
-      for (const key of ["workerId", "taskId", "runId", "gateId", "artifactId"] as const) {
-        if (input[key] && artifact.resourceRefs[key] !== input[key] && artifact.artifactId !== input[key]) {
-          return false;
-        }
-      }
-      return true;
-    });
-  const page = filtered.slice(0, limit);
-  return {
-    artifacts: page.map((entry) => entry.artifact),
-    lastIndex: page.at(-1)?.index ?? null,
-    hasMore: filtered.length > page.length,
-  };
-}
-
-export function queryConductorEvents(
-  run: RunRecord,
-  input: {
-    workerId?: string;
-    taskId?: string;
-    runId?: string;
-    gateId?: string;
-    artifactId?: string;
-    type?: string;
-    afterSequence?: number;
-    limit?: number;
-  } = {},
-): { events: ConductorEvent[]; lastSequence: number | null; hasMore: boolean } {
-  const normalized = normalizeProjectRecord(run);
-  const limit = Math.max(1, Math.min(input.limit ?? 20, 100));
-  const filtered = normalized.events.filter((event) => {
-    if (input.afterSequence !== undefined && event.sequence <= input.afterSequence) {
-      return false;
-    }
-    if (input.type && event.type !== input.type) {
-      return false;
-    }
-    for (const key of ["workerId", "taskId", "runId", "gateId", "artifactId"] as const) {
-      if (input[key] && event.resourceRefs[key] !== input[key]) {
-        return false;
-      }
-    }
-    return true;
-  });
-  const events = filtered.slice(0, limit);
-  return {
-    events,
-    lastSequence: events.at(-1)?.sequence ?? null,
-    hasMore: filtered.length > events.length,
   };
 }
 
@@ -876,6 +506,9 @@ export function startTaskRun(
   const worker = normalized.workers.find((entry) => entry.workerId === input.workerId);
   if (!worker) {
     throw new Error(`Worker ${input.workerId} not found`);
+  }
+  if (worker.lifecycle !== "idle") {
+    throw new Error(`Worker ${input.workerId} is ${worker.lifecycle} and cannot start another run`);
   }
   if (normalized.runs.some((entry) => entry.runId === input.runId)) {
     throw new Error(`Run ${input.runId} already exists`);
@@ -1642,15 +1275,8 @@ export function createWorkerRecord(input: {
       sessionId: input.sessionId ?? null,
       lastResumedAt: null,
     },
-    currentTask: null,
     lifecycle: "idle",
     recoverable: false,
-    lastRun: null,
-    summary: {
-      text: null,
-      updatedAt: null,
-      stale: false,
-    },
     pr: {
       url: null,
       number: null,
@@ -1683,65 +1309,6 @@ export function addWorker(run: RunRecord, worker: WorkerRecord): RunRecord {
   );
 }
 
-export function setWorkerTask(run: RunRecord, workerId: string, task: string): RunRecord {
-  let found = false;
-  const workers = run.workers.map((worker) => {
-    if (worker.workerId !== workerId) {
-      return worker;
-    }
-    found = true;
-    return {
-      ...worker,
-      currentTask: task,
-      summary: {
-        ...worker.summary,
-        stale: worker.summary.text !== null ? true : worker.summary.stale,
-      },
-      updatedAt: new Date().toISOString(),
-    };
-  });
-
-  if (!found) {
-    throw new Error(`Worker ${workerId} not found`);
-  }
-
-  return {
-    ...run,
-    workers,
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-export function setWorkerSummary(run: RunRecord, workerId: string, summaryText: string): RunRecord {
-  let found = false;
-  const now = new Date().toISOString();
-  const workers = run.workers.map((worker) => {
-    if (worker.workerId !== workerId) {
-      return worker;
-    }
-    found = true;
-    return {
-      ...worker,
-      summary: {
-        text: summaryText,
-        updatedAt: now,
-        stale: false,
-      },
-      updatedAt: now,
-    };
-  });
-
-  if (!found) {
-    throw new Error(`Worker ${workerId} not found`);
-  }
-
-  return {
-    ...run,
-    workers,
-    updatedAt: now,
-  };
-}
-
 export function removeWorker(run: RunRecord, workerId: string): RunRecord {
   const worker = run.workers.find((entry) => entry.workerId === workerId);
   if (!worker) {
@@ -1754,7 +1321,7 @@ export function removeWorker(run: RunRecord, workerId: string): RunRecord {
       workers: run.workers.filter((entry) => entry.workerId !== workerId),
       archivedWorkers: [
         ...run.archivedWorkers,
-        { ...worker, lifecycle: "archived", currentTask: null, recoverable: false, updatedAt: now },
+        { ...worker, lifecycle: "archived", recoverable: false, updatedAt: now },
       ],
       updatedAt: now,
     },
@@ -1830,171 +1397,5 @@ export function setWorkerPrState(run: RunRecord, workerId: string, pr: Partial<W
     type: "worker.pr_updated",
     resourceRefs: { projectKey: run.projectKey, workerId },
     payload: { changed: Object.keys(pr), pr: workers.find((worker) => worker.workerId === workerId)?.pr ?? null },
-  });
-}
-
-export function startWorkerRun(
-  run: RunRecord,
-  workerId: string,
-  input: { task: string; sessionId: string | null },
-): RunRecord {
-  let found = false;
-  const now = new Date().toISOString();
-  const workers = run.workers.map((worker) => {
-    if (worker.workerId !== workerId) {
-      return worker;
-    }
-    found = true;
-    return {
-      ...worker,
-      currentTask: input.task,
-      lifecycle: "running" as const,
-      lastRun: {
-        task: input.task,
-        status: null,
-        startedAt: now,
-        finishedAt: null,
-        errorMessage: null,
-        sessionId: input.sessionId,
-      },
-      summary: {
-        ...worker.summary,
-        stale: worker.summary.text !== null ? true : worker.summary.stale,
-      },
-      updatedAt: now,
-    };
-  });
-
-  if (!found) {
-    throw new Error(`Worker ${workerId} not found`);
-  }
-
-  const updated = {
-    ...run,
-    workers,
-    updatedAt: now,
-  };
-  const beforeWorker = run.workers.find((worker) => worker.workerId === workerId);
-  const afterWorker = updated.workers.find((worker) => worker.workerId === workerId);
-  return beforeWorker && afterWorker ? appendWorkerLifecycleChangedEvent(updated, beforeWorker, afterWorker) : updated;
-}
-
-export function setWorkerRunSessionId(run: RunRecord, workerId: string, sessionId: string): RunRecord {
-  let found = false;
-  let workerHadLastRun = true;
-  const now = new Date().toISOString();
-  const workers = run.workers.map((worker) => {
-    if (worker.workerId !== workerId) {
-      return worker;
-    }
-    found = true;
-    if (!worker.lastRun) {
-      workerHadLastRun = false;
-      return worker;
-    }
-    return {
-      ...worker,
-      lastRun: {
-        ...worker.lastRun,
-        sessionId,
-      },
-      updatedAt: now,
-    };
-  });
-
-  if (!found) {
-    throw new Error(`Worker ${workerId} not found`);
-  }
-  if (!workerHadLastRun) {
-    throw new Error(`Worker ${workerId} does not have an active lastRun to attach a session id to`);
-  }
-
-  return {
-    ...run,
-    workers,
-    updatedAt: now,
-  };
-}
-
-export function finishWorkerRun(
-  run: RunRecord,
-  workerId: string,
-  input: { status: WorkerRunStatus; errorMessage?: string | null },
-): RunRecord {
-  let found = false;
-  const now = new Date().toISOString();
-  const workers = run.workers.map((worker) => {
-    if (worker.workerId !== workerId) {
-      return worker;
-    }
-    found = true;
-    const lastRun: WorkerLastRun = {
-      task: worker.lastRun?.task ?? worker.currentTask ?? "(unknown task)",
-      status: input.status,
-      startedAt: worker.lastRun?.startedAt ?? now,
-      finishedAt: now,
-      errorMessage: input.errorMessage ?? null,
-      sessionId: worker.lastRun?.sessionId ?? null,
-    };
-    return {
-      ...worker,
-      lifecycle: input.status === "error" ? ("blocked" as const) : ("idle" as const),
-      lastRun,
-      updatedAt: now,
-    };
-  });
-
-  if (!found) {
-    throw new Error(`Worker ${workerId} not found`);
-  }
-
-  const updated = {
-    ...run,
-    workers,
-    updatedAt: now,
-  };
-  const beforeWorker = run.workers.find((worker) => worker.workerId === workerId);
-  const afterWorker = updated.workers.find((worker) => worker.workerId === workerId);
-  return beforeWorker && afterWorker ? appendWorkerLifecycleChangedEvent(updated, beforeWorker, afterWorker) : updated;
-}
-
-export function setWorkerLifecycle(run: RunRecord, workerId: string, lifecycle: WorkerLifecycleState): RunRecord {
-  let found = false;
-  let previousLifecycle: WorkerLifecycleState | null = null;
-  let workerName: string | null = null;
-  const now = new Date().toISOString();
-  const workers = run.workers.map((worker) => {
-    if (worker.workerId !== workerId) {
-      return worker;
-    }
-    found = true;
-    previousLifecycle = worker.lifecycle;
-    workerName = worker.name;
-    return {
-      ...worker,
-      lifecycle,
-      summary: {
-        ...worker.summary,
-        stale: worker.summary.text !== null && worker.lifecycle !== lifecycle ? true : worker.summary.stale,
-      },
-      updatedAt: now,
-    };
-  });
-  if (!found || !previousLifecycle || !workerName) {
-    throw new Error(`Worker ${workerId} not found`);
-  }
-  const updated = {
-    ...run,
-    workers,
-    updatedAt: now,
-  };
-  if (previousLifecycle === lifecycle) {
-    return updated;
-  }
-  return appendConductorEvent(updated, {
-    actor: { type: "system", id: "storage" },
-    type: "worker.lifecycle_changed",
-    resourceRefs: { projectKey: run.projectKey, workerId },
-    payload: { previousLifecycle, lifecycle, name: workerName },
   });
 }

@@ -1,11 +1,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
-import {
-  type ConductorBackendDispatcher,
-  type ConductorBackendsStatus,
-  getConductorBackendAdapter,
-  inspectConductorBackends,
-} from "./backends.js";
+import { type ConductorBackendDispatcher, getConductorBackendAdapter, inspectConductorBackends } from "./backends.js";
+import { createGateForRepo } from "./gate-service.js";
 import {
   commitAllChanges,
   createPullRequest,
@@ -13,79 +9,159 @@ import {
   validatePrPreconditions,
   validatePushPreconditions,
 } from "./git-pr.js";
-import { deriveProjectKey } from "./project-key.js";
+import { computeNextActions } from "./next-actions.js";
+import { createObjectiveForRepo, planObjectiveForRepo, refreshObjectiveStatusForRepo } from "./objective-service.js";
+import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
 import {
   createWorkerSessionRuntime,
   preflightWorkerRunRuntime,
   recoverWorkerSessionRuntime,
-  resumeWorkerSessionRuntime,
   runWorkerPromptRuntime,
-  summarizeWorkerSessionRuntime,
 } from "./runtime.js";
+import { type SchedulerFairness, type SchedulerPolicyName, selectSchedulerActions } from "./scheduler-selection.js";
 import {
   addConductorArtifact,
-  addObjective,
-  addTask,
   addWorker,
   appendConductorEvent,
-  assignTaskToWorker,
-  cancelTaskRun,
   completeTaskRun,
-  createConductorGate,
-  createObjectiveRecord,
-  createTaskRecord,
   createWorkerRecord,
-  finishWorkerRun,
-  linkTaskToObjective,
   markConductorGateUsed,
-  mutateRunWithFileLockSync,
-  readRun,
   reconcileRunLeases,
-  recordTaskCompletion,
-  recordTaskProgress,
   removeWorker,
-  resolveConductorGate,
-  setWorkerLifecycle,
   setWorkerPrState,
-  setWorkerRunSessionId,
-  setWorkerRuntimeState,
-  setWorkerSummary,
-  setWorkerTask,
-  startTaskRun,
-  startWorkerRun,
-  updateObjective,
-  updateTask,
 } from "./storage.js";
+import {
+  assignTaskForRepo,
+  cancelTaskRunForRepo,
+  createFollowUpTaskForRepo,
+  createTaskForRepo,
+  recordTaskCompletionForRepo,
+  recordTaskProgressForRepo,
+  retryTaskForRepo,
+  startTaskRunForRepo,
+} from "./task-service.js";
 import type {
-  ConductorActor,
   ConductorEventType,
   ConductorNextAction,
-  ConductorNextActionPriority,
   ConductorNextActionsResponse,
   ConductorProjectBrief,
   ConductorResourceRefs,
   ConductorResourceTimeline,
   ConductorTaskBrief,
-  EvidenceBundle,
-  EvidenceBundlePurpose,
-  GateRecord,
-  GateStatus,
-  ObjectivePlanResult,
-  ObjectiveRecord,
-  ObjectiveStatus,
-  ReadinessCheck,
-  ReadinessPurpose,
   RunAttemptRecord,
   RunRecord,
   TaskContractInput,
   TaskRecord,
-  WorkerLifecycleState,
   WorkerRecord,
   WorkerRunResult,
 } from "./types.js";
 
-export type SchedulerPolicyName = "safe" | "execute";
-export type SchedulerFairness = "priority" | "round_robin";
+export { buildEvidenceBundleForRepo, checkReadinessForRepo } from "./evidence-service.js";
+export { createGateForRepo, resolveGateForRepo, resolveGateFromTrustedHumanForRepo } from "./gate-service.js";
+export { computeNextActions } from "./next-actions.js";
+export {
+  createObjectiveForRepo,
+  linkTaskToObjectiveForRepo,
+  planObjectiveForRepo,
+  refreshObjectiveStatusForRepo,
+  updateObjectiveForRepo,
+} from "./objective-service.js";
+export { getOrCreateRunForRepo } from "./repo-run.js";
+export { buildBlockingDiagnosisForRepo, prepareHumanReviewForRepo } from "./review-service.js";
+export type { SchedulerFairness, SchedulerPolicyName } from "./scheduler-selection.js";
+export {
+  assignTaskForRepo,
+  cancelTaskRunForRepo,
+  createFollowUpTaskForRepo,
+  createTaskForRepo,
+  recordTaskCompletionForRepo,
+  recordTaskProgressForRepo,
+  retryTaskForRepo,
+  startTaskRunForRepo,
+  updateTaskForRepo,
+} from "./task-service.js";
+
+export type ParallelWorkItemInput = {
+  title: string;
+  prompt: string;
+  workerName?: string;
+};
+
+export type ParallelWorkRunner = (repoRoot: string, taskId: string, signal?: AbortSignal) => Promise<WorkerRunResult>;
+
+export type WorkRoutingMode = "auto" | "single" | "parallel" | "objective";
+
+export type RunWorkItemInput = ParallelWorkItemInput & {
+  writeScope?: string[];
+  dependsOn?: string[];
+};
+
+export type WorkRoutingDecision = {
+  mode: Exclude<WorkRoutingMode, "auto">;
+  confidence: number;
+  reason: string;
+  tasks: RunWorkItemInput[];
+  riskFlags: string[];
+};
+
+type LiveWorkAbortHandle = {
+  runId?: string;
+  taskId: string;
+  workerId?: string;
+  controller: AbortController;
+};
+
+const liveWorkAbortHandles = new Set<LiveWorkAbortHandle>();
+
+function createLinkedAbortController(parentSignal?: AbortSignal): {
+  controller: AbortController;
+  signal: AbortSignal;
+  dispose: () => void;
+} {
+  const controller = new AbortController();
+  if (!parentSignal) {
+    return { controller, signal: controller.signal, dispose: () => undefined };
+  }
+  const onAbort = () => controller.abort();
+  parentSignal.addEventListener("abort", onAbort);
+  if (parentSignal.aborted) {
+    onAbort();
+  }
+  return {
+    controller,
+    signal: controller.signal,
+    dispose: () => parentSignal.removeEventListener("abort", onAbort),
+  };
+}
+
+function registerLiveWorkAbortHandle(handle: LiveWorkAbortHandle): () => void {
+  liveWorkAbortHandles.add(handle);
+  return () => {
+    liveWorkAbortHandles.delete(handle);
+  };
+}
+
+function liveHandleMatchesFilter(
+  handle: LiveWorkAbortHandle,
+  filter: { runIds?: Set<string>; taskIds?: Set<string>; workerIds?: Set<string> },
+): boolean {
+  const runMatches = !filter.runIds || (handle.runId !== undefined && filter.runIds.has(handle.runId));
+  const taskMatches = !filter.taskIds || filter.taskIds.has(handle.taskId);
+  const workerMatches = !filter.workerIds || (handle.workerId !== undefined && filter.workerIds.has(handle.workerId));
+  return runMatches && taskMatches && workerMatches;
+}
+
+function abortLiveWorkForFilter(filter: {
+  runIds?: Set<string>;
+  taskIds?: Set<string>;
+  workerIds?: Set<string>;
+}): void {
+  for (const handle of liveWorkAbortHandles) {
+    if (liveHandleMatchesFilter(handle, filter) && !handle.controller.signal.aborted) {
+      handle.controller.abort();
+    }
+  }
+}
 
 function resolveSchedulerPolicy(input: { policy?: SchedulerPolicyName; executeRuns?: boolean }): {
   policy: SchedulerPolicyName;
@@ -95,11 +171,6 @@ function resolveSchedulerPolicy(input: { policy?: SchedulerPolicyName; executeRu
     return { policy: input.policy, executeRuns: input.policy === "execute" };
   }
   return { policy: input.executeRuns ? "execute" : "safe", executeRuns: input.executeRuns ?? false };
-}
-
-function mutateRepoRunSync(repoRoot: string, mutator: (run: RunRecord) => RunRecord): RunRecord {
-  const normalizedRoot = resolve(repoRoot);
-  return mutateRunWithFileLockSync(deriveProjectKey(normalizedRoot), normalizedRoot, mutator);
 }
 
 function errorMessage(error: unknown): string {
@@ -115,10 +186,6 @@ function eventTypeForOperation(status: "succeeded" | "failed", operation: unknow
       return status === "succeeded" ? "scheduler.tick_succeeded" : "scheduler.tick_failed";
     case "dispatch_task_run":
       return status === "succeeded" ? "backend.dispatch_succeeded" : "backend.dispatch_failed";
-    case "resume_worker":
-      return status === "succeeded" ? "worker.resume_succeeded" : "worker.resume_failed";
-    case "refresh_worker_summary":
-      return status === "succeeded" ? "worker.summary_refreshed" : "worker.summary_refresh_failed";
     case "commit_worker":
       return `worker.commit_${suffix}` as ConductorEventType;
     case "push_worker":
@@ -160,369 +227,6 @@ import {
   removeManagedBranch,
   removeManagedWorktree,
 } from "./worktrees.js";
-
-const priorityRank: Record<ConductorNextActionPriority, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-const terminalRunStatuses = new Set([
-  "succeeded",
-  "partial",
-  "blocked",
-  "failed",
-  "aborted",
-  "stale",
-  "interrupted",
-  "unknown_dispatch",
-]);
-
-function nextAction(input: Omit<ConductorNextAction, "actionId">): ConductorNextAction {
-  const refs = input.resourceRefs;
-  const actionId = [input.kind, refs.objectiveId, refs.workerId, refs.taskId, refs.runId, refs.gateId, refs.artifactId]
-    .filter(Boolean)
-    .join(":");
-  return { ...input, actionId };
-}
-
-function incompleteDependenciesForTask(run: RunRecord, task: TaskRecord): TaskRecord[] {
-  const dependencies = task.dependsOnTaskIds
-    .map((taskId) => run.tasks.find((entry) => entry.taskId === taskId))
-    .filter((entry): entry is TaskRecord => Boolean(entry));
-  return dependencies.filter((entry) => entry.state !== "completed");
-}
-
-function isUsableIdleWorker(worker: WorkerRecord): boolean {
-  return (
-    worker.lifecycle === "idle" && !worker.recoverable && Boolean(worker.worktreePath) && Boolean(worker.sessionFile)
-  );
-}
-
-function sortNextActions(actions: ConductorNextAction[]): ConductorNextAction[] {
-  return [...actions].sort(
-    (left, right) =>
-      priorityRank[left.priority] - priorityRank[right.priority] || left.actionId.localeCompare(right.actionId),
-  );
-}
-
-export function computeNextActions(
-  run: RunRecord,
-  input: {
-    now?: string;
-    maxActions?: number;
-    includeLowPriority?: boolean;
-    includePrActions?: boolean;
-    includeHumanGateActions?: boolean;
-    objectiveId?: string;
-    reconciledPreview?: boolean;
-  } = {},
-): ConductorNextActionsResponse {
-  const now = input.now ?? new Date().toISOString();
-  const maxActions = Math.max(1, Math.min(input.maxActions ?? 10, 25));
-  const actions: ConductorNextAction[] = [];
-  const objectiveTaskIds = input.objectiveId
-    ? new Set(run.objectives.find((objective) => objective.objectiveId === input.objectiveId)?.taskIds ?? [])
-    : null;
-  const isInObjectiveScope = (refs: ConductorResourceRefs): boolean => {
-    if (!input.objectiveId) return true;
-    return (
-      refs.objectiveId === input.objectiveId ||
-      (refs.taskId !== undefined && Boolean(objectiveTaskIds?.has(refs.taskId)))
-    );
-  };
-  const scopedTasks = input.objectiveId
-    ? run.tasks.filter((task) => task.objectiveId === input.objectiveId || Boolean(objectiveTaskIds?.has(task.taskId)))
-    : run.tasks;
-  const openGates = run.gates.filter((gate) => gate.status === "open" && isInObjectiveScope(gate.resourceRefs));
-  const activeRuns = run.runs.filter(
-    (attempt) =>
-      !attempt.finishedAt &&
-      !terminalRunStatuses.has(attempt.status) &&
-      (!input.objectiveId || Boolean(objectiveTaskIds?.has(attempt.taskId))),
-  );
-  const usableWorkers = run.workers.filter(isUsableIdleWorker);
-
-  for (const objective of run.objectives.filter(
-    (entry) => !input.objectiveId || entry.objectiveId === input.objectiveId,
-  )) {
-    if (["active", "draft"].includes(objective.status) && objective.taskIds.length === 0) {
-      actions.push(
-        nextAction({
-          priority: "high",
-          kind: "plan_objective",
-          title: `Plan executable tasks for objective ${objective.title}`,
-          rationale: "The objective is active but has no scoped task plan for workers to execute.",
-          resourceRefs: { projectKey: run.projectKey, objectiveId: objective.objectiveId },
-          toolCall: {
-            name: "conductor_plan_objective",
-            params: {
-              objectiveId: objective.objectiveId,
-              tasks: "<derive an ordered task list for this objective>",
-            },
-          },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "medium",
-        }),
-      );
-    }
-  }
-
-  if (!input.objectiveId && run.workers.length === 0) {
-    actions.push(
-      nextAction({
-        priority: run.tasks.length === 0 ? "medium" : "high",
-        kind: "create_worker",
-        title: "Create the first conductor worker",
-        rationale: "The project has no usable workers, so tasks cannot run.",
-        resourceRefs: { projectKey: run.projectKey },
-        toolCall: { name: "conductor_create_worker", params: { name: "worker-1" } },
-        requiresHuman: false,
-        destructive: false,
-        blockedBy: [],
-        confidence: "medium",
-      }),
-    );
-  }
-
-  for (const attempt of activeRuns) {
-    if (attempt.leaseExpiresAt && attempt.leaseExpiresAt <= now) {
-      actions.push(
-        nextAction({
-          priority: "critical",
-          kind: "reconcile_project",
-          title: `Reconcile expired run ${attempt.runId}`,
-          rationale: "The run lease has expired but the run is not terminal.",
-          resourceRefs: {
-            projectKey: run.projectKey,
-            taskId: attempt.taskId,
-            workerId: attempt.workerId,
-            runId: attempt.runId,
-          },
-          toolCall: { name: "conductor_reconcile_project", params: { dryRun: false } },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "high",
-        }),
-      );
-    } else if (input.includeLowPriority) {
-      actions.push(
-        nextAction({
-          priority: "low",
-          kind: "wait_for_run",
-          title: `Wait for active run ${attempt.runId}`,
-          rationale: "The run is active and its lease has not expired.",
-          resourceRefs: {
-            projectKey: run.projectKey,
-            taskId: attempt.taskId,
-            workerId: attempt.workerId,
-            runId: attempt.runId,
-          },
-          toolCall: { name: "conductor_list_events", params: { runId: attempt.runId, limit: 20 } },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "high",
-        }),
-      );
-    }
-  }
-
-  for (const gate of openGates) {
-    const refs = { ...gate.resourceRefs, gateId: gate.gateId };
-    if (["approval_required", "ready_for_pr", "destructive_cleanup"].includes(gate.type)) {
-      if (input.includeHumanGateActions ?? true) {
-        actions.push(
-          nextAction({
-            priority: gate.type === "destructive_cleanup" ? "critical" : "high",
-            kind: "await_human_gate",
-            title: `Human decision required for ${gate.type} gate ${gate.gateId}`,
-            rationale: "This gate type requires a human actor for approval.",
-            resourceRefs: refs,
-            toolCall: null,
-            requiresHuman: true,
-            destructive: gate.type === "destructive_cleanup",
-            blockedBy: [{ gateId: gate.gateId }],
-            confidence: "high",
-          }),
-        );
-      }
-    } else {
-      actions.push(
-        nextAction({
-          priority: gate.type === "needs_input" ? "high" : "medium",
-          kind: "resolve_gate",
-          title: `Resolve ${gate.type} gate ${gate.gateId}`,
-          rationale: gate.requestedDecision,
-          resourceRefs: refs,
-          toolCall: {
-            name: "conductor_resolve_gate",
-            params: {
-              gateId: gate.gateId,
-              status: "approved",
-              resolutionReason: "<parent decision required>",
-              actorId: "parent",
-              actorType: "parent_agent",
-            },
-          },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [{ gateId: gate.gateId }],
-          confidence: "medium",
-        }),
-      );
-    }
-  }
-
-  for (const worker of run.workers) {
-    if (worker.lifecycle === "broken" || worker.recoverable) {
-      actions.push(
-        nextAction({
-          priority: "high",
-          kind: "recover_worker",
-          title: `Recover worker ${worker.name}`,
-          rationale: "The worker is broken or recoverable.",
-          resourceRefs: { projectKey: run.projectKey, workerId: worker.workerId },
-          toolCall: { name: "conductor_recover_worker", params: { name: worker.name } },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "high",
-        }),
-      );
-    }
-  }
-
-  for (const task of scopedTasks) {
-    const assignedWorker = run.workers.find((worker) => worker.workerId === task.assignedWorkerId);
-    if (task.activeRunId) {
-      continue;
-    }
-    if (task.state === "ready" && !task.assignedWorkerId && usableWorkers[0]) {
-      actions.push(
-        nextAction({
-          priority: "medium",
-          kind: "assign_task",
-          title: `Assign ready task ${task.taskId}`,
-          rationale: "The task is ready and an idle usable worker exists.",
-          resourceRefs: { projectKey: run.projectKey, taskId: task.taskId, workerId: usableWorkers[0].workerId },
-          toolCall: {
-            name: "conductor_assign_task",
-            params: { taskId: task.taskId, workerId: usableWorkers[0].workerId },
-          },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "medium",
-        }),
-      );
-    }
-    const incompleteDependencies = incompleteDependenciesForTask(run, task);
-    if (task.state === "assigned" && incompleteDependencies.length > 0) {
-      actions.push(
-        nextAction({
-          priority: "high",
-          kind: "wait_for_dependency",
-          title: `Wait for dependencies before running task ${task.taskId}`,
-          rationale: "The task is assigned but one or more dependency tasks are not completed.",
-          resourceRefs: {
-            projectKey: run.projectKey,
-            taskId: task.taskId,
-            workerId: task.assignedWorkerId ?? undefined,
-          },
-          toolCall: { name: "conductor_task_brief", params: { taskId: task.taskId } },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: incompleteDependencies.map((dependency) => ({ taskId: dependency.taskId })),
-          confidence: "high",
-        }),
-      );
-      continue;
-    }
-    if (task.state === "assigned" && assignedWorker && isUsableIdleWorker(assignedWorker)) {
-      actions.push(
-        nextAction({
-          priority: "high",
-          kind: "run_task",
-          title: `Run assigned task ${task.taskId}`,
-          rationale: "The task is assigned and the worker is idle.",
-          resourceRefs: { projectKey: run.projectKey, taskId: task.taskId, workerId: assignedWorker.workerId },
-          toolCall: { name: "conductor_run_task", params: { taskId: task.taskId } },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "high",
-        }),
-      );
-    }
-    if (
-      ["blocked", "failed", "needs_review", "canceled"].includes(task.state) &&
-      assignedWorker &&
-      isUsableIdleWorker(assignedWorker)
-    ) {
-      actions.push(
-        nextAction({
-          priority: "medium",
-          kind: "retry_task",
-          title: `Retry task ${task.taskId}`,
-          rationale: `The task is ${task.state} and has an idle assigned worker.`,
-          resourceRefs: { projectKey: run.projectKey, taskId: task.taskId, workerId: assignedWorker.workerId },
-          toolCall: { name: "conductor_retry_task", params: { taskId: task.taskId } },
-          requiresHuman: false,
-          destructive: false,
-          blockedBy: [],
-          confidence: "medium",
-        }),
-      );
-    }
-  }
-
-  const filtered = input.includeLowPriority ? actions : actions.filter((action) => action.priority !== "low");
-  const sorted = sortNextActions(filtered);
-  const returned = sorted.slice(0, maxActions);
-  const highestPriority = returned[0]?.priority ?? null;
-  const status =
-    run.workers.length === 0 && run.tasks.length === 0
-      ? "empty"
-      : returned.some((action) => action.priority === "critical")
-        ? "blocked"
-        : returned.length > 0
-          ? "actionable"
-          : openGates.length > 0 || activeRuns.length > 0
-            ? "waiting"
-            : "healthy_idle";
-  const headline =
-    status === "empty"
-      ? "No conductor workers or tasks exist yet."
-      : status === "blocked"
-        ? "Critical conductor maintenance or gate decisions are required."
-        : status === "actionable"
-          ? "Parent orchestration can proceed with recommended tool calls."
-          : status === "waiting"
-            ? "No safe immediate parent action; waiting on active runs or human gates."
-            : "Project is healthy and idle.";
-  return {
-    project: {
-      projectKey: run.projectKey,
-      repoRoot: run.repoRoot,
-      schemaVersion: run.schemaVersion,
-      revision: run.revision,
-      reconciledPreview: input.reconciledPreview ?? false,
-      counts: {
-        workers: run.workers.length,
-        tasks: scopedTasks.length,
-        runs: run.runs.length,
-        gates: run.gates.length,
-        artifacts: run.artifacts.length,
-        events: run.events.length,
-      },
-    },
-    summary: { status, headline, totalActions: sorted.length, returnedActions: returned.length, highestPriority },
-    actions: returned,
-    omitted: {
-      count: Math.max(0, sorted.length - returned.length),
-      reason: sorted.length > returned.length ? "maxActions" : null,
-    },
-  };
-}
 
 function refsMatchFilter(refs: ConductorResourceRefs, filter: ConductorResourceRefs): boolean {
   return (["objectiveId", "workerId", "taskId", "runId", "gateId", "artifactId"] as const).some(
@@ -817,113 +521,11 @@ export function buildProjectBriefForRepo(
   };
 }
 
-export function buildBlockingDiagnosisForRepo(
-  repoRoot: string,
-  input: { objectiveId?: string; taskId?: string } = {},
-): {
-  markdown: string;
-  blockers: Array<{
-    kind: string;
-    gateId?: string;
-    taskId?: string;
-    message: string;
-    nextToolCall: { name: string; params: Record<string, unknown> } | null;
-  }>;
-} {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const taskIds = input.objectiveId
-    ? new Set(run.objectives.find((objective) => objective.objectiveId === input.objectiveId)?.taskIds ?? [])
-    : null;
-  const blockers = [] as Array<{
-    kind: string;
-    gateId?: string;
-    taskId?: string;
-    message: string;
-    nextToolCall: { name: string; params: Record<string, unknown> } | null;
-  }>;
-  for (const gate of run.gates.filter(
-    (entry) =>
-      entry.status === "open" &&
-      (!input.objectiveId ||
-        entry.resourceRefs.objectiveId === input.objectiveId ||
-        (entry.resourceRefs.taskId && taskIds?.has(entry.resourceRefs.taskId))) &&
-      (!input.taskId || entry.resourceRefs.taskId === input.taskId),
-  )) {
-    blockers.push({
-      kind: "gate",
-      gateId: gate.gateId,
-      message: gate.requestedDecision,
-      nextToolCall: ["needs_input", "needs_review"].includes(gate.type)
-        ? {
-            name: "conductor_resolve_gate",
-            params: { gateId: gate.gateId, status: "approved", resolutionReason: "<decision>", actorId: "parent" },
-          }
-        : null,
-    });
-  }
-  const tasks = input.taskId
-    ? run.tasks.filter((task) => task.taskId === input.taskId)
-    : input.objectiveId
-      ? run.tasks.filter((task) => taskIds?.has(task.taskId))
-      : run.tasks;
-  for (const task of tasks) {
-    for (const dependency of incompleteDependenciesForTask(run, task)) {
-      blockers.push({
-        kind: "dependency",
-        taskId: task.taskId,
-        message: `Task ${task.taskId} waits for ${dependency.taskId}`,
-        nextToolCall: { name: "conductor_task_brief", params: { taskId: dependency.taskId } },
-      });
-    }
-  }
-  const markdown = [
-    "# Conductor Blocking Diagnosis",
-    "",
-    blockers.length === 0
-      ? "- no blockers"
-      : blockers.map((blocker) => `- ${blocker.kind}: ${blocker.message}`).join("\n"),
-  ].join("\n");
-  return { markdown, blockers };
-}
-
-export function prepareHumanReviewForRepo(
-  repoRoot: string,
-  input: { objectiveId?: string; taskId?: string } = {},
-): {
-  markdown: string;
-  objective: ObjectiveRecord | null;
-  task: TaskRecord | null;
-  nextActions: ConductorNextAction[];
-  blockers: ReturnType<typeof buildBlockingDiagnosisForRepo>["blockers"];
-} {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const objective = input.objectiveId
-    ? (run.objectives.find((entry) => entry.objectiveId === input.objectiveId) ?? null)
-    : null;
-  const task = input.taskId ? (run.tasks.find((entry) => entry.taskId === input.taskId) ?? null) : null;
-  const nextActions = computeNextActions(run, { objectiveId: input.objectiveId, maxActions: 5 }).actions;
-  const blockers = buildBlockingDiagnosisForRepo(repoRoot, input).blockers;
-  const markdown = [
-    "# Conductor Human Review Packet",
-    "",
-    objective
-      ? `Objective: ${objective.title} [${objective.objectiveId}] status=${objective.status}`
-      : "Objective: project",
-    task ? `Task: ${task.title} [${task.taskId}] state=${task.state}` : "Task: none selected",
-    "",
-    "## Blockers",
-    blockers.length === 0 ? "- none" : blockers.map((blocker) => `- ${blocker.kind}: ${blocker.message}`).join("\n"),
-    "",
-    "## Next Actions",
-    nextActions.length === 0 ? "- none" : nextActions.map((action) => `- ${action.kind}: ${action.title}`).join("\n"),
-  ].join("\n");
-  return { markdown, objective, task, nextActions, blockers };
-}
-
 async function executeConductorAction(
   repoRoot: string,
   action: ConductorNextAction,
   input: { executeRuns: boolean },
+  signal?: AbortSignal,
 ): Promise<{ executed: boolean; reason: string | null; action: ConductorNextAction; result: unknown }> {
   if (action.requiresHuman) return { executed: false, reason: "action requires human", action, result: null };
   if (action.destructive) return { executed: false, reason: "action is destructive", action, result: null };
@@ -958,7 +560,7 @@ async function executeConductorAction(
       executed: true,
       reason: null,
       action,
-      result: await runTaskForRepo(repoRoot, action.toolCall.params.taskId),
+      result: await runTaskForRepo(repoRoot, action.toolCall.params.taskId, signal),
     };
   }
   if (action.kind === "retry_task" && typeof action.toolCall?.params.taskId === "string") {
@@ -995,13 +597,14 @@ async function executeConductorAction(
 export async function runNextActionForRepo(
   repoRoot: string,
   input: { objectiveId?: string; executeRuns?: boolean; policy?: SchedulerPolicyName } = {},
+  signal?: AbortSignal,
 ): Promise<{ executed: boolean; reason: string | null; action: ConductorNextAction | null; result: unknown }> {
   const schedulerPolicy = resolveSchedulerPolicy(input);
   const action =
     getNextActionsForRepo(repoRoot, { objectiveId: input.objectiveId, maxActions: 1, reconcile: false }).actions[0] ??
     null;
   return action
-    ? executeConductorAction(repoRoot, action, schedulerPolicy)
+    ? executeConductorAction(repoRoot, action, schedulerPolicy, signal)
     : { executed: false, reason: "no action", action, result: null };
 }
 
@@ -1014,6 +617,7 @@ export async function scheduleObjectiveForRepo(
     executeRuns?: boolean;
     policy?: SchedulerPolicyName;
   },
+  signal?: AbortSignal,
 ): Promise<{
   objectiveId: string | null;
   assigned: TaskRecord[];
@@ -1042,49 +646,22 @@ export async function scheduleObjectiveForRepo(
   const executed: Array<{ taskId: string; result: unknown }> = [];
   const skipped: string[] = [];
   for (const task of runnableTasks) {
-    let currentTask = task;
-    if (!currentTask.assignedWorkerId) {
+    let schedulableTask = task;
+    if (!schedulableTask.assignedWorkerId) {
       const worker = idleWorkers.shift();
       if (!worker) {
         skipped.push(task.taskId);
         continue;
       }
-      currentTask = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
-      assigned.push(currentTask);
+      schedulableTask = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
+      assigned.push(schedulableTask);
     }
     if (schedulerPolicy.executeRuns) {
-      const result = await runTaskForRepo(repoRoot, currentTask.taskId);
-      executed.push({ taskId: currentTask.taskId, result });
+      const result = await runTaskForRepo(repoRoot, schedulableTask.taskId, signal);
+      executed.push({ taskId: schedulableTask.taskId, result });
     }
   }
   return { objectiveId: input.objectiveId ?? null, assigned, executed, skipped };
-}
-
-function objectiveKeyForAction(action: ConductorNextAction, taskObjectiveIds: Map<string, string | null>): string {
-  return (
-    action.resourceRefs.objectiveId ??
-    (action.resourceRefs.taskId ? taskObjectiveIds.get(action.resourceRefs.taskId) : null) ??
-    "project"
-  );
-}
-
-function roundRobinActions(
-  actions: ConductorNextAction[],
-  taskObjectiveIds: Map<string, string | null>,
-): ConductorNextAction[] {
-  const buckets = new Map<string, ConductorNextAction[]>();
-  for (const action of actions) {
-    const key = objectiveKeyForAction(action, taskObjectiveIds);
-    buckets.set(key, [...(buckets.get(key) ?? []), action]);
-  }
-  const ordered: ConductorNextAction[] = [];
-  while ([...buckets.values()].some((bucket) => bucket.length > 0)) {
-    for (const bucket of buckets.values()) {
-      const action = bucket.shift();
-      if (action) ordered.push(action);
-    }
-  }
-  return ordered;
 }
 
 function recordSchedulerActionEvent(
@@ -1114,6 +691,7 @@ export async function schedulerTickForRepo(
     executeRuns?: boolean;
     policy?: SchedulerPolicyName;
   } = {},
+  signal?: AbortSignal,
 ): Promise<{
   executed: Array<{ action: ConductorNextAction | null; result: unknown }>;
   skipped: Array<{ action: ConductorNextAction | null; reason: string | null }>;
@@ -1138,37 +716,22 @@ export async function schedulerTickForRepo(
       maxActions: 100,
       reconcile: false,
     }).actions;
-    const ordered = fairness === "round_robin" ? roundRobinActions(actions, taskObjectiveIds) : actions;
-    const objectiveCounts = new Map<string, number>();
-    let runSelections = 0;
-    const selected: ConductorNextAction[] = [];
-    for (const action of ordered) {
-      const objectiveKey = objectiveKeyForAction(action, taskObjectiveIds);
-      if ((objectiveCounts.get(objectiveKey) ?? 0) >= perObjectiveLimit) {
-        skipped.push({ action, reason: "per-objective scheduler limit reached" });
-        continue;
-      }
-      if (action.kind === "run_task") {
-        if (!schedulerPolicy.executeRuns) {
-          skipped.push({ action, reason: "run execution disabled by scheduler policy" });
-          continue;
-        }
-        if (runSelections >= maxRuns) {
-          skipped.push({ action, reason: "run capacity exhausted" });
-          continue;
-        }
-        runSelections += 1;
-      }
-      selected.push(action);
-      objectiveCounts.set(objectiveKey, (objectiveCounts.get(objectiveKey) ?? 0) + 1);
-      if (selected.length >= maxActions) break;
-    }
-    for (const action of selected) {
+    const selection = selectSchedulerActions({
+      actions,
+      taskObjectiveIds,
+      maxActions,
+      maxRuns,
+      perObjectiveLimit,
+      fairness,
+      executeRuns: schedulerPolicy.executeRuns,
+    });
+    skipped.push(...selection.skipped);
+    for (const action of selection.selected) {
       recordSchedulerActionEvent(repoRoot, "scheduler.action_selected", action, {
         fairness,
         policy: schedulerPolicy.policy,
       });
-      const result = await executeConductorAction(repoRoot, action, schedulerPolicy);
+      const result = await executeConductorAction(repoRoot, action, schedulerPolicy, signal);
       if (result.executed) {
         executed.push({ action, result: result.result });
       } else {
@@ -1231,326 +794,6 @@ export function getNextActionsForRepo(
   const run =
     (input.reconcile ?? true) ? reconcileProjectForRepo(repoRoot, { dryRun: true }) : getOrCreateRunForRepo(repoRoot);
   return computeNextActions(run, { ...input, reconciledPreview: input.reconcile ?? true });
-}
-
-export function getOrCreateRunForRepo(repoRoot: string): RunRecord {
-  const normalizedRoot = resolve(repoRoot);
-  const projectKey = deriveProjectKey(normalizedRoot);
-  const existing = readRun(projectKey);
-  return existing ?? mutateRepoRunSync(normalizedRoot, (run) => run);
-}
-
-function createObjectiveId(): string {
-  return `objective-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createTaskId(): string {
-  return `task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createRunId(): string {
-  return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function leaseExpiryFromNow(leaseSeconds: number): string {
-  return new Date(Date.now() + leaseSeconds * 1000).toISOString();
-}
-
-export function createObjectiveForRepo(repoRoot: string, input: { title: string; prompt: string }): ObjectiveRecord {
-  let objective!: ObjectiveRecord;
-  mutateRepoRunSync(repoRoot, (run) => {
-    objective = createObjectiveRecord({
-      objectiveId: createObjectiveId(),
-      title: input.title,
-      prompt: input.prompt,
-    });
-    return addObjective(run, objective);
-  });
-  return objective;
-}
-
-export function updateObjectiveForRepo(
-  repoRoot: string,
-  input: { objectiveId: string; title?: string; prompt?: string; status?: ObjectiveStatus; summary?: string | null },
-): ObjectiveRecord {
-  const updatedRun = mutateRepoRunSync(repoRoot, (run) => updateObjective(run, input));
-  const objective = updatedRun.objectives.find((entry) => entry.objectiveId === input.objectiveId);
-  if (!objective) {
-    throw new Error(`Objective ${input.objectiveId} disappeared during update`);
-  }
-  return objective;
-}
-
-export function refreshObjectiveStatusForRepo(repoRoot: string, objectiveId: string): ObjectiveRecord {
-  const updatedRun = mutateRepoRunSync(repoRoot, (run) => {
-    const objective = run.objectives.find((entry) => entry.objectiveId === objectiveId);
-    if (!objective) {
-      throw new Error(`Objective ${objectiveId} not found`);
-    }
-    const tasks = run.tasks.filter((task) => objective.taskIds.includes(task.taskId));
-    const completed = tasks.filter((task) => task.state === "completed").length;
-    const blocked = tasks.filter((task) => ["blocked", "failed", "canceled"].includes(task.state)).length;
-    const needsReview = tasks.filter((task) => task.state === "needs_review").length;
-    const status =
-      tasks.length > 0 && completed === tasks.length
-        ? "completed"
-        : blocked > 0
-          ? "blocked"
-          : needsReview > 0
-            ? "needs_review"
-            : objective.status === "draft"
-              ? "draft"
-              : "active";
-    const summary = `${completed}/${tasks.length} tasks completed; blocked=${blocked}; needs_review=${needsReview}`;
-    return appendConductorEvent(
-      {
-        ...run,
-        objectives: run.objectives.map((entry) =>
-          entry.objectiveId === objectiveId
-            ? { ...entry, status, summary, revision: entry.revision + 1, updatedAt: new Date().toISOString() }
-            : entry,
-        ),
-      },
-      {
-        actor: { type: "system", id: "conductor" },
-        type: "objective.status_refreshed",
-        resourceRefs: { projectKey: run.projectKey, objectiveId },
-        payload: { status, summary },
-      },
-    );
-  });
-  const updated = updatedRun.objectives.find((entry) => entry.objectiveId === objectiveId);
-  if (!updated) {
-    throw new Error(`Objective ${objectiveId} disappeared during status refresh`);
-  }
-  return updated;
-}
-
-export function linkTaskToObjectiveForRepo(repoRoot: string, objectiveId: string, taskId: string): ObjectiveRecord {
-  const updatedRun = mutateRepoRunSync(repoRoot, (run) => linkTaskToObjective(run, objectiveId, taskId));
-  const objective = updatedRun.objectives.find((entry) => entry.objectiveId === objectiveId);
-  if (!objective) {
-    throw new Error(`Objective ${objectiveId} disappeared during link`);
-  }
-  return objective;
-}
-
-function validateObjectivePlanTasks(tasks: Array<{ title: string; prompt: string; dependsOn?: string[] }>): void {
-  const titles = new Set<string>();
-  for (const task of tasks) {
-    const title = task.title.trim();
-    if (titles.has(title)) {
-      throw new Error(`Duplicate task title '${title}' in objective plan`);
-    }
-    titles.add(title);
-    if (task.prompt.trim().length < 10) {
-      throw new Error(`Vague prompt for task '${title}' in objective plan`);
-    }
-  }
-  for (const task of tasks) {
-    for (const dependency of task.dependsOn ?? []) {
-      if (!titles.has(dependency)) {
-        throw new Error(`Unresolved dependency '${dependency}' for task '${task.title}'`);
-      }
-      if (dependency === task.title) {
-        throw new Error(`Task '${task.title}' cannot depend on itself`);
-      }
-    }
-  }
-}
-
-export function planObjectiveForRepo(
-  repoRoot: string,
-  input: {
-    objectiveId: string;
-    tasks: Array<{ title: string; prompt: string; dependsOn?: string[] }>;
-    rationale?: string;
-  },
-): ObjectivePlanResult {
-  if (input.tasks.length === 0) {
-    throw new Error("Objective plan must include at least one task");
-  }
-  validateObjectivePlanTasks(input.tasks);
-  const createdTasks: TaskRecord[] = [];
-  const updatedRun = mutateRepoRunSync(repoRoot, (run) => {
-    const objective = run.objectives.find((entry) => entry.objectiveId === input.objectiveId);
-    if (!objective) {
-      throw new Error(`Objective ${input.objectiveId} not found`);
-    }
-    let nextRun = run;
-    for (const taskInput of input.tasks) {
-      const dependencyText = taskInput.dependsOn?.length ? `\n\nDepends on: ${taskInput.dependsOn.join(", ")}` : "";
-      const task = createTaskRecord({
-        taskId: createTaskId(),
-        title: taskInput.title,
-        prompt: `${taskInput.prompt}${dependencyText}`,
-        objectiveId: input.objectiveId,
-        dependsOnTaskIds: taskInput.dependsOn
-          ?.map(
-            (dependency) =>
-              createdTasks.find((task) => task.title === dependency || task.taskId === dependency)?.taskId,
-          )
-          .filter((taskId): taskId is string => Boolean(taskId)),
-      });
-      nextRun = linkTaskToObjective(addTask(nextRun, task), input.objectiveId, task.taskId);
-      createdTasks.push(task);
-    }
-    return appendConductorEvent(nextRun, {
-      actor: { type: "parent_agent", id: "conductor" },
-      type: "objective.planned",
-      resourceRefs: { projectKey: nextRun.projectKey, objectiveId: input.objectiveId },
-      payload: { taskIds: createdTasks.map((task) => task.taskId), rationale: input.rationale ?? null },
-    });
-  });
-  const updatedObjective = updatedRun.objectives.find((entry) => entry.objectiveId === input.objectiveId);
-  if (!updatedObjective) {
-    throw new Error(`Objective ${input.objectiveId} disappeared during planning`);
-  }
-  return { objective: updatedObjective, tasks: createdTasks };
-}
-
-export function createTaskForRepo(
-  repoRoot: string,
-  input: { title: string; prompt: string; objectiveId?: string; dependsOnTaskIds?: string[] },
-): TaskRecord {
-  let task!: TaskRecord;
-  mutateRepoRunSync(repoRoot, (run) => {
-    const missingDependency = input.dependsOnTaskIds?.find(
-      (taskId) => !run.tasks.some((entry) => entry.taskId === taskId),
-    );
-    if (missingDependency) {
-      throw new Error(`Task dependency ${missingDependency} not found`);
-    }
-    task = createTaskRecord({
-      taskId: createTaskId(),
-      title: input.title,
-      prompt: input.prompt,
-      objectiveId: input.objectiveId,
-      dependsOnTaskIds: input.dependsOnTaskIds,
-    });
-    return input.objectiveId
-      ? linkTaskToObjective(addTask(run, task), input.objectiveId, task.taskId)
-      : addTask(run, task);
-  });
-  return task;
-}
-
-export function updateTaskForRepo(
-  repoRoot: string,
-  input: { taskId: string; title?: string; prompt?: string },
-): TaskRecord {
-  const updatedRun = mutateRepoRunSync(repoRoot, (run) => updateTask(run, input));
-  const task = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
-  if (!task) {
-    throw new Error(`Task ${input.taskId} disappeared during update`);
-  }
-  return task;
-}
-
-export function assignTaskForRepo(repoRoot: string, taskId: string, workerId: string): TaskRecord {
-  const updatedRun = mutateRepoRunSync(repoRoot, (run) => assignTaskToWorker(run, taskId, workerId));
-  const task = updatedRun.tasks.find((entry) => entry.taskId === taskId);
-  if (!task) {
-    throw new Error(`Task ${taskId} disappeared during assignment`);
-  }
-  return task;
-}
-
-export function recordTaskProgressForRepo(
-  repoRoot: string,
-  input: {
-    runId: string;
-    taskId: string;
-    progress: string;
-    idempotencyKey?: string;
-    artifact?: {
-      type: "note" | "test_result" | "changed_files" | "log" | "completion_report" | "pr_evidence" | "other";
-      ref: string;
-      metadata?: Record<string, unknown>;
-    };
-  },
-): TaskRecord {
-  const updatedRun = mutateRepoRunSync(repoRoot, (run) => recordTaskProgress(run, input));
-  const task = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
-  if (!task) {
-    throw new Error(`Task ${input.taskId} disappeared during progress update`);
-  }
-  return task;
-}
-
-export function recordTaskCompletionForRepo(
-  repoRoot: string,
-  input: {
-    runId: string;
-    taskId: string;
-    status: "succeeded" | "partial" | "blocked" | "failed" | "aborted";
-    completionSummary: string;
-    idempotencyKey?: string;
-    artifact?: {
-      type: "note" | "test_result" | "changed_files" | "log" | "completion_report" | "pr_evidence" | "other";
-      ref: string;
-      metadata?: Record<string, unknown>;
-    };
-  },
-): TaskRecord {
-  const updatedRun = mutateRepoRunSync(repoRoot, (run) => recordTaskCompletion(run, input));
-  const task = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
-  if (!task) {
-    throw new Error(`Task ${input.taskId} disappeared during completion update`);
-  }
-  if (task.objectiveId) {
-    refreshObjectiveStatusForRepo(repoRoot, task.objectiveId);
-    return getOrCreateRunForRepo(repoRoot).tasks.find((entry) => entry.taskId === input.taskId) ?? task;
-  }
-  return task;
-}
-
-export function createGateForRepo(
-  repoRoot: string,
-  input: {
-    type: GateRecord["type"];
-    resourceRefs: ConductorResourceRefs;
-    requestedDecision: string;
-    gateId?: string;
-    operation?: GateRecord["operation"];
-    targetRevision?: number | null;
-    expiresAt?: string | null;
-  },
-): GateRecord {
-  const gateId = input.gateId ?? `gate-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const updatedRun = mutateRepoRunSync(repoRoot, (run) => createConductorGate(run, { ...input, gateId }));
-  const gate = updatedRun.gates.find((entry) => entry.gateId === gateId);
-  if (!gate) {
-    throw new Error(`Gate ${gateId} disappeared during creation`);
-  }
-  return gate;
-}
-
-export function resolveGateForRepo(
-  repoRoot: string,
-  input: { gateId: string; status: Exclude<GateStatus, "open">; actor: ConductorActor; resolutionReason: string },
-): GateRecord {
-  const updatedRun = mutateRepoRunSync(repoRoot, (run) => resolveConductorGate(run, input));
-  const gate = updatedRun.gates.find((entry) => entry.gateId === input.gateId);
-  if (!gate) {
-    throw new Error(`Gate ${input.gateId} disappeared during resolution`);
-  }
-  return gate;
-}
-
-export function resolveGateFromTrustedHumanForRepo(
-  repoRoot: string,
-  input: { gateId: string; status: Exclude<GateStatus, "open">; humanId: string; resolutionReason: string },
-): GateRecord {
-  if (!input.humanId.trim()) {
-    throw new Error("Trusted human resolver requires a non-empty humanId");
-  }
-  return resolveGateForRepo(repoRoot, {
-    gateId: input.gateId,
-    status: input.status,
-    resolutionReason: input.resolutionReason,
-    actor: { type: "human", id: input.humanId },
-  });
 }
 
 export async function dispatchTaskRunForRepo(
@@ -1645,135 +888,6 @@ export async function dispatchTaskRunForRepo(
   };
 }
 
-export function startTaskRunForRepo(
-  repoRoot: string,
-  input: {
-    taskId: string;
-    workerId?: string;
-    leaseSeconds?: number;
-    runId?: string;
-    backend?: RunAttemptRecord["backend"];
-    allowFollowUpTasks?: boolean;
-    inspectBackends?: () => ConductorBackendsStatus;
-  },
-): { run: RunAttemptRecord; taskContract: TaskContractInput } {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const task = run.tasks.find((entry) => entry.taskId === input.taskId);
-  if (!task) {
-    throw new Error(`Task ${input.taskId} not found`);
-  }
-  const workerId = input.workerId ?? task.assignedWorkerId;
-  if (!workerId) {
-    throw new Error(`Task ${input.taskId} is not assigned to a worker`);
-  }
-  const backend = input.backend ?? "native";
-  if (backend === "pi-subagents") {
-    const status = (input.inspectBackends ?? inspectConductorBackends)().piSubagents;
-    mutateRepoRunSync(repoRoot, (latest) =>
-      appendConductorEvent(latest, {
-        actor: { type: "backend", id: "pi-subagents" },
-        type: "backend.unavailable",
-        resourceRefs: { projectKey: latest.projectKey, taskId: input.taskId, workerId },
-        payload: {
-          backend,
-          diagnostic: status.available
-            ? "pi-subagents dispatch adapter is not implemented yet"
-            : (status.diagnostic ?? "pi-subagents backend is unavailable"),
-        },
-      }),
-    );
-    throw new Error(
-      `pi-subagents backend unavailable: ${status.available ? "dispatch adapter is not implemented yet" : (status.diagnostic ?? "not available")}`,
-    );
-  }
-  const runId = input.runId ?? createRunId();
-  const updatedRun = mutateRepoRunSync(repoRoot, (latest) =>
-    startTaskRun(latest, {
-      runId,
-      taskId: input.taskId,
-      workerId,
-      backend,
-      leaseExpiresAt: leaseExpiryFromNow(input.leaseSeconds ?? 900),
-    }),
-  );
-  const started = updatedRun.runs.find((entry) => entry.runId === runId);
-  const updatedTask = updatedRun.tasks.find((entry) => entry.taskId === input.taskId);
-  if (!started || !updatedTask) {
-    throw new Error(`Run ${runId} disappeared during start`);
-  }
-  return {
-    run: started,
-    taskContract: {
-      taskId: updatedTask.taskId,
-      runId: started.runId,
-      taskRevision: started.taskRevision,
-      goal: updatedTask.prompt,
-      constraints: [],
-      explicitCompletionTools: true,
-      allowFollowUpTasks: input.allowFollowUpTasks ?? false,
-    },
-  };
-}
-
-export function cancelTaskRunForRepo(repoRoot: string, input: { runId: string; reason: string }): RunRecord {
-  const updatedRun = mutateRepoRunSync(repoRoot, (run) => cancelTaskRun(run, input));
-  const task = updatedRun.tasks.find((entry) => entry.runIds.includes(input.runId));
-  if (task?.objectiveId) {
-    refreshObjectiveStatusForRepo(repoRoot, task.objectiveId);
-    return getOrCreateRunForRepo(repoRoot);
-  }
-  return updatedRun;
-}
-
-export function retryTaskForRepo(
-  repoRoot: string,
-  input: { taskId: string; workerId?: string; leaseSeconds?: number },
-): { run: RunAttemptRecord; taskContract: TaskContractInput } {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const task = run.tasks.find((entry) => entry.taskId === input.taskId);
-  if (!task) {
-    throw new Error(`Task ${input.taskId} not found`);
-  }
-  if (task.activeRunId) {
-    throw new Error(`Task ${input.taskId} already has an active run`);
-  }
-  if (!["blocked", "failed", "needs_review", "canceled"].includes(task.state)) {
-    throw new Error(`Task ${input.taskId} is ${task.state} and is not eligible for retry`);
-  }
-  const started = startTaskRunForRepo(repoRoot, input);
-  const refreshedTask = getOrCreateRunForRepo(repoRoot).tasks.find((entry) => entry.taskId === input.taskId);
-  if (refreshedTask?.objectiveId) {
-    refreshObjectiveStatusForRepo(repoRoot, refreshedTask.objectiveId);
-  }
-  return started;
-}
-
-export function createFollowUpTaskForRepo(
-  repoRoot: string,
-  input: { runId: string; taskId: string; title: string; prompt: string },
-): TaskRecord {
-  let task!: TaskRecord;
-  const withEvent = mutateRepoRunSync(repoRoot, (run) => {
-    const runAttempt = run.runs.find((entry) => entry.runId === input.runId);
-    if (!runAttempt || runAttempt.taskId !== input.taskId || runAttempt.finishedAt) {
-      throw new Error(`Run ${input.runId} is not an active run for task ${input.taskId}`);
-    }
-    task = createTaskRecord({ taskId: createTaskId(), title: input.title, prompt: input.prompt });
-    const withTask = addTask(run, task);
-    return appendConductorEvent(withTask, {
-      actor: { type: "child_run", id: input.runId },
-      type: "task.followup_created",
-      resourceRefs: { projectKey: run.projectKey, taskId: task.taskId, runId: input.runId },
-      payload: { parentTaskId: input.taskId, title: input.title },
-    });
-  });
-  const created = withEvent.tasks.find((entry) => entry.taskId === task.taskId);
-  if (!created) {
-    throw new Error(`Follow-up task ${task.taskId} disappeared during creation`);
-  }
-  return created;
-}
-
 export async function delegateTaskForRepo(
   repoRoot: string,
   input: { title: string; prompt: string; workerName: string; startRun?: boolean; leaseSeconds?: number },
@@ -1808,236 +922,543 @@ export async function delegateTaskForRepo(
   };
 }
 
-function isTerminalStatus(status: string): boolean {
-  return ["succeeded", "partial", "blocked", "failed", "aborted", "stale", "interrupted", "unknown_dispatch"].includes(
-    status,
-  );
-}
-
-export function buildEvidenceBundleForRepo(
+export function cancelActiveWorkForRepo(
   repoRoot: string,
   input: {
-    workerId?: string;
-    workerName?: string;
-    objectiveId?: string;
-    taskId?: string;
-    runId?: string;
-    purpose?: EvidenceBundlePurpose;
-    includeEvents?: boolean;
-    persistArtifact?: boolean;
+    reason?: string;
+    taskIds?: string[];
+    workerIds?: string[];
+  } = {},
+): { canceledRuns: string[]; canceledTasks: string[]; project: RunRecord } {
+  const reason = input.reason?.trim() || "Canceled active conductor work";
+  let project = getOrCreateRunForRepo(repoRoot);
+  const taskIds = new Set(input.taskIds ?? []);
+  const workerIds = new Set(input.workerIds ?? []);
+  const activeRuns = project.runs.filter(
+    (run) =>
+      !run.finishedAt &&
+      (taskIds.size === 0 || taskIds.has(run.taskId)) &&
+      (workerIds.size === 0 || workerIds.has(run.workerId)),
+  );
+  const canceledRuns: string[] = [];
+  const canceledTasks = new Set<string>();
+  const liveTaskIds =
+    taskIds.size > 0 ? taskIds : activeRuns.length > 0 ? new Set(activeRuns.map((run) => run.taskId)) : undefined;
+  const liveWorkerIds =
+    workerIds.size > 0 ? workerIds : activeRuns.length > 0 ? new Set(activeRuns.map((run) => run.workerId)) : undefined;
+  abortLiveWorkForFilter({
+    taskIds: liveTaskIds,
+    workerIds: liveWorkerIds,
+  });
+
+  for (const run of activeRuns) {
+    project = cancelTaskRunForRepo(repoRoot, { runId: run.runId, reason });
+    canceledRuns.push(run.runId);
+    canceledTasks.add(run.taskId);
+  }
+
+  const pending = cancelPendingWorkForRepo(repoRoot, { reason, taskIds, workerIds });
+  project = pending.project;
+  for (const taskId of pending.canceledTasks) canceledTasks.add(taskId);
+
+  return { canceledRuns, canceledTasks: [...canceledTasks], project };
+}
+
+export async function runParallelWorkForRepo(
+  repoRoot: string,
+  input: {
+    tasks: ParallelWorkItemInput[];
+    workerPrefix?: string;
   },
-): EvidenceBundle {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const selectedRun = input.runId ? run.runs.find((entry) => entry.runId === input.runId) : null;
-  const objective = input.objectiveId
-    ? (run.objectives.find((entry) => entry.objectiveId === input.objectiveId) ?? null)
-    : null;
-  const task = input.taskId
-    ? run.tasks.find((entry) => entry.taskId === input.taskId)
-    : selectedRun
-      ? run.tasks.find((entry) => entry.taskId === selectedRun.taskId)
-      : null;
-  const worker = input.workerId
-    ? (run.workers.find((entry) => entry.workerId === input.workerId) ?? null)
-    : input.workerName
-      ? (run.workers.find((entry) => entry.name === input.workerName) ?? null)
-      : selectedRun
-        ? (run.workers.find((entry) => entry.workerId === selectedRun.workerId) ?? null)
-        : task?.assignedWorkerId
-          ? (run.workers.find((entry) => entry.workerId === task.assignedWorkerId) ?? null)
-          : null;
-  const taskIds = new Set<string>();
-  const runIds = new Set<string>();
-  if (objective) {
-    for (const taskId of objective.taskIds) taskIds.add(taskId);
+  signal?: AbortSignal,
+  runner: ParallelWorkRunner = runTaskForRepo,
+): Promise<{
+  workers: WorkerRecord[];
+  tasks: TaskRecord[];
+  results: Array<{
+    taskId: string;
+    status: "fulfilled" | "rejected";
+    result: WorkerRunResult | null;
+    error: string | null;
+  }>;
+  canceledRuns: string[];
+  canceledTasks: string[];
+}> {
+  if (input.tasks.length === 0) {
+    throw new Error("At least one parallel work item is required");
   }
-  if (task) taskIds.add(task.taskId);
-  if (selectedRun) runIds.add(selectedRun.runId);
-  if (worker) {
-    for (const entry of run.tasks.filter((candidate) => candidate.assignedWorkerId === worker.workerId)) {
-      taskIds.add(entry.taskId);
+  const workerPrefix = input.workerPrefix?.trim() || "parallel-worker";
+  const items = input.tasks.map((item, index) => {
+    const title = item.title.trim();
+    const prompt = item.prompt.trim();
+    if (!title || !prompt) {
+      throw new Error(`Parallel work item ${index + 1} requires title and prompt`);
     }
-  }
-  for (const entry of run.runs) {
-    if (taskIds.has(entry.taskId) || runIds.has(entry.runId)) {
-      taskIds.add(entry.taskId);
-      runIds.add(entry.runId);
+    return {
+      title,
+      prompt,
+      workerName: item.workerName?.trim() || `${workerPrefix}-${index + 1}`,
+    };
+  });
+  const workerNames = new Set<string>();
+  for (const item of items) {
+    if (workerNames.has(item.workerName)) {
+      throw new Error(`Duplicate parallel worker name '${item.workerName}'`);
     }
+    workerNames.add(item.workerName);
   }
-  const tasks = run.tasks.filter((entry) => taskIds.has(entry.taskId));
-  const runs = run.runs.filter((entry) => runIds.has(entry.runId) || taskIds.has(entry.taskId));
-  const gates = run.gates.filter(
-    (gate) =>
-      (worker && gate.resourceRefs.workerId === worker.workerId) ||
-      (objective && gate.resourceRefs.objectiveId === objective.objectiveId) ||
-      (gate.resourceRefs.taskId !== undefined && taskIds.has(gate.resourceRefs.taskId)) ||
-      (gate.resourceRefs.runId !== undefined && runIds.has(gate.resourceRefs.runId)),
-  );
-  const artifacts = run.artifacts.filter(
-    (artifact) =>
-      (worker && artifact.resourceRefs.workerId === worker.workerId) ||
-      (objective && artifact.resourceRefs.objectiveId === objective.objectiveId) ||
-      (artifact.resourceRefs.taskId !== undefined && taskIds.has(artifact.resourceRefs.taskId)) ||
-      (artifact.resourceRefs.runId !== undefined && runIds.has(artifact.resourceRefs.runId)),
-  );
-  const eventMatches = (refs: { workerId?: string; objectiveId?: string; taskId?: string; runId?: string }) =>
-    (worker && refs.workerId === worker.workerId) ||
-    (objective && refs.objectiveId === objective.objectiveId) ||
-    (refs.taskId !== undefined && taskIds.has(refs.taskId)) ||
-    (refs.runId !== undefined && runIds.has(refs.runId));
-  const bundle: EvidenceBundle = {
-    purpose: input.purpose ?? "task_review",
-    generatedAt: new Date().toISOString(),
-    resourceRefs: {
-      projectKey: run.projectKey,
-      objectiveId: objective?.objectiveId,
-      workerId: worker?.workerId,
-      taskId: task?.taskId,
-      runId: selectedRun?.runId,
-    },
-    objective,
-    worker,
-    tasks,
-    runs,
-    gates,
-    artifacts,
-    events: input.includeEvents ? run.events.filter((event) => eventMatches(event.resourceRefs)) : undefined,
-    pr: worker?.pr ?? null,
-    summary: {
-      taskCount: tasks.length,
-      runCount: runs.length,
-      openGateCount: gates.filter((gate) => gate.status === "open").length,
-      artifactCount: artifacts.length,
-      terminalRunCount: runs.filter((entry) => isTerminalStatus(entry.status)).length,
-      completedTaskCount: tasks.filter((entry) => entry.state === "completed").length,
-      needsReviewTaskCount: tasks.filter((entry) => entry.state === "needs_review").length,
-      blockedTaskCount: tasks.filter((entry) => entry.state === "blocked").length,
-      failedTaskCount: tasks.filter((entry) => entry.state === "failed").length,
-    },
+  const workers: WorkerRecord[] = [];
+  const tasks: TaskRecord[] = [];
+
+  for (const item of items) {
+    const current = getOrCreateRunForRepo(repoRoot);
+    const existingWorker = current.workers.find((entry) => entry.name === item.workerName);
+    if (existingWorker) {
+      if (
+        existingWorker.lifecycle !== "idle" ||
+        existingWorker.recoverable ||
+        !existingWorker.worktreePath ||
+        !existingWorker.sessionFile
+      ) {
+        throw new Error(`Parallel worker '${item.workerName}' is not idle and ready for dispatch`);
+      }
+    }
+    const worker = existingWorker ?? (await createWorkerForRepo(repoRoot, item.workerName));
+    const task = createTaskForRepo(repoRoot, { title: item.title, prompt: item.prompt });
+    const assigned = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
+    workers.push(worker);
+    tasks.push(assigned);
+  }
+
+  const cancelReason = "Parent conductor parallel work was interrupted";
+  const cancelOwnedWork = () =>
+    cancelActiveWorkForRepo(repoRoot, {
+      reason: cancelReason,
+      taskIds: tasks.map((task) => task.taskId),
+      workerIds: workers.map((worker) => worker.workerId),
+    });
+
+  let canceledRuns: string[] = [];
+  let canceledTasks: string[] = [];
+  const collectOwnedCanceledWork = () => {
+    const project = getOrCreateRunForRepo(repoRoot);
+    const taskIds = new Set(tasks.map((task) => task.taskId));
+    const workerIds = new Set(workers.map((worker) => worker.workerId));
+    canceledRuns = [
+      ...new Set([
+        ...canceledRuns,
+        ...project.runs
+          .filter((run) => taskIds.has(run.taskId) && workerIds.has(run.workerId) && run.status === "aborted")
+          .map((run) => run.runId),
+      ]),
+    ];
+    canceledTasks = [
+      ...new Set([
+        ...canceledTasks,
+        ...project.tasks
+          .filter((task) => taskIds.has(task.taskId) && task.state === "canceled")
+          .map((task) => task.taskId),
+      ]),
+    ];
   };
-  if (input.persistArtifact) {
-    const withArtifact = mutateRepoRunSync(repoRoot, (latest) =>
-      addConductorArtifact(latest, {
-        type: "other",
-        ref: `evidence://${bundle.purpose}/${task?.taskId ?? worker?.workerId ?? objective?.objectiveId ?? selectedRun?.runId ?? latest.projectKey}/${Date.now().toString(36)}`,
-        resourceRefs: bundle.resourceRefs,
-        producer: { type: "parent_agent", id: "conductor" },
-        metadata: {
-          purpose: bundle.purpose,
-          taskIds: tasks.map((entry) => entry.taskId),
-          runIds: runs.map((entry) => entry.runId),
-          artifactIds: artifacts.map((entry) => entry.artifactId),
-          summary: bundle.summary,
-        },
-      }),
+  const onAbort = () => {
+    const canceled = cancelOwnedWork();
+    canceledRuns = [...new Set([...canceledRuns, ...canceled.canceledRuns])];
+    canceledTasks = [...new Set([...canceledTasks, ...canceled.canceledTasks])];
+  };
+  signal?.addEventListener("abort", onAbort);
+  if (signal?.aborted) onAbort();
+
+  const liveControllers = tasks.map((task, index) => {
+    const linked = createLinkedAbortController(signal);
+    const unregister = registerLiveWorkAbortHandle({
+      taskId: task.taskId,
+      workerId: workers[index]?.workerId,
+      controller: linked.controller,
+    });
+    return {
+      signal: linked.signal,
+      dispose: () => {
+        unregister();
+        linked.dispose();
+      },
+    };
+  });
+
+  try {
+    if (signal?.aborted) {
+      return { workers, tasks, results: [], canceledRuns, canceledTasks };
+    }
+    const settled = await Promise.allSettled(
+      tasks.map((task, index) => runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal)),
     );
-    bundle.persistedArtifact = withArtifact.artifacts.at(-1);
+    if (signal?.aborted) onAbort();
+    collectOwnedCanceledWork();
+    const results = settled.map((entry, index) =>
+      entry.status === "fulfilled"
+        ? { taskId: tasks[index]?.taskId ?? "", status: "fulfilled" as const, result: entry.value, error: null }
+        : {
+            taskId: tasks[index]?.taskId ?? "",
+            status: "rejected" as const,
+            result: null,
+            error: errorMessage(entry.reason),
+          },
+    );
+    return { workers, tasks, results, canceledRuns, canceledTasks };
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+    for (const controller of liveControllers) {
+      controller.dispose();
+    }
   }
-  return bundle;
 }
 
-export function checkReadinessForRepo(
+function hasParallelIntent(request: string): boolean {
+  return /\b(parallel|split|many|multiple|workers|fan[- ]?out|deep[- ]?dive|all)\b/i.test(request);
+}
+
+function hasSingleIntent(request: string): boolean {
+  return /\b(single|one worker|do not split|don't split|dont split|same worker|small|typo)\b/i.test(request);
+}
+
+function deriveWorkTitle(request: string): string {
+  const trimmed = request.trim().replace(/\s+/g, " ");
+  if (!trimmed) {
+    return "Conductor work";
+  }
+  return trimmed.length > 80 ? `${trimmed.slice(0, 77)}...` : trimmed;
+}
+
+function normalizeRunWorkItems(input: { request: string; tasks?: RunWorkItemInput[] }): RunWorkItemInput[] {
+  const candidates = input.tasks?.length
+    ? input.tasks
+    : [{ title: deriveWorkTitle(input.request), prompt: input.request }];
+  return candidates.map((task, index) => ({
+    ...task,
+    title: task.title.trim() || `Work item ${index + 1}`,
+    prompt: task.prompt.trim() || input.request.trim(),
+    workerName: task.workerName?.trim() || undefined,
+    writeScope: task.writeScope?.map((scope) => scope.trim()).filter(Boolean),
+    dependsOn: task.dependsOn?.map((dependency) => dependency.trim()).filter(Boolean),
+  }));
+}
+
+function normalizeWriteScope(scope: string): string {
+  return scope.trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
+}
+
+function writeScopesOverlap(left: string, right: string): boolean {
+  const normalizedLeft = normalizeWriteScope(left);
+  const normalizedRight = normalizeWriteScope(right);
+  if (!normalizedLeft || !normalizedRight) {
+    return false;
+  }
+  return (
+    normalizedLeft === normalizedRight ||
+    normalizedLeft.startsWith(`${normalizedRight}/`) ||
+    normalizedRight.startsWith(`${normalizedLeft}/`)
+  );
+}
+
+function findOverlappingWriteScopes(tasks: RunWorkItemInput[]): boolean {
+  const seen: string[] = [];
+  for (const task of tasks) {
+    for (const scope of task.writeScope ?? []) {
+      if (seen.some((knownScope) => writeScopesOverlap(knownScope, scope))) {
+        return true;
+      }
+      seen.push(scope);
+    }
+  }
+  return false;
+}
+
+function combineWorkItems(tasks: RunWorkItemInput[], request: string): RunWorkItemInput {
+  if (tasks.length === 1 && tasks[0]) {
+    return tasks[0];
+  }
+  return {
+    title: deriveWorkTitle(request),
+    prompt: [
+      request.trim(),
+      "",
+      "Run these work items coherently in one conductor worker because splitting is unsafe:",
+      ...tasks.map((task, index) => `${index + 1}. ${task.title}\n${task.prompt}`),
+    ].join("\n"),
+    writeScope: [...new Set(tasks.flatMap((task) => task.writeScope ?? []))],
+    dependsOn: [...new Set(tasks.flatMap((task) => task.dependsOn ?? []))],
+  };
+}
+
+function capParallelWorkItems(tasks: RunWorkItemInput[], maxWorkers: number): RunWorkItemInput[] {
+  if (tasks.length <= maxWorkers) {
+    return tasks;
+  }
+  const buckets = Array.from({ length: maxWorkers }, () => [] as RunWorkItemInput[]);
+  for (const [index, task] of tasks.entries()) {
+    buckets[index % maxWorkers]?.push(task);
+  }
+  return buckets.map((bucket, index) => ({
+    title: bucket.length === 1 ? (bucket[0]?.title ?? `Work shard ${index + 1}`) : `Work shard ${index + 1}`,
+    prompt:
+      bucket.length === 1
+        ? (bucket[0]?.prompt ?? "")
+        : bucket.map((task, taskIndex) => `${taskIndex + 1}. ${task.title}\n${task.prompt}`).join("\n\n"),
+    workerName: bucket.length === 1 ? bucket[0]?.workerName : undefined,
+    writeScope: [...new Set(bucket.flatMap((task) => task.writeScope ?? []))],
+  }));
+}
+
+export function planWorkRouting(input: {
+  request: string;
+  mode?: WorkRoutingMode;
+  tasks?: RunWorkItemInput[];
+  maxWorkers?: number;
+}): WorkRoutingDecision {
+  const request = input.request.trim();
+  if (!request) {
+    throw new Error("conductor_run_work requires a natural-language request");
+  }
+  const maxWorkers = Math.max(1, Math.floor(input.maxWorkers ?? 4));
+  const tasks = normalizeRunWorkItems({ request, tasks: input.tasks });
+  const riskFlags: string[] = [];
+  const hasDependencies = tasks.some((task) => (task.dependsOn?.length ?? 0) > 0);
+  const hasScopeOverlap = findOverlappingWriteScopes(tasks);
+  if (hasScopeOverlap) {
+    riskFlags.push("overlapping_write_scope");
+  }
+  if (tasks.length > maxWorkers) {
+    riskFlags.push("worker_cap_applied");
+  }
+
+  const requestedMode = input.mode ?? "auto";
+  if (requestedMode === "single") {
+    return {
+      mode: "single",
+      confidence: 1,
+      reason: "Single-worker mode was requested explicitly.",
+      tasks: [combineWorkItems(tasks, request)],
+      riskFlags,
+    };
+  }
+  if (requestedMode === "objective" || hasDependencies) {
+    return {
+      mode: "objective",
+      confidence: requestedMode === "objective" ? 1 : 0.9,
+      reason:
+        requestedMode === "objective"
+          ? "Objective mode was requested explicitly."
+          : "Dependent work requires objective scheduling instead of parallel fan-out.",
+      tasks,
+      riskFlags,
+    };
+  }
+
+  if (tasks.length <= 1 || hasSingleIntent(request) || hasScopeOverlap || maxWorkers === 1) {
+    return {
+      mode: "single",
+      confidence: tasks.length <= 1 ? 0.95 : 0.8,
+      reason:
+        tasks.length <= 1
+          ? "Single coherent work item; splitting would add coordination overhead."
+          : "Work should stay in one worker because parallel splitting is unsafe or was discouraged.",
+      tasks: [combineWorkItems(tasks, request)],
+      riskFlags,
+    };
+  }
+
+  if (requestedMode === "parallel" || hasParallelIntent(request)) {
+    return {
+      mode: "parallel",
+      confidence: requestedMode === "parallel" ? 1 : 0.85,
+      reason: "Independent work items can run in parallel under one foreground cancellation boundary.",
+      tasks: capParallelWorkItems(tasks, maxWorkers),
+      riskFlags,
+    };
+  }
+
+  return {
+    mode: "single",
+    confidence: 0.65,
+    reason: "No explicit parallel intent; defaulting to one coherent worker.",
+    tasks: [combineWorkItems(tasks, request)],
+    riskFlags,
+  };
+}
+
+export async function runWorkForRepo(
   repoRoot: string,
   input: {
-    workerId?: string;
-    workerName?: string;
-    taskId?: string;
-    purpose: ReadinessPurpose;
-    requireCompletionReport?: boolean;
-    requireTestEvidence?: boolean;
-    requireNoOpenGates?: boolean;
-    requireCommit?: boolean;
-    requirePush?: boolean;
-    requireApprovedReadyForPrGate?: boolean;
+    request: string;
+    mode?: WorkRoutingMode;
+    tasks?: RunWorkItemInput[];
+    workerPrefix?: string;
+    maxWorkers?: number;
+    execute?: boolean;
   },
-): ReadinessCheck {
-  const bundle = buildEvidenceBundleForRepo(repoRoot, { ...input, purpose: input.purpose });
-  const blockers: ReadinessCheck["blockers"] = [];
-  const warnings: ReadinessCheck["warnings"] = [];
-  if (input.purpose === "task_review") {
-    const task = bundle.tasks[0];
-    if (!task)
-      blockers.push({ code: "missing_task", message: "Task was not found", resourceRefs: bundle.resourceRefs });
-    if (task && !["completed", "needs_review"].includes(task.state)) {
-      blockers.push({
-        code: "task_not_terminal",
-        message: `Task is ${task.state}`,
-        resourceRefs: { taskId: task.taskId },
-      });
-    }
-    if (
-      (input.requireNoOpenGates ?? true) &&
-      bundle.gates.some((gate) => gate.status === "open" && gate.type !== "needs_review")
-    ) {
-      blockers.push({ code: "open_gate", message: "Open blocking gate exists", resourceRefs: bundle.resourceRefs });
-    }
-    if (
-      (input.requireCompletionReport ?? true) &&
-      !bundle.artifacts.some((artifact) => artifact.type === "completion_report")
-    ) {
-      blockers.push({
-        code: "missing_completion_report",
-        message: "Completion report artifact is required",
-        resourceRefs: bundle.resourceRefs,
-      });
-    }
-    if (input.requireTestEvidence && !bundle.artifacts.some((artifact) => artifact.type === "test_result")) {
-      blockers.push({
-        code: "missing_test_result",
-        message: "Test result artifact is required",
-        resourceRefs: bundle.resourceRefs,
-      });
-    }
-  } else {
-    if (!bundle.worker)
-      blockers.push({ code: "missing_worker", message: "Worker was not found", resourceRefs: bundle.resourceRefs });
-    if (bundle.tasks.filter((task) => ["completed", "needs_review"].includes(task.state)).length === 0) {
-      blockers.push({
-        code: "task_not_terminal",
-        message: "No completed or reviewable worker tasks found",
-        resourceRefs: bundle.resourceRefs,
-      });
-    }
-    if ((input.requireCommit ?? true) && !bundle.worker?.pr.commitSucceeded) {
-      blockers.push({
-        code: "missing_commit",
-        message: "Worker commit is required",
-        resourceRefs: bundle.resourceRefs,
-      });
-    }
-    if ((input.requirePush ?? true) && !bundle.worker?.pr.pushSucceeded) {
-      blockers.push({ code: "missing_push", message: "Worker push is required", resourceRefs: bundle.resourceRefs });
-    }
-    const readyGate = bundle.gates.find((gate) => gate.type === "ready_for_pr" && gate.status === "approved");
-    if ((input.requireApprovedReadyForPrGate ?? true) && !readyGate) {
-      blockers.push({
-        code: "missing_ready_for_pr_gate",
-        message: "Approved ready_for_pr gate is required",
-        resourceRefs: bundle.resourceRefs,
-      });
-    }
-    if (bundle.worker?.pr.url)
-      warnings.push({
-        code: "pr_already_created",
-        message: "Worker already has a PR",
-        resourceRefs: bundle.resourceRefs,
-      });
+  signal?: AbortSignal,
+  runner: ParallelWorkRunner = runTaskForRepo,
+): Promise<{
+  decision: WorkRoutingDecision;
+  workers: WorkerRecord[];
+  tasks: TaskRecord[];
+  single: { worker: WorkerRecord; task: TaskRecord; result: WorkerRunResult | null } | null;
+  parallel: Awaited<ReturnType<typeof runParallelWorkForRepo>> | null;
+  objective: {
+    objective: ReturnType<typeof createObjectiveForRepo>;
+    tasks: TaskRecord[];
+    schedule: Awaited<ReturnType<typeof scheduleObjectiveForRepo>> | null;
+  } | null;
+}> {
+  const decision = planWorkRouting(input);
+  const workerPrefix = input.workerPrefix?.trim() || "run-work";
+  const execute = input.execute ?? true;
+
+  if (decision.mode === "parallel") {
+    const parallel = await runParallelWorkForRepo(
+      repoRoot,
+      {
+        workerPrefix,
+        tasks: decision.tasks.map((task) => ({
+          title: task.title,
+          prompt: task.prompt,
+          workerName: task.workerName,
+        })),
+      },
+      signal,
+      runner,
+    );
+    return { decision, workers: parallel.workers, tasks: parallel.tasks, single: null, parallel, objective: null };
   }
-  const status =
-    blockers.length === 0
-      ? "ready"
-      : blockers.some((blocker) => blocker.code === "open_gate")
-        ? "blocked"
-        : "not_ready";
+
+  if (decision.mode === "objective") {
+    const objective = createObjectiveForRepo(repoRoot, {
+      title: deriveWorkTitle(input.request),
+      prompt: input.request,
+    });
+    const planned = planObjectiveForRepo(repoRoot, {
+      objectiveId: objective.objectiveId,
+      tasks: decision.tasks.map((task) => ({ title: task.title, prompt: task.prompt, dependsOn: task.dependsOn })),
+      rationale: decision.reason,
+    });
+    let workers: WorkerRecord[] = [];
+    if (execute) {
+      const current = getOrCreateRunForRepo(repoRoot);
+      workers = current.workers.filter(
+        (worker) => worker.lifecycle === "idle" && !worker.recoverable && worker.worktreePath && worker.sessionFile,
+      );
+      if (workers.length === 0) {
+        workers = [await createWorkerForRepo(repoRoot, `${workerPrefix}-objective-1`)];
+      }
+    }
+    const schedule = execute
+      ? await scheduleObjectiveForRepo(
+          repoRoot,
+          { objectiveId: objective.objectiveId, policy: "execute", maxConcurrency: input.maxWorkers },
+          signal,
+        )
+      : null;
+    const scheduledWorkerIds = new Set(schedule?.assigned.map((task) => task.assignedWorkerId).filter(Boolean));
+    return {
+      decision,
+      workers:
+        schedule && scheduledWorkerIds.size > 0
+          ? getOrCreateRunForRepo(repoRoot).workers.filter((worker) => scheduledWorkerIds.has(worker.workerId))
+          : workers,
+      tasks: planned.tasks,
+      single: null,
+      parallel: null,
+      objective: { ...planned, schedule },
+    };
+  }
+
+  const taskInput = decision.tasks[0];
+  if (!taskInput) {
+    throw new Error("conductor_run_work could not derive a work item");
+  }
+  const delegated = await delegateTaskForRepo(repoRoot, {
+    title: taskInput.title,
+    prompt: taskInput.prompt,
+    workerName: taskInput.workerName ?? `${workerPrefix}-1`,
+    startRun: false,
+  });
+  if (signal?.aborted) {
+    cancelActiveWorkForRepo(repoRoot, {
+      reason: "Parent conductor work was interrupted",
+      taskIds: [delegated.task.taskId],
+      workerIds: [delegated.worker.workerId],
+    });
+    return {
+      decision,
+      workers: [delegated.worker],
+      tasks: [delegated.task],
+      single: { worker: delegated.worker, task: delegated.task, result: null },
+      parallel: null,
+      objective: null,
+    };
+  }
+  const result = execute ? await runner(repoRoot, delegated.task.taskId, signal) : null;
   return {
-    purpose: input.purpose,
-    status,
-    generatedAt: new Date().toISOString(),
-    resourceRefs: bundle.resourceRefs,
-    bundle,
-    blockers,
-    warnings,
+    decision,
+    workers: [delegated.worker],
+    tasks: [delegated.task],
+    single: { worker: delegated.worker, task: delegated.task, result },
+    parallel: null,
+    objective: null,
   };
+}
+
+function cancelPendingWorkForRepo(
+  repoRoot: string,
+  input: {
+    reason: string;
+    taskIds: Set<string>;
+    workerIds: Set<string>;
+  },
+): { canceledTasks: string[]; project: RunRecord } {
+  const cancelableStates = new Set<TaskRecord["state"]>(["draft", "ready", "assigned"]);
+  const canceledTasks: string[] = [];
+  const affectedObjectiveIds = new Set<string>();
+  let project = mutateRepoRunSync(repoRoot, (run) => {
+    const now = new Date().toISOString();
+    let updated = run;
+    const tasks = run.tasks.map((task) => {
+      const matchesTask = input.taskIds.size === 0 || input.taskIds.has(task.taskId);
+      const matchesWorker =
+        input.workerIds.size === 0 || (task.assignedWorkerId !== null && input.workerIds.has(task.assignedWorkerId));
+      if (!matchesTask || !matchesWorker || task.activeRunId || !cancelableStates.has(task.state)) {
+        return task;
+      }
+      canceledTasks.push(task.taskId);
+      if (task.objectiveId) affectedObjectiveIds.add(task.objectiveId);
+      return { ...task, state: "canceled" as const, activeRunId: null, updatedAt: now };
+    });
+    if (canceledTasks.length === 0) {
+      return run;
+    }
+    updated = { ...run, tasks, updatedAt: now };
+    for (const taskId of canceledTasks) {
+      const task = tasks.find((entry) => entry.taskId === taskId);
+      updated = appendConductorEvent(updated, {
+        actor: { type: "parent_agent", id: "conductor" },
+        type: "task.canceled",
+        resourceRefs: {
+          projectKey: run.projectKey,
+          taskId,
+          workerId: task?.assignedWorkerId ?? undefined,
+        },
+        payload: { reason: input.reason },
+      });
+    }
+    return updated;
+  });
+
+  for (const objectiveId of affectedObjectiveIds) {
+    refreshObjectiveStatusForRepo(repoRoot, objectiveId);
+    project = getOrCreateRunForRepo(repoRoot);
+  }
+
+  return { canceledTasks, project };
 }
 
 export async function createWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
@@ -2073,103 +1494,6 @@ export async function createWorkerForRepo(repoRoot: string, workerName: string):
   return worker;
 }
 
-export function updateWorkerTaskForRepo(repoRoot: string, workerName: string, task: string): WorkerRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const worker = run.workers.find((entry) => entry.name === workerName);
-  if (!worker) {
-    throw new Error(`Worker named ${workerName} not found`);
-  }
-  const updatedRun = mutateRepoRunSync(repoRoot, (latest) =>
-    setWorkerLifecycle(setWorkerTask(latest, worker.workerId, task), worker.workerId, "idle"),
-  );
-  const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
-  if (!updatedWorker) {
-    throw new Error(`Worker named ${workerName} disappeared during task update`);
-  }
-  return updatedWorker;
-}
-
-export async function resumeWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
-  const run = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
-  const worker = run.workers.find((entry) => entry.name === workerName);
-  if (!worker) {
-    throw new Error(`Worker named ${workerName} not found`);
-  }
-  if (worker.lifecycle === "broken") {
-    throw new Error(`Worker named ${workerName} is broken and must be recovered before resume`);
-  }
-  if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
-    throw new Error(`Worker named ${workerName} does not have a valid session file`);
-  }
-
-  let runtime: Awaited<ReturnType<typeof resumeWorkerSessionRuntime>>;
-  try {
-    runtime = await resumeWorkerSessionRuntime(worker.sessionFile);
-  } catch (error) {
-    recordExternalOperationEvent(repoRoot, {
-      status: "failed",
-      resourceRefs: { workerId: worker.workerId },
-      payload: {
-        operation: "resume_worker",
-        name: worker.name,
-        sessionFile: worker.sessionFile,
-        errorMessage: errorMessage(error),
-      },
-    });
-    throw error;
-  }
-  // Resume in the current MVP means "reopen and re-link the persisted worker
-  // session" rather than "continue an autonomous running agent". For that
-  // reason, resume intentionally normalizes the worker back to idle.
-  const withEvent = mutateRepoRunSync(repoRoot, (latest) =>
-    appendExternalOperationEvent(
-      setWorkerLifecycle(
-        setWorkerRuntimeState(latest, worker.workerId, {
-          sessionFile: runtime.sessionFile,
-          sessionId: runtime.sessionId,
-          lastResumedAt: runtime.lastResumedAt,
-        }),
-        worker.workerId,
-        "idle",
-      ),
-      {
-        status: "succeeded",
-        resourceRefs: { workerId: worker.workerId },
-        payload: {
-          operation: "resume_worker",
-          name: worker.name,
-          sessionFile: runtime.sessionFile,
-          sessionId: runtime.sessionId,
-          lastResumedAt: runtime.lastResumedAt,
-          lifecycle: "idle",
-        },
-      },
-    ),
-  );
-  return withEvent.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
-}
-
-export function updateWorkerLifecycleForRepo(
-  repoRoot: string,
-  workerName: string,
-  lifecycle: WorkerLifecycleState,
-): WorkerRecord {
-  if (lifecycle === "broken") {
-    throw new Error("Broken lifecycle is reserved for detected health failures");
-  }
-  const run = getOrCreateRunForRepo(repoRoot);
-  const worker = run.workers.find((entry) => entry.name === workerName);
-  if (!worker) {
-    throw new Error(`Worker named ${workerName} not found`);
-  }
-  const updatedRun = mutateRepoRunSync(repoRoot, (latest) => setWorkerLifecycle(latest, worker.workerId, lifecycle));
-  const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
-  if (!updatedWorker) {
-    throw new Error(`Worker named ${workerName} disappeared during lifecycle update`);
-  }
-  return updatedWorker;
-}
-
 export function reconcileProjectForRepo(repoRoot: string, input: { now?: string; dryRun?: boolean } = {}): RunRecord {
   const healthReconciled = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
   const leaseReconciled = reconcileRunLeases(healthReconciled, input);
@@ -2198,50 +1522,6 @@ export function reconcileWorkerHealth(run: RunRecord): RunRecord {
     workers,
     updatedAt: new Date().toISOString(),
   };
-}
-
-export async function refreshWorkerSummaryForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const worker = run.workers.find((entry) => entry.name === workerName);
-  if (!worker) {
-    throw new Error(`Worker named ${workerName} not found`);
-  }
-  if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
-    throw new Error(`Worker named ${workerName} does not have a valid session file`);
-  }
-  let summaryText: string;
-  try {
-    summaryText = await summarizeWorkerSessionRuntime(worker.sessionFile);
-  } catch (error) {
-    recordExternalOperationEvent(repoRoot, {
-      status: "failed",
-      resourceRefs: { workerId: worker.workerId },
-      payload: {
-        operation: "refresh_worker_summary",
-        name: worker.name,
-        sessionFile: worker.sessionFile,
-        errorMessage: errorMessage(error),
-      },
-    });
-    throw error;
-  }
-  const updatedRun = mutateRepoRunSync(repoRoot, (latest) =>
-    appendExternalOperationEvent(setWorkerSummary(latest, worker.workerId, summaryText), {
-      status: "succeeded",
-      resourceRefs: { workerId: worker.workerId },
-      payload: {
-        operation: "refresh_worker_summary",
-        name: worker.name,
-        sessionFile: worker.sessionFile,
-        summaryLength: summaryText.length,
-      },
-    }),
-  );
-  const updatedWorker = updatedRun.workers.find((entry) => entry.workerId === worker.workerId);
-  if (!updatedWorker) {
-    throw new Error(`Worker named ${workerName} disappeared during summary refresh`);
-  }
-  return updatedWorker;
 }
 
 export function removeWorkerForRepo(repoRoot: string, workerName: string): WorkerRecord {
@@ -2458,7 +1738,7 @@ export function createWorkerPrForRepo(
     }
     throw new Error(`Worker ${worker.name} requires an approved ready_for_pr gate before PR creation`);
   }
-  const prBody = body?.trim() || worker.summary.text || worker.currentTask || `PR for ${worker.name}`;
+  const prBody = body?.trim() || `PR for ${worker.name}`;
   try {
     validatePrPreconditions(run.repoRoot);
   } catch (error) {
@@ -2563,11 +1843,7 @@ function mapWorkerRunStatusToRunStatus(status: WorkerRunResult["status"]): "succ
   }
 }
 
-function createGateId(): string {
-  return `gate-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export async function runTaskForRepo(repoRoot: string, taskId: string): Promise<WorkerRunResult> {
+export async function runTaskForRepo(repoRoot: string, taskId: string, signal?: AbortSignal): Promise<WorkerRunResult> {
   const started = startTaskRunForRepo(repoRoot, { taskId });
   const currentRun = getOrCreateRunForRepo(repoRoot);
   const worker = currentRun.workers.find((entry) => entry.workerId === started.run.workerId);
@@ -2584,123 +1860,62 @@ export async function runTaskForRepo(repoRoot: string, taskId: string): Promise<
 
   await preflightWorkerRunRuntime({ worktreePath: worker.worktreePath, sessionFile: worker.sessionFile });
 
-  const runtimeResult = await runWorkerPromptRuntime({
-    worktreePath: worker.worktreePath,
-    sessionFile: worker.sessionFile,
-    task: task.prompt,
-    taskContract: started.taskContract,
-    onConductorProgress: async (progress) => {
-      recordTaskProgressForRepo(repoRoot, progress);
-    },
-    onConductorComplete: async (completion) => {
-      recordTaskCompletionForRepo(repoRoot, completion);
-    },
-    onConductorGate: async (gate) => {
-      createGateForRepo(repoRoot, {
-        type: gate.type,
-        resourceRefs: { taskId: gate.taskId, runId: gate.runId, workerId: worker.workerId },
-        requestedDecision: gate.requestedDecision,
-      });
-    },
-    onConductorFollowUpTask: async (followUp) => {
-      createFollowUpTaskForRepo(repoRoot, followUp);
-    },
-  });
-
-  let createdFallbackCompletion = false;
-  mutateRepoRunSync(repoRoot, (latest) => {
-    const runAttempt = latest.runs.find((entry) => entry.runId === started.run.runId);
-    if (!runAttempt || runAttempt.finishedAt) {
-      return latest;
-    }
-    const semanticStatus =
-      runtimeResult.status === "success" ? "partial" : mapWorkerRunStatusToRunStatus(runtimeResult.status);
-    createdFallbackCompletion = true;
-    return completeTaskRun(latest, {
-      runId: started.run.runId,
-      status: semanticStatus,
-      completionSummary: runtimeResult.finalText,
-      errorMessage: runtimeResult.errorMessage,
-    });
-  });
-  if (createdFallbackCompletion && runtimeResult.status === "success") {
-    createGateForRepo(repoRoot, {
-      gateId: createGateId(),
-      type: "needs_review",
-      resourceRefs: { taskId, runId: started.run.runId, workerId: worker.workerId },
-      requestedDecision: `Review task ${taskId}: native worker exited without explicit conductor_child_complete`,
-    });
-  }
-
-  return {
-    workerName: worker.name,
-    status: runtimeResult.status,
-    finalText: runtimeResult.finalText,
-    errorMessage: runtimeResult.errorMessage,
-    sessionId: runtimeResult.sessionId,
-  };
-}
-
-export async function runWorkerForRepo(repoRoot: string, workerName: string, task: string): Promise<WorkerRunResult> {
-  const run = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
-  const worker = run.workers.find((entry) => entry.name === workerName);
-  if (!worker) {
-    throw new Error(`Worker named ${workerName} not found`);
-  }
-  if (worker.lifecycle === "broken") {
-    throw new Error(`Worker named ${workerName} is broken and must recover the worker first`);
-  }
-  if (worker.lifecycle === "running") {
-    throw new Error(`Worker named ${workerName} is already running and cannot accept overlapping runs`);
-  }
-  if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
-    throw new Error(`Worker named ${workerName} is missing its session file; recover the worker first`);
-  }
-  if (!worker.worktreePath || !existsSync(worker.worktreePath)) {
-    throw new Error(`Worker named ${workerName} is missing its worktree; recover the worker first`);
-  }
-
-  await preflightWorkerRunRuntime({
-    worktreePath: worker.worktreePath,
-    sessionFile: worker.sessionFile,
-  });
-
-  mutateRepoRunSync(repoRoot, (latest) => {
-    const reconciled = reconcileWorkerHealth(latest);
-    const latestWorker = reconciled.workers.find((entry) => entry.workerId === worker.workerId);
-    if (!latestWorker) {
-      throw new Error(`Worker named ${workerName} not found`);
-    }
-    if (latestWorker.lifecycle === "broken") {
-      throw new Error(`Worker named ${workerName} is broken and must recover the worker first`);
-    }
-    if (latestWorker.lifecycle === "running") {
-      throw new Error(`Worker named ${workerName} is already running and cannot accept overlapping runs`);
-    }
-    return startWorkerRun(reconciled, latestWorker.workerId, { task, sessionId: null });
+  const linkedSignal = createLinkedAbortController(signal);
+  const unregisterLiveRun = registerLiveWorkAbortHandle({
+    runId: started.run.runId,
+    taskId,
+    workerId: worker.workerId,
+    controller: linkedSignal.controller,
   });
 
   try {
     const runtimeResult = await runWorkerPromptRuntime({
       worktreePath: worker.worktreePath,
       sessionFile: worker.sessionFile,
-      task,
-      onSessionReady: async (sessionId) => {
-        mutateRepoRunSync(repoRoot, (latest) => setWorkerRunSessionId(latest, worker.workerId, sessionId));
+      task: task.prompt,
+      signal: linkedSignal.signal,
+      taskContract: started.taskContract,
+      onConductorProgress: async (progress) => {
+        recordTaskProgressForRepo(repoRoot, progress);
+      },
+      onConductorComplete: async (completion) => {
+        recordTaskCompletionForRepo(repoRoot, completion);
+      },
+      onConductorGate: async (gate) => {
+        createGateForRepo(repoRoot, {
+          type: gate.type,
+          resourceRefs: { taskId: gate.taskId, runId: gate.runId, workerId: worker.workerId },
+          requestedDecision: gate.requestedDecision,
+        });
+      },
+      onConductorFollowUpTask: async (followUp) => {
+        createFollowUpTaskForRepo(repoRoot, followUp);
       },
     });
 
+    let createdFallbackCompletion = false;
     mutateRepoRunSync(repoRoot, (latest) => {
-      let nextRun = latest;
-      const latestWorker = nextRun.workers.find((entry) => entry.workerId === worker.workerId);
-      if (runtimeResult.sessionId && latestWorker?.lastRun?.sessionId !== runtimeResult.sessionId) {
-        nextRun = setWorkerRunSessionId(nextRun, worker.workerId, runtimeResult.sessionId);
+      const runAttempt = latest.runs.find((entry) => entry.runId === started.run.runId);
+      if (!runAttempt || runAttempt.finishedAt) {
+        return latest;
       }
-      return finishWorkerRun(nextRun, worker.workerId, {
-        status: runtimeResult.status,
+      const semanticStatus =
+        runtimeResult.status === "success" ? "partial" : mapWorkerRunStatusToRunStatus(runtimeResult.status);
+      createdFallbackCompletion = true;
+      return completeTaskRun(latest, {
+        runId: started.run.runId,
+        status: semanticStatus,
+        completionSummary: runtimeResult.finalText,
         errorMessage: runtimeResult.errorMessage,
       });
     });
+    if (createdFallbackCompletion && runtimeResult.status === "success") {
+      createGateForRepo(repoRoot, {
+        type: "needs_review",
+        resourceRefs: { taskId, runId: started.run.runId, workerId: worker.workerId },
+        requestedDecision: `Review task ${taskId}: native worker exited without explicit conductor_child_complete`,
+      });
+    }
 
     return {
       workerName: worker.name,
@@ -2709,29 +1924,9 @@ export async function runWorkerForRepo(repoRoot: string, workerName: string, tas
       errorMessage: runtimeResult.errorMessage,
       sessionId: runtimeResult.sessionId,
     };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-
-    try {
-      mutateRepoRunSync(repoRoot, (latest) =>
-        finishWorkerRun(latest, worker.workerId, {
-          status: "error",
-          errorMessage: message,
-        }),
-      );
-    } catch (persistenceError) {
-      const persistenceMessage =
-        persistenceError instanceof Error ? persistenceError.message : String(persistenceError);
-      throw new Error(`${message} (Additionally failed to persist worker run error state: ${persistenceMessage})`);
-    }
-
-    return {
-      workerName: worker.name,
-      status: "error",
-      finalText: null,
-      errorMessage: message,
-      sessionId: null,
-    };
+  } finally {
+    unregisterLiveRun();
+    linkedSignal.dispose();
   }
 }
 

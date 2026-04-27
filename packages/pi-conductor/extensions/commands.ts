@@ -1,29 +1,12 @@
 import {
-  commitWorkerForRepo,
   createTaskForRepo,
   createWorkerForRepo,
-  createWorkerPrForRepo,
   getOrCreateRunForRepo,
-  pushWorkerForRepo,
   reconcileProjectForRepo,
   reconcileWorkerHealth,
-  recoverWorkerForRepo,
-  refreshWorkerSummaryForRepo,
-  removeWorkerForRepo,
-  resumeWorkerForRepo,
-  runWorkerForRepo,
-  updateWorkerLifecycleForRepo,
-  updateWorkerTaskForRepo,
 } from "./conductor.js";
 import { formatRunStatus } from "./status.js";
 import { queryConductorEvents } from "./storage.js";
-
-const LEGACY_SLASH_DEPRECATION =
-  "deprecated: legacy /conductor worker subcommands will be removed; prefer resource-native conductor_* tools.\n";
-
-function legacySlashResponse(text: string): string {
-  return `${LEGACY_SLASH_DEPRECATION}${text}`;
-}
 
 function getUsage(): string {
   return [
@@ -172,119 +155,6 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
     const after = reconcileProjectForRepo(cwd, { dryRun });
     const changed = after.revision !== before.revision || after.updatedAt !== before.updatedAt;
     return `${dryRun ? "previewed" : "reconciled"} project ${after.projectKey}: changed=${changed} workers=${after.workers.length} tasks=${after.tasks.length} runs=${after.runs.length}`;
-  }
-  const removedLegacySubcommands = new Set([
-    "start",
-    "task",
-    "resume",
-    "run",
-    "state",
-    "recover",
-    "summarize",
-    "cleanup",
-    "commit",
-    "push",
-    "pr",
-  ]);
-  if (removedLegacySubcommands.has(subcommand ?? "")) {
-    return `error: legacy /conductor ${subcommand} was removed; use resource-native conductor_* tools such as conductor_create_worker, conductor_delegate_task, conductor_run_task, conductor_cleanup_worker, conductor_commit_worker, conductor_push_worker, and conductor_create_worker_pr`;
-  }
-
-  if (subcommand === "start") {
-    const workerName = rest.join(" ").trim();
-    if (!workerName) {
-      return `${getUsage()}\n\nerror: missing worker name`;
-    }
-    const worker = await createWorkerForRepo(cwd, workerName);
-    return legacySlashResponse(`created worker ${worker.name} [${worker.workerId}] on branch ${worker.branch}`);
-  }
-  if (subcommand === "task") {
-    const [workerName, ...taskParts] = rest;
-    const task = taskParts.join(" ").trim();
-    if (!workerName || !task) {
-      return `${getUsage()}\n\nerror: missing worker name or task`;
-    }
-    const worker = updateWorkerTaskForRepo(cwd, workerName, task);
-    return legacySlashResponse(`updated task for ${worker.name}: ${worker.currentTask}`);
-  }
-  if (subcommand === "resume") {
-    const workerName = rest.join(" ").trim();
-    if (!workerName) {
-      return `${getUsage()}\n\nerror: missing worker name`;
-    }
-    const worker = await resumeWorkerForRepo(cwd, workerName);
-    return legacySlashResponse(`resumed worker ${worker.name}: session=${worker.sessionFile}`);
-  }
-  if (subcommand === "run") {
-    const [workerName, ...taskParts] = rest;
-    const task = taskParts.join(" ").trim();
-    if (!workerName) {
-      return `${getUsage()}\n\nerror: missing worker name`;
-    }
-    if (!task) {
-      return `${getUsage()}\n\nerror: missing task`;
-    }
-    const result = await runWorkerForRepo(cwd, workerName, task);
-    const summary = result.finalText ?? result.errorMessage ?? "Run completed without a final assistant summary";
-    return legacySlashResponse(`ran worker ${result.workerName}: outcome=${result.status} result=${summary}`);
-  }
-  if (subcommand === "state") {
-    const [workerName, lifecycle] = rest;
-    if (!workerName || !lifecycle) {
-      return `${getUsage()}\n\nerror: missing worker name or lifecycle state`;
-    }
-    const worker = updateWorkerLifecycleForRepo(cwd, workerName, lifecycle as never);
-    return legacySlashResponse(`updated worker ${worker.name} state to ${worker.lifecycle}`);
-  }
-  if (subcommand === "recover") {
-    const workerName = rest.join(" ").trim();
-    if (!workerName) {
-      return `${getUsage()}\n\nerror: missing worker name`;
-    }
-    const worker = await recoverWorkerForRepo(cwd, workerName);
-    return legacySlashResponse(`recovered worker ${worker.name}: session=${worker.sessionFile}`);
-  }
-  if (subcommand === "summarize") {
-    const workerName = rest.join(" ").trim();
-    if (!workerName) {
-      return `${getUsage()}\n\nerror: missing worker name`;
-    }
-    const worker = await refreshWorkerSummaryForRepo(cwd, workerName);
-    return legacySlashResponse(`refreshed summary for ${worker.name}: ${worker.summary.text}`);
-  }
-  if (subcommand === "cleanup") {
-    const workerName = rest.join(" ").trim();
-    if (!workerName) {
-      return `${getUsage()}\n\nerror: missing worker name`;
-    }
-    const worker = removeWorkerForRepo(cwd, workerName);
-    return legacySlashResponse(`removed worker ${worker.name} [${worker.workerId}]`);
-  }
-  if (subcommand === "commit") {
-    const [workerName, ...messageParts] = rest;
-    const message = messageParts.join(" ").trim();
-    if (!workerName || !message) {
-      return `${getUsage()}\n\nerror: missing worker name or commit message`;
-    }
-    const worker = commitWorkerForRepo(cwd, workerName, message);
-    return legacySlashResponse(`committed worker ${worker.name}: ${message}`);
-  }
-  if (subcommand === "push") {
-    const workerName = rest.join(" ").trim();
-    if (!workerName) {
-      return `${getUsage()}\n\nerror: missing worker name`;
-    }
-    const worker = pushWorkerForRepo(cwd, workerName);
-    return legacySlashResponse(`pushed worker ${worker.name} on branch ${worker.branch}`);
-  }
-  if (subcommand === "pr") {
-    const [workerName, ...titleParts] = rest;
-    const title = titleParts.join(" ").trim();
-    if (!workerName || !title) {
-      return `${getUsage()}\n\nerror: missing worker name or PR title`;
-    }
-    const worker = createWorkerPrForRepo(cwd, workerName, title);
-    return legacySlashResponse(`created PR for ${worker.name}: ${worker.pr.url}`);
   }
 
   return `${getUsage()}\n\nerror: unknown subcommand '${subcommand}'`;

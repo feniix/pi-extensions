@@ -10,6 +10,7 @@ Use this workflow when `pi-conductor` should coordinate work as a durable local 
 ## Core principles
 
 - Conductor-owned state is canonical: objectives, tasks, runs, gates, artifacts, and events are the source of truth.
+- Natural language is enough for parent orchestration. Do not ask the user to name conductor tools, worker IDs, task IDs, or run IDs when the requested action can be inferred.
 - Scheduler execution is explicit. Default to safe previews; use `policy: "execute"` only when the user wants conductor to run work.
 - Child task completion must be explicit through run-scoped child tools. A backend exit is not semantic completion.
 - Human approval gates are UI-only. Do not create model-callable human approval shortcuts.
@@ -30,6 +31,8 @@ Use this workflow when `pi-conductor` should coordinate work as a durable local 
 5. Preview scheduling safely:
    - `conductor_scheduler_tick({ objectiveId, policy: "safe", maxActions: 3 })`
 6. Execute intentionally when ready:
+   - Prefer `conductor_run_work({ request, tasks, mode: "auto" })` for natural-language work. Let conductor decide whether to use one worker, parallel workers, or an objective DAG.
+   - Use `conductor_run_parallel_work({ tasks })` only as a lower-level primitive when the work has already been proven parallel-safe.
    - `conductor_scheduler_tick({ objectiveId, policy: "execute", maxRuns: 1 })`
    - or `conductor_run_next_action({ objectiveId, policy: "execute" })`
 7. Monitor evidence and blockers:
@@ -45,6 +48,7 @@ Use this workflow when `pi-conductor` should coordinate work as a durable local 
 
 ## Recovery workflow
 
+- For natural-language stop/cancel/escape requests, call `conductor_cancel_active_work({ reason })`; do not ask the user to supply run IDs.
 - Use `conductor_reconcile_project({ dryRun: true })` before mutating recovery state.
 - If leases are stale or worker state drifted, use `conductor_reconcile_project({ dryRun: false })`.
 - Use `conductor_recover_worker({ name })` for broken worker session linkage.

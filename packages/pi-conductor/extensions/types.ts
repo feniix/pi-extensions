@@ -1,6 +1,6 @@
 export const CONDUCTOR_SCHEMA_VERSION = 1;
 
-export type WorkerLifecycleState = "idle" | "running" | "blocked" | "ready_for_pr" | "done" | "broken" | "archived";
+export type WorkerLifecycleState = "idle" | "running" | "broken" | "archived";
 export type ObjectiveStatus = "draft" | "active" | "blocked" | "needs_review" | "completed" | "canceled";
 export type WorkerRunStatus = "success" | "error" | "aborted";
 
@@ -235,6 +235,7 @@ export type ConductorEventType =
   | "scheduler.tick_started"
   | "scheduler.tick_succeeded"
   | "task.assigned"
+  | "task.canceled"
   | "task.completion_rejected"
   | "task.created"
   | "task.followup_created"
@@ -254,11 +255,7 @@ export type ConductorEventType =
   | "worker.push_failed"
   | "worker.push_succeeded"
   | "worker.recovery_failed"
-  | "worker.recovery_succeeded"
-  | "worker.resume_failed"
-  | "worker.resume_succeeded"
-  | "worker.summary_refresh_failed"
-  | "worker.summary_refreshed";
+  | "worker.recovery_succeeded";
 
 export interface ConductorEvent {
   eventId: string;
@@ -352,12 +349,6 @@ export interface ArtifactRecord {
   updatedAt: string;
 }
 
-export interface WorkerSummary {
-  text: string | null;
-  updatedAt: string | null;
-  stale: boolean;
-}
-
 export interface WorkerPrState {
   url: string | null;
   number: number | null;
@@ -372,15 +363,6 @@ export interface WorkerRuntimeState {
   lastResumedAt: string | null;
 }
 
-export interface WorkerLastRun {
-  task: string;
-  status: WorkerRunStatus | null;
-  startedAt: string;
-  finishedAt: string | null;
-  errorMessage: string | null;
-  sessionId: string | null;
-}
-
 export interface WorkerRecord {
   workerId: string;
   name: string;
@@ -388,11 +370,8 @@ export interface WorkerRecord {
   worktreePath: string | null;
   sessionFile: string | null;
   runtime: WorkerRuntimeState;
-  currentTask: string | null;
   lifecycle: WorkerLifecycleState;
   recoverable: boolean;
-  lastRun: WorkerLastRun | null;
-  summary: WorkerSummary;
   pr: WorkerPrState;
   createdAt: string;
   updatedAt: string;
@@ -477,6 +456,7 @@ export interface RuntimeRunContext {
   sessionFile: string;
   task: string;
   taskContract?: TaskContractInput;
+  signal?: AbortSignal;
   onSessionReady?: (sessionId: string) => void | Promise<void>;
   onConductorProgress?: (input: ConductorProgressReportInput) => void | Promise<void>;
   onConductorComplete?: (input: ConductorCompletionReportInput) => void | Promise<void>;

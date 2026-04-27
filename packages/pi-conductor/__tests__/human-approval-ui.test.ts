@@ -330,7 +330,7 @@ describe("trusted human gate approval UI", () => {
     });
   });
 
-  it("can browse open gates with the dashboard select fallback", async () => {
+  it("can browse open gates with the dashboard select UI path", async () => {
     const firstGate = createGateForRepo(repoRoot, {
       type: "needs_input",
       resourceRefs: {},
@@ -464,7 +464,7 @@ describe("trusted human gate approval UI", () => {
     });
   });
 
-  it("can browse open gates with the select fallback", async () => {
+  it("can browse open gates with the select UI path", async () => {
     const firstGate = createGateForRepo(repoRoot, {
       type: "needs_input",
       resourceRefs: {},
