@@ -25,6 +25,7 @@ Agent-native local control plane for Pi worker orchestration.
 - Child tool calls are bound to the task/run contract, support `idempotencyKey`, and are not registered as broad parent-agent tools.
 - Parent agents can explicitly grant child runs permission to create scoped follow-up tasks; this is disabled by default.
 - Parent-agent task control supports safe task update, explicit cancellation, and retry without overwriting prior run history.
+- Natural-language orchestration can create/reuse workers, create/assign tasks, run parallel work inside one foreground abort boundary, and cancel owned runs/tasks when the parent operation is interrupted.
 - Parent-agent orchestration advice is available through `conductor_next_actions`; `conductor_run_next_action` and `conductor_scheduler_tick` execute only policy-allowed non-human recommendations, while `conductor_project_brief`, `conductor_task_brief`, and `conductor_resource_timeline` provide markdown + structured state/history digests for LLM handoffs.
 - LLM review helpers include task assessment, blocker diagnosis, objective DAG batching, safe artifact reads, and human review packet preparation.
 - Objectives group related tasks above the worker/run layer so parent agents can keep multi-task goals explicit, expand them into durable task plans with `conductor_plan_objective`, and roll up linked task states with `conductor_refresh_objective_status`.
@@ -71,6 +72,9 @@ Resource/control-plane tools:
 - `conductor_project_brief`
 - `conductor_task_brief`
 - `conductor_resource_timeline`
+- `conductor_run_work`
+- `conductor_run_parallel_work`
+- `conductor_cancel_active_work`
 - `conductor_run_next_action`
 - `conductor_assess_task`
 - `conductor_read_artifact`
@@ -157,6 +161,37 @@ conductor_scheduler_tick({ objectiveId, maxActions: 1, policy: "safe" })
 conductor_scheduler_tick({ maxActions: 4, maxRuns: 2, fairness: "round_robin", perObjectiveLimit: 1, policy: "execute" })
 conductor_schedule_objective({ objectiveId, maxConcurrency: 2, policy: "safe" })
 ```
+
+### Run work from natural language
+
+When a parent agent receives a normal user request, it should call the high-level work router instead of asking the user for worker IDs, task IDs, run IDs, or exact conductor tool names. `conductor_run_work` decides whether to keep the work in one worker, fan out independent shards, or create an objective DAG for dependent work:
+
+```text
+conductor_run_work({
+  request: "Deep dive pi-conductor maintainability and verify it",
+  maxWorkers: 3,
+  tasks: [
+    { title: "Runtime review", prompt: "Inspect runtime/session behavior", writeScope: ["extensions/runtime.ts"] },
+    { title: "Tool review", prompt: "Inspect conductor tool ergonomics", writeScope: ["extensions/tools/"] },
+    { title: "Test review", prompt: "Inspect useful test coverage", writeScope: ["__tests__/"] }
+  ]
+})
+```
+
+The router is conservative. It splits only when work items are independent, have distinct scopes, and the request implies parallelism. It stays single-worker for small work, overlapping write scopes, or coherent refactors. It uses objective planning when candidate tasks declare dependencies.
+
+`conductor_run_parallel_work` remains the lower-level primitive for callers that already made a parallel-safe decision:
+
+```text
+conductor_run_parallel_work({
+  tasks: [
+    { title: "Backend shard", prompt: "Implement and verify the backend changes" },
+    { title: "Tests shard", prompt: "Add focused regression tests and report evidence" }
+  ]
+})
+```
+
+If the user interrupts or asks in natural language to stop conductor work, use `conductor_cancel_active_work({ reason: "user requested stop" })`. It cancels active runs and conductor-owned queued tasks without requiring run IDs.
 
 ### Inspect dependency scheduling for parallel-safe work
 
