@@ -15,6 +15,14 @@ vi.mock("../extensions/runtime.js", async (importOriginal) => {
     ...actual,
     preflightWorkerRunRuntime: runtimeMocks.preflightWorkerRunRuntime,
     runWorkerPromptRuntime: runtimeMocks.runWorkerPromptRuntime,
+    getWorkerRunRuntimeBackend: vi.fn((mode = "headless") => {
+      if (mode !== "headless") throw new Error(`${mode} runtime is not implemented yet`);
+      return {
+        mode,
+        preflight: runtimeMocks.preflightWorkerRunRuntime,
+        run: runtimeMocks.runWorkerPromptRuntime,
+      };
+    }),
   };
 });
 

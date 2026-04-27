@@ -295,6 +295,53 @@ export function validateRunRecord(run: RunRecord): void {
     }
   }
   for (const attempt of normalized.runs) {
+    assertRequiredKeys(
+      attempt,
+      [
+        "runId",
+        "taskId",
+        "workerId",
+        "taskRevision",
+        "status",
+        "backend",
+        "backendRunId",
+        "sessionId",
+        "runtime",
+        "leaseGeneration",
+        "leaseStartedAt",
+        "leaseExpiresAt",
+        "lastHeartbeatAt",
+        "startedAt",
+        "finishedAt",
+        "completionSummary",
+        "errorMessage",
+        "artifactIds",
+        "gateIds",
+      ],
+      `Run ${attempt.runId ?? "<unknown>"}`,
+    );
+    assertRequiredKeys(
+      attempt.runtime,
+      [
+        "mode",
+        "status",
+        "sessionId",
+        "cwd",
+        "command",
+        "runnerPid",
+        "processGroupId",
+        "tmux",
+        "logPath",
+        "viewerCommand",
+        "viewerStatus",
+        "diagnostics",
+        "heartbeatAt",
+        "cleanupStatus",
+        "startedAt",
+        "finishedAt",
+      ],
+      `Run ${attempt.runId} runtime`,
+    );
     if (!indexes.taskIds.has(attempt.taskId)) {
       throw new Error(`Run ${attempt.runId} references missing task ${attempt.taskId}`);
     }

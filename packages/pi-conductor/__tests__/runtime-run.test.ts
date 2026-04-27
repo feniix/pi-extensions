@@ -25,6 +25,7 @@ import {
   buildRunScopedConductorTools,
   buildTaskContractPrompt,
   extractFinalAssistantText,
+  getWorkerRunRuntimeBackend,
   mapStopReasonToRunOutcome,
   preflightWorkerRunRuntime,
   runWorkerPromptRuntime,
@@ -342,6 +343,36 @@ describe("worker run runtime helpers", () => {
     await expect(preflightWorkerRunRuntime({ worktreePath, sessionFile })).rejects.toThrow(
       /No usable model or provider configuration/,
     );
+  });
+
+  it("routes headless execution through a runtime backend interface", async () => {
+    const worktreePath = mkdtempSync(join(tmpdir(), "pi-conductor-runtime-"));
+    const sessionFile = join(worktreePath, "session.jsonl");
+    writeFileSync(sessionFile, "{}\n", "utf-8");
+    codingAgentMocks.openSession.mockReturnValue({} as never);
+
+    const session = {
+      sessionId: "run-session-backend",
+      messages: [] as unknown[],
+      bindExtensions: vi.fn(async () => {}),
+      prompt: vi.fn(async () => {
+        session.messages.push({ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done" }] });
+      }),
+      abort: vi.fn(async () => {}),
+      dispose: vi.fn(),
+    };
+    codingAgentMocks.createAgentSession.mockResolvedValue({ session });
+
+    const backend = getWorkerRunRuntimeBackend("headless");
+    expect(backend.mode).toBe("headless");
+    const result = await backend.run({ worktreePath, sessionFile, task: "do work" });
+
+    expect(result).toMatchObject({ status: "success", finalText: "done", sessionId: "run-session-backend" });
+  });
+
+  it("fails closed for visible runtime modes until their adapters are implemented", () => {
+    expect(() => getWorkerRunRuntimeBackend("tmux")).toThrow(/tmux runtime is not implemented/i);
+    expect(() => getWorkerRunRuntimeBackend("iterm-tmux")).toThrow(/iterm-tmux runtime is not implemented/i);
   });
 
   it("returns successful outcome from assistant final state and text extraction", async () => {

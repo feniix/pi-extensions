@@ -14,6 +14,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { deriveProjectKey } from "./project-key.js";
+import { createRunRuntimeMetadata, mapRunStatusToRuntimeStatus } from "./runtime-metadata.js";
 import { defaultOperationForGate, normalizeProjectRecord } from "./storage-normalize.js";
 import { validateRunRecord } from "./storage-validation.js";
 
@@ -523,6 +524,13 @@ export function startTaskRun(
     backend: input.backend,
     backendRunId: null,
     sessionId: worker.runtime.sessionId,
+    runtime: createRunRuntimeMetadata({
+      mode: "headless",
+      status: "running",
+      sessionId: worker.runtime.sessionId,
+      cwd: worker.worktreePath,
+      startedAt: now,
+    }),
     leaseGeneration: 1,
     leaseStartedAt: now,
     leaseExpiresAt: input.leaseExpiresAt,
@@ -597,6 +605,12 @@ export function cancelTaskRun(run: RunRecord, input: { runId: string; reason: st
         ? {
             ...entry,
             status: "aborted" as const,
+            runtime: {
+              ...entry.runtime,
+              status: "aborted" as const,
+              finishedAt: now,
+              cleanupStatus: entry.runtime.mode === "headless" ? "not_required" : entry.runtime.cleanupStatus,
+            },
             finishedAt: now,
             leaseExpiresAt: null,
             errorMessage: input.reason,
@@ -652,6 +666,7 @@ export function recordRunHeartbeat(
         ? {
             ...entry,
             lastHeartbeatAt: now,
+            runtime: { ...entry.runtime, heartbeatAt: now },
             leaseExpiresAt: input.leaseExpiresAt === undefined ? entry.leaseExpiresAt : input.leaseExpiresAt,
           }
         : entry,
@@ -694,7 +709,14 @@ export function reconcileRunLeases(run: RunRecord, input: { now?: string } = {})
       ...current,
       runs: current.runs.map((entry) =>
         entry.runId === expired.runId
-          ? { ...entry, status: "stale" as const, finishedAt: now, leaseExpiresAt: null, errorMessage: "Lease expired" }
+          ? {
+              ...entry,
+              status: "stale" as const,
+              runtime: { ...entry.runtime, status: "exited_error" as const, finishedAt: now },
+              finishedAt: now,
+              leaseExpiresAt: null,
+              errorMessage: "Lease expired",
+            }
           : entry,
       ),
       tasks: current.tasks.map((entry) =>
@@ -1106,7 +1128,12 @@ export function recordTaskProgress(
     ),
     runs: normalized.runs.map((entry) =>
       entry.runId === input.runId
-        ? { ...entry, lastHeartbeatAt: now, artifactIds: [...entry.artifactIds, ...artifactIds] }
+        ? {
+            ...entry,
+            lastHeartbeatAt: now,
+            runtime: { ...entry.runtime, heartbeatAt: now },
+            artifactIds: [...entry.artifactIds, ...artifactIds],
+          }
         : entry,
     ),
     artifacts: artifact ? [...normalized.artifacts, artifact] : normalized.artifacts,
@@ -1222,6 +1249,12 @@ export function completeTaskRun(
         ? {
             ...entry,
             status: input.status,
+            runtime: {
+              ...entry.runtime,
+              status: mapRunStatusToRuntimeStatus(input.status),
+              finishedAt: now,
+              cleanupStatus: entry.runtime.mode === "headless" ? "not_required" : entry.runtime.cleanupStatus,
+            },
             finishedAt: now,
             leaseExpiresAt: null,
             completionSummary: input.completionSummary ?? null,

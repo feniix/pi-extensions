@@ -187,7 +187,17 @@ describe("storage helpers", () => {
     });
 
     expect(running.tasks[0]).toMatchObject({ state: "running", activeRunId: "run-1", runIds: ["run-1"] });
-    expect(running.runs[0]).toMatchObject({ runId: "run-1", status: "running", taskRevision: 1 });
+    expect(running.runs[0]).toMatchObject({
+      runId: "run-1",
+      status: "running",
+      taskRevision: 1,
+      runtime: {
+        mode: "headless",
+        status: "running",
+        sessionId: null,
+        cleanupStatus: "not_required",
+      },
+    });
     expect(running.workers[0]?.lifecycle).toBe("running");
 
     const completed = completeTaskRun(running, {
@@ -200,6 +210,7 @@ describe("storage helpers", () => {
     expect(completed.runs[0]).toMatchObject({
       status: "succeeded",
       completionSummary: "Implemented durable task runs",
+      runtime: { status: "exited_success", cleanupStatus: "not_required" },
     });
     expect(completed.workers[0]?.lifecycle).toBe("idle");
     expect(completed.events.map((event) => event.type)).toContain("run.completed");
@@ -235,10 +246,15 @@ describe("storage helpers", () => {
     });
     expect(heartbeat.runs[0]).toMatchObject({ leaseExpiresAt: "2026-04-24T02:00:00.000Z" });
     expect(heartbeat.runs[0]?.lastHeartbeatAt).toBeTruthy();
+    expect(heartbeat.runs[0]?.runtime.heartbeatAt).toBeTruthy();
     expect(heartbeat.events.map((event) => event.type)).toContain("run.heartbeat");
 
     const reconciled = reconcileRunLeases(heartbeat, { now: "2026-04-24T02:00:01.000Z" });
-    expect(reconciled.runs[0]).toMatchObject({ status: "stale", finishedAt: "2026-04-24T02:00:01.000Z" });
+    expect(reconciled.runs[0]).toMatchObject({
+      status: "stale",
+      finishedAt: "2026-04-24T02:00:01.000Z",
+      runtime: { status: "exited_error", finishedAt: "2026-04-24T02:00:01.000Z" },
+    });
     expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
     expect(reconciled.workers[0]?.lifecycle).toBe("idle");
     expect(reconciled.events.map((event) => event.type)).toContain("run.lease_expired");
@@ -383,7 +399,11 @@ describe("storage helpers", () => {
 
     const canceled = cancelTaskRun(run, { runId: "run-1", reason: "Parent agent stopped superseded work" });
 
-    expect(canceled.runs[0]).toMatchObject({ status: "aborted", errorMessage: "Parent agent stopped superseded work" });
+    expect(canceled.runs[0]).toMatchObject({
+      status: "aborted",
+      errorMessage: "Parent agent stopped superseded work",
+      runtime: { status: "aborted", cleanupStatus: "not_required" },
+    });
     expect(canceled.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
     expect(canceled.workers[0]?.lifecycle).toBe("idle");
     expect(canceled.events.map((event) => event.type)).toContain("run.canceled");
@@ -682,6 +702,56 @@ describe("storage helpers", () => {
     expect(() => readRun("abc")).toThrow(/Failed to read conductor state for project abc/i);
   });
 
+  it("normalizes legacy run attempts without runtime metadata", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: null,
+    });
+    const task = createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" });
+    const legacy = {
+      ...run,
+      workers: [worker],
+      tasks: [{ ...task, assignedWorkerId: worker.workerId, activeRunId: "run-1", runIds: ["run-1"] }],
+      runs: [
+        {
+          runId: "run-1",
+          taskId: task.taskId,
+          workerId: worker.workerId,
+          taskRevision: 1,
+          status: "running",
+          backend: "native",
+          backendRunId: null,
+          sessionId: "session-1",
+          leaseGeneration: 1,
+          leaseStartedAt: null,
+          leaseExpiresAt: null,
+          lastHeartbeatAt: null,
+          startedAt: "2026-01-01T00:00:00.000Z",
+          finishedAt: null,
+          completionSummary: null,
+          errorMessage: null,
+          artifactIds: [],
+          gateIds: [],
+        },
+      ],
+    };
+
+    writeRun(legacy as never);
+
+    const persisted = readRun("abc");
+    expect(persisted?.runs[0]?.runtime).toMatchObject({
+      mode: "headless",
+      status: "running",
+      sessionId: "session-1",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      cleanupStatus: "not_required",
+    });
+  });
+
   it("validates resource identity and reference invariants", () => {
     const run = createEmptyRun("abc", "/tmp/repo");
     const worker = createWorkerRecord({
@@ -712,6 +782,24 @@ describe("storage helpers", () => {
             backend: "native",
             backendRunId: null,
             sessionId: null,
+            runtime: {
+              mode: "headless",
+              status: "running",
+              sessionId: null,
+              cwd: null,
+              command: null,
+              runnerPid: null,
+              processGroupId: null,
+              tmux: null,
+              logPath: null,
+              viewerCommand: null,
+              viewerStatus: "not_applicable",
+              diagnostics: [],
+              heartbeatAt: null,
+              cleanupStatus: "not_required",
+              startedAt: null,
+              finishedAt: null,
+            },
             leaseGeneration: 1,
             leaseStartedAt: null,
             leaseExpiresAt: null,

@@ -12,12 +12,7 @@ import {
 import { computeNextActions } from "./next-actions.js";
 import { createObjectiveForRepo, planObjectiveForRepo, refreshObjectiveStatusForRepo } from "./objective-service.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
-import {
-  createWorkerSessionRuntime,
-  preflightWorkerRunRuntime,
-  recoverWorkerSessionRuntime,
-  runWorkerPromptRuntime,
-} from "./runtime.js";
+import { createWorkerSessionRuntime, getWorkerRunRuntimeBackend, recoverWorkerSessionRuntime } from "./runtime.js";
 import { type SchedulerFairness, type SchedulerPolicyName, selectSchedulerActions } from "./scheduler-selection.js";
 import {
   addConductorArtifact,
@@ -1858,7 +1853,8 @@ export async function runTaskForRepo(repoRoot: string, taskId: string, signal?: 
     throw new Error(`Worker ${worker.name} is missing its worktree; recover the worker first`);
   }
 
-  await preflightWorkerRunRuntime({ worktreePath: worker.worktreePath, sessionFile: worker.sessionFile });
+  const runtimeBackend = getWorkerRunRuntimeBackend("headless");
+  await runtimeBackend.preflight({ worktreePath: worker.worktreePath, sessionFile: worker.sessionFile });
 
   const linkedSignal = createLinkedAbortController(signal);
   const unregisterLiveRun = registerLiveWorkAbortHandle({
@@ -1869,7 +1865,7 @@ export async function runTaskForRepo(repoRoot: string, taskId: string, signal?: 
   });
 
   try {
-    const runtimeResult = await runWorkerPromptRuntime({
+    const runtimeResult = await runtimeBackend.run({
       worktreePath: worker.worktreePath,
       sessionFile: worker.sessionFile,
       task: task.prompt,
