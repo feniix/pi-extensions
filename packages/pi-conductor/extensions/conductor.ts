@@ -1973,11 +1973,22 @@ export async function runTaskForRepo(
 
   try {
     const runtimeResult = await runtimeBackend.run({
+      repoRoot,
       worktreePath: worker.worktreePath,
       sessionFile: worker.sessionFile,
       task: task.prompt,
       signal: linkedSignal.signal,
       taskContract: started.taskContract,
+      onRuntimeMetadata: async (metadata) => {
+        mutateRepoRunSync(repoRoot, (latest) => ({
+          ...latest,
+          runs: latest.runs.map((entry) =>
+            entry.runId === started.run.runId
+              ? { ...entry, runtime: { ...entry.runtime, ...metadata }, updatedAt: new Date().toISOString() }
+              : entry,
+          ),
+        }));
+      },
       onConductorProgress: async (progress) => {
         recordTaskProgressForRepo(repoRoot, progress);
       },

@@ -385,8 +385,8 @@ describe("worker run runtime helpers", () => {
     expect(mapRunStatusToRuntimeStatus(undefined)).toBe("unknown");
   });
 
-  it("fails closed for visible runtime modes until their adapters are implemented", () => {
-    expect(() => getWorkerRunRuntimeBackend("tmux")).toThrow(/tmux runtime is not implemented/i);
+  it("selects the tmux backend while keeping the iTerm viewer mode fail-closed", () => {
+    expect(getWorkerRunRuntimeBackend("tmux")).toMatchObject({ mode: "tmux" });
     expect(() => getWorkerRunRuntimeBackend("iterm-tmux")).toThrow(/iterm-tmux runtime is not implemented/i);
   });
 

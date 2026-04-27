@@ -10,6 +10,7 @@ import {
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
+import { createTmuxWorkerRunRuntimeBackend } from "./tmux-runtime.js";
 import type {
   ConductorCompletionReportInput,
   ConductorFollowUpTaskInput,
@@ -41,6 +42,9 @@ export function getWorkerRunRuntimeBackend(mode: RunRuntimeMode = "headless"): W
       preflight: preflightWorkerRunRuntime,
       run: runWorkerPromptRuntime,
     };
+  }
+  if (mode === "tmux") {
+    return createTmuxWorkerRunRuntimeBackend();
   }
   throw new Error(`${mode} runtime is not implemented yet`);
 }

@@ -219,9 +219,9 @@ describe("conductor service", () => {
         prompt: "Run visibly",
         workerName: "visible-worker",
         startRun: true,
-        runtimeMode: "tmux",
+        runtimeMode: "iterm-tmux",
       }),
-    ).rejects.toThrow(/Runtime mode tmux unavailable/i);
+    ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null, runIds: [] });
@@ -575,8 +575,8 @@ describe("conductor service", () => {
     expect(canceled.runs[0]).toMatchObject({ status: "aborted" });
     expect(canceled.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
 
-    expect(() => retryTaskForRepo(repoDir, { taskId: task.taskId, runtimeMode: "tmux" })).toThrow(
-      /Runtime mode tmux unavailable/i,
+    expect(() => retryTaskForRepo(repoDir, { taskId: task.taskId, runtimeMode: "iterm-tmux" })).toThrow(
+      /Runtime mode iterm-tmux unavailable/i,
     );
     expect(getOrCreateRunForRepo(repoDir).tasks[0]?.runIds).toHaveLength(1);
 

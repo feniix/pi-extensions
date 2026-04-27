@@ -140,13 +140,13 @@ describe("durable task run flows", () => {
     expect(persisted.workers[0]).toMatchObject({ lifecycle: "idle" });
   });
 
-  it("fails closed for explicit visible runtime start before creating a run", async () => {
+  it("fails closed for explicit unavailable viewer runtime start before creating a run", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const task = createTaskForRepo(repoDir, { title: "Visible start", prompt: "Start visible work" });
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
 
-    expect(() => startTaskRunForRepo(repoDir, { taskId: task.taskId, runtimeMode: "tmux" })).toThrow(
-      /Runtime mode tmux unavailable/i,
+    expect(() => startTaskRunForRepo(repoDir, { taskId: task.taskId, runtimeMode: "iterm-tmux" })).toThrow(
+      /Runtime mode iterm-tmux unavailable/i,
     );
 
     const persisted = getOrCreateRunForRepo(repoDir);
@@ -154,13 +154,13 @@ describe("durable task run flows", () => {
     expect(persisted.runs).toHaveLength(0);
   });
 
-  it("fails closed for explicit visible runtime execution before creating a run", async () => {
+  it("fails closed for explicit unavailable viewer runtime execution before creating a run", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const task = createTaskForRepo(repoDir, { title: "Visible task", prompt: "Do visible work" });
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
 
-    await expect(runTaskForRepo(repoDir, task.taskId, undefined, { runtimeMode: "tmux" })).rejects.toThrow(
-      /Runtime mode tmux unavailable/i,
+    await expect(runTaskForRepo(repoDir, task.taskId, undefined, { runtimeMode: "iterm-tmux" })).rejects.toThrow(
+      /Runtime mode iterm-tmux unavailable/i,
     );
 
     const persisted = getOrCreateRunForRepo(repoDir);

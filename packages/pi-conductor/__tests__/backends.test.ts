@@ -49,9 +49,9 @@ describe("conductor backend inspection", () => {
     });
     expect(status.tmux).toMatchObject({
       mode: "tmux",
-      available: false,
-      capabilities: { canStartRun: false, canSuperviseLiveOutput: true, requiresExternalRunner: true },
+      capabilities: { canSuperviseLiveOutput: true, requiresExternalRunner: true },
     });
+    expect(status.tmux.capabilities.canStartRun).toBe(status.tmux.available);
     expect(status["iterm-tmux"]).toMatchObject({
       mode: "iterm-tmux",
       available: false,
@@ -59,7 +59,7 @@ describe("conductor backend inspection", () => {
     });
     expect(status.itermTmux).toBe(status["iterm-tmux"]);
     expect(getConductorRuntimeModeStatus("headless").available).toBe(true);
-    expect(getConductorRuntimeModeStatus("tmux").diagnostic).toMatch(/not implemented yet/i);
+    expect(getConductorRuntimeModeStatus("tmux")).toMatchObject({ mode: "tmux" });
   });
 
   it("reports pi-subagents available when an explicit dispatcher is injected", async () => {

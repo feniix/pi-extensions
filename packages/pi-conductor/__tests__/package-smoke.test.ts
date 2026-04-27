@@ -26,6 +26,7 @@ describe("pi-conductor package smoke", () => {
       .sort();
 
     expect(packageJson.files).toContain("skills/");
+    expect(packageJson.bin).toMatchObject({ "pi-conductor-runner": "./extensions/runner-cli.mjs" });
     expect(packageJson.pi.skills).toEqual(["./skills"]);
     expect(skillDirectories).toEqual(["conductor-gate-review", "conductor-orchestration"]);
 
