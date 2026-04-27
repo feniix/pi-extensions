@@ -118,6 +118,49 @@ describe("pi-conductor runner contract", () => {
     });
   });
 
+  it("emits runner heartbeats while work is still active", async () => {
+    const { task, started, contractPath, nonce } = await createStartedContract();
+
+    await runRunnerFromContract({
+      contractPath,
+      nonce,
+      heartbeatIntervalMs: 5,
+      async runWorker(input) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        await input.onConductorComplete?.({
+          runId: started.run.runId,
+          taskId: task.taskId,
+          status: "succeeded",
+          completionSummary: "done after heartbeat",
+        });
+        return { status: "success", finalText: "done", errorMessage: null, sessionId: "runner-session" };
+      },
+    });
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.events.map((event) => event.type)).toContain("run.heartbeat");
+    expect(persisted.runs[0]?.lastHeartbeatAt).toBeTruthy();
+    expect(persisted.runs[0]?.runtime.heartbeatAt).toBeTruthy();
+  });
+
+  it("marks the run failed when the runner crashes before completion", async () => {
+    const { contractPath, nonce } = await createStartedContract();
+
+    await expect(
+      runRunnerFromContract({
+        contractPath,
+        nonce,
+        async runWorker() {
+          throw new Error("runner crashed");
+        },
+      }),
+    ).rejects.toThrow(/runner crashed/i);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "failed", activeRunId: null });
+    expect(persisted.runs[0]).toMatchObject({ status: "failed", completionSummary: "runner crashed" });
+  });
+
   it("creates a needs-review fallback when the runner exits without explicit completion", async () => {
     const { contractPath, nonce } = await createStartedContract();
 

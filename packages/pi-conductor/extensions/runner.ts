@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createGateForRepo } from "./gate-service.js";
-import { getOrCreateRunForRepo } from "./repo-run.js";
+import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
+import { recordRunHeartbeat } from "./storage.js";
 import { createFollowUpTaskForRepo, recordTaskCompletionForRepo, recordTaskProgressForRepo } from "./task-service.js";
 import type {
   ConductorCompletionReportInput,
@@ -189,27 +190,57 @@ async function defaultRuntimeRunner(input: RuntimeRunContext): Promise<RuntimeRu
   return runtime.runWorkerPromptRuntime(input);
 }
 
+function startRunnerHeartbeat(input: { repoRoot: string; runId: string; heartbeatIntervalMs?: number }): () => void {
+  const heartbeatIntervalMs = input.heartbeatIntervalMs;
+  if (heartbeatIntervalMs === undefined || heartbeatIntervalMs <= 0) {
+    return () => undefined;
+  }
+  const timer = setInterval(() => {
+    void withStateLockRetry(() =>
+      mutateRepoRunSync(input.repoRoot, (run) => recordRunHeartbeat(run, { runId: input.runId })),
+    ).catch(() => undefined);
+  }, heartbeatIntervalMs);
+  return () => clearInterval(timer);
+}
+
 export async function runRunnerFromContract(input: {
   contractPath: string;
   nonce: string;
   signal?: AbortSignal;
+  heartbeatIntervalMs?: number;
   runWorker?: RuntimeRunner;
 }): Promise<RuntimeRunResult> {
   const contract = readRunnerContract(input.contractPath);
   validateRunnerContractForRepo({ repoRoot: contract.repoRoot, contract, nonce: input.nonce, requireActive: true });
   const callbacks = createScopedRunnerCallbacks(contract, input.nonce);
   const runWorker = input.runWorker ?? defaultRuntimeRunner;
-  const result = await runWorker({
+  const stopHeartbeat = startRunnerHeartbeat({
     repoRoot: contract.repoRoot,
-    worktreePath: contract.worktreePath,
-    sessionFile: contract.sessionFile,
-    task: contract.taskContract.goal,
-    taskContract: contract.taskContract,
-    signal: input.signal,
-    ...callbacks,
+    runId: contract.taskContract.runId,
+    heartbeatIntervalMs: input.heartbeatIntervalMs,
   });
-  finalizeRunnerExitForRepo({ repoRoot: contract.repoRoot, contract, result });
-  return result;
+  try {
+    const result = await runWorker({
+      repoRoot: contract.repoRoot,
+      worktreePath: contract.worktreePath,
+      sessionFile: contract.sessionFile,
+      task: contract.taskContract.goal,
+      taskContract: contract.taskContract,
+      signal: input.signal,
+      ...callbacks,
+    });
+    finalizeRunnerExitForRepo({ repoRoot: contract.repoRoot, contract, result });
+    return result;
+  } catch (error) {
+    finalizeRunnerExitForRepo({
+      repoRoot: contract.repoRoot,
+      contract,
+      result: { status: "error", finalText: null, errorMessage: errorMessage(error), sessionId: null },
+    });
+    throw error;
+  } finally {
+    stopHeartbeat();
+  }
 }
 
 function parseRunnerArgs(args: string[]): { contractPath: string; nonce: string } {

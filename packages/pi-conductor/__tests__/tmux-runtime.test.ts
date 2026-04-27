@@ -234,6 +234,35 @@ describe("tmux conductor runtime", () => {
     expect(metadataUpdates).toEqual(expect.arrayContaining([expect.objectContaining({ cleanupStatus: "succeeded" })]));
   });
 
+  it("does not kill a tmux session when pane command verification fails", async () => {
+    const adapter = new FakeTmuxAdapter();
+    adapter.replacedPaneCommand = true;
+    const runtime: RunRuntimeMetadata = {
+      mode: "tmux",
+      status: "running",
+      sessionId: null,
+      cwd: repoDir,
+      command: "'node' '/tmp/pi-conductor-runner' 'run'",
+      runnerPid: null,
+      processGroupId: null,
+      tmux: { socketPath: "/tmp/tmux.sock", sessionName: "owned", windowId: null, paneId: "%7" },
+      logPath: null,
+      viewerCommand: null,
+      viewerStatus: "pending",
+      diagnostics: [],
+      heartbeatAt: null,
+      cleanupStatus: "pending",
+      startedAt: null,
+      finishedAt: null,
+    };
+
+    await expect(cancelTmuxRuntime({ adapter, runtime })).resolves.toMatchObject({
+      cleanupStatus: "failed",
+      diagnostic: expect.stringContaining("pane command"),
+    });
+    expect(adapter.calls.some((call) => call.args.includes("kill-session"))).toBe(false);
+  });
+
   it("treats tmux cancellation as idempotent when the session is already gone", async () => {
     const adapter = new FakeTmuxAdapter();
     adapter.failKill = true;

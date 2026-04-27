@@ -257,13 +257,21 @@ export async function cancelTmuxRuntime(input: {
     return { cleanupStatus: "succeeded", diagnostic: "tmux metadata was not present" };
   }
   try {
-    await (input.adapter ?? defaultCommandAdapter).execFile("tmux", [
-      "-S",
-      tmux.socketPath,
-      "kill-session",
-      "-t",
-      tmux.sessionName,
-    ]);
+    const adapter = input.adapter ?? defaultCommandAdapter;
+    if (input.runtime.command) {
+      const currentPaneCommand = await inspectPaneCurrentCommand({
+        adapter,
+        socketPath: tmux.socketPath,
+        paneTarget: tmux.paneId ?? tmux.sessionName,
+      });
+      if (currentPaneCommand && !input.runtime.command.includes(currentPaneCommand)) {
+        return {
+          cleanupStatus: "failed",
+          diagnostic: `tmux pane command verification failed before cancel: ${currentPaneCommand}`,
+        };
+      }
+    }
+    await adapter.execFile("tmux", ["-S", tmux.socketPath, "kill-session", "-t", tmux.sessionName]);
     return { cleanupStatus: "succeeded", diagnostic: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
