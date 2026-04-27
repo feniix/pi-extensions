@@ -107,6 +107,26 @@ describe("durable task run flows", () => {
     expect(persisted.events.map((event) => event.type)).toContain("run.completed");
   });
 
+  it("records runtime log paths as conductor log artifacts", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Log task", prompt: "Do logged work" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async (input) => {
+      await input.onRuntimeMetadata?.({ logPath: "/tmp/pi-conductor-runtime.log" });
+      return { status: "success", finalText: "logged", errorMessage: null, sessionId: "run-session-log" };
+    });
+
+    await runTaskForRepo(repoDir, task.taskId);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.artifacts[0]).toMatchObject({
+      type: "log",
+      ref: "file:///tmp/pi-conductor-runtime.log",
+      resourceRefs: { taskId: task.taskId, runId: persisted.runs[0]?.runId },
+    });
+    expect(persisted.runs[0]?.artifactIds).toContain(persisted.artifacts[0]?.artifactId);
+  });
+
   it("requires review when a durable task run exits without explicit child completion", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const task = createTaskForRepo(repoDir, { title: "Review task", prompt: "Do work" });

@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -176,6 +176,58 @@ export function buildTmuxLaunch(input: {
   };
 }
 
+async function inspectProcessGroupId(input: {
+  adapter: TmuxCommandAdapter;
+  runnerPid: number | null;
+}): Promise<number | null> {
+  if (input.runnerPid === null) {
+    return null;
+  }
+  try {
+    const result = await input.adapter.execFile("ps", ["-p", String(input.runnerPid), "-o", "pgid="]);
+    const pgid = result.stdout.trim();
+    return /^\d+$/.test(pgid) ? Number(pgid) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function inspectTmuxPaneMetadata(input: {
+  adapter: TmuxCommandAdapter;
+  socketPath: string;
+  sessionName: string;
+}): Promise<{
+  windowId: string | null;
+  paneId: string | null;
+  runnerPid: number | null;
+  processGroupId: number | null;
+  diagnostic: string | null;
+}> {
+  try {
+    const result = await input.adapter.execFile("tmux", [
+      "-S",
+      input.socketPath,
+      "display-message",
+      "-p",
+      "-t",
+      input.sessionName,
+      "#{window_id} #{pane_id} #{pane_pid}",
+    ]);
+    const [windowId, paneId, panePid] = result.stdout.trim().split(/\s+/);
+    const runnerPid = panePid && /^\d+$/.test(panePid) ? Number(panePid) : null;
+    const processGroupId = await inspectProcessGroupId({ adapter: input.adapter, runnerPid });
+    return { windowId: windowId || null, paneId: paneId || null, runnerPid, processGroupId, diagnostic: null };
+  } catch (error) {
+    return {
+      windowId: null,
+      paneId: null,
+      runnerPid: null,
+      processGroupId: null,
+      diagnostic: `tmux pane metadata unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
 async function waitForTerminalRun(input: {
   repoRoot: string;
   runId: string;
@@ -222,11 +274,92 @@ export async function cancelTmuxRuntime(input: {
   }
 }
 
+async function isRunnerPidAlive(input: { adapter: TmuxCommandAdapter; runnerPid: number | null }): Promise<boolean> {
+  if (input.runnerPid === null) {
+    return false;
+  }
+  try {
+    await input.adapter.execFile("ps", ["-p", String(input.runnerPid), "-o", "pid="]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function inspectPaneCurrentCommand(input: {
+  adapter: TmuxCommandAdapter;
+  socketPath: string;
+  paneTarget: string;
+}): Promise<string | null> {
+  try {
+    const result = await input.adapter.execFile("tmux", [
+      "-S",
+      input.socketPath,
+      "display-message",
+      "-p",
+      "-t",
+      input.paneTarget,
+      "#{pane_current_command}",
+    ]);
+    return result.stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function markTmuxRunStale(input: {
+  repoRoot: string;
+  attempt: RunAttemptRecord;
+  now: string;
+  diagnostic: string;
+}): RunRecord {
+  return mutateRepoRunSync(input.repoRoot, (latest) => ({
+    ...latest,
+    tasks: latest.tasks.map((task) =>
+      task.taskId === input.attempt.taskId && task.activeRunId === input.attempt.runId
+        ? { ...task, state: "needs_review" as const, activeRunId: null, updatedAt: input.now }
+        : task,
+    ),
+    workers: latest.workers.map((worker) =>
+      worker.workerId === input.attempt.workerId
+        ? { ...worker, lifecycle: "idle" as const, updatedAt: input.now }
+        : worker,
+    ),
+    runs: latest.runs.map((entry) =>
+      entry.runId === input.attempt.runId
+        ? {
+            ...entry,
+            status: "stale" as const,
+            runtime: {
+              ...entry.runtime,
+              status: "exited_error" as const,
+              diagnostics: [...entry.runtime.diagnostics, input.diagnostic],
+              finishedAt: input.now,
+              cleanupStatus: entry.runtime.cleanupStatus === "pending" ? "failed" : entry.runtime.cleanupStatus,
+            },
+            finishedAt: input.now,
+            leaseExpiresAt: null,
+            errorMessage: input.diagnostic,
+          }
+        : entry,
+    ),
+    updatedAt: input.now,
+  }));
+}
+
+function heartbeatIsStale(input: { heartbeatAt: string | null; now: string; staleHeartbeatMs?: number }): boolean {
+  if (!input.heartbeatAt || input.staleHeartbeatMs === undefined) {
+    return false;
+  }
+  return Date.parse(input.now) - Date.parse(input.heartbeatAt) > input.staleHeartbeatMs;
+}
+
 export async function reconcileTmuxRuntimeForRepo(input: {
   repoRoot: string;
   runId: string;
   adapter?: TmuxCommandAdapter;
   now?: string;
+  staleHeartbeatMs?: number;
 }): Promise<RunRecord> {
   const adapter = input.adapter ?? defaultCommandAdapter;
   const run = getOrCreateRunForRepo(input.repoRoot);
@@ -242,6 +375,57 @@ export async function reconcileTmuxRuntimeForRepo(input: {
       "-t",
       attempt.runtime.tmux.sessionName ?? "",
     ]);
+    const now = input.now ?? new Date().toISOString();
+    const currentPaneCommand = await inspectPaneCurrentCommand({
+      adapter,
+      socketPath: attempt.runtime.tmux.socketPath,
+      paneTarget: attempt.runtime.tmux.paneId ?? attempt.runtime.tmux.sessionName ?? "",
+    });
+    if (currentPaneCommand && attempt.runtime.command && !attempt.runtime.command.includes(currentPaneCommand)) {
+      return markTmuxRunStale({
+        repoRoot: input.repoRoot,
+        attempt,
+        now,
+        diagnostic: `tmux pane command changed from runner command to ${currentPaneCommand}`,
+      });
+    }
+    if (attempt.runtime.logPath && !existsSync(attempt.runtime.logPath)) {
+      const diagnostic = `tmux log path missing during reconciliation: ${attempt.runtime.logPath}`;
+      return mutateRepoRunSync(input.repoRoot, (latest) => ({
+        ...latest,
+        runs: latest.runs.map((entry) =>
+          entry.runId === attempt.runId
+            ? {
+                ...entry,
+                runtime: { ...entry.runtime, diagnostics: [...entry.runtime.diagnostics, diagnostic] },
+                updatedAt: now,
+              }
+            : entry,
+        ),
+        updatedAt: now,
+      }));
+    }
+    if (heartbeatIsStale({ heartbeatAt: attempt.runtime.heartbeatAt, now, staleHeartbeatMs: input.staleHeartbeatMs })) {
+      const runnerAlive = await isRunnerPidAlive({ adapter, runnerPid: attempt.runtime.runnerPid });
+      if (runnerAlive) {
+        const diagnostic = `tmux runner heartbeat stale but runner pid ${attempt.runtime.runnerPid} is still alive`;
+        return mutateRepoRunSync(input.repoRoot, (latest) => ({
+          ...latest,
+          runs: latest.runs.map((entry) =>
+            entry.runId === attempt.runId
+              ? {
+                  ...entry,
+                  runtime: { ...entry.runtime, diagnostics: [...entry.runtime.diagnostics, diagnostic] },
+                  updatedAt: now,
+                }
+              : entry,
+          ),
+          updatedAt: now,
+        }));
+      }
+      const diagnostic = `tmux runner heartbeat stale and runner pid ${attempt.runtime.runnerPid ?? "unknown"} is not alive`;
+      return markTmuxRunStale({ repoRoot: input.repoRoot, attempt, now, diagnostic });
+    }
     return run;
   } catch (error) {
     const now = input.now ?? new Date().toISOString();
@@ -325,6 +509,7 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
         createdAt: now(),
       });
       writeRunnerContract(paths.contractPath, contract);
+      writeFileSync(paths.logPath, "", { encoding: "utf-8", flag: "a", mode: 0o600 });
       const projectKey = deriveProjectKey(resolve(input.repoRoot));
       const sessionName = buildTmuxSessionName({ projectKey, runId: input.taskContract.runId, nonce });
       const launch = buildTmuxLaunch({
@@ -337,17 +522,28 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
         logPath: paths.logPath,
       });
       await adapter.execFile("tmux", launch.args, { cwd: input.worktreePath, env: buildRunnerEnvironment() });
+      const paneMetadata = await inspectTmuxPaneMetadata({ adapter, socketPath: paths.socketPath, sessionName });
       await input.onRuntimeMetadata?.({
         mode,
         status: "running",
         cwd: input.worktreePath,
         command: launch.command,
-        tmux: { socketPath: paths.socketPath, sessionName, windowId: null, paneId: null },
+        runnerPid: paneMetadata.runnerPid,
+        processGroupId: paneMetadata.processGroupId,
+        tmux: {
+          socketPath: paths.socketPath,
+          sessionName,
+          windowId: paneMetadata.windowId,
+          paneId: paneMetadata.paneId,
+        },
         logPath: paths.logPath,
         viewerCommand: launch.attachCommand,
         viewerStatus: "pending",
         cleanupStatus: "pending",
-        diagnostics: [`tmux session ${sessionName} launched`],
+        diagnostics: [
+          `tmux session ${sessionName} launched`,
+          ...(paneMetadata.diagnostic ? [paneMetadata.diagnostic] : []),
+        ],
         heartbeatAt: now(),
       });
 

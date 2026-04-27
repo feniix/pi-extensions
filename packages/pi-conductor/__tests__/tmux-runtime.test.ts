@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -24,6 +24,8 @@ class FakeTmuxAdapter implements TmuxCommandAdapter {
   calls: Array<{ command: string; args: string[]; cwd?: string; env?: NodeJS.ProcessEnv }> = [];
   failHasSession = false;
   failKill = false;
+  failPs = false;
+  replacedPaneCommand = false;
 
   async execFile(command: string, args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }) {
     this.calls.push({ command, args, cwd: options?.cwd, env: options?.env });
@@ -32,6 +34,18 @@ class FakeTmuxAdapter implements TmuxCommandAdapter {
     }
     if (args.includes("kill-session") && this.failKill) {
       throw new Error("can't find session: missing");
+    }
+    if (args.includes("display-message") && args.includes("#{pane_current_command}")) {
+      return { stdout: this.replacedPaneCommand ? "zsh\n" : "node\n", stderr: "" };
+    }
+    if (args.includes("display-message")) {
+      return { stdout: "@42 %7 4242\n", stderr: "" };
+    }
+    if (command === "ps") {
+      if (this.failPs) {
+        throw new Error("process not found");
+      }
+      return { stdout: args.includes("pgid=") ? "4240\n" : "4242\n", stderr: "" };
     }
     return { stdout: command === "tmux" && args[0] === "-V" ? "tmux 3.4" : "", stderr: "" };
   }
@@ -133,13 +147,17 @@ describe("tmux conductor runtime", () => {
     expect(persisted?.runtime).toMatchObject({
       mode: "tmux",
       status: "running",
-      tmux: { sessionName: expect.stringContaining(started.run.runId.slice(0, 32)) },
+      runnerPid: 4242,
+      processGroupId: 4240,
+      tmux: { sessionName: expect.stringContaining(started.run.runId.slice(0, 32)), windowId: "@42", paneId: "%7" },
       logPath: expect.stringContaining("runner.log"),
       viewerCommand: expect.stringContaining("attach-session -r"),
     });
     const contractPath = persisted?.runtime.command?.match(/--contract'?'?\s+'([^']+)'/)?.[1] ?? null;
     expect(contractPath).toBeTruthy();
     expect(readFileSync(contractPath ?? "", "utf-8")).toContain(started.run.runId);
+    expect(existsSync(persisted?.runtime.logPath ?? "")).toBe(true);
+    expect(statSync(persisted?.runtime.logPath ?? "").mode & 0o777).toBe(0o600);
   });
 
   it("launches tmux with a sanitized runner environment", async () => {
@@ -239,6 +257,178 @@ describe("tmux conductor runtime", () => {
     };
 
     await expect(cancelTmuxRuntime({ adapter, runtime })).resolves.toMatchObject({ cleanupStatus: "succeeded" });
+  });
+
+  it("records missing log diagnostics without making a healthy tmux session terminal", async () => {
+    const { worker, started } = await createStartedTask();
+    const adapter = new FakeTmuxAdapter();
+    const backend = createTmuxWorkerRunRuntimeBackend({
+      commandAdapter: adapter,
+      runnerCommand: ["node", "/tmp/pi-conductor-runner", "run"],
+      waitForCompletion: false,
+      randomHex: () => "badc0ffeebadc0ffeebadc0ffeebadc0f",
+    });
+    await backend.run({
+      repoRoot: repoDir,
+      worktreePath: worker.worktreePath ?? repoDir,
+      sessionFile: worker.sessionFile ?? join(repoDir, "session.jsonl"),
+      task: "Run in tmux",
+      taskContract: started.taskContract,
+      onRuntimeMetadata: async (metadata) => {
+        const { writeRun } = await import("../extensions/storage.js");
+        const latest = getOrCreateRunForRepo(repoDir);
+        writeRun({
+          ...latest,
+          runs: latest.runs.map((entry) =>
+            entry.runId === started.run.runId ? { ...entry, runtime: { ...entry.runtime, ...metadata } } : entry,
+          ),
+        });
+      },
+    });
+    const logPath = getOrCreateRunForRepo(repoDir).runs[0]?.runtime.logPath;
+    if (logPath) rmSync(logPath, { force: true });
+
+    const reconciled = await reconcileTmuxRuntimeForRepo({
+      repoRoot: repoDir,
+      runId: started.run.runId,
+      adapter,
+      now: "2026-04-27T00:00:00.000Z",
+    });
+
+    expect(reconciled.tasks[0]).toMatchObject({ state: "running", activeRunId: started.run.runId });
+    expect(reconciled.runs[0]).toMatchObject({ status: "running", finishedAt: null });
+    expect(reconciled.runs[0]?.runtime.diagnostics.at(-1)).toMatch(/log path missing/i);
+  });
+
+  it("records stale heartbeat as diagnostic while the runner pid is still alive", async () => {
+    const { worker, started } = await createStartedTask();
+    const adapter = new FakeTmuxAdapter();
+    const backend = createTmuxWorkerRunRuntimeBackend({
+      commandAdapter: adapter,
+      runnerCommand: ["node", "/tmp/pi-conductor-runner", "run"],
+      waitForCompletion: false,
+      randomHex: () => "cafebabecafebabecafebabecafebabe",
+      now: () => "2026-04-27T00:00:00.000Z",
+    });
+    await backend.run({
+      repoRoot: repoDir,
+      worktreePath: worker.worktreePath ?? repoDir,
+      sessionFile: worker.sessionFile ?? join(repoDir, "session.jsonl"),
+      task: "Run in tmux",
+      taskContract: started.taskContract,
+      onRuntimeMetadata: async (metadata) => {
+        const { writeRun } = await import("../extensions/storage.js");
+        const latest = getOrCreateRunForRepo(repoDir);
+        writeRun({
+          ...latest,
+          runs: latest.runs.map((entry) =>
+            entry.runId === started.run.runId ? { ...entry, runtime: { ...entry.runtime, ...metadata } } : entry,
+          ),
+        });
+      },
+    });
+    const logPath = getOrCreateRunForRepo(repoDir).runs[0]?.runtime.logPath;
+    writeFileSync(logPath ?? join(repoDir, "missing-log-path"), "runner output\n", "utf-8");
+
+    const reconciled = await reconcileTmuxRuntimeForRepo({
+      repoRoot: repoDir,
+      runId: started.run.runId,
+      adapter,
+      now: "2026-04-27T00:05:00.000Z",
+      staleHeartbeatMs: 60_000,
+    });
+
+    expect(reconciled.tasks[0]).toMatchObject({ state: "running", activeRunId: started.run.runId });
+    expect(reconciled.runs[0]).toMatchObject({ status: "running", finishedAt: null });
+    expect(reconciled.runs[0]?.runtime.diagnostics.at(-1)).toMatch(/heartbeat stale/i);
+  });
+
+  it("reconciles stale heartbeat with a missing runner pid to needs-review", async () => {
+    const { worker, started } = await createStartedTask();
+    const adapter = new FakeTmuxAdapter();
+    const backend = createTmuxWorkerRunRuntimeBackend({
+      commandAdapter: adapter,
+      runnerCommand: ["node", "/tmp/pi-conductor-runner", "run"],
+      waitForCompletion: false,
+      randomHex: () => "abcddcbaabcddcbaabcddcbaabcddcba",
+      now: () => "2026-04-27T00:00:00.000Z",
+    });
+    await backend.run({
+      repoRoot: repoDir,
+      worktreePath: worker.worktreePath ?? repoDir,
+      sessionFile: worker.sessionFile ?? join(repoDir, "session.jsonl"),
+      task: "Run in tmux",
+      taskContract: started.taskContract,
+      onRuntimeMetadata: async (metadata) => {
+        const { writeRun } = await import("../extensions/storage.js");
+        const latest = getOrCreateRunForRepo(repoDir);
+        writeRun({
+          ...latest,
+          runs: latest.runs.map((entry) =>
+            entry.runId === started.run.runId ? { ...entry, runtime: { ...entry.runtime, ...metadata } } : entry,
+          ),
+        });
+      },
+    });
+    const logPath = getOrCreateRunForRepo(repoDir).runs[0]?.runtime.logPath;
+    writeFileSync(logPath ?? join(repoDir, "missing-log-path"), "runner output\n", "utf-8");
+    adapter.failPs = true;
+
+    const reconciled = await reconcileTmuxRuntimeForRepo({
+      repoRoot: repoDir,
+      runId: started.run.runId,
+      adapter,
+      now: "2026-04-27T00:05:00.000Z",
+      staleHeartbeatMs: 60_000,
+    });
+
+    expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+    expect(reconciled.runs[0]).toMatchObject({ status: "stale", errorMessage: expect.stringContaining("runner pid") });
+    expect(reconciled.runs[0]?.runtime.status).toBe("exited_error");
+  });
+
+  it("reconciles a replaced tmux pane command to needs-review", async () => {
+    const { worker, started } = await createStartedTask();
+    const adapter = new FakeTmuxAdapter();
+    const backend = createTmuxWorkerRunRuntimeBackend({
+      commandAdapter: adapter,
+      runnerCommand: ["node", "/tmp/pi-conductor-runner", "run"],
+      waitForCompletion: false,
+      randomHex: () => "f00df00df00df00df00df00df00df00d",
+    });
+    await backend.run({
+      repoRoot: repoDir,
+      worktreePath: worker.worktreePath ?? repoDir,
+      sessionFile: worker.sessionFile ?? join(repoDir, "session.jsonl"),
+      task: "Run in tmux",
+      taskContract: started.taskContract,
+      onRuntimeMetadata: async (metadata) => {
+        const { writeRun } = await import("../extensions/storage.js");
+        const latest = getOrCreateRunForRepo(repoDir);
+        writeRun({
+          ...latest,
+          runs: latest.runs.map((entry) =>
+            entry.runId === started.run.runId ? { ...entry, runtime: { ...entry.runtime, ...metadata } } : entry,
+          ),
+        });
+      },
+    });
+    const logPath = getOrCreateRunForRepo(repoDir).runs[0]?.runtime.logPath;
+    writeFileSync(logPath ?? join(repoDir, "missing-log-path"), "runner output\n", "utf-8");
+    adapter.replacedPaneCommand = true;
+
+    const reconciled = await reconcileTmuxRuntimeForRepo({
+      repoRoot: repoDir,
+      runId: started.run.runId,
+      adapter,
+      now: "2026-04-27T00:00:00.000Z",
+    });
+
+    expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+    expect(reconciled.runs[0]).toMatchObject({
+      status: "stale",
+      errorMessage: expect.stringContaining("pane command"),
+    });
   });
 
   it("reconciles a missing tmux session to stale needs-review without inventing success", async () => {

@@ -1980,14 +1980,51 @@ export async function runTaskForRepo(
       signal: linkedSignal.signal,
       taskContract: started.taskContract,
       onRuntimeMetadata: async (metadata) => {
-        mutateRepoRunSync(repoRoot, (latest) => ({
-          ...latest,
-          runs: latest.runs.map((entry) =>
+        mutateRepoRunSync(repoRoot, (latest) => {
+          const now = new Date().toISOString();
+          const logRef = metadata.logPath ? `file://${metadata.logPath}` : null;
+          const existingLogArtifact = logRef
+            ? latest.artifacts.find(
+                (artifact) => artifact.ref === logRef && artifact.resourceRefs.runId === started.run.runId,
+              )
+            : null;
+          const updatedRuns = latest.runs.map((entry) =>
             entry.runId === started.run.runId
-              ? { ...entry, runtime: { ...entry.runtime, ...metadata }, updatedAt: new Date().toISOString() }
+              ? {
+                  ...entry,
+                  runtime: { ...entry.runtime, ...metadata },
+                  artifactIds: existingLogArtifact
+                    ? entry.artifactIds.includes(existingLogArtifact.artifactId)
+                      ? entry.artifactIds
+                      : [...entry.artifactIds, existingLogArtifact.artifactId]
+                    : entry.artifactIds,
+                  updatedAt: now,
+                }
               : entry,
-          ),
-        }));
+          );
+          const updated = { ...latest, runs: updatedRuns, updatedAt: now };
+          if (!logRef || existingLogArtifact) {
+            return updated;
+          }
+          const withArtifact = addConductorArtifact(updated, {
+            type: "log",
+            ref: logRef,
+            resourceRefs: { taskId, runId: started.run.runId, workerId: worker.workerId },
+            producer: { type: "system", id: "runtime" },
+            metadata: { runtimeMode, path: metadata.logPath },
+          });
+          const artifact = withArtifact.artifacts.at(-1);
+          return artifact
+            ? {
+                ...withArtifact,
+                runs: withArtifact.runs.map((entry) =>
+                  entry.runId === started.run.runId
+                    ? { ...entry, artifactIds: [...entry.artifactIds, artifact.artifactId], updatedAt: now }
+                    : entry,
+                ),
+              }
+            : withArtifact;
+        });
       },
       onConductorProgress: async (progress) => {
         recordTaskProgressForRepo(repoRoot, progress);
