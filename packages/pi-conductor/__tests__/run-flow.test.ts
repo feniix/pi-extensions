@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -35,6 +35,8 @@ import {
   runTaskForRepo,
   startTaskRunForRepo,
 } from "../extensions/conductor.js";
+import { readArtifactContentForRepo } from "../extensions/storage.js";
+import { createTmuxRuntimePaths } from "../extensions/tmux-runtime.js";
 
 describe("durable task run flows", () => {
   let repoDir: string;
@@ -107,12 +109,30 @@ describe("durable task run flows", () => {
     expect(persisted.events.map((event) => event.type)).toContain("run.completed");
   });
 
+  it("marks a started run failed immediately when the runtime backend throws", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Explode", prompt: "Launch and fail" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    runtimeMocks.runWorkerPromptRuntime.mockRejectedValueOnce(new Error("tmux launch failed"));
+
+    await expect(runTaskForRepo(repoDir, task.taskId)).rejects.toThrow(/tmux launch failed/i);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "failed", activeRunId: null });
+    expect(persisted.workers[0]).toMatchObject({ lifecycle: "idle" });
+    expect(persisted.runs[0]).toMatchObject({ status: "failed", errorMessage: "tmux launch failed" });
+  });
+
   it("records runtime log paths as conductor log artifacts", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const task = createTaskForRepo(repoDir, { title: "Log task", prompt: "Do logged work" });
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
     runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async (input) => {
-      await input.onRuntimeMetadata?.({ logPath: "/tmp/pi-conductor-runtime.log" });
+      if (!input.repoRoot || !input.taskContract) throw new Error("missing run scope");
+      const paths = createTmuxRuntimePaths({ repoRoot: input.repoRoot, runId: input.taskContract.runId });
+      mkdirSync(paths.runtimeDir, { recursive: true });
+      writeFileSync(paths.logPath, "runtime log content\n", "utf-8");
+      await input.onRuntimeMetadata?.({ logPath: paths.logPath });
       return { status: "success", finalText: "logged", errorMessage: null, sessionId: "run-session-log" };
     });
 
@@ -121,10 +141,12 @@ describe("durable task run flows", () => {
     const persisted = getOrCreateRunForRepo(repoDir);
     expect(persisted.artifacts[0]).toMatchObject({
       type: "log",
-      ref: "file:///tmp/pi-conductor-runtime.log",
+      ref: `runtime/${persisted.runs[0]?.runId}/runner.log`,
       resourceRefs: { taskId: task.taskId, runId: persisted.runs[0]?.runId },
     });
     expect(persisted.runs[0]?.artifactIds).toContain(persisted.artifacts[0]?.artifactId);
+    const content = readArtifactContentForRepo(repoDir, persisted.artifacts[0]?.artifactId ?? "missing");
+    expect(content).toMatchObject({ content: "runtime log content\n", diagnostic: null });
   });
 
   it("requires review when a durable task run exits without explicit child completion", async () => {
@@ -197,7 +219,7 @@ describe("durable task run flows", () => {
     runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async (input) => {
       runtimeSignal = input.signal;
       expect(runtimeSignal?.aborted).toBe(false);
-      cancelTaskRunForRepo(repoDir, { runId: input.taskContract.runId, reason: "human canceled run" });
+      await cancelTaskRunForRepo(repoDir, { runId: input.taskContract.runId, reason: "human canceled run" });
       expect(runtimeSignal?.aborted).toBe(true);
       return {
         status: "aborted",

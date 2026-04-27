@@ -94,7 +94,7 @@ describe("conductor runtime-mode tool contracts", () => {
     expect(getOrCreateRunForRepo(repoDir).runs).toHaveLength(0);
 
     const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
-    cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "prepare retry" });
+    await cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "prepare retry" });
     await expect(
       getTool(tools, "conductor_retry_task").execute?.(
         "tool-call-3",

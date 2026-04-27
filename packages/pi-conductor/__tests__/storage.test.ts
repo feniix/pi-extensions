@@ -754,6 +754,40 @@ describe("storage helpers", () => {
     });
   });
 
+  it("normalizes persisted runtime metadata that predates runner nonce fields", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: null,
+    });
+    const task = createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" });
+    const running = startTaskRun(
+      assignTaskToWorker(addTask(addWorker(run, worker), task), task.taskId, worker.workerId),
+      {
+        runId: "run-1",
+        taskId: task.taskId,
+        workerId: worker.workerId,
+        backend: "native",
+        leaseExpiresAt: "2026-01-01T00:15:00.000Z",
+      },
+    );
+    const { contractPath: _contractPath, nonceHash: _nonceHash, ...legacyRuntime } = running.runs[0]?.runtime ?? {};
+
+    const projectDir = getConductorProjectDir("abc");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(
+      join(projectDir, "run.json"),
+      `${JSON.stringify({ ...running, runs: [{ ...running.runs[0], runtime: legacyRuntime }] }, null, 2)}\n`,
+      "utf-8",
+    );
+
+    const persisted = readRun("abc");
+    expect(persisted?.runs[0]?.runtime).toMatchObject({ contractPath: null, nonceHash: null });
+  });
+
   it("rejects malformed runtime metadata", () => {
     const run = createEmptyRun("abc", "/tmp/repo");
     const worker = createWorkerRecord({
@@ -899,6 +933,8 @@ describe("storage helpers", () => {
               sessionId: null,
               cwd: null,
               command: null,
+              contractPath: null,
+              nonceHash: null,
               runnerPid: null,
               processGroupId: null,
               tmux: null,

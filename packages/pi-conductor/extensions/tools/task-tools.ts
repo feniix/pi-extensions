@@ -220,7 +220,7 @@ export function registerTaskTools(pi: ExtensionAPI): void {
       reason: Type.String({ description: "Cancellation reason" }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const project = conductor.cancelTaskRunForRepo(ctx.cwd, params);
+      const project = await conductor.cancelTaskRunForRepo(ctx.cwd, params);
       const run = project.runs.find((entry) => entry.runId === params.runId);
       return {
         content: [{ type: "text", text: `canceled run ${params.runId}: ${params.reason}` }],

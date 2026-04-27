@@ -234,7 +234,7 @@ describe("conductor service", () => {
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
     const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
 
-    const canceled = cancelActiveWorkForRepo(repoDir, { reason: "human pressed escape" });
+    const canceled = await cancelActiveWorkForRepo(repoDir, { reason: "human pressed escape" });
 
     expect(canceled.canceledRuns).toEqual([started.run.runId]);
     expect(canceled.canceledTasks).toEqual([task.taskId]);
@@ -320,7 +320,7 @@ describe("conductor service", () => {
       undefined,
       async (_root, _taskId, signal) => {
         runnerSignal = signal;
-        const canceled = cancelActiveWorkForRepo(repoDir, { reason: "human asked to stop" });
+        const canceled = await cancelActiveWorkForRepo(repoDir, { reason: "human asked to stop" });
         expect(canceled.canceledTasks).toHaveLength(1);
         expect(runnerSignal?.aborted).toBe(true);
         return {
@@ -556,7 +556,7 @@ describe("conductor service", () => {
       ),
     });
 
-    const canceled = cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "stop" });
+    const canceled = await cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "stop" });
 
     expect(canceled.runs[0]).toMatchObject({ status: "failed", finishedAt: null });
     expect(canceled.events.at(-1)).toMatchObject({ type: "run.cancel_rejected" });
@@ -568,7 +568,7 @@ describe("conductor service", () => {
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
     const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
 
-    const canceled = cancelTaskRunForRepo(repoDir, {
+    const canceled = await cancelTaskRunForRepo(repoDir, {
       runId: started.run.runId,
       reason: "superseded attempt",
     });
@@ -598,6 +598,74 @@ describe("conductor service", () => {
     expect(reconciled.runs[0]).toMatchObject({ status: "stale" });
     expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
     expect(getOrCreateRunForRepo(repoDir).events.map((event) => event.type)).toContain("run.lease_expired");
+  });
+
+  it("reconciles missing tmux runtime sessions through project reconciliation", async () => {
+    const worker = await createWorkerForRepo(repoDir, "tmux-worker");
+    const task = createTaskForRepo(repoDir, { title: "Visible lease task", prompt: "Do it visibly" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+    const run = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...run,
+      runs: run.runs.map((attempt) =>
+        attempt.runId === started.run.runId
+          ? {
+              ...attempt,
+              runtime: {
+                ...attempt.runtime,
+                mode: "tmux",
+                tmux: { socketPath: "/tmp/missing-tmux.sock", sessionName: "missing", windowId: "@1", paneId: "%2" },
+              },
+            }
+          : attempt,
+      ),
+    });
+
+    const reconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:00:00.000Z" });
+
+    expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+    expect(reconciled.runs[0]).toMatchObject({ status: "stale", errorMessage: expect.stringContaining("tmux") });
+  });
+
+  it("does not expire active tmux runs while their tmux session is still present", async () => {
+    const originalPath = process.env.PATH;
+    const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));
+    writeFileSync(join(binDir, "tmux"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+    try {
+      const worker = await createWorkerForRepo(repoDir, "live-tmux-worker");
+      const task = createTaskForRepo(repoDir, { title: "Live visible lease task", prompt: "Do it visibly" });
+      assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+      const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+      const run = getOrCreateRunForRepo(repoDir);
+      writeRun({
+        ...run,
+        runs: run.runs.map((attempt) =>
+          attempt.runId === started.run.runId
+            ? {
+                ...attempt,
+                leaseExpiresAt: "2026-04-27T00:00:00.000Z",
+                runtime: {
+                  ...attempt.runtime,
+                  mode: "tmux",
+                  heartbeatAt: "2026-04-27T00:09:00.000Z",
+                  tmux: { socketPath: "/tmp/live-tmux.sock", sessionName: "live", windowId: "@1", paneId: "%2" },
+                },
+              }
+            : attempt,
+        ),
+      });
+
+      const reconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:10:00.000Z" });
+
+      expect(reconciled.tasks[0]).toMatchObject({ state: "running", activeRunId: started.run.runId });
+      expect(reconciled.workers[0]).toMatchObject({ lifecycle: "running" });
+      expect(reconciled.runs[0]).toMatchObject({ status: "running", leaseExpiresAt: null });
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(binDir, { recursive: true, force: true });
+    }
   });
 
   it("supports read-only project reconciliation dry runs", async () => {

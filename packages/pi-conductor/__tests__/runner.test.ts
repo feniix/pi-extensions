@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -14,11 +15,12 @@ import {
 import { deriveProjectKey } from "../extensions/project-key.js";
 import {
   createRunnerContract,
+  readRunnerContract,
   runRunnerFromContract,
   validateRunnerContractForRepo,
   writeRunnerContract,
 } from "../extensions/runner.js";
-import { getRunLockFile } from "../extensions/storage.js";
+import { getRunLockFile, writeRun } from "../extensions/storage.js";
 
 describe("pi-conductor runner contract", () => {
   let repoDir: string;
@@ -43,7 +45,7 @@ describe("pi-conductor runner contract", () => {
     }
   });
 
-  async function createStartedContract(nonce = "nonce-1") {
+  async function createStartedContract(nonce = "nonce-1", options: { persistRuntimeMetadata?: boolean } = {}) {
     const worker = await createWorkerForRepo(repoDir, "runner-worker");
     const task = createTaskForRepo(repoDir, { title: "Runner task", prompt: "Run through contract" });
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
@@ -58,8 +60,60 @@ describe("pi-conductor runner contract", () => {
     });
     const contractPath = join(conductorHome, `${started.run.runId}-contract.json`);
     writeRunnerContract(contractPath, contract);
+    if (options.persistRuntimeMetadata ?? true) {
+      const expectedHash = createHash("sha256").update(nonce).digest("hex");
+      const run = getOrCreateRunForRepo(repoDir);
+      writeRun({
+        ...run,
+        runs: run.runs.map((entry) =>
+          entry.runId === started.run.runId
+            ? { ...entry, runtime: { ...entry.runtime, contractPath, nonceHash: expectedHash } }
+            : entry,
+        ),
+      });
+    }
     return { worker, task, started, contract, contractPath, nonce };
   }
+
+  it("rejects external runner contracts before durable nonce metadata is recorded", async () => {
+    const { contractPath, nonce } = await createStartedContract("nonce-1", { persistRuntimeMetadata: false });
+
+    await expect(
+      runRunnerFromContract({
+        contractPath,
+        nonce,
+        async runWorker() {
+          throw new Error("should not run");
+        },
+      }),
+    ).rejects.toThrow(/Runner contract nonce metadata is not recorded/i);
+  });
+
+  it("rejects malformed runner contract files with clear validation errors", async () => {
+    const contractPath = join(conductorHome, "malformed-contract.json");
+    writeFileSync(
+      contractPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        repoRoot: 42,
+        worktreePath: repoDir,
+        sessionFile: join(repoDir, ".pi-session.jsonl"),
+        taskContract: {
+          taskId: "task-1",
+          runId: "run-1",
+          taskRevision: 1,
+          goal: "Do it",
+          explicitCompletionTools: true,
+        },
+        nonce: "nonce",
+        createdAt: "2026-04-27T00:00:00.000Z",
+        heartbeatIntervalMs: 5000,
+      }),
+      "utf-8",
+    );
+
+    expect(() => readRunnerContract(contractPath)).toThrow(/Runner contract repoRoot must be a string/i);
+  });
 
   it("forwards runner progress and completion through scoped conductor mutations", async () => {
     const { task, started, contractPath, nonce } = await createStartedContract();
@@ -118,6 +172,28 @@ describe("pi-conductor runner contract", () => {
     });
   });
 
+  it("uses the persisted contract heartbeat interval for CLI runner invocations", async () => {
+    const { task, started, contractPath, nonce, contract } = await createStartedContract();
+    writeRunnerContract(contractPath, { ...contract, heartbeatIntervalMs: 5 });
+
+    await runRunnerFromContract({
+      contractPath,
+      nonce,
+      async runWorker(input) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        await input.onConductorComplete?.({
+          runId: started.run.runId,
+          taskId: task.taskId,
+          status: "succeeded",
+          completionSummary: "done after persisted heartbeat",
+        });
+        return { status: "success", finalText: "done", errorMessage: null, sessionId: "runner-session" };
+      },
+    });
+
+    expect(getOrCreateRunForRepo(repoDir).events.map((event) => event.type)).toContain("run.heartbeat");
+  });
+
   it("emits runner heartbeats while work is still active", async () => {
     const { task, started, contractPath, nonce } = await createStartedContract();
 
@@ -141,6 +217,28 @@ describe("pi-conductor runner contract", () => {
     expect(persisted.events.map((event) => event.type)).toContain("run.heartbeat");
     expect(persisted.runs[0]?.lastHeartbeatAt).toBeTruthy();
     expect(persisted.runs[0]?.runtime.heartbeatAt).toBeTruthy();
+  });
+
+  it("preserves blocked outcomes reported through the runner contract", async () => {
+    const { task, started, contractPath, nonce } = await createStartedContract();
+
+    await runRunnerFromContract({
+      contractPath,
+      nonce,
+      async runWorker(input) {
+        await input.onConductorComplete?.({
+          runId: started.run.runId,
+          taskId: task.taskId,
+          status: "blocked",
+          completionSummary: "needs human input",
+        });
+        return { status: "success", finalText: "needs human input", errorMessage: null, sessionId: "runner-session" };
+      },
+    });
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "blocked", activeRunId: null });
+    expect(persisted.runs[0]).toMatchObject({ status: "blocked", completionSummary: "needs human input" });
   });
 
   it("marks the run failed when the runner crashes before completion", async () => {
@@ -185,7 +283,7 @@ describe("pi-conductor runner contract", () => {
       contractPath,
       nonce,
       async runWorker(input) {
-        cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "human stopped it" });
+        await cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "human stopped it" });
         await input.onConductorComplete?.({
           runId: started.run.runId,
           taskId: task.taskId,
@@ -200,6 +298,70 @@ describe("pi-conductor runner contract", () => {
     expect(persisted.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
     expect(persisted.runs[0]).toMatchObject({ status: "aborted", completionSummary: null });
     expect(persisted.events.map((event) => event.type)).toContain("task.completion_rejected");
+  });
+
+  it("allows scoped runner callbacks after runtime metadata records the contract path", async () => {
+    const { task, started, contractPath, nonce } = await createStartedContract("expected-nonce");
+    const expectedHash = createHash("sha256").update(nonce).digest("hex");
+    const run = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...run,
+      runs: run.runs.map((entry) =>
+        entry.runId === started.run.runId
+          ? { ...entry, runtime: { ...entry.runtime, contractPath, nonceHash: expectedHash } }
+          : entry,
+      ),
+    });
+
+    await runRunnerFromContract({
+      contractPath,
+      nonce,
+      async runWorker(input) {
+        await input.onConductorProgress?.({
+          runId: started.run.runId,
+          taskId: task.taskId,
+          progress: "working with bound contract path",
+        });
+        await input.onConductorComplete?.({
+          runId: started.run.runId,
+          taskId: task.taskId,
+          status: "succeeded",
+          completionSummary: "done",
+        });
+        return { status: "success", finalText: "done", errorMessage: null, sessionId: "runner-session" };
+      },
+    });
+
+    expect(getOrCreateRunForRepo(repoDir).events.map((event) => event.type)).toContain("run.progress_reported");
+  });
+
+  it("rejects forged contracts whose nonce is not bound to persisted run metadata", async () => {
+    const { contract, contractPath, nonce } = await createStartedContract("expected-nonce");
+    const expectedHash = createHash("sha256").update(nonce).digest("hex");
+    const run = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...run,
+      runs: run.runs.map((entry) =>
+        entry.runId === contract.taskContract.runId
+          ? { ...entry, runtime: { ...entry.runtime, contractPath, nonceHash: expectedHash } }
+          : entry,
+      ),
+    });
+    const forgedContractPath = join(conductorHome, "forged-contract.json");
+    writeRunnerContract(forgedContractPath, { ...contract, nonce: "forged-nonce" });
+
+    await expect(
+      runRunnerFromContract({
+        contractPath: forgedContractPath,
+        nonce: "forged-nonce",
+        async runWorker() {
+          throw new Error("should not run");
+        },
+      }),
+    ).rejects.toThrow(/nonce mismatch|contract path mismatch/i);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "running", activeRunId: contract.taskContract.runId });
   });
 
   it("rejects stale or forged runner contracts before mutating state", async () => {

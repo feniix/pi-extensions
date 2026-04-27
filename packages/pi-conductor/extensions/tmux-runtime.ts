@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,7 @@ import type {
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+const TMUX_COMMAND_TIMEOUT_MS = 10_000;
 
 export interface TmuxCommandAdapter {
   execFile(
@@ -34,6 +35,7 @@ export interface TmuxRuntimeOptions {
   runnerCommand?: string[];
   waitForCompletion?: boolean;
   pollIntervalMs?: number;
+  runnerHeartbeatIntervalMs?: number;
   now?: () => string;
   randomHex?: (bytes: number) => string;
 }
@@ -47,13 +49,21 @@ type TmuxRuntimePaths = {
 
 const defaultCommandAdapter: TmuxCommandAdapter = {
   async execFile(command, args, options) {
-    const result = await execFileAsync(command, args, { cwd: options?.cwd, env: options?.env });
+    const result = await execFileAsync(command, args, {
+      cwd: options?.cwd,
+      env: options?.env,
+      timeout: TMUX_COMMAND_TIMEOUT_MS,
+    });
     return { stdout: result.stdout, stderr: result.stderr };
   },
 };
 
 function defaultRandomHex(bytes: number): string {
   return randomBytes(bytes).toString("hex");
+}
+
+function hashRunnerNonce(nonce: string): string {
+  return createHash("sha256").update(nonce).digest("hex");
 }
 
 function buildRunnerEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
@@ -122,7 +132,7 @@ export function inspectTmuxRuntimeAvailability(input: { runnerCommand?: string[]
     return { available: false, diagnostic: "pi-conductor-runner is not resolvable from pi-conductor" };
   }
   try {
-    execFileSync("tmux", ["-V"], { stdio: "ignore" });
+    execFileSync("tmux", ["-V"], { stdio: "ignore", timeout: TMUX_COMMAND_TIMEOUT_MS });
   } catch {
     return { available: false, diagnostic: "tmux executable is not available on PATH" };
   }
@@ -132,7 +142,8 @@ export function inspectTmuxRuntimeAvailability(input: { runnerCommand?: string[]
 export function buildTmuxSessionName(input: { projectKey: string; runId: string; nonce: string }): string {
   const safeProject = input.projectKey.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 32);
   const safeRun = input.runId.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 32);
-  return `pi-cond-${safeProject}-${safeRun}-${input.nonce.slice(0, 8)}`.slice(0, 100);
+  const nonceHashSuffix = createHash("sha256").update(input.nonce).digest("hex").slice(0, 8);
+  return `pi-cond-${safeProject}-${safeRun}-${nonceHashSuffix}`.slice(0, 100);
 }
 
 export function createTmuxRuntimePaths(input: { repoRoot: string; runId: string }): TmuxRuntimePaths {
@@ -144,6 +155,10 @@ export function createTmuxRuntimePaths(input: { repoRoot: string; runId: string 
     logPath: join(runtimeDir, "runner.log"),
     socketPath: join(runtimeDir, "tmux.sock"),
   };
+}
+
+function redactTmuxRunnerCommand(command: string, nonce: string): string {
+  return command.replace(shellQuote(nonce), "<redacted>");
 }
 
 export function buildTmuxLaunch(input: {
@@ -233,6 +248,7 @@ async function waitForTerminalRun(input: {
   runId: string;
   signal?: AbortSignal;
   pollIntervalMs: number;
+  onAbort?: () => Promise<void>;
 }): Promise<RuntimeRunResult> {
   while (!input.signal?.aborted) {
     const run = getOrCreateRunForRepo(input.repoRoot);
@@ -245,6 +261,7 @@ async function waitForTerminalRun(input: {
     }
     await sleep(input.pollIntervalMs);
   }
+  await input.onAbort?.();
   return { status: "aborted", finalText: null, errorMessage: null, sessionId: null };
 }
 
@@ -330,7 +347,7 @@ function markTmuxRunStale(input: {
     ),
     workers: latest.workers.map((worker) =>
       worker.workerId === input.attempt.workerId
-        ? { ...worker, lifecycle: "idle" as const, updatedAt: input.now }
+        ? { ...worker, lifecycle: "broken" as const, recoverable: true, updatedAt: input.now }
         : worker,
     ),
     runs: latest.runs.map((entry) =>
@@ -446,7 +463,9 @@ export async function reconcileTmuxRuntimeForRepo(input: {
           : task,
       ),
       workers: latest.workers.map((worker) =>
-        worker.workerId === attempt.workerId ? { ...worker, lifecycle: "idle" as const, updatedAt: now } : worker,
+        worker.workerId === attempt.workerId
+          ? { ...worker, lifecycle: "broken" as const, recoverable: true, updatedAt: now }
+          : worker,
       ),
       runs: latest.runs.map((entry) =>
         entry.runId === attempt.runId
@@ -477,6 +496,7 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
   const waitForCompletion = options.waitForCompletion ?? true;
   const pollIntervalMs = options.pollIntervalMs ?? 1000;
   const now = options.now ?? (() => new Date().toISOString());
+  const runnerHeartbeatIntervalMs = options.runnerHeartbeatIntervalMs ?? 30_000;
   const randomHex = options.randomHex ?? defaultRandomHex;
 
   return {
@@ -515,6 +535,7 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
         taskContract: input.taskContract,
         nonce,
         createdAt: now(),
+        heartbeatIntervalMs: runnerHeartbeatIntervalMs,
       });
       writeRunnerContract(paths.contractPath, contract);
       writeFileSync(paths.logPath, "", { encoding: "utf-8", flag: "a", mode: 0o600 });
@@ -529,13 +550,57 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
         nonce,
         logPath: paths.logPath,
       });
+      const redactedCommand = redactTmuxRunnerCommand(launch.command, nonce);
+      const baseRuntime = {
+        mode,
+        cwd: input.worktreePath,
+        command: redactedCommand,
+        contractPath: paths.contractPath,
+        nonceHash: hashRunnerNonce(nonce),
+        tmux: { socketPath: paths.socketPath, sessionName, windowId: null, paneId: null },
+        logPath: paths.logPath,
+        viewerCommand: launch.attachCommand,
+        viewerStatus: "pending" as const,
+        cleanupStatus: "pending" as const,
+      };
+      await input.onRuntimeMetadata?.({
+        ...baseRuntime,
+        status: "starting",
+        diagnostics: [`tmux session ${sessionName} prepared`],
+        heartbeatAt: now(),
+      });
       await adapter.execFile("tmux", launch.args, { cwd: input.worktreePath, env: buildRunnerEnvironment() });
+      const durableRun = getOrCreateRunForRepo(input.repoRoot).runs.find(
+        (entry) => entry.runId === input.taskContract?.runId,
+      );
+      if (durableRun && (durableRun.finishedAt || isTerminalRunStatus(durableRun.status))) {
+        const cleanup = await cancelTmuxRuntime({
+          adapter,
+          runtime: {
+            ...durableRun.runtime,
+            ...baseRuntime,
+            sessionId: durableRun.runtime.sessionId,
+            status: "aborted",
+            runnerPid: durableRun.runtime.runnerPid,
+            processGroupId: durableRun.runtime.processGroupId,
+            diagnostics: durableRun.runtime.diagnostics,
+            heartbeatAt: durableRun.runtime.heartbeatAt,
+            startedAt: durableRun.runtime.startedAt,
+            finishedAt: durableRun.runtime.finishedAt,
+          },
+        });
+        await input.onRuntimeMetadata?.({
+          status: "aborted",
+          cleanupStatus: cleanup.cleanupStatus,
+          finishedAt: now(),
+          diagnostics: cleanup.diagnostic ? [cleanup.diagnostic] : [`tmux session ${sessionName} cleanup succeeded`],
+        });
+        return mapTerminalRunToRuntimeResult(durableRun);
+      }
       const paneMetadata = await inspectTmuxPaneMetadata({ adapter, socketPath: paths.socketPath, sessionName });
       await input.onRuntimeMetadata?.({
-        mode,
+        ...baseRuntime,
         status: "running",
-        cwd: input.worktreePath,
-        command: launch.command,
         runnerPid: paneMetadata.runnerPid,
         processGroupId: paneMetadata.processGroupId,
         tmux: {
@@ -544,10 +609,6 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
           windowId: paneMetadata.windowId,
           paneId: paneMetadata.paneId,
         },
-        logPath: paths.logPath,
-        viewerCommand: launch.attachCommand,
-        viewerStatus: "pending",
-        cleanupStatus: "pending",
         diagnostics: [
           `tmux session ${sessionName} launched`,
           ...(paneMetadata.diagnostic ? [paneMetadata.diagnostic] : []),
@@ -555,51 +616,47 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
         heartbeatAt: now(),
       });
 
-      const onAbort = () => {
-        void (async () => {
-          const cleanup = await cancelTmuxRuntime({
-            adapter,
-            runtime: {
-              mode,
-              status: "aborted",
-              sessionId: null,
-              cwd: input.worktreePath,
-              command: launch.command,
-              runnerPid: null,
-              processGroupId: null,
-              tmux: { socketPath: paths.socketPath, sessionName, windowId: null, paneId: null },
-              logPath: paths.logPath,
-              viewerCommand: launch.attachCommand,
-              viewerStatus: "pending",
-              diagnostics: [],
-              heartbeatAt: null,
-              cleanupStatus: "pending",
-              startedAt: null,
-              finishedAt: null,
-            },
-          });
-          await input.onRuntimeMetadata?.({
+      const onAbort = async () => {
+        const cleanup = await cancelTmuxRuntime({
+          adapter,
+          runtime: {
+            mode,
             status: "aborted",
-            cleanupStatus: cleanup.cleanupStatus,
-            finishedAt: now(),
-            diagnostics: cleanup.diagnostic ? [cleanup.diagnostic] : [`tmux session ${sessionName} cleanup succeeded`],
-          });
-        })();
-      };
-      input.signal?.addEventListener("abort", onAbort, { once: true });
-      try {
-        if (!waitForCompletion) {
-          return { status: "success", finalText: "tmux runtime launched", errorMessage: null, sessionId: sessionName };
-        }
-        return await waitForTerminalRun({
-          repoRoot: input.repoRoot,
-          runId: input.taskContract.runId,
-          signal: input.signal,
-          pollIntervalMs,
+            sessionId: null,
+            cwd: input.worktreePath,
+            command: redactedCommand,
+            contractPath: paths.contractPath,
+            nonceHash: hashRunnerNonce(nonce),
+            runnerPid: null,
+            processGroupId: null,
+            tmux: { socketPath: paths.socketPath, sessionName, windowId: null, paneId: null },
+            logPath: paths.logPath,
+            viewerCommand: launch.attachCommand,
+            viewerStatus: "pending",
+            diagnostics: [],
+            heartbeatAt: null,
+            cleanupStatus: "pending",
+            startedAt: null,
+            finishedAt: null,
+          },
         });
-      } finally {
-        input.signal?.removeEventListener("abort", onAbort);
+        await input.onRuntimeMetadata?.({
+          status: "aborted",
+          cleanupStatus: cleanup.cleanupStatus,
+          finishedAt: now(),
+          diagnostics: cleanup.diagnostic ? [cleanup.diagnostic] : [`tmux session ${sessionName} cleanup succeeded`],
+        });
+      };
+      if (!waitForCompletion) {
+        return { status: "success", finalText: "tmux runtime launched", errorMessage: null, sessionId: sessionName };
       }
+      return await waitForTerminalRun({
+        repoRoot: input.repoRoot,
+        runId: input.taskContract.runId,
+        signal: input.signal,
+        pollIntervalMs,
+        onAbort,
+      });
     },
   };
 }

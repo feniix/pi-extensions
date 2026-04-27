@@ -6,6 +6,8 @@ import type { RunRuntimeMode } from "./types.js";
 
 export type ConductorBackendKind = "native" | "pi-subagents";
 
+const TMUX_AVAILABILITY_TIMEOUT_MS = 10_000;
+
 export interface ConductorBackendCapabilities {
   canStartRun: boolean;
   canRunForeground: boolean;
@@ -150,7 +152,7 @@ function inspectTmuxRuntimeAvailability(): { available: boolean; diagnostic: str
     return { available: false, diagnostic: "pi-conductor-runner is not resolvable from pi-conductor" };
   }
   try {
-    execFileSync("tmux", ["-V"], { stdio: "ignore" });
+    execFileSync("tmux", ["-V"], { stdio: "ignore", timeout: TMUX_AVAILABILITY_TIMEOUT_MS });
   } catch {
     return { available: false, diagnostic: "tmux executable is not available on PATH" };
   }

@@ -153,11 +153,58 @@ describe("tmux conductor runtime", () => {
       logPath: expect.stringContaining("runner.log"),
       viewerCommand: expect.stringContaining("attach-session -r"),
     });
-    const contractPath = persisted?.runtime.command?.match(/--contract'?'?\s+'([^']+)'/)?.[1] ?? null;
+    expect(persisted?.runtime.command).not.toContain("abc123def4567890abc123def4567890");
+    expect(persisted?.runtime.command).not.toContain("abc123de");
+    expect(persisted?.runtime.command).toContain("'--nonce' <redacted>");
+    expect(persisted?.runtime.tmux?.sessionName).not.toContain("abc123de");
+    expect(persisted?.runtime.viewerCommand).not.toContain("abc123de");
+    expect(persisted?.runtime.diagnostics.join("\n")).not.toContain("abc123de");
+    const contractPath = persisted?.runtime.contractPath;
     expect(contractPath).toBeTruthy();
     expect(readFileSync(contractPath ?? "", "utf-8")).toContain(started.run.runId);
     expect(existsSync(persisted?.runtime.logPath ?? "")).toBe(true);
     expect(statSync(persisted?.runtime.logPath ?? "").mode & 0o777).toBe(0o600);
+  });
+
+  it("cleans up tmux when durable cancellation wins the launch race", async () => {
+    const { worker, started } = await createStartedTask();
+    const adapter = new FakeTmuxAdapter();
+    const originalExecFile = adapter.execFile.bind(adapter);
+    adapter.execFile = async (command, args, options) => {
+      const result = await originalExecFile(command, args, options);
+      if (args.includes("new-session")) {
+        const { cancelTaskRunForRepo: cancelTaskRunStateForRepo } = await import("../extensions/task-service.js");
+        cancelTaskRunStateForRepo(repoDir, { runId: started.run.runId, reason: "human canceled during launch" });
+      }
+      return result;
+    };
+    const backend = createTmuxWorkerRunRuntimeBackend({
+      commandAdapter: adapter,
+      runnerCommand: ["node", "/tmp/pi-conductor-runner", "run"],
+      waitForCompletion: false,
+      randomHex: () => "11223344556677889900aabbccddeeff",
+    });
+
+    const result = await backend.run({
+      repoRoot: repoDir,
+      worktreePath: worker.worktreePath ?? repoDir,
+      sessionFile: worker.sessionFile ?? join(repoDir, "session.jsonl"),
+      task: "Run in tmux",
+      taskContract: started.taskContract,
+      onRuntimeMetadata: async (metadata) => {
+        const latest = getOrCreateRunForRepo(repoDir);
+        const { writeRun } = await import("../extensions/storage.js");
+        writeRun({
+          ...latest,
+          runs: latest.runs.map((entry) =>
+            entry.runId === started.run.runId ? { ...entry, runtime: { ...entry.runtime, ...metadata } } : entry,
+          ),
+        });
+      },
+    });
+
+    expect(result).toMatchObject({ status: "aborted" });
+    expect(adapter.calls.some((call) => call.args.includes("kill-session"))).toBe(true);
   });
 
   it("launches tmux with a sanitized runner environment", async () => {
@@ -243,6 +290,8 @@ describe("tmux conductor runtime", () => {
       sessionId: null,
       cwd: repoDir,
       command: "'node' '/tmp/pi-conductor-runner' 'run'",
+      contractPath: null,
+      nonceHash: null,
       runnerPid: null,
       processGroupId: null,
       tmux: { socketPath: "/tmp/tmux.sock", sessionName: "owned", windowId: null, paneId: "%7" },
@@ -272,6 +321,8 @@ describe("tmux conductor runtime", () => {
       sessionId: null,
       cwd: repoDir,
       command: null,
+      contractPath: null,
+      nonceHash: null,
       runnerPid: null,
       processGroupId: null,
       tmux: { socketPath: "/tmp/tmux.sock", sessionName: "missing", windowId: null, paneId: null },
@@ -412,6 +463,7 @@ describe("tmux conductor runtime", () => {
     });
 
     expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+    expect(reconciled.workers[0]).toMatchObject({ lifecycle: "broken", recoverable: true });
     expect(reconciled.runs[0]).toMatchObject({ status: "stale", errorMessage: expect.stringContaining("runner pid") });
     expect(reconciled.runs[0]?.runtime.status).toBe("exited_error");
   });
@@ -454,6 +506,7 @@ describe("tmux conductor runtime", () => {
     });
 
     expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+    expect(reconciled.workers[0]).toMatchObject({ lifecycle: "broken", recoverable: true });
     expect(reconciled.runs[0]).toMatchObject({
       status: "stale",
       errorMessage: expect.stringContaining("pane command"),

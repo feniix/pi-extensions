@@ -138,7 +138,7 @@ describe("LLM hardening follow-ups", () => {
     addWorkerAndAssign(task.taskId);
     const started = startTaskRunForRepo(repoRoot, { taskId: task.taskId, workerId: "worker-1" });
 
-    cancelTaskRunForRepo(repoRoot, { runId: started.run.runId, reason: "stop" });
+    await cancelTaskRunForRepo(repoRoot, { runId: started.run.runId, reason: "stop" });
     expect(getOrCreateRunForRepo(repoRoot).objectives[0]?.status).toBe("blocked");
 
     await runNextActionForRepo(repoRoot);
