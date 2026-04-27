@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { getAuthStatusMessage, getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
+import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
 import {
   webAnswerParams,
   webFetchParams,
