@@ -318,8 +318,8 @@ export interface RunRuntimeMetadata {
   sessionId: string | null;
   cwd: string | null;
   command: string | null;
-  contractPath: string | null;
-  nonceHash: string | null;
+  contractPath?: string | null;
+  nonceHash?: string | null;
   runnerPid: number | null;
   processGroupId: number | null;
   tmux: {

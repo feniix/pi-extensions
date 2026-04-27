@@ -6,8 +6,12 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { deriveProjectKey } from "./project-key.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
-import { createRunnerContract, writeRunnerContract } from "./runner.js";
+import { isTerminalRunStatus } from "./run-status.js";
+import { createRunnerContract, hashRunnerNonce, writeRunnerContract } from "./runner-contract.js";
+import { markRunAttemptStale } from "./runtime-stale.js";
+import { releaseTerminalTmuxWorkerForRepo } from "./runtime-worker-release.js";
 import { getConductorProjectDir } from "./storage.js";
+import { applyTmuxReconciliationState } from "./tmux-reconcile-policy.js";
 import type {
   RunAttemptRecord,
   RunRecord,
@@ -20,6 +24,22 @@ import type {
 
 const execFileAsync = promisify(execFile);
 const TMUX_COMMAND_TIMEOUT_MS = 10_000;
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isTmuxMissingSessionMessage(message: string): boolean {
+  return /can't find session|no server running|not found/i.test(message);
+}
+
+function errorWithCleanupStatus(
+  error: unknown,
+  cleanupStatus: "succeeded" | "failed",
+): Error & { cleanupStatus: "succeeded" | "failed" } {
+  const wrapped = error instanceof Error ? error : new Error(String(error));
+  return Object.assign(wrapped, { cleanupStatus });
+}
 
 export interface TmuxCommandAdapter {
   execFile(
@@ -43,6 +63,7 @@ export interface TmuxRuntimeOptions {
 type TmuxRuntimePaths = {
   runtimeDir: string;
   contractPath: string;
+  noncePath: string;
   logPath: string;
   socketPath: string;
 };
@@ -62,12 +83,47 @@ function defaultRandomHex(bytes: number): string {
   return randomBytes(bytes).toString("hex");
 }
 
-function hashRunnerNonce(nonce: string): string {
-  return createHash("sha256").update(nonce).digest("hex");
-}
-
 function buildRunnerEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  const allowedKeys = ["PATH", "HOME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "PI_CONDUCTOR_HOME"];
+  const defaultAllowedKeys = [
+    "PATH",
+    "HOME",
+    "SHELL",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "PI_CONDUCTOR_HOME",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "XAI_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_ENDPOINT",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "SSH_AUTH_SOCK",
+    "SSH_AGENT_PID",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GIT_ASKPASS",
+    "GIT_SSH_COMMAND",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+  ];
+  const configuredAllowedKeys = (env.PI_CONDUCTOR_RUNNER_ENV_ALLOWLIST ?? "")
+    .split(",")
+    .map((key) => key.trim())
+    .filter((key) => /^[A-Z_][A-Z0-9_]*$/.test(key));
+  const allowedKeys = [...new Set([...defaultAllowedKeys, ...configuredAllowedKeys])];
   return Object.fromEntries(
     allowedKeys.flatMap((key) => (env[key] === undefined ? [] : [[key, env[key]]])),
   ) as NodeJS.ProcessEnv;
@@ -75,12 +131,6 @@ function buildRunnerEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.Pr
 
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, milliseconds));
-}
-
-function isTerminalRunStatus(status: RunAttemptRecord["status"]): boolean {
-  return ["succeeded", "partial", "blocked", "failed", "aborted", "stale", "interrupted", "unknown_dispatch"].includes(
-    status,
-  );
 }
 
 function mapTerminalRunToRuntimeResult(run: RunAttemptRecord): RuntimeRunResult {
@@ -152,6 +202,7 @@ export function createTmuxRuntimePaths(input: { repoRoot: string; runId: string 
   return {
     runtimeDir,
     contractPath: join(runtimeDir, "contract.json"),
+    noncePath: join(runtimeDir, "nonce"),
     logPath: join(runtimeDir, "runner.log"),
     socketPath: join(runtimeDir, "tmux.sock"),
   };
@@ -167,10 +218,10 @@ export function buildTmuxLaunch(input: {
   worktreePath: string;
   runnerCommand: string[];
   contractPath: string;
-  nonce: string;
+  noncePath: string;
   logPath: string;
 }): { args: string[]; command: string; attachCommand: string } {
-  const runnerArgv = [...input.runnerCommand, "--contract", input.contractPath, "--nonce", input.nonce];
+  const runnerArgv = [...input.runnerCommand, "--contract", input.contractPath, "--nonce-file", input.noncePath];
   const command = `${runnerArgv.map(shellQuote).join(" ")} >> ${shellQuote(input.logPath)} 2>&1`;
   return {
     args: [
@@ -248,6 +299,8 @@ async function waitForTerminalRun(input: {
   runId: string;
   signal?: AbortSignal;
   pollIntervalMs: number;
+  adapter?: TmuxCommandAdapter;
+  staleHeartbeatMs?: number;
   onAbort?: () => Promise<void>;
 }): Promise<RuntimeRunResult> {
   while (!input.signal?.aborted) {
@@ -257,7 +310,32 @@ async function waitForTerminalRun(input: {
       return { status: "error", finalText: null, errorMessage: `Run ${input.runId} disappeared`, sessionId: null };
     }
     if (attempt.finishedAt || isTerminalRunStatus(attempt.status)) {
-      return mapTerminalRunToRuntimeResult(attempt);
+      if (attempt.runtime.mode === "tmux" && input.adapter && attempt.runtime.cleanupStatus === "pending") {
+        const cleanup = await cancelTmuxRuntime({ adapter: input.adapter, runtime: attempt.runtime });
+        releaseTerminalTmuxWorkerForRepo({
+          repoRoot: input.repoRoot,
+          runId: input.runId,
+          diagnostic: cleanup.diagnostic ?? "tmux terminal run cleanup completed",
+          cleanupStatus: cleanup.cleanupStatus,
+          workerLifecycle: cleanup.cleanupStatus === "succeeded" ? "idle" : "broken",
+          workerRecoverable: cleanup.cleanupStatus !== "succeeded",
+        });
+      }
+      return mapTerminalRunToRuntimeResult(
+        getOrCreateRunForRepo(input.repoRoot).runs.find((entry) => entry.runId === input.runId) ?? attempt,
+      );
+    }
+    if (attempt.runtime.mode === "tmux" && input.adapter) {
+      const reconciled = await reconcileTmuxRuntimeForRepo({
+        repoRoot: input.repoRoot,
+        runId: input.runId,
+        adapter: input.adapter,
+        staleHeartbeatMs: input.staleHeartbeatMs,
+      });
+      const reconciledAttempt = reconciled.runs.find((entry) => entry.runId === input.runId);
+      if (reconciledAttempt && (reconciledAttempt.finishedAt || isTerminalRunStatus(reconciledAttempt.status))) {
+        return mapTerminalRunToRuntimeResult(reconciledAttempt);
+      }
     }
     await sleep(input.pollIntervalMs);
   }
@@ -276,15 +354,32 @@ export async function cancelTmuxRuntime(input: {
   try {
     const adapter = input.adapter ?? defaultCommandAdapter;
     if (input.runtime.command) {
-      const currentPaneCommand = await inspectPaneCurrentCommand({
-        adapter,
-        socketPath: tmux.socketPath,
-        paneTarget: tmux.paneId ?? tmux.sessionName,
-      });
+      let currentPaneCommand: string | null = null;
+      try {
+        const result = await adapter.execFile("tmux", [
+          "-S",
+          tmux.socketPath,
+          "display-message",
+          "-p",
+          "-t",
+          tmux.paneId ?? tmux.sessionName,
+          "#{pane_current_command}",
+        ]);
+        currentPaneCommand = result.stdout.trim() || null;
+      } catch (error) {
+        const message = errorMessage(error);
+        if (isTmuxMissingSessionMessage(message)) {
+          return { cleanupStatus: "succeeded", diagnostic: message };
+        }
+        return {
+          cleanupStatus: "failed",
+          diagnostic: `tmux pane command verification failed before cancel: ${message}`,
+        };
+      }
       if (currentPaneCommand && !input.runtime.command.includes(currentPaneCommand)) {
         return {
           cleanupStatus: "failed",
-          diagnostic: `tmux pane command verification failed before cancel: ${currentPaneCommand}`,
+          diagnostic: `tmux pane command verification differed before cancel: ${currentPaneCommand}`,
         };
       }
     }
@@ -292,7 +387,7 @@ export async function cancelTmuxRuntime(input: {
     return { cleanupStatus: "succeeded", diagnostic: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (/can't find session|no server running|not found/i.test(message)) {
+    if (isTmuxMissingSessionMessage(message)) {
       return { cleanupStatus: "succeeded", diagnostic: message };
     }
     return { cleanupStatus: "failed", diagnostic: message };
@@ -338,45 +433,20 @@ function markTmuxRunStale(input: {
   now: string;
   diagnostic: string;
 }): RunRecord {
-  return mutateRepoRunSync(input.repoRoot, (latest) => ({
-    ...latest,
-    tasks: latest.tasks.map((task) =>
-      task.taskId === input.attempt.taskId && task.activeRunId === input.attempt.runId
-        ? { ...task, state: "needs_review" as const, activeRunId: null, updatedAt: input.now }
-        : task,
-    ),
-    workers: latest.workers.map((worker) =>
-      worker.workerId === input.attempt.workerId
-        ? { ...worker, lifecycle: "broken" as const, recoverable: true, updatedAt: input.now }
-        : worker,
-    ),
-    runs: latest.runs.map((entry) =>
-      entry.runId === input.attempt.runId
-        ? {
-            ...entry,
-            status: "stale" as const,
-            runtime: {
-              ...entry.runtime,
-              status: "exited_error" as const,
-              diagnostics: [...entry.runtime.diagnostics, input.diagnostic],
-              finishedAt: input.now,
-              cleanupStatus: entry.runtime.cleanupStatus === "pending" ? "failed" : entry.runtime.cleanupStatus,
-            },
-            finishedAt: input.now,
-            leaseExpiresAt: null,
-            errorMessage: input.diagnostic,
-          }
-        : entry,
-    ),
-    updatedAt: input.now,
-  }));
-}
-
-function heartbeatIsStale(input: { heartbeatAt: string | null; now: string; staleHeartbeatMs?: number }): boolean {
-  if (!input.heartbeatAt || input.staleHeartbeatMs === undefined) {
-    return false;
-  }
-  return Date.parse(input.now) - Date.parse(input.heartbeatAt) > input.staleHeartbeatMs;
+  return mutateRepoRunSync(input.repoRoot, (latest) => {
+    const latestAttempt = latest.runs.find((entry) => entry.runId === input.attempt.runId);
+    const latestTask = latest.tasks.find((entry) => entry.taskId === input.attempt.taskId);
+    if (
+      !latestAttempt ||
+      latestAttempt.finishedAt ||
+      isTerminalRunStatus(latestAttempt.status) ||
+      latestTask?.activeRunId !== latestAttempt.runId ||
+      latestAttempt.runtime.heartbeatAt !== input.attempt.runtime.heartbeatAt
+    ) {
+      return latest;
+    }
+    return markRunAttemptStale({ run: latest, attempt: latestAttempt, now: input.now, diagnostic: input.diagnostic });
+  });
 }
 
 export async function reconcileTmuxRuntimeForRepo(input: {
@@ -406,13 +476,49 @@ export async function reconcileTmuxRuntimeForRepo(input: {
       socketPath: attempt.runtime.tmux.socketPath,
       paneTarget: attempt.runtime.tmux.paneId ?? attempt.runtime.tmux.sessionName ?? "",
     });
-    if (currentPaneCommand && attempt.runtime.command && !attempt.runtime.command.includes(currentPaneCommand)) {
-      return markTmuxRunStale({
+    const runnerAlive =
+      input.staleHeartbeatMs === undefined
+        ? false
+        : await isRunnerPidAlive({ adapter, runnerPid: attempt.runtime.runnerPid });
+    const reconciled = applyTmuxReconciliationState({
+      run,
+      attempt,
+      now,
+      staleHeartbeatMs: input.staleHeartbeatMs ?? Number.POSITIVE_INFINITY,
+      runnerAlive,
+      currentPaneCommand,
+      paneChangedDiagnostic: (command) => `tmux pane command changed from runner command to ${command}`,
+    });
+    if (reconciled.action === "stale") {
+      const persisted = markTmuxRunStale({
         repoRoot: input.repoRoot,
         attempt,
         now,
-        diagnostic: `tmux pane command changed from runner command to ${currentPaneCommand}`,
+        diagnostic: reconciled.diagnostic ?? "tmux runtime reconciled stale",
       });
+      const persistedAttempt = persisted.runs.find((entry) => entry.runId === attempt.runId);
+      if (persistedAttempt?.status !== "stale") return persisted;
+      const cleanup = await cancelTmuxRuntime({ adapter, runtime: persistedAttempt.runtime });
+      return mutateRepoRunSync(input.repoRoot, (latest) => ({
+        ...latest,
+        runs: latest.runs.map((entry) =>
+          entry.runId === attempt.runId
+            ? {
+                ...entry,
+                runtime: {
+                  ...entry.runtime,
+                  cleanupStatus: cleanup.cleanupStatus,
+                  diagnostics: cleanup.diagnostic
+                    ? [...entry.runtime.diagnostics, cleanup.diagnostic]
+                    : entry.runtime.diagnostics,
+                },
+              }
+            : entry,
+        ),
+      }));
+    }
+    if (reconciled.action === "diagnostic") {
+      return mutateRepoRunSync(input.repoRoot, () => reconciled.run);
     }
     if (attempt.runtime.logPath && !existsSync(attempt.runtime.logPath)) {
       const diagnostic = `tmux log path missing during reconciliation: ${attempt.runtime.logPath}`;
@@ -430,63 +536,14 @@ export async function reconcileTmuxRuntimeForRepo(input: {
         updatedAt: now,
       }));
     }
-    if (heartbeatIsStale({ heartbeatAt: attempt.runtime.heartbeatAt, now, staleHeartbeatMs: input.staleHeartbeatMs })) {
-      const runnerAlive = await isRunnerPidAlive({ adapter, runnerPid: attempt.runtime.runnerPid });
-      if (runnerAlive) {
-        const diagnostic = `tmux runner heartbeat stale but runner pid ${attempt.runtime.runnerPid} is still alive`;
-        return mutateRepoRunSync(input.repoRoot, (latest) => ({
-          ...latest,
-          runs: latest.runs.map((entry) =>
-            entry.runId === attempt.runId
-              ? {
-                  ...entry,
-                  runtime: { ...entry.runtime, diagnostics: [...entry.runtime.diagnostics, diagnostic] },
-                  updatedAt: now,
-                }
-              : entry,
-          ),
-          updatedAt: now,
-        }));
-      }
-      const diagnostic = `tmux runner heartbeat stale and runner pid ${attempt.runtime.runnerPid ?? "unknown"} is not alive`;
-      return markTmuxRunStale({ repoRoot: input.repoRoot, attempt, now, diagnostic });
+    if (reconciled.action === "lease_cleared") {
+      return mutateRepoRunSync(input.repoRoot, () => reconciled.run);
     }
     return run;
   } catch (error) {
     const now = input.now ?? new Date().toISOString();
     const diagnostic = `tmux session missing during reconciliation: ${error instanceof Error ? error.message : String(error)}`;
-    return mutateRepoRunSync(input.repoRoot, (latest) => ({
-      ...latest,
-      tasks: latest.tasks.map((task) =>
-        task.taskId === attempt.taskId && task.activeRunId === attempt.runId
-          ? { ...task, state: "needs_review" as const, activeRunId: null, updatedAt: now }
-          : task,
-      ),
-      workers: latest.workers.map((worker) =>
-        worker.workerId === attempt.workerId
-          ? { ...worker, lifecycle: "broken" as const, recoverable: true, updatedAt: now }
-          : worker,
-      ),
-      runs: latest.runs.map((entry) =>
-        entry.runId === attempt.runId
-          ? {
-              ...entry,
-              status: "stale" as const,
-              runtime: {
-                ...entry.runtime,
-                status: "exited_error" as const,
-                diagnostics: [...entry.runtime.diagnostics, diagnostic],
-                finishedAt: now,
-                cleanupStatus: entry.runtime.cleanupStatus === "pending" ? "failed" : entry.runtime.cleanupStatus,
-              },
-              finishedAt: now,
-              leaseExpiresAt: null,
-              errorMessage: diagnostic,
-            }
-          : entry,
-      ),
-      updatedAt: now,
-    }));
+    return markTmuxRunStale({ repoRoot: input.repoRoot, attempt, now, diagnostic });
   }
 }
 
@@ -515,6 +572,9 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
       await adapter.execFile("tmux", ["-V"]);
     },
     async run(input: RuntimeRunContext): Promise<RuntimeRunResult> {
+      if (input.signal?.aborted) {
+        return { status: "aborted", finalText: null, errorMessage: null, sessionId: null };
+      }
       if (!input.repoRoot) {
         throw new Error("tmux runtime requires the conductor repo root");
       }
@@ -538,6 +598,7 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
         heartbeatIntervalMs: runnerHeartbeatIntervalMs,
       });
       writeRunnerContract(paths.contractPath, contract);
+      writeFileSync(paths.noncePath, `${nonce}\n`, { encoding: "utf-8", mode: 0o600 });
       writeFileSync(paths.logPath, "", { encoding: "utf-8", flag: "a", mode: 0o600 });
       const projectKey = deriveProjectKey(resolve(input.repoRoot));
       const sessionName = buildTmuxSessionName({ projectKey, runId: input.taskContract.runId, nonce });
@@ -547,7 +608,7 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
         worktreePath: input.worktreePath,
         runnerCommand,
         contractPath: paths.contractPath,
-        nonce,
+        noncePath: paths.noncePath,
         logPath: paths.logPath,
       });
       const redactedCommand = redactTmuxRunnerCommand(launch.command, nonce);
@@ -563,83 +624,101 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
         viewerStatus: "pending" as const,
         cleanupStatus: "pending" as const,
       };
+      const buildCancellationRuntime = (): RunRuntimeMetadata => ({
+        ...baseRuntime,
+        status: "aborted",
+        sessionId: null,
+        runnerPid: null,
+        processGroupId: null,
+        diagnostics: [],
+        heartbeatAt: null,
+        startedAt: null,
+        finishedAt: null,
+      });
       await input.onRuntimeMetadata?.({
         ...baseRuntime,
         status: "starting",
         diagnostics: [`tmux session ${sessionName} prepared`],
         heartbeatAt: now(),
       });
-      await adapter.execFile("tmux", launch.args, { cwd: input.worktreePath, env: buildRunnerEnvironment() });
-      const durableRun = getOrCreateRunForRepo(input.repoRoot).runs.find(
+      if (input.signal?.aborted) {
+        return { status: "aborted", finalText: null, errorMessage: null, sessionId: null };
+      }
+      const latestBeforeLaunch = getOrCreateRunForRepo(input.repoRoot).runs.find(
         (entry) => entry.runId === input.taskContract?.runId,
       );
-      if (durableRun && (durableRun.finishedAt || isTerminalRunStatus(durableRun.status))) {
-        const cleanup = await cancelTmuxRuntime({
-          adapter,
-          runtime: {
-            ...durableRun.runtime,
-            ...baseRuntime,
-            sessionId: durableRun.runtime.sessionId,
-            status: "aborted",
-            runnerPid: durableRun.runtime.runnerPid,
-            processGroupId: durableRun.runtime.processGroupId,
-            diagnostics: durableRun.runtime.diagnostics,
-            heartbeatAt: durableRun.runtime.heartbeatAt,
-            startedAt: durableRun.runtime.startedAt,
-            finishedAt: durableRun.runtime.finishedAt,
-          },
-        });
+      if (latestBeforeLaunch?.finishedAt || isTerminalRunStatus(latestBeforeLaunch?.status)) {
+        return latestBeforeLaunch
+          ? mapTerminalRunToRuntimeResult(latestBeforeLaunch)
+          : { status: "aborted", finalText: null, errorMessage: null, sessionId: null };
+      }
+      try {
+        await adapter.execFile("tmux", launch.args, { cwd: input.worktreePath, env: buildRunnerEnvironment() });
+      } catch (error) {
+        const cleanup = await cancelTmuxRuntime({ adapter, runtime: buildCancellationRuntime() });
         await input.onRuntimeMetadata?.({
           status: "aborted",
           cleanupStatus: cleanup.cleanupStatus,
           finishedAt: now(),
-          diagnostics: cleanup.diagnostic ? [cleanup.diagnostic] : [`tmux session ${sessionName} cleanup succeeded`],
+          diagnostics: cleanup.diagnostic
+            ? [cleanup.diagnostic]
+            : [`tmux session ${sessionName} cleanup after launch error`],
         });
-        return mapTerminalRunToRuntimeResult(durableRun);
+        throw errorWithCleanupStatus(error, cleanup.cleanupStatus);
       }
-      const paneMetadata = await inspectTmuxPaneMetadata({ adapter, socketPath: paths.socketPath, sessionName });
-      await input.onRuntimeMetadata?.({
-        ...baseRuntime,
-        status: "running",
-        runnerPid: paneMetadata.runnerPid,
-        processGroupId: paneMetadata.processGroupId,
-        tmux: {
-          socketPath: paths.socketPath,
-          sessionName,
-          windowId: paneMetadata.windowId,
-          paneId: paneMetadata.paneId,
-        },
-        diagnostics: [
-          `tmux session ${sessionName} launched`,
-          ...(paneMetadata.diagnostic ? [paneMetadata.diagnostic] : []),
-        ],
-        heartbeatAt: now(),
-      });
+      try {
+        const durableRun = getOrCreateRunForRepo(input.repoRoot).runs.find(
+          (entry) => entry.runId === input.taskContract?.runId,
+        );
+        if (durableRun && (durableRun.finishedAt || isTerminalRunStatus(durableRun.status))) {
+          const cleanup = await cancelTmuxRuntime({
+            adapter,
+            runtime: {
+              ...durableRun.runtime,
+              ...baseRuntime,
+              sessionId: durableRun.runtime.sessionId,
+              status: "aborted",
+              runnerPid: durableRun.runtime.runnerPid,
+              processGroupId: durableRun.runtime.processGroupId,
+              diagnostics: durableRun.runtime.diagnostics,
+              heartbeatAt: durableRun.runtime.heartbeatAt,
+              startedAt: durableRun.runtime.startedAt,
+              finishedAt: durableRun.runtime.finishedAt,
+            },
+          });
+          await input.onRuntimeMetadata?.({
+            status: "aborted",
+            cleanupStatus: cleanup.cleanupStatus,
+            finishedAt: now(),
+            diagnostics: cleanup.diagnostic ? [cleanup.diagnostic] : [`tmux session ${sessionName} cleanup succeeded`],
+          });
+          return mapTerminalRunToRuntimeResult(durableRun);
+        }
+        const paneMetadata = await inspectTmuxPaneMetadata({ adapter, socketPath: paths.socketPath, sessionName });
+        await input.onRuntimeMetadata?.({
+          ...baseRuntime,
+          status: "running",
+          runnerPid: paneMetadata.runnerPid,
+          processGroupId: paneMetadata.processGroupId,
+          tmux: {
+            socketPath: paths.socketPath,
+            sessionName,
+            windowId: paneMetadata.windowId,
+            paneId: paneMetadata.paneId,
+          },
+          diagnostics: [
+            `tmux session ${sessionName} launched`,
+            ...(paneMetadata.diagnostic ? [paneMetadata.diagnostic] : []),
+          ],
+          heartbeatAt: now(),
+        });
+      } catch (error) {
+        const cleanup = await cancelTmuxRuntime({ adapter, runtime: buildCancellationRuntime() });
+        throw errorWithCleanupStatus(error, cleanup.cleanupStatus);
+      }
 
       const onAbort = async () => {
-        const cleanup = await cancelTmuxRuntime({
-          adapter,
-          runtime: {
-            mode,
-            status: "aborted",
-            sessionId: null,
-            cwd: input.worktreePath,
-            command: redactedCommand,
-            contractPath: paths.contractPath,
-            nonceHash: hashRunnerNonce(nonce),
-            runnerPid: null,
-            processGroupId: null,
-            tmux: { socketPath: paths.socketPath, sessionName, windowId: null, paneId: null },
-            logPath: paths.logPath,
-            viewerCommand: launch.attachCommand,
-            viewerStatus: "pending",
-            diagnostics: [],
-            heartbeatAt: null,
-            cleanupStatus: "pending",
-            startedAt: null,
-            finishedAt: null,
-          },
-        });
+        const cleanup = await cancelTmuxRuntime({ adapter, runtime: buildCancellationRuntime() });
         await input.onRuntimeMetadata?.({
           status: "aborted",
           cleanupStatus: cleanup.cleanupStatus,
@@ -655,6 +734,8 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
         runId: input.taskContract.runId,
         signal: input.signal,
         pollIntervalMs,
+        adapter,
+        staleHeartbeatMs: runnerHeartbeatIntervalMs * 4,
         onAbort,
       });
     },

@@ -90,7 +90,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
       workerIds: Type.Optional(Type.Array(Type.String({ description: "Optional worker IDs to limit cancellation" }))),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await conductor.cancelActiveWorkForRepo(ctx.cwd, params);
+      const result = await conductor.cancelActiveWorkForRepoWithRuntimeCleanup(ctx.cwd, params);
       const text =
         result.canceledRuns.length === 0 && result.canceledTasks.length === 0
           ? "no active conductor runs to cancel"

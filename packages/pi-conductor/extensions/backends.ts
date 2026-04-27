@@ -1,12 +1,8 @@
-import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { inspectTmuxRuntimeAvailability } from "./tmux-runtime.js";
 import type { RunRuntimeMode } from "./types.js";
 
 export type ConductorBackendKind = "native" | "pi-subagents";
-
-const TMUX_AVAILABILITY_TIMEOUT_MS = 10_000;
 
 export interface ConductorBackendCapabilities {
   canStartRun: boolean;
@@ -144,19 +140,6 @@ export function inspectConductorBackends(
           : "Optional pi-subagents adapter is not installed or not resolvable from pi-conductor",
     },
   };
-}
-
-function inspectTmuxRuntimeAvailability(): { available: boolean; diagnostic: string | null } {
-  const runnerCli = fileURLToPath(new URL("./runner-cli.mjs", import.meta.url));
-  if (!existsSync(runnerCli)) {
-    return { available: false, diagnostic: "pi-conductor-runner is not resolvable from pi-conductor" };
-  }
-  try {
-    execFileSync("tmux", ["-V"], { stdio: "ignore", timeout: TMUX_AVAILABILITY_TIMEOUT_MS });
-  } catch {
-    return { available: false, diagnostic: "tmux executable is not available on PATH" };
-  }
-  return { available: true, diagnostic: null };
 }
 
 export function inspectConductorRuntimeModes(): ConductorRuntimeModesStatus {
