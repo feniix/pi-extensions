@@ -331,14 +331,17 @@ export async function runWorkerPromptRuntime(input: RuntimeRunContext): Promise<
     };
   }
 
+  const customTools = input.taskContract ? buildRunScopedConductorTools(input) : [];
+  const enabledTools = ["read", "bash", "edit", "write", "grep", "find", "ls", ...customTools.map((tool) => tool.name)];
+
   const { session } = await createAgentSession({
     cwd: input.worktreePath,
     sessionManager,
     authStorage,
     modelRegistry,
     resourceLoader,
-    tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
-    customTools: input.taskContract ? buildRunScopedConductorTools(input) : [],
+    tools: enabledTools,
+    customTools,
   });
 
   let unsubscribeAbortHandler: (() => void) | null = null;

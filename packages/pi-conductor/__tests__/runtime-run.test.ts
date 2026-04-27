@@ -369,4 +369,55 @@ describe("worker run runtime helpers", () => {
     expect(result.errorMessage).toBeNull();
     expect(result.sessionId).toBe("run-session-success");
   });
+
+  it("enables run-scoped conductor tools in child session allowlist", async () => {
+    const worktreePath = mkdtempSync(join(tmpdir(), "pi-conductor-runtime-"));
+    const sessionFile = join(worktreePath, "session.jsonl");
+    writeFileSync(sessionFile, "{}\n", "utf-8");
+    codingAgentMocks.openSession.mockReturnValue({} as never);
+
+    const session = {
+      sessionId: "run-session-tools",
+      messages: [] as unknown[],
+      bindExtensions: vi.fn(async () => {}),
+      prompt: vi.fn(async () => {
+        session.messages.push({ role: "assistant", stopReason: "stop", content: [{ type: "text", text: "done" }] });
+      }),
+      abort: vi.fn(async () => {}),
+      dispose: vi.fn(),
+    };
+    codingAgentMocks.createAgentSession.mockResolvedValue({ session });
+
+    await runWorkerPromptRuntime({
+      worktreePath,
+      sessionFile,
+      task: "do work",
+      taskContract: {
+        taskId: "task-1",
+        runId: "run-1",
+        taskRevision: 1,
+        goal: "do work",
+        explicitCompletionTools: true,
+        allowFollowUpTasks: true,
+      },
+    });
+
+    expect(codingAgentMocks.createAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tools: expect.arrayContaining([
+          "read",
+          "conductor_child_progress",
+          "conductor_child_create_gate",
+          "conductor_child_create_followup_task",
+          "conductor_child_complete",
+        ]),
+        customTools: expect.arrayContaining([
+          expect.objectContaining({ name: "conductor_child_progress" }),
+          expect.objectContaining({ name: "conductor_child_create_gate" }),
+          expect.objectContaining({ name: "conductor_child_create_followup_task" }),
+          expect.objectContaining({ name: "conductor_child_complete" }),
+        ]),
+      }),
+    );
+  });
 });
