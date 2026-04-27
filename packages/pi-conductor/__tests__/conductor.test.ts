@@ -20,7 +20,8 @@ import {
   startTaskRunForRepo,
   updateTaskForRepo,
 } from "../extensions/conductor.js";
-import { writeRun } from "../extensions/storage.js";
+import { deriveProjectKey } from "../extensions/project-key.js";
+import { getRunFile, writeRun } from "../extensions/storage.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
   if (value == null) {
@@ -600,6 +601,69 @@ describe("conductor service", () => {
     expect(getOrCreateRunForRepo(repoDir).events.map((event) => event.type)).toContain("run.lease_expired");
   });
 
+  it("retries full tmux reconciliation when state changes during probing", async () => {
+    const originalPath = process.env.PATH;
+    const originalRunFile = process.env.PI_CONDUCTOR_TEST_RUN_FILE;
+    const originalMarker = process.env.PI_CONDUCTOR_TEST_MARKER;
+    const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));
+    const markerPath = join(binDir, "updated-once");
+    process.env.PI_CONDUCTOR_TEST_RUN_FILE = getRunFile(deriveProjectKey(repoDir));
+    process.env.PI_CONDUCTOR_TEST_MARKER = markerPath;
+    writeFileSync(
+      join(binDir, "tmux"),
+      `#!/bin/sh
+if [ ! -f "$PI_CONDUCTOR_TEST_MARKER" ]; then
+  touch "$PI_CONDUCTOR_TEST_MARKER"
+  node - "$PI_CONDUCTOR_TEST_RUN_FILE" <<'NODE'
+const fs = require('node:fs');
+const path = process.argv[2];
+const data = JSON.parse(fs.readFileSync(path, 'utf-8'));
+data.updatedAt = '2026-04-27T00:00:00.123Z';
+fs.writeFileSync(path, JSON.stringify(data, null, 2) + String.fromCharCode(10));
+NODE
+fi
+case "$*" in *has-session*) exit 1 ;; *) exit 0 ;; esac
+`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+    try {
+      const worker = await createWorkerForRepo(repoDir, "tmux-race-worker");
+      const task = createTaskForRepo(repoDir, { title: "Visible race", prompt: "Do it visibly" });
+      assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+      const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+      const run = getOrCreateRunForRepo(repoDir);
+      writeRun({
+        ...run,
+        runs: run.runs.map((attempt) =>
+          attempt.runId === started.run.runId
+            ? {
+                ...attempt,
+                runtime: {
+                  ...attempt.runtime,
+                  mode: "tmux",
+                  tmux: { socketPath: "/tmp/racy-tmux.sock", sessionName: "missing", windowId: "@1", paneId: "%2" },
+                },
+              }
+            : attempt,
+        ),
+      });
+
+      const reconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:00:00.000Z" });
+
+      expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+      expect(reconciled.runs[0]).toMatchObject({ status: "stale", errorMessage: expect.stringContaining("tmux") });
+      expect(getOrCreateRunForRepo(repoDir).runs[0]).toMatchObject({ status: "stale" });
+    } finally {
+      process.env.PATH = originalPath;
+      if (originalRunFile === undefined) delete process.env.PI_CONDUCTOR_TEST_RUN_FILE;
+      else process.env.PI_CONDUCTOR_TEST_RUN_FILE = originalRunFile;
+      if (originalMarker === undefined) delete process.env.PI_CONDUCTOR_TEST_MARKER;
+      else process.env.PI_CONDUCTOR_TEST_MARKER = originalMarker;
+      rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
   it("reconciles missing tmux runtime sessions through project reconciliation", async () => {
     const worker = await createWorkerForRepo(repoDir, "tmux-worker");
     const task = createTaskForRepo(repoDir, { title: "Visible lease task", prompt: "Do it visibly" });
@@ -666,6 +730,406 @@ describe("conductor service", () => {
       process.env.PATH = originalPath;
       rmSync(binDir, { recursive: true, force: true });
     }
+  });
+
+  it("reconciles replaced tmux pane commands through project reconciliation", async () => {
+    const originalPath = process.env.PATH;
+    const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));
+    writeFileSync(
+      join(binDir, "tmux"),
+      "#!/bin/sh\ncase \"$*\" in *display-message*) printf 'zsh\\n' ;; *) exit 0 ;; esac\n",
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+    try {
+      const worker = await createWorkerForRepo(repoDir, "replaced-pane-worker");
+      const task = createTaskForRepo(repoDir, { title: "Pane replaced", prompt: "Do it visibly" });
+      assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+      const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+      const run = getOrCreateRunForRepo(repoDir);
+      writeRun({
+        ...run,
+        runs: run.runs.map((attempt) =>
+          attempt.runId === started.run.runId
+            ? {
+                ...attempt,
+                runtime: {
+                  ...attempt.runtime,
+                  mode: "tmux",
+                  command: "'node' '/tmp/pi-conductor-runner' 'run'",
+                  heartbeatAt: "2026-04-27T00:09:00.000Z",
+                  tmux: { socketPath: "/tmp/live-tmux.sock", sessionName: "live", windowId: "@1", paneId: "%2" },
+                },
+              }
+            : attempt,
+        ),
+      });
+
+      const reconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:10:00.000Z" });
+
+      expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+      expect(reconciled.workers[0]).toMatchObject({ lifecycle: "broken", recoverable: true });
+      expect(reconciled.runs[0]).toMatchObject({ status: "stale", errorMessage: expect.stringContaining("pane") });
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps stale-heartbeat tmux runs active when the runner pid is still alive", async () => {
+    const originalPath = process.env.PATH;
+    const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));
+    writeFileSync(
+      join(binDir, "tmux"),
+      "#!/bin/sh\ncase \"$*\" in *display-message*) printf 'node\\n' ;; *) exit 0 ;; esac\n",
+      {
+        mode: 0o755,
+      },
+    );
+    writeFileSync(join(binDir, "ps"), "#!/bin/sh\nprintf '4242\\n'\n", { mode: 0o755 });
+    process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+    try {
+      const worker = await createWorkerForRepo(repoDir, "alive-stale-tmux-worker");
+      const task = createTaskForRepo(repoDir, { title: "Alive stale visible task", prompt: "Do it visibly" });
+      assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+      const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+      const run = getOrCreateRunForRepo(repoDir);
+      writeRun({
+        ...run,
+        runs: run.runs.map((attempt) =>
+          attempt.runId === started.run.runId
+            ? {
+                ...attempt,
+                leaseExpiresAt: "2026-04-27T00:00:00.000Z",
+                runtime: {
+                  ...attempt.runtime,
+                  mode: "tmux",
+                  command: "'node' '/tmp/pi-conductor-runner' 'run'",
+                  runnerPid: 4242,
+                  heartbeatAt: "2026-04-27T00:00:00.000Z",
+                  tmux: { socketPath: "/tmp/live-tmux.sock", sessionName: "live", windowId: "@1", paneId: "%2" },
+                },
+              }
+            : attempt,
+        ),
+      });
+
+      const reconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:10:00.000Z" });
+
+      expect(reconciled.tasks[0]).toMatchObject({ state: "running", activeRunId: started.run.runId });
+      expect(reconciled.workers[0]).toMatchObject({ lifecycle: "running" });
+      expect(reconciled.runs[0]).toMatchObject({ status: "running", leaseExpiresAt: null });
+      expect(reconciled.runs[0]?.runtime.diagnostics.at(-1)).toMatch(
+        /heartbeat stale but runner pid 4242 is still alive/i,
+      );
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not kill tmux sessions from a stale reconciliation snapshot after a fresh heartbeat", async () => {
+    const originalPath = process.env.PATH;
+    const originalRunFile = process.env.PI_CONDUCTOR_TEST_RUN_FILE;
+    const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));
+    const killMarker = join(binDir, "killed-session");
+    process.env.PI_CONDUCTOR_TEST_RUN_FILE = getRunFile(deriveProjectKey(repoDir));
+    writeFileSync(
+      join(binDir, "tmux"),
+      `#!/bin/sh
+case "$*" in
+  *display-message*)
+    node - "$PI_CONDUCTOR_TEST_RUN_FILE" <<'NODE'
+const fs = require('node:fs');
+const path = process.argv[2];
+const data = JSON.parse(fs.readFileSync(path, 'utf-8'));
+data.updatedAt = '2026-04-27T00:10:00.123Z';
+data.runs = data.runs.map((run) => ({ ...run, runtime: { ...run.runtime, heartbeatAt: '2026-04-27T00:10:00.000Z' } }));
+fs.writeFileSync(path, JSON.stringify(data, null, 2) + String.fromCharCode(10));
+NODE
+    printf 'node\n'
+    ;;
+  *kill-session*) touch '${killMarker}' ;;
+  *) exit 0 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(join(binDir, "ps"), "#!/bin/sh\nprintf '4242\n'\n", { mode: 0o755 });
+    process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+    try {
+      const worker = await createWorkerForRepo(repoDir, "fresh-heartbeat-worker");
+      const task = createTaskForRepo(repoDir, { title: "Fresh heartbeat", prompt: "Do it visibly" });
+      assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+      const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+      const run = getOrCreateRunForRepo(repoDir);
+      const aliveDiagnostic = "tmux runner heartbeat stale but runner pid 4242 is still alive";
+      writeRun({
+        ...run,
+        runs: run.runs.map((attempt) =>
+          attempt.runId === started.run.runId
+            ? {
+                ...attempt,
+                leaseExpiresAt: "2026-04-27T00:00:00.000Z",
+                runtime: {
+                  ...attempt.runtime,
+                  mode: "tmux",
+                  command: "'node' '/tmp/pi-conductor-runner' 'run'",
+                  runnerPid: 4242,
+                  heartbeatAt: "2026-04-27T00:00:00.000Z",
+                  cleanupStatus: "pending",
+                  diagnostics: [aliveDiagnostic],
+                  tmux: { socketPath: "/tmp/live-tmux.sock", sessionName: "live", windowId: "@1", paneId: "%2" },
+                },
+              }
+            : attempt,
+        ),
+      });
+
+      const reconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:10:00.000Z" });
+
+      expect(reconciled.runs[0]).toMatchObject({ status: "running", leaseExpiresAt: null });
+      expect(existsSync(killMarker)).toBe(false);
+    } finally {
+      process.env.PATH = originalPath;
+      if (originalRunFile === undefined) delete process.env.PI_CONDUCTOR_TEST_RUN_FILE;
+      else process.env.PI_CONDUCTOR_TEST_RUN_FILE = originalRunFile;
+      rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports reconcile contention instead of returning unpersisted changes", async () => {
+    const originalPath = process.env.PATH;
+    const originalRunFile = process.env.PI_CONDUCTOR_TEST_RUN_FILE;
+    const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));
+    process.env.PI_CONDUCTOR_TEST_RUN_FILE = getRunFile(deriveProjectKey(repoDir));
+    writeFileSync(
+      join(binDir, "tmux"),
+      `#!/bin/sh
+node - "$PI_CONDUCTOR_TEST_RUN_FILE" <<'NODE'
+const fs = require('node:fs');
+const path = process.argv[2];
+const data = JSON.parse(fs.readFileSync(path, 'utf-8'));
+data.updatedAt = new Date(Date.now() + Math.floor(Math.random() * 100000)).toISOString();
+fs.writeFileSync(path, JSON.stringify(data, null, 2) + String.fromCharCode(10));
+NODE
+case "$*" in *has-session*) exit 1 ;; *) exit 0 ;; esac
+`,
+      { mode: 0o755 },
+    );
+    process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+    try {
+      const worker = await createWorkerForRepo(repoDir, "contention-worker");
+      const task = createTaskForRepo(repoDir, { title: "Contention", prompt: "Do it visibly" });
+      assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+      const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+      const run = getOrCreateRunForRepo(repoDir);
+      writeRun({
+        ...run,
+        runs: run.runs.map((attempt) =>
+          attempt.runId === started.run.runId
+            ? {
+                ...attempt,
+                runtime: {
+                  ...attempt.runtime,
+                  mode: "tmux",
+                  tmux: { socketPath: "/tmp/contention.sock", sessionName: "contention", windowId: "@1", paneId: "%2" },
+                },
+              }
+            : attempt,
+        ),
+      });
+
+      expect(() => reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:00:00.000Z" })).toThrow(
+        /concurrent updates/i,
+      );
+      expect(getOrCreateRunForRepo(repoDir).runs[0]).toMatchObject({ status: "running" });
+    } finally {
+      process.env.PATH = originalPath;
+      if (originalRunFile === undefined) delete process.env.PI_CONDUCTOR_TEST_RUN_FILE;
+      else process.env.PI_CONDUCTOR_TEST_RUN_FILE = originalRunFile;
+      rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  it("cleans up repeated alive-pid stale heartbeats after marking terminal", async () => {
+    const originalPath = process.env.PATH;
+    const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));
+    const killMarker = join(binDir, "killed-session");
+    writeFileSync(
+      join(binDir, "tmux"),
+      `#!/bin/sh
+case "$*" in
+  *display-message*) printf 'node\n' ;;
+  *kill-session*) touch '${killMarker}' ;;
+  *) exit 0 ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    writeFileSync(join(binDir, "ps"), "#!/bin/sh\nprintf '4242\n'\n", { mode: 0o755 });
+    process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+    try {
+      const worker = await createWorkerForRepo(repoDir, "repeated-alive-stale-worker");
+      const task = createTaskForRepo(repoDir, { title: "Repeated stale", prompt: "Do it visibly" });
+      assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+      const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+      const run = getOrCreateRunForRepo(repoDir);
+      const aliveDiagnostic = "tmux runner heartbeat stale but runner pid 4242 is still alive";
+      writeRun({
+        ...run,
+        runs: run.runs.map((attempt) =>
+          attempt.runId === started.run.runId
+            ? {
+                ...attempt,
+                leaseExpiresAt: "2026-04-27T00:00:00.000Z",
+                runtime: {
+                  ...attempt.runtime,
+                  mode: "tmux",
+                  command: "'node' '/tmp/pi-conductor-runner' 'run'",
+                  runnerPid: 4242,
+                  heartbeatAt: "2026-04-27T00:00:00.000Z",
+                  cleanupStatus: "pending",
+                  diagnostics: [aliveDiagnostic],
+                  tmux: { socketPath: "/tmp/live-tmux.sock", sessionName: "live", windowId: "@1", paneId: "%2" },
+                },
+              }
+            : attempt,
+        ),
+      });
+
+      const reconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:10:00.000Z" });
+
+      expect(reconciled.runs[0]).toMatchObject({ status: "stale", runtime: { cleanupStatus: "succeeded" } });
+      expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+      expect(existsSync(killMarker)).toBe(true);
+      rmSync(killMarker, { force: true });
+
+      const rereconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:11:00.000Z" });
+
+      expect(rereconciled.runs[0]).toMatchObject({ status: "stale", runtime: { cleanupStatus: "succeeded" } });
+      expect(existsSync(killMarker)).toBe(false);
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not make tmux runs immortal when the runner heartbeat is stale", async () => {
+    const originalPath = process.env.PATH;
+    const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));
+    writeFileSync(join(binDir, "tmux"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+    try {
+      const worker = await createWorkerForRepo(repoDir, "stale-tmux-worker");
+      const task = createTaskForRepo(repoDir, { title: "Stale visible task", prompt: "Do it visibly" });
+      assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+      const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+      const run = getOrCreateRunForRepo(repoDir);
+      writeRun({
+        ...run,
+        runs: run.runs.map((attempt) =>
+          attempt.runId === started.run.runId
+            ? {
+                ...attempt,
+                leaseExpiresAt: "2026-04-27T00:00:00.000Z",
+                runtime: {
+                  ...attempt.runtime,
+                  mode: "tmux",
+                  heartbeatAt: "2026-04-27T00:00:00.000Z",
+                  tmux: { socketPath: "/tmp/live-tmux.sock", sessionName: "live", windowId: "@1", paneId: "%2" },
+                },
+              }
+            : attempt,
+        ),
+      });
+
+      const reconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:10:00.000Z" });
+
+      expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+      expect(reconciled.workers[0]).toMatchObject({ lifecycle: "broken", recoverable: true });
+      expect(reconciled.runs[0]).toMatchObject({ status: "stale", errorMessage: expect.stringContaining("heartbeat") });
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  it("records failed cleanup when stale heartbeat tmux cleanup fails", async () => {
+    const originalPath = process.env.PATH;
+    const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));
+    writeFileSync(
+      join(binDir, "tmux"),
+      "#!/bin/sh\ncase \"$*\" in *display-message*) printf 'node\\n' ;; *kill-session*) echo 'permission denied' >&2; exit 2 ;; *) exit 0 ;; esac\n",
+      { mode: 0o755 },
+    );
+    writeFileSync(join(binDir, "ps"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    process.env.PATH = `${binDir}:${originalPath ?? ""}`;
+    try {
+      const worker = await createWorkerForRepo(repoDir, "cleanup-failure-worker");
+      const task = createTaskForRepo(repoDir, { title: "Cleanup failure", prompt: "Do it visibly" });
+      assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+      const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+      const run = getOrCreateRunForRepo(repoDir);
+      writeRun({
+        ...run,
+        runs: run.runs.map((attempt) =>
+          attempt.runId === started.run.runId
+            ? {
+                ...attempt,
+                runtime: {
+                  ...attempt.runtime,
+                  mode: "tmux",
+                  command: "'node' '/tmp/pi-conductor-runner' 'run'",
+                  runnerPid: 4242,
+                  heartbeatAt: "2026-04-27T00:00:00.000Z",
+                  cleanupStatus: "pending",
+                  diagnostics: [],
+                  tmux: { socketPath: "/tmp/live-tmux.sock", sessionName: "live", windowId: "@1", paneId: "%2" },
+                },
+              }
+            : attempt,
+        ),
+      });
+
+      const reconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:10:00.000Z" });
+
+      expect(reconciled.runs[0]).toMatchObject({ status: "stale", runtime: { cleanupStatus: "failed" } });
+      expect(reconciled.runs[0]?.runtime.diagnostics.at(-1)).toMatch(/cleanup failed/i);
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(binDir, { recursive: true, force: true });
+    }
+  });
+
+  it("previews tmux stale-session reconciliation without persisting dry runs", async () => {
+    const worker = await createWorkerForRepo(repoDir, "tmux-dry-worker");
+    const task = createTaskForRepo(repoDir, { title: "Visible dry run", prompt: "Do it visibly" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+    const run = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...run,
+      runs: run.runs.map((attempt) =>
+        attempt.runId === started.run.runId
+          ? {
+              ...attempt,
+              runtime: {
+                ...attempt.runtime,
+                mode: "tmux",
+                tmux: { socketPath: "/tmp/missing-tmux.sock", sessionName: "missing", windowId: "@1", paneId: "%2" },
+              },
+            }
+          : attempt,
+      ),
+    });
+
+    const preview = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:00:00.000Z", dryRun: true });
+    const persisted = getOrCreateRunForRepo(repoDir);
+
+    expect(preview.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+    expect(persisted.tasks[0]).toMatchObject({ state: "running", activeRunId: started.run.runId });
+    expect(persisted.runs[0]).toMatchObject({ status: "running", errorMessage: null });
   });
 
   it("supports read-only project reconciliation dry runs", async () => {

@@ -15,6 +15,8 @@ import {
 import { deriveProjectKey } from "../extensions/project-key.js";
 import {
   createRunnerContract,
+  finalizeRunnerExitForRepo,
+  parseRunnerArgs,
   readRunnerContract,
   runRunnerFromContract,
   validateRunnerContractForRepo,
@@ -46,7 +48,7 @@ describe("pi-conductor runner contract", () => {
   });
 
   async function createStartedContract(nonce = "nonce-1", options: { persistRuntimeMetadata?: boolean } = {}) {
-    const worker = await createWorkerForRepo(repoDir, "runner-worker");
+    const worker = await createWorkerForRepo(repoDir, `runner-worker-${nonce.replace(/[^a-zA-Z0-9_-]/g, "-")}`);
     const task = createTaskForRepo(repoDir, { title: "Runner task", prompt: "Run through contract" });
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
     const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
@@ -89,6 +91,16 @@ describe("pi-conductor runner contract", () => {
     ).rejects.toThrow(/Runner contract nonce metadata is not recorded/i);
   });
 
+  it("reads and removes runner nonces from nonce files", async () => {
+    const noncePath = join(conductorHome, "runner.nonce");
+    writeFileSync(noncePath, "nonce-from-file\n", "utf-8");
+
+    const parsed = parseRunnerArgs(["run", "--contract", "/tmp/contract.json", "--nonce-file", noncePath]);
+
+    expect(parsed).toEqual({ contractPath: "/tmp/contract.json", nonce: "nonce-from-file" });
+    expect(existsSync(noncePath)).toBe(false);
+  });
+
   it("rejects malformed runner contract files with clear validation errors", async () => {
     const contractPath = join(conductorHome, "malformed-contract.json");
     writeFileSync(
@@ -105,7 +117,7 @@ describe("pi-conductor runner contract", () => {
           goal: "Do it",
           explicitCompletionTools: true,
         },
-        nonce: "nonce",
+        nonceHash: createHash("sha256").update("nonce").digest("hex"),
         createdAt: "2026-04-27T00:00:00.000Z",
         heartbeatIntervalMs: 5000,
       }),
@@ -259,6 +271,67 @@ describe("pi-conductor runner contract", () => {
     expect(persisted.runs[0]).toMatchObject({ status: "failed", completionSummary: "runner crashed" });
   });
 
+  it("releases tmux workers after fallback completion on runner exit", async () => {
+    const { started, contractPath, nonce } = await createStartedContract("tmux-fallback-nonce");
+    const expectedHash = createHash("sha256").update(nonce).digest("hex");
+    const run = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...run,
+      runs: run.runs.map((entry) =>
+        entry.runId === started.run.runId
+          ? { ...entry, runtime: { ...entry.runtime, mode: "tmux", contractPath, nonceHash: expectedHash } }
+          : entry,
+      ),
+    });
+
+    await runRunnerFromContract({
+      contractPath,
+      nonce,
+      async runWorker() {
+        return { status: "success", finalText: "tmux runner exited", errorMessage: null, sessionId: "tmux-session" };
+      },
+    });
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.runs[0]).toMatchObject({ status: "partial" });
+    expect(persisted.workers[0]).toMatchObject({ lifecycle: "idle", recoverable: false });
+  });
+
+  it("does not release a worker from stale tmux finalization when a newer run is active", async () => {
+    const { worker, task, started, contract } = await createStartedContract("old-tmux-finalizer-nonce");
+    cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "superseded" });
+    const latest = getOrCreateRunForRepo(repoDir);
+    const newerTask = {
+      ...task,
+      taskId: "task-newer-finalizer",
+      activeRunId: "run-newer-finalizer",
+      runIds: ["run-newer-finalizer"],
+    };
+    const newerRun = {
+      ...started.run,
+      runId: "run-newer-finalizer",
+      taskId: "task-newer-finalizer",
+      status: "running" as const,
+      finishedAt: null,
+    };
+    writeRun({
+      ...latest,
+      tasks: [...latest.tasks, newerTask],
+      runs: [...latest.runs, newerRun],
+      workers: latest.workers.map((entry) =>
+        entry.workerId === worker.workerId ? { ...entry, lifecycle: "running" as const, recoverable: false } : entry,
+      ),
+    });
+
+    finalizeRunnerExitForRepo({
+      repoRoot: repoDir,
+      contract,
+      result: { status: "success", finalText: "old exit", errorMessage: null, sessionId: "old-session" },
+    });
+
+    expect(getOrCreateRunForRepo(repoDir).workers[0]).toMatchObject({ lifecycle: "running", recoverable: false });
+  });
+
   it("creates a needs-review fallback when the runner exits without explicit completion", async () => {
     const { contractPath, nonce } = await createStartedContract();
 
@@ -274,6 +347,31 @@ describe("pi-conductor runner contract", () => {
     expect(persisted.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
     expect(persisted.runs[0]).toMatchObject({ status: "partial", completionSummary: "runner exited" });
     expect(persisted.gates[0]).toMatchObject({ type: "needs_review", status: "open" });
+  });
+
+  it("retries fallback exit finalization while the conductor state lock is briefly held", async () => {
+    const { started, contractPath, nonce } = await createStartedContract();
+    const lockPath = getRunLockFile(deriveProjectKey(resolve(repoDir)));
+
+    await runRunnerFromContract({
+      contractPath,
+      nonce,
+      async runWorker() {
+        writeFileSync(lockPath, JSON.stringify({ pid: 123, createdAt: new Date().toISOString() }));
+        setTimeout(() => unlinkSync(lockPath), 25);
+        return {
+          status: "success",
+          finalText: "runner exited after lock",
+          errorMessage: null,
+          sessionId: "runner-session",
+        };
+      },
+    });
+
+    expect(getOrCreateRunForRepo(repoDir).runs.find((entry) => entry.runId === started.run.runId)).toMatchObject({
+      status: "partial",
+      completionSummary: "runner exited after lock",
+    });
   });
 
   it("audits stale runner completion after cancellation without changing terminal state", async () => {
@@ -298,6 +396,153 @@ describe("pi-conductor runner contract", () => {
     expect(persisted.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
     expect(persisted.runs[0]).toMatchObject({ status: "aborted", completionSummary: null });
     expect(persisted.events.map((event) => event.type)).toContain("task.completion_rejected");
+  });
+
+  it("rejects scoped runner callbacks that target a different active run", async () => {
+    const first = await createStartedContract("first-nonce");
+    const second = await createStartedContract("second-nonce");
+
+    await expect(
+      runRunnerFromContract({
+        contractPath: first.contractPath,
+        nonce: first.nonce,
+        async runWorker(input) {
+          await input.onConductorComplete?.({
+            runId: second.started.run.runId,
+            taskId: second.task.taskId,
+            status: "succeeded",
+            completionSummary: "forged completion",
+          });
+          return { status: "success", finalText: "forged", errorMessage: null, sessionId: "runner-session" };
+        },
+      }),
+    ).rejects.toThrow(/Runner contract scope mismatch/i);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    const secondRun = persisted.runs.find((entry) => entry.runId === second.started.run.runId);
+    const secondTask = persisted.tasks.find((entry) => entry.taskId === second.task.taskId);
+    expect(secondRun).toMatchObject({ status: "running", completionSummary: null });
+    expect(secondTask).toMatchObject({ state: "running", activeRunId: second.started.run.runId });
+  });
+
+  it("creates scoped follow-up tasks from active runner callbacks", async () => {
+    const { task, started, contractPath, nonce } = await createStartedContract("followup-nonce");
+
+    await runRunnerFromContract({
+      contractPath,
+      nonce,
+      async runWorker(input) {
+        await input.onConductorFollowUpTask?.({
+          runId: started.run.runId,
+          taskId: task.taskId,
+          title: "Follow up",
+          prompt: "Continue from the runner",
+        });
+        await input.onConductorComplete?.({
+          runId: started.run.runId,
+          taskId: task.taskId,
+          status: "succeeded",
+          completionSummary: "done",
+        });
+        return { status: "success", finalText: "done", errorMessage: null, sessionId: "runner-session" };
+      },
+    });
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks.map((entry) => entry.title)).toContain("Follow up");
+    expect(persisted.events.map((event) => event.type)).toContain("task.followup_created");
+  });
+
+  it("rejects scoped runner follow-up tasks after the scoped run is canceled", async () => {
+    const { task, started, contractPath, nonce } = await createStartedContract("canceled-followup-nonce");
+
+    await expect(
+      runRunnerFromContract({
+        contractPath,
+        nonce,
+        async runWorker(input) {
+          cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "human stopped it" });
+          await input.onConductorFollowUpTask?.({
+            runId: started.run.runId,
+            taskId: task.taskId,
+            title: "Late follow up",
+            prompt: "Should not be created",
+          });
+          return { status: "success", finalText: "late", errorMessage: null, sessionId: "runner-session" };
+        },
+      }),
+    ).rejects.toThrow(/Run .* is not active|active run/i);
+
+    expect(getOrCreateRunForRepo(repoDir).tasks).toHaveLength(1);
+  });
+
+  it("rejects scoped runner follow-up tasks that target a different active run", async () => {
+    const first = await createStartedContract("followup-first-nonce");
+    const second = await createStartedContract("followup-second-nonce");
+
+    await expect(
+      runRunnerFromContract({
+        contractPath: first.contractPath,
+        nonce: first.nonce,
+        async runWorker(input) {
+          await input.onConductorFollowUpTask?.({
+            runId: second.started.run.runId,
+            taskId: second.task.taskId,
+            title: "Forged follow up",
+            prompt: "Should not be created",
+          });
+          return { status: "success", finalText: "forged", errorMessage: null, sessionId: "runner-session" };
+        },
+      }),
+    ).rejects.toThrow(/Runner contract scope mismatch/i);
+
+    expect(getOrCreateRunForRepo(repoDir).tasks.map((entry) => entry.title)).not.toContain("Forged follow up");
+  });
+
+  it("rejects scoped runner gates after the scoped run is canceled", async () => {
+    const { task, started, contractPath, nonce } = await createStartedContract("canceled-gate-nonce");
+
+    await expect(
+      runRunnerFromContract({
+        contractPath,
+        nonce,
+        async runWorker(input) {
+          await cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "human stopped it" });
+          await input.onConductorGate?.({
+            runId: started.run.runId,
+            taskId: task.taskId,
+            type: "needs_review",
+            requestedDecision: "late gate",
+          });
+          return { status: "success", finalText: "late gate", errorMessage: null, sessionId: "runner-session" };
+        },
+      }),
+    ).rejects.toThrow(/Run .* is not active|Cannot create gate for inactive run/i);
+
+    expect(getOrCreateRunForRepo(repoDir).gates).toHaveLength(0);
+  });
+
+  it("rejects scoped runner gates that target a different active run", async () => {
+    const first = await createStartedContract("gate-first-nonce");
+    const second = await createStartedContract("gate-second-nonce");
+
+    await expect(
+      runRunnerFromContract({
+        contractPath: first.contractPath,
+        nonce: first.nonce,
+        async runWorker(input) {
+          await input.onConductorGate?.({
+            runId: second.started.run.runId,
+            taskId: second.task.taskId,
+            type: "needs_review",
+            requestedDecision: "forged gate",
+          });
+          return { status: "success", finalText: "forged", errorMessage: null, sessionId: "runner-session" };
+        },
+      }),
+    ).rejects.toThrow(/Runner contract scope mismatch/i);
+
+    expect(getOrCreateRunForRepo(repoDir).gates).toHaveLength(0);
   });
 
   it("allows scoped runner callbacks after runtime metadata records the contract path", async () => {
@@ -348,7 +593,10 @@ describe("pi-conductor runner contract", () => {
       ),
     });
     const forgedContractPath = join(conductorHome, "forged-contract.json");
-    writeRunnerContract(forgedContractPath, { ...contract, nonce: "forged-nonce" });
+    writeRunnerContract(forgedContractPath, {
+      ...contract,
+      nonceHash: createHash("sha256").update("forged-nonce").digest("hex"),
+    });
 
     await expect(
       runRunnerFromContract({

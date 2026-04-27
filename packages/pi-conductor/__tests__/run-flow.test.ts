@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -16,7 +16,7 @@ vi.mock("../extensions/runtime.js", async (importOriginal) => {
     preflightWorkerRunRuntime: runtimeMocks.preflightWorkerRunRuntime,
     runWorkerPromptRuntime: runtimeMocks.runWorkerPromptRuntime,
     getWorkerRunRuntimeBackend: vi.fn((mode = "headless") => {
-      if (mode !== "headless") throw new Error(`${mode} runtime is not implemented yet`);
+      if (mode !== "headless" && mode !== "tmux") throw new Error(`${mode} runtime is not implemented yet`);
       return {
         mode,
         preflight: runtimeMocks.preflightWorkerRunRuntime,
@@ -35,7 +35,8 @@ import {
   runTaskForRepo,
   startTaskRunForRepo,
 } from "../extensions/conductor.js";
-import { readArtifactContentForRepo } from "../extensions/storage.js";
+import { deriveProjectKey } from "../extensions/project-key.js";
+import { getRunLockFile, readArtifactContentForRepo } from "../extensions/storage.js";
 import { createTmuxRuntimePaths } from "../extensions/tmux-runtime.js";
 
 describe("durable task run flows", () => {
@@ -107,6 +108,155 @@ describe("durable task run flows", () => {
     expect(persisted.artifacts.map((artifact) => artifact.type)).toEqual(["log", "completion_report"]);
     expect(persisted.events.map((event) => event.type)).toContain("run.progress_reported");
     expect(persisted.events.map((event) => event.type)).toContain("run.completed");
+  });
+
+  it("retries runtime metadata writes while the conductor state lock is briefly held", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Runtime metadata retry", prompt: "Retry metadata" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const lockPath = getRunLockFile(deriveProjectKey(resolve(repoDir)));
+
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async ({ onRuntimeMetadata }) => {
+      writeFileSync(lockPath, JSON.stringify({ pid: 123, createdAt: new Date().toISOString() }));
+      setTimeout(() => unlinkSync(lockPath), 25);
+      await onRuntimeMetadata?.({ diagnostics: ["metadata after retry"] });
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-1" };
+    });
+
+    await runTaskForRepo(repoDir, task.taskId);
+
+    expect(getOrCreateRunForRepo(repoDir).runs[0]?.runtime.diagnostics).toContain("metadata after retry");
+  });
+
+  it("does not let child artifacts opt into conductor storage reads", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Artifact escape", prompt: "Try to read storage" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async ({ taskContract, onConductorProgress }) => {
+      const paths = createTmuxRuntimePaths({ repoRoot: repoDir, runId: taskContract.runId });
+      mkdirSync(paths.runtimeDir, { recursive: true, mode: 0o700 });
+      writeFileSync(paths.contractPath, "secret contract nonce\n", "utf-8");
+      await onConductorProgress?.({
+        runId: taskContract.runId,
+        taskId: task.taskId,
+        progress: "attached suspicious artifact",
+        artifact: {
+          type: "log",
+          ref: `runtime/${taskContract.runId}/contract.json`,
+          metadata: { root: "storage", worktreeRoot: "/tmp/other-root", step: 1 },
+        },
+      });
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-1" };
+    });
+
+    await runTaskForRepo(repoDir, task.taskId);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    const artifact = persisted.artifacts.find((entry) => entry.producer.type === "child_run");
+    const artifactId = artifact?.artifactId;
+    if (!artifactId) throw new Error("expected child artifact");
+    expect(artifact?.metadata).toEqual({ root: "storage", worktreeRoot: "/tmp/other-root", step: 1 });
+    const content = readArtifactContentForRepo(repoDir, artifactId);
+    expect(content.content).toBeNull();
+    expect(content.diagnostic).toBe("Artifact file is missing");
+  });
+
+  it("does not let child completion artifacts opt into conductor storage reads", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Completion artifact escape", prompt: "Try completion storage" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async ({ taskContract, onConductorComplete }) => {
+      const paths = createTmuxRuntimePaths({ repoRoot: repoDir, runId: taskContract.runId });
+      mkdirSync(paths.runtimeDir, { recursive: true, mode: 0o700 });
+      writeFileSync(paths.contractPath, "secret completion contract nonce\n", "utf-8");
+      await onConductorComplete?.({
+        runId: taskContract.runId,
+        taskId: task.taskId,
+        status: "succeeded",
+        completionSummary: "done",
+        artifact: {
+          type: "completion_report",
+          ref: `runtime/${taskContract.runId}/contract.json`,
+          metadata: { root: "storage", worktreeRoot: "/tmp/other-root", checks: "ok" },
+        },
+      });
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "run-session-1" };
+    });
+
+    await runTaskForRepo(repoDir, task.taskId);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    const artifact = persisted.artifacts.find((entry) => entry.producer.type === "child_run");
+    const artifactId = artifact?.artifactId;
+    if (!artifactId) throw new Error("expected child artifact");
+    expect(artifact?.metadata).toEqual({ root: "storage", worktreeRoot: "/tmp/other-root", checks: "ok" });
+    const content = readArtifactContentForRepo(repoDir, artifactId);
+    expect(content.content).toBeNull();
+    expect(content.diagnostic).toBe("Artifact file is missing");
+  });
+
+  it("releases tmux workers when the runtime returns an aborted result", async () => {
+    const worker = await createWorkerForRepo(repoDir, "tmux-abort");
+    const task = createTaskForRepo(repoDir, { title: "Tmux abort", prompt: "Abort visibly" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    runtimeMocks.runWorkerPromptRuntime.mockResolvedValueOnce({
+      status: "aborted",
+      finalText: null,
+      errorMessage: null,
+      sessionId: null,
+    });
+
+    const result = await runTaskForRepo(repoDir, task.taskId, undefined, { runtimeMode: "tmux" });
+
+    expect(result.status).toBe("aborted");
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.runs[0]).toMatchObject({ status: "aborted", runtime: { mode: "tmux" } });
+    expect(persisted.workers[0]).toMatchObject({ lifecycle: "idle", recoverable: false });
+  });
+
+  it("releases tmux workers when the runtime backend throws before durable completion", async () => {
+    const worker = await createWorkerForRepo(repoDir, "tmux-backend");
+    const task = createTaskForRepo(repoDir, { title: "Tmux backend failure", prompt: "Launch and fail visibly" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async (input) => {
+      await input.onRuntimeMetadata?.({
+        mode: "tmux",
+        tmux: { socketPath: "/tmp/tmux.sock", sessionName: "failed", windowId: "@1", paneId: "%2" },
+      });
+      throw new Error("tmux launch failed");
+    });
+
+    await expect(runTaskForRepo(repoDir, task.taskId, undefined, { runtimeMode: "tmux" })).rejects.toThrow(
+      /tmux launch failed/i,
+    );
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.runs[0]).toMatchObject({ status: "failed", runtime: { mode: "tmux" } });
+    expect(persisted.workers[0]).toMatchObject({ lifecycle: "idle", recoverable: false });
+  });
+
+  it("keeps tmux workers broken when backend error cleanup fails", async () => {
+    const worker = await createWorkerForRepo(repoDir, "tmux-failed-cleanup");
+    const task = createTaskForRepo(repoDir, { title: "Tmux cleanup failure", prompt: "Fail cleanup visibly" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async (input) => {
+      await input.onRuntimeMetadata?.({
+        mode: "tmux",
+        tmux: { socketPath: "/tmp/tmux.sock", sessionName: "failed-cleanup", windowId: "@1", paneId: "%2" },
+        cleanupStatus: "pending",
+      });
+      throw Object.assign(new Error("tmux launch failed after orphan"), { cleanupStatus: "failed" as const });
+    });
+
+    await expect(runTaskForRepo(repoDir, task.taskId, undefined, { runtimeMode: "tmux" })).rejects.toThrow(
+      /tmux launch failed after orphan/i,
+    );
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.runs[0]).toMatchObject({ status: "failed", runtime: { mode: "tmux", cleanupStatus: "failed" } });
+    expect(persisted.workers[0]).toMatchObject({ lifecycle: "broken", recoverable: true });
   });
 
   it("marks a started run failed immediately when the runtime backend throws", async () => {

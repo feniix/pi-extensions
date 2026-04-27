@@ -35,6 +35,25 @@ describe("runtime artifact metadata merging", () => {
     }
   });
 
+  it("preserves cleanup status when late non-terminal metadata omits it", async () => {
+    const worker = await createWorkerForRepo(repoDir, "runtime-worker");
+    const task = createTaskForRepo(repoDir, { title: "Race", prompt: "Run" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
+    const canceled = cancelTaskRunStateForRepo(repoDir, { runId: started.run.runId, reason: "stop" });
+
+    const merged = recordRuntimeMetadataForRun({
+      run: canceled,
+      runId: started.run.runId,
+      taskId: task.taskId,
+      workerId: worker.workerId,
+      runtimeMode: "tmux",
+      metadata: { status: "running" },
+    });
+
+    expect(merged.runs[0]?.runtime.cleanupStatus).toBe("not_required");
+  });
+
   it("does not let stale running runtime metadata overwrite terminal cancellation cleanup", async () => {
     const worker = await createWorkerForRepo(repoDir, "runtime-worker");
     const task = createTaskForRepo(repoDir, { title: "Race", prompt: "Run" });

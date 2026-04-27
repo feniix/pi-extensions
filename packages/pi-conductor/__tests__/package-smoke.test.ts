@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -38,6 +39,23 @@ describe("pi-conductor package smoke", () => {
       expect(frontmatter.name).toBe(skillDirectory);
       expect(frontmatter.description).toBeTruthy();
     }
+  });
+
+  it("executes the packaged runner CLI wrapper", () => {
+    let status = 0;
+    let output = "";
+    try {
+      execFileSync(process.execPath, [join(packageRoot, "extensions/runner-cli.mjs")], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 1;
+      output = `${(error as { stdout?: string }).stdout ?? ""}${(error as { stderr?: string }).stderr ?? ""}`;
+    }
+
+    expect(status).toBe(1);
+    expect(output).toContain("Usage: pi-conductor-runner run --contract");
   });
 
   it("keeps skill guidance aligned with the conductor safety workflow", () => {
