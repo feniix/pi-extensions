@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { getAuthStatusMessage, getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
+import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
 import {
   webAnswerParams,
   webFetchParams,
@@ -39,11 +39,6 @@ export { DEFAULT_NUM_RESULTS } from "./web-search.js";
 // =============================================================================
 
 export default function exaExtension(pi: ExtensionAPI) {
-  // SessionStart: check auth and print status
-  pi.on("session_start", async () => {
-    console.log(getAuthStatusMessage(pi));
-  });
-
   // Register CLI flags
   pi.registerFlag("--exa-api-key", {
     description: "Exa AI API key for search operations",
