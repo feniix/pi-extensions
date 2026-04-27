@@ -431,6 +431,9 @@ export interface RunRecord {
   updatedAt: string;
 }
 
+export type PersistedRunAttemptRecord = Omit<RunAttemptRecord, "runtime"> & { runtime?: RunRuntimeMetadata };
+export type PersistedRunRecord = Omit<RunRecord, "runs"> & { runs: PersistedRunAttemptRecord[] };
+
 export interface WorkerRunResult {
   workerName: string;
   status: WorkerRunStatus;

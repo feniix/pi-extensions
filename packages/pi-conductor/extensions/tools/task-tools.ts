@@ -139,6 +139,7 @@ export function registerTaskTools(pi: ExtensionAPI): void {
       workerName: Type.String({ description: "Worker name to use or create" }),
       startRun: Type.Optional(Type.Boolean({ description: "Start a durable run immediately; defaults to true" })),
       leaseSeconds: Type.Optional(Type.Number({ description: "Run lease duration in seconds; defaults to 900" })),
+      runtimeMode: Type.Optional(runtimeModeSchema),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const delegated = await conductor.delegateTaskForRepo(ctx.cwd, {
@@ -147,6 +148,7 @@ export function registerTaskTools(pi: ExtensionAPI): void {
         workerName: params.workerName,
         startRun: params.startRun ?? true,
         leaseSeconds: params.leaseSeconds,
+        runtimeMode: params.runtimeMode,
       });
       const runText = delegated.run ? ` and started run ${delegated.run.runId}` : "";
       return {

@@ -28,6 +28,7 @@ vi.mock("../extensions/runtime.js", async (importOriginal) => {
 
 import {
   assignTaskForRepo,
+  cancelTaskRunForRepo,
   createTaskForRepo,
   createWorkerForRepo,
   getOrCreateRunForRepo,
@@ -159,12 +160,40 @@ describe("durable task run flows", () => {
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
 
     await expect(runTaskForRepo(repoDir, task.taskId, undefined, { runtimeMode: "tmux" })).rejects.toThrow(
-      /tmux runtime is not implemented/i,
+      /Runtime mode tmux unavailable/i,
     );
 
     const persisted = getOrCreateRunForRepo(repoDir);
     expect(persisted.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null, runIds: [] });
     expect(persisted.runs).toHaveLength(0);
+  });
+
+  it("aborts live worker runtime when canceling a specific active run", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Cancelable run", prompt: "Do cancellable work" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    let runtimeSignal: AbortSignal | undefined;
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async (input) => {
+      runtimeSignal = input.signal;
+      expect(runtimeSignal?.aborted).toBe(false);
+      cancelTaskRunForRepo(repoDir, { runId: input.taskContract.runId, reason: "human canceled run" });
+      expect(runtimeSignal?.aborted).toBe(true);
+      return {
+        status: "aborted",
+        finalText: null,
+        errorMessage: "human canceled run",
+        sessionId: "run-session-aborted",
+      };
+    });
+
+    const result = await runTaskForRepo(repoDir, task.taskId);
+
+    expect(result.status).toBe("aborted");
+    expect(runtimeSignal?.aborted).toBe(true);
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
+    expect(persisted.runs[0]).toMatchObject({ status: "aborted", errorMessage: "human canceled run" });
   });
 
   it("forwards cancellation signals from tool callers into the worker runtime", async () => {

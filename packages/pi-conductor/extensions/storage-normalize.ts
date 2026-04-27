@@ -1,7 +1,16 @@
 import { normalizeRunRuntimeMetadata } from "./runtime-metadata.js";
-import type { GateOperation, GateRecord, RunAttemptRecord, RunRecord, TaskRecord, WorkerRecord } from "./types.js";
+import type {
+  GateOperation,
+  GateRecord,
+  PersistedRunAttemptRecord,
+  PersistedRunRecord,
+  RunAttemptRecord,
+  RunRecord,
+  TaskRecord,
+  WorkerRecord,
+} from "./types.js";
 
-export function normalizeProjectRecord(run: RunRecord): RunRecord {
+export function normalizeProjectRecord(run: RunRecord | PersistedRunRecord): RunRecord {
   return {
     ...run,
     schemaVersion: run.schemaVersion,
@@ -50,7 +59,7 @@ function normalizeTaskRecord(task: TaskRecord): TaskRecord {
   };
 }
 
-function normalizeRunAttemptRecord(run: RunAttemptRecord): RunAttemptRecord {
+function normalizeRunAttemptRecord(run: RunAttemptRecord | PersistedRunAttemptRecord): RunAttemptRecord {
   return {
     ...run,
     runtime: normalizeRunRuntimeMetadata(run),

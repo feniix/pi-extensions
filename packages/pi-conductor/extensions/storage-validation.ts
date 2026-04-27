@@ -1,6 +1,12 @@
 import { normalizeProjectRecord } from "./storage-normalize.js";
 import { assertRunRuntimeMetadata } from "./storage-runtime-validation.js";
-import type { ConductorActor, ConductorEventType, ConductorResourceRefs, RunRecord } from "./types.js";
+import type {
+  ConductorActor,
+  ConductorEventType,
+  ConductorResourceRefs,
+  PersistedRunRecord,
+  RunRecord,
+} from "./types.js";
 import { CONDUCTOR_SCHEMA_VERSION } from "./types.js";
 
 const conductorEventTypes = new Set<ConductorEventType>([
@@ -138,7 +144,7 @@ function assertRefsExist(
   }
 }
 
-export function validateRunRecord(run: RunRecord): void {
+export function validateRunRecord(run: RunRecord | PersistedRunRecord): void {
   const workerRecordKeys = [
     "workerId",
     "name",

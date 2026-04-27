@@ -33,6 +33,7 @@ import type {
   GateStatus,
   ObjectiveRecord,
   ObjectiveStatus,
+  PersistedRunRecord,
   RunAttemptRecord,
   RunRecord,
   RunRuntimeMode,
@@ -78,7 +79,7 @@ export function readRun(projectKey: string): RunRecord | null {
     return null;
   }
   try {
-    const run = JSON.parse(readFileSync(path, "utf-8")) as RunRecord;
+    const run = JSON.parse(readFileSync(path, "utf-8")) as PersistedRunRecord;
     validateRunRecord(run);
     return normalizeProjectRecord(run);
   } catch (error) {
@@ -586,7 +587,7 @@ export function cancelTaskRun(run: RunRecord, input: { runId: string; reason: st
   if (!runAttempt) {
     throw new Error(`Run ${input.runId} not found`);
   }
-  if (runAttempt.finishedAt) {
+  if (runAttempt.finishedAt || isTerminalRunStatus(runAttempt.status)) {
     return appendConductorEvent(normalized, {
       actor: { type: "parent_agent", id: "conductor" },
       type: "run.cancel_rejected",
@@ -658,7 +659,7 @@ export function recordRunHeartbeat(
   if (!runAttempt) {
     throw new Error(`Run ${input.runId} not found`);
   }
-  if (runAttempt.finishedAt) {
+  if (runAttempt.finishedAt || isTerminalRunStatus(runAttempt.status)) {
     throw new Error(`Run ${input.runId} is already terminal`);
   }
   const updated = {
@@ -1064,7 +1065,7 @@ function getActiveRunForTask(normalized: RunRecord, input: { runId: string; task
   if (runAttempt.taskId !== input.taskId) {
     throw new Error(`Run ${input.runId} is not scoped to task ${input.taskId}`);
   }
-  if (runAttempt.finishedAt) {
+  if (runAttempt.finishedAt || isTerminalRunStatus(runAttempt.status)) {
     throw new Error(`Run ${input.runId} is already terminal`);
   }
   const task = normalized.tasks.find((entry) => entry.taskId === input.taskId);
@@ -1093,7 +1094,7 @@ export function recordTaskProgress(
     return normalized;
   }
   const existingRun = normalized.runs.find((entry) => entry.runId === input.runId);
-  if (existingRun?.taskId === input.taskId && existingRun.finishedAt) {
+  if (existingRun?.taskId === input.taskId && (existingRun.finishedAt || isTerminalRunStatus(existingRun.status))) {
     return appendConductorEvent(normalized, {
       actor: { type: "child_run", id: input.runId },
       type: "task.progress_rejected",
@@ -1171,7 +1172,7 @@ export function recordTaskCompletion(
     return normalized;
   }
   const existingRun = normalized.runs.find((entry) => entry.runId === input.runId);
-  if (existingRun?.taskId === input.taskId && existingRun.finishedAt) {
+  if (existingRun?.taskId === input.taskId && (existingRun.finishedAt || isTerminalRunStatus(existingRun.status))) {
     return appendConductorEvent(normalized, {
       actor: { type: "child_run", id: input.runId },
       type: "task.completion_rejected",
@@ -1233,7 +1234,7 @@ export function completeTaskRun(
   if (!runAttempt) {
     throw new Error(`Run ${input.runId} not found`);
   }
-  if (runAttempt.finishedAt) {
+  if (runAttempt.finishedAt || isTerminalRunStatus(runAttempt.status)) {
     throw new Error(`Run ${input.runId} is already terminal`);
   }
 

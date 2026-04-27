@@ -2,6 +2,8 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import * as conductor from "../conductor.js";
 
+const runtimeModeSchema = Type.Union([Type.Literal("headless"), Type.Literal("tmux"), Type.Literal("iterm-tmux")]);
+
 export function registerOrchestrationTools(pi: ExtensionAPI): void {
   const workItemSchema = Type.Object({
     title: Type.String({ description: "Short title for this work item" }),
@@ -34,6 +36,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
       ),
       maxWorkers: Type.Optional(Type.Number({ description: "Maximum workers conductor may start in this request" })),
       execute: Type.Optional(Type.Boolean({ description: "Whether to execute after planning; defaults to true" })),
+      runtimeMode: Type.Optional(runtimeModeSchema),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const result = await conductor.runWorkForRepo(ctx.cwd, params, signal);
@@ -64,6 +67,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
       workerPrefix: Type.Optional(
         Type.String({ description: "Prefix for generated worker names; defaults to parallel-worker" }),
       ),
+      runtimeMode: Type.Optional(runtimeModeSchema),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const result = await conductor.runParallelWorkForRepo(ctx.cwd, params, signal);

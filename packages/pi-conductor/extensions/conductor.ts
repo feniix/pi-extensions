@@ -1,6 +1,11 @@
 import { existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
-import { type ConductorBackendDispatcher, getConductorBackendAdapter, inspectConductorBackends } from "./backends.js";
+import {
+  type ConductorBackendDispatcher,
+  getConductorBackendAdapter,
+  getConductorRuntimeModeStatus,
+  inspectConductorBackends,
+} from "./backends.js";
 import { createGateForRepo } from "./gate-service.js";
 import {
   commitAllChanges,
@@ -28,7 +33,7 @@ import {
 } from "./storage.js";
 import {
   assignTaskForRepo,
-  cancelTaskRunForRepo,
+  cancelTaskRunForRepo as cancelTaskRunStateForRepo,
   createFollowUpTaskForRepo,
   createTaskForRepo,
   recordTaskCompletionForRepo,
@@ -68,7 +73,6 @@ export { buildBlockingDiagnosisForRepo, prepareHumanReviewForRepo } from "./revi
 export type { SchedulerFairness, SchedulerPolicyName } from "./scheduler-selection.js";
 export {
   assignTaskForRepo,
-  cancelTaskRunForRepo,
   createFollowUpTaskForRepo,
   createTaskForRepo,
   recordTaskCompletionForRepo,
@@ -84,7 +88,12 @@ export type ParallelWorkItemInput = {
   workerName?: string;
 };
 
-export type ParallelWorkRunner = (repoRoot: string, taskId: string, signal?: AbortSignal) => Promise<WorkerRunResult>;
+export type ParallelWorkRunner = (
+  repoRoot: string,
+  taskId: string,
+  signal?: AbortSignal,
+  input?: { runtimeMode?: RunRuntimeMode },
+) => Promise<WorkerRunResult>;
 
 export type WorkRoutingMode = "auto" | "single" | "parallel" | "objective";
 
@@ -476,7 +485,7 @@ export function buildProjectBriefForRepo(
   });
   const recentEventLimit = Math.max(1, Math.min(input.recentEventLimit ?? 10, 50));
   const recentEvents = run.events.slice(-recentEventLimit);
-  const activeRuns = run.runs.filter((attempt) => !attempt.finishedAt);
+  const activeRuns = run.runs.filter(isActiveRunAttempt);
   const lines = [
     "# Conductor Project Brief",
     "",
@@ -634,6 +643,7 @@ export async function scheduleObjectiveForRepo(
     maxConcurrency?: number;
     executeRuns?: boolean;
     policy?: SchedulerPolicyName;
+    runtimeMode?: RunRuntimeMode;
   },
   signal?: AbortSignal,
 ): Promise<{
@@ -675,7 +685,7 @@ export async function scheduleObjectiveForRepo(
       assigned.push(schedulableTask);
     }
     if (schedulerPolicy.executeRuns) {
-      const result = await runTaskForRepo(repoRoot, schedulableTask.taskId, signal);
+      const result = await runTaskForRepo(repoRoot, schedulableTask.taskId, signal, { runtimeMode: input.runtimeMode });
       executed.push({ taskId: schedulableTask.taskId, result });
     }
   }
@@ -854,11 +864,33 @@ export async function dispatchTaskRunForRepo(
     });
   }
   const started = startTaskRunForRepo(repoRoot, { ...input, backend: "native" });
-  const result = await adapter.dispatch({
-    cwd: resolve(repoRoot),
-    taskContract: started.taskContract,
-    run: started.run,
-  });
+  let result: { ok: boolean; diagnostic: string | null; backendRunId?: string | null };
+  try {
+    result = await adapter.dispatch({
+      cwd: resolve(repoRoot),
+      taskContract: started.taskContract,
+      run: started.run,
+    });
+  } catch (error) {
+    const diagnostic = errorMessage(error);
+    recordTaskCompletionForRepo(repoRoot, {
+      runId: started.run.runId,
+      taskId: input.taskId,
+      status: "failed",
+      completionSummary: diagnostic,
+    });
+    recordExternalOperationEvent(repoRoot, {
+      status: "failed",
+      resourceRefs: { taskId: input.taskId, workerId: started.run.workerId, runId: started.run.runId },
+      payload: {
+        operation: "dispatch_task_run",
+        backend: "pi-subagents",
+        diagnostic,
+        errorMessage: diagnostic,
+      },
+    });
+    throw error;
+  }
   if (!result.ok) {
     recordTaskCompletionForRepo(repoRoot, {
       runId: started.run.runId,
@@ -909,7 +941,14 @@ export async function dispatchTaskRunForRepo(
 
 export async function delegateTaskForRepo(
   repoRoot: string,
-  input: { title: string; prompt: string; workerName: string; startRun?: boolean; leaseSeconds?: number },
+  input: {
+    title: string;
+    prompt: string;
+    workerName: string;
+    startRun?: boolean;
+    leaseSeconds?: number;
+    runtimeMode?: RunRuntimeMode;
+  },
 ): Promise<{
   worker: WorkerRecord;
   task: TaskRecord;
@@ -931,6 +970,7 @@ export async function delegateTaskForRepo(
     taskId: assigned.taskId,
     workerId: worker.workerId,
     leaseSeconds: input.leaseSeconds,
+    runtimeMode: input.runtimeMode,
   });
   const current = getOrCreateRunForRepo(repoRoot);
   return {
@@ -939,6 +979,15 @@ export async function delegateTaskForRepo(
     run: started.run,
     taskContract: started.taskContract,
   };
+}
+
+export function cancelTaskRunForRepo(repoRoot: string, input: { runId: string; reason: string }): RunRecord {
+  const project = cancelTaskRunStateForRepo(repoRoot, input);
+  const run = project.runs.find((entry) => entry.runId === input.runId);
+  if (run?.status === "aborted") {
+    abortLiveWorkForFilter({ runIds: new Set([input.runId]) });
+  }
+  return project;
 }
 
 export function cancelActiveWorkForRepo(
@@ -955,7 +1004,7 @@ export function cancelActiveWorkForRepo(
   const workerIds = new Set(input.workerIds ?? []);
   const activeRuns = project.runs.filter(
     (run) =>
-      !run.finishedAt &&
+      isActiveRunAttempt(run) &&
       (taskIds.size === 0 || taskIds.has(run.taskId)) &&
       (workerIds.size === 0 || workerIds.has(run.workerId)),
   );
@@ -988,6 +1037,7 @@ export async function runParallelWorkForRepo(
   input: {
     tasks: ParallelWorkItemInput[];
     workerPrefix?: string;
+    runtimeMode?: RunRuntimeMode;
   },
   signal?: AbortSignal,
   runner: ParallelWorkRunner = runTaskForRepo,
@@ -1109,7 +1159,9 @@ export async function runParallelWorkForRepo(
       return { workers, tasks, results: [], canceledRuns, canceledTasks };
     }
     const settled = await Promise.allSettled(
-      tasks.map((task, index) => runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal)),
+      tasks.map((task, index) =>
+        runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal, { runtimeMode: input.runtimeMode }),
+      ),
     );
     if (signal?.aborted) onAbort();
     collectOwnedCanceledWork();
@@ -1314,6 +1366,7 @@ export async function runWorkForRepo(
     workerPrefix?: string;
     maxWorkers?: number;
     execute?: boolean;
+    runtimeMode?: RunRuntimeMode;
   },
   signal?: AbortSignal,
   runner: ParallelWorkRunner = runTaskForRepo,
@@ -1338,6 +1391,7 @@ export async function runWorkForRepo(
       repoRoot,
       {
         workerPrefix,
+        runtimeMode: input.runtimeMode,
         tasks: decision.tasks.map((task) => ({
           title: task.title,
           prompt: task.prompt,
@@ -1373,7 +1427,12 @@ export async function runWorkForRepo(
     const schedule = execute
       ? await scheduleObjectiveForRepo(
           repoRoot,
-          { objectiveId: objective.objectiveId, policy: "execute", maxConcurrency: input.maxWorkers },
+          {
+            objectiveId: objective.objectiveId,
+            policy: "execute",
+            maxConcurrency: input.maxWorkers,
+            runtimeMode: input.runtimeMode,
+          },
           signal,
         )
       : null;
@@ -1416,7 +1475,9 @@ export async function runWorkForRepo(
       objective: null,
     };
   }
-  const result = execute ? await runner(repoRoot, delegated.task.taskId, signal) : null;
+  const result = execute
+    ? await runner(repoRoot, delegated.task.taskId, signal, { runtimeMode: input.runtimeMode })
+    : null;
   return {
     decision,
     workers: [delegated.worker],
@@ -1851,6 +1912,16 @@ export function createWorkerPrForRepo(
   }
 }
 
+function isTerminalRunAttemptStatus(status: RunAttemptRecord["status"]): boolean {
+  return ["succeeded", "partial", "blocked", "failed", "aborted", "stale", "interrupted", "unknown_dispatch"].includes(
+    status,
+  );
+}
+
+function isActiveRunAttempt(attempt: RunAttemptRecord): boolean {
+  return !attempt.finishedAt && !isTerminalRunAttemptStatus(attempt.status);
+}
+
 function mapWorkerRunStatusToRunStatus(status: WorkerRunResult["status"]): "succeeded" | "failed" | "aborted" {
   switch (status) {
     case "success":
@@ -1869,6 +1940,12 @@ export async function runTaskForRepo(
   input: { runtimeMode?: RunRuntimeMode } = {},
 ): Promise<WorkerRunResult> {
   const runtimeMode = input.runtimeMode ?? "headless";
+  const runtimeStatus = getConductorRuntimeModeStatus(runtimeMode);
+  if (!runtimeStatus.available) {
+    throw new Error(
+      `Runtime mode ${runtimeMode} unavailable: ${runtimeStatus.diagnostic ?? "not available"}. Use conductor_backend_status to inspect available runtime modes; headless is available.`,
+    );
+  }
   const runtimeBackend = getWorkerRunRuntimeBackend(runtimeMode);
   const currentRun = getOrCreateRunForRepo(repoRoot);
   const task = currentRun.tasks.find((entry) => entry.taskId === taskId);

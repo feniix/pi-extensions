@@ -1,4 +1,10 @@
-import type { RunAttemptRecord, RunRuntimeMetadata, RunRuntimeMode, RunRuntimeStatus } from "./types.js";
+import type {
+  PersistedRunAttemptRecord,
+  RunAttemptRecord,
+  RunRuntimeMetadata,
+  RunRuntimeMode,
+  RunRuntimeStatus,
+} from "./types.js";
 
 export function createRunRuntimeMetadata(input: {
   mode: RunRuntimeMode;
@@ -64,7 +70,7 @@ function isTerminalRunStatus(status: RunAttemptRecord["status"] | undefined): bo
   );
 }
 
-export function normalizeRunRuntimeMetadata(run: RunAttemptRecord): RunRuntimeMetadata {
+export function normalizeRunRuntimeMetadata(run: PersistedRunAttemptRecord): RunRuntimeMetadata {
   const runtime = run.runtime
     ? {
         mode: run.runtime.mode,
