@@ -740,7 +740,9 @@ describe("storage helpers", () => {
       ],
     };
 
-    writeRun(legacy as never);
+    const projectDir = getConductorProjectDir("abc");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, "run.json"), `${JSON.stringify(legacy, null, 2)}\n`, "utf-8");
 
     const persisted = readRun("abc");
     expect(persisted?.runs[0]?.runtime).toMatchObject({
@@ -750,6 +752,115 @@ describe("storage helpers", () => {
       startedAt: "2026-01-01T00:00:00.000Z",
       cleanupStatus: "not_required",
     });
+  });
+
+  it("rejects malformed runtime metadata", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: null,
+    });
+    const task = createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" });
+    const running = startTaskRun(
+      assignTaskToWorker(addTask(addWorker(run, worker), task), task.taskId, worker.workerId),
+      {
+        runId: "run-1",
+        taskId: task.taskId,
+        workerId: worker.workerId,
+        backend: "native",
+        leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+      },
+    );
+    const runtime = running.runs[0]?.runtime;
+    if (!runtime) throw new Error("expected runtime");
+
+    expect(() =>
+      validateRunRecord({
+        ...running,
+        runs: [{ ...running.runs[0], runtime: { ...runtime, mode: "bogus" } } as never],
+      }),
+    ).toThrow(/runtime\.mode has invalid value/i);
+    expect(() =>
+      validateRunRecord({
+        ...running,
+        runs: [{ ...running.runs[0], runtime: { ...runtime, diagnostics: "not-an-array" } } as never],
+      }),
+    ).toThrow(/runtime\.diagnostics must be an array of strings/i);
+    const { diagnostics: _diagnostics, ...partialRuntime } = runtime;
+    expect(() =>
+      validateRunRecord({
+        ...running,
+        runs: [{ ...running.runs[0], runtime: partialRuntime } as never],
+      }),
+    ).toThrow(/runtime missing required field diagnostics/i);
+    expect(() =>
+      validateRunRecord({
+        ...running,
+        runs: [
+          {
+            ...running.runs[0],
+            runtime: { ...runtime, mode: "tmux", tmux: { socketPath: "/tmp/socket", sessionName: "s" } },
+          } as never,
+        ],
+      }),
+    ).toThrow(/runtime\.tmux missing required field windowId/i);
+    expect(() =>
+      validateRunRecord({
+        ...running,
+        runs: [
+          {
+            ...running.runs[0],
+            runtime: {
+              ...runtime,
+              mode: "tmux",
+              tmux: { socketPath: "/tmp/socket", sessionName: "s", windowId: "w", paneId: "%1" },
+              viewerStatus: "pending",
+              cleanupStatus: "pending",
+            },
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("lets canonical terminal run state win over stale runtime metadata", () => {
+    const run = createEmptyRun("abc", "/tmp/repo");
+    const worker = createWorkerRecord({
+      workerId: "worker-1",
+      name: "backend",
+      branch: "conductor/backend",
+      worktreePath: "/tmp/repo/.worktrees/backend",
+      sessionFile: null,
+    });
+    const task = createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" });
+    const running = startTaskRun(
+      assignTaskToWorker(addTask(addWorker(run, worker), task), task.taskId, worker.workerId),
+      {
+        runId: "run-1",
+        taskId: task.taskId,
+        workerId: worker.workerId,
+        backend: "native",
+        leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+      },
+    );
+    const canceled = cancelTaskRun(running, { runId: "run-1", reason: "stop" });
+    const corrupted = {
+      ...canceled,
+      runs: canceled.runs.map((attempt) =>
+        attempt.runId === "run-1"
+          ? { ...attempt, runtime: { ...attempt.runtime, status: "running", finishedAt: null } }
+          : attempt,
+      ),
+    };
+    const projectDir = getConductorProjectDir("abc");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, "run.json"), `${JSON.stringify(corrupted, null, 2)}\n`, "utf-8");
+
+    const persisted = readRun("abc");
+    expect(persisted?.runs[0]?.runtime).toMatchObject({ status: "aborted", finishedAt: canceled.runs[0]?.finishedAt });
   });
 
   it("validates resource identity and reference invariants", () => {

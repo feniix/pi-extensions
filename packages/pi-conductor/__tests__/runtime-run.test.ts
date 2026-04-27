@@ -30,6 +30,7 @@ import {
   preflightWorkerRunRuntime,
   runWorkerPromptRuntime,
 } from "../extensions/runtime.js";
+import { mapRunStatusToRuntimeStatus } from "../extensions/runtime-metadata.js";
 
 describe("worker run runtime helpers", () => {
   afterEach(() => {
@@ -368,6 +369,20 @@ describe("worker run runtime helpers", () => {
     const result = await backend.run({ worktreePath, sessionFile, task: "do work" });
 
     expect(result).toMatchObject({ status: "success", finalText: "done", sessionId: "run-session-backend" });
+  });
+
+  it("maps conductor run statuses to runtime statuses", () => {
+    expect(mapRunStatusToRuntimeStatus("queued")).toBe("running");
+    expect(mapRunStatusToRuntimeStatus("dispatch_pending")).toBe("running");
+    expect(mapRunStatusToRuntimeStatus("succeeded")).toBe("exited_success");
+    expect(mapRunStatusToRuntimeStatus("partial")).toBe("exited_success");
+    expect(mapRunStatusToRuntimeStatus("blocked")).toBe("exited_success");
+    expect(mapRunStatusToRuntimeStatus("failed")).toBe("exited_error");
+    expect(mapRunStatusToRuntimeStatus("stale")).toBe("exited_error");
+    expect(mapRunStatusToRuntimeStatus("unknown_dispatch")).toBe("exited_error");
+    expect(mapRunStatusToRuntimeStatus("aborted")).toBe("aborted");
+    expect(mapRunStatusToRuntimeStatus("interrupted")).toBe("aborted");
+    expect(mapRunStatusToRuntimeStatus(undefined)).toBe("unknown");
   });
 
   it("fails closed for visible runtime modes until their adapters are implemented", () => {

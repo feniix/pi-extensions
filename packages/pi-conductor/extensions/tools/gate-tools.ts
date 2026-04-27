@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import * as conductor from "../conductor.js";
+import { formatRunRuntimeSummary } from "../runtime-metadata.js";
 
 const gateTypeSchema = Type.Union([
   Type.Literal("needs_input"),
@@ -36,7 +37,12 @@ export function registerGateTools(pi: ExtensionAPI): void {
       const text =
         runs.length === 0
           ? "no conductor runs"
-          : runs.map((attempt) => `${attempt.runId} task=${attempt.taskId} status=${attempt.status}`).join("\n");
+          : runs
+              .map(
+                (attempt) =>
+                  `${attempt.runId} task=${attempt.taskId} status=${attempt.status} ${formatRunRuntimeSummary(attempt.runtime)}`,
+              )
+              .join("\n");
       return { content: [{ type: "text", text }], details: { runs } };
     },
   });

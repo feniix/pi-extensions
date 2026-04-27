@@ -1,6 +1,9 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import * as conductor from "../conductor.js";
+
+const runtimeModeSchema = Type.Union([Type.Literal("headless"), Type.Literal("tmux"), Type.Literal("iterm-tmux")]);
+
 export function registerTaskTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "conductor_assess_task",
@@ -167,6 +170,7 @@ export function registerTaskTools(pi: ExtensionAPI): void {
       workerId: Type.Optional(Type.String({ description: "Worker ID; defaults to the task's assigned worker" })),
       leaseSeconds: Type.Optional(Type.Number({ description: "Lease duration in seconds; defaults to 900" })),
       backend: Type.Optional(Type.Union([Type.Literal("native"), Type.Literal("pi-subagents")])),
+      runtimeMode: Type.Optional(runtimeModeSchema),
       allowFollowUpTasks: Type.Optional(
         Type.Boolean({ description: "Allow the child run to create scoped follow-up tasks" }),
       ),
@@ -191,9 +195,12 @@ export function registerTaskTools(pi: ExtensionAPI): void {
     description: "Run an assigned durable task through its worker using scoped child completion tools",
     parameters: Type.Object({
       taskId: Type.String({ description: "Task ID to run" }),
+      runtimeMode: Type.Optional(runtimeModeSchema),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await conductor.runTaskForRepo(ctx.cwd, params.taskId, _signal);
+      const result = await conductor.runTaskForRepo(ctx.cwd, params.taskId, _signal, {
+        runtimeMode: params.runtimeMode,
+      });
       const summary = result.finalText ?? result.errorMessage ?? "Run completed without a final assistant summary";
       return {
         content: [{ type: "text", text: `ran task ${params.taskId}: outcome=${result.status} result=${summary}` }],
@@ -228,6 +235,7 @@ export function registerTaskTools(pi: ExtensionAPI): void {
       taskId: Type.String({ description: "Task ID to retry" }),
       workerId: Type.Optional(Type.String({ description: "Worker ID; defaults to assigned worker" })),
       leaseSeconds: Type.Optional(Type.Number({ description: "Lease duration in seconds; defaults to 900" })),
+      runtimeMode: Type.Optional(runtimeModeSchema),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const retried = conductor.retryTaskForRepo(ctx.cwd, params);

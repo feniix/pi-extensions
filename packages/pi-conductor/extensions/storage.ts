@@ -35,6 +35,7 @@ import type {
   ObjectiveStatus,
   RunAttemptRecord,
   RunRecord,
+  RunRuntimeMode,
   RunStatus,
   TaskRecord,
   WorkerPrState,
@@ -489,6 +490,7 @@ export function startTaskRun(
     taskId: string;
     workerId: string;
     backend: RunAttemptRecord["backend"];
+    runtimeMode?: RunRuntimeMode;
     leaseExpiresAt: string;
   },
 ): RunRecord {
@@ -525,7 +527,7 @@ export function startTaskRun(
     backendRunId: null,
     sessionId: worker.runtime.sessionId,
     runtime: createRunRuntimeMetadata({
-      mode: "headless",
+      mode: input.runtimeMode ?? "headless",
       status: "running",
       sessionId: worker.runtime.sessionId,
       cwd: worker.worktreePath,

@@ -1,4 +1,5 @@
 import { normalizeProjectRecord } from "./storage-normalize.js";
+import { assertRunRuntimeMetadata } from "./storage-runtime-validation.js";
 import type { ConductorActor, ConductorEventType, ConductorResourceRefs, RunRecord } from "./types.js";
 import { CONDUCTOR_SCHEMA_VERSION } from "./types.js";
 
@@ -222,6 +223,11 @@ export function validateRunRecord(run: RunRecord): void {
       `Gate ${gate.gateId ?? "<unknown>"}`,
     );
   }
+  for (const attempt of run.runs) {
+    if (Object.hasOwn(attempt, "runtime")) {
+      assertRunRuntimeMetadata(attempt.runtime, `Run ${attempt.runId ?? "<unknown>"} runtime`);
+    }
+  }
   const normalized = normalizeProjectRecord(run);
   if (normalized.schemaVersion !== CONDUCTOR_SCHEMA_VERSION) {
     throw new Error(`Unsupported conductor schemaVersion ${normalized.schemaVersion}`);
@@ -320,28 +326,7 @@ export function validateRunRecord(run: RunRecord): void {
       ],
       `Run ${attempt.runId ?? "<unknown>"}`,
     );
-    assertRequiredKeys(
-      attempt.runtime,
-      [
-        "mode",
-        "status",
-        "sessionId",
-        "cwd",
-        "command",
-        "runnerPid",
-        "processGroupId",
-        "tmux",
-        "logPath",
-        "viewerCommand",
-        "viewerStatus",
-        "diagnostics",
-        "heartbeatAt",
-        "cleanupStatus",
-        "startedAt",
-        "finishedAt",
-      ],
-      `Run ${attempt.runId} runtime`,
-    );
+    assertRunRuntimeMetadata(attempt.runtime, `Run ${attempt.runId} runtime`);
     if (!indexes.taskIds.has(attempt.taskId)) {
       throw new Error(`Run ${attempt.runId} references missing task ${attempt.taskId}`);
     }

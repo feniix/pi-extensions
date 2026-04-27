@@ -164,7 +164,7 @@ export function registerProjectTools(pi: ExtensionAPI, findRepoRoot: (cwd: strin
         `pi-subagents: available=${backendStatus.piSubagents.available}${backendStatus.piSubagents.diagnostic ? ` (${backendStatus.piSubagents.diagnostic})` : ""}`,
         `runtime headless: available=${runtimeStatus.headless.available}`,
         `runtime tmux: available=${runtimeStatus.tmux.available}${runtimeStatus.tmux.diagnostic ? ` (${runtimeStatus.tmux.diagnostic})` : ""}`,
-        `runtime iterm-tmux: available=${runtimeStatus.itermTmux.available}${runtimeStatus.itermTmux.diagnostic ? ` (${runtimeStatus.itermTmux.diagnostic})` : ""}`,
+        `runtime iterm-tmux: available=${runtimeStatus["iterm-tmux"].available}${runtimeStatus["iterm-tmux"].diagnostic ? ` (${runtimeStatus["iterm-tmux"].diagnostic})` : ""}`,
       ].join("\n");
       return { content: [{ type: "text", text }], details: { ...backendStatus, runtimes: runtimeStatus } };
     },

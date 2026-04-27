@@ -52,11 +52,12 @@ describe("conductor backend inspection", () => {
       available: false,
       capabilities: { canStartRun: false, canSuperviseLiveOutput: true, requiresExternalRunner: true },
     });
-    expect(status.itermTmux).toMatchObject({
+    expect(status["iterm-tmux"]).toMatchObject({
       mode: "iterm-tmux",
       available: false,
       capabilities: { viewerOnly: true },
     });
+    expect(status.itermTmux).toBe(status["iterm-tmux"]);
     expect(getConductorRuntimeModeStatus("headless").available).toBe(true);
     expect(getConductorRuntimeModeStatus("tmux").diagnostic).toMatch(/not implemented yet/i);
   });

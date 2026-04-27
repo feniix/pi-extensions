@@ -38,11 +38,10 @@ export interface ConductorRuntimeModeStatus {
   diagnostic: string | null;
 }
 
-export interface ConductorRuntimeModesStatus {
-  headless: ConductorRuntimeModeStatus;
-  tmux: ConductorRuntimeModeStatus;
+export type ConductorRuntimeModesStatus = Record<RunRuntimeMode, ConductorRuntimeModeStatus> & {
+  /** @deprecated Use the runtime mode literal key `iterm-tmux`. */
   itermTmux: ConductorRuntimeModeStatus;
-}
+};
 
 export interface ConductorBackendDispatchResult {
   ok: boolean;
@@ -136,6 +135,13 @@ export function inspectConductorBackends(
 }
 
 export function inspectConductorRuntimeModes(): ConductorRuntimeModesStatus {
+  const itermTmux: ConductorRuntimeModeStatus = {
+    mode: "iterm-tmux",
+    available: false,
+    canonicalStateOwner: "conductor",
+    capabilities: unavailableItermViewerCapabilities,
+    diagnostic: "iTerm2 viewer depends on the tmux supervised runtime adapter, which is not implemented yet",
+  };
   return {
     headless: {
       mode: "headless",
@@ -151,26 +157,14 @@ export function inspectConductorRuntimeModes(): ConductorRuntimeModesStatus {
       capabilities: unavailableVisibleRuntimeCapabilities,
       diagnostic: "tmux supervised runtime adapter is not implemented yet",
     },
-    itermTmux: {
-      mode: "iterm-tmux",
-      available: false,
-      canonicalStateOwner: "conductor",
-      capabilities: unavailableItermViewerCapabilities,
-      diagnostic: "iTerm2 viewer depends on the tmux supervised runtime adapter, which is not implemented yet",
-    },
+    "iterm-tmux": itermTmux,
+    itermTmux,
   };
 }
 
 export function getConductorRuntimeModeStatus(mode: RunRuntimeMode): ConductorRuntimeModeStatus {
   const status = inspectConductorRuntimeModes();
-  switch (mode) {
-    case "headless":
-      return status.headless;
-    case "tmux":
-      return status.tmux;
-    case "iterm-tmux":
-      return status.itermTmux;
-  }
+  return status[mode];
 }
 
 export function getConductorBackendAdapter(

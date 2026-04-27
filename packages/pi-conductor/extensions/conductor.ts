@@ -13,6 +13,7 @@ import { computeNextActions } from "./next-actions.js";
 import { createObjectiveForRepo, planObjectiveForRepo, refreshObjectiveStatusForRepo } from "./objective-service.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
 import { createWorkerSessionRuntime, getWorkerRunRuntimeBackend, recoverWorkerSessionRuntime } from "./runtime.js";
+import { formatRunRuntimeSummary } from "./runtime-metadata.js";
 import { type SchedulerFairness, type SchedulerPolicyName, selectSchedulerActions } from "./scheduler-selection.js";
 import {
   addConductorArtifact,
@@ -45,6 +46,7 @@ import type {
   ConductorTaskBrief,
   RunAttemptRecord,
   RunRecord,
+  RunRuntimeMode,
   TaskContractInput,
   TaskRecord,
   WorkerRecord,
@@ -431,6 +433,16 @@ export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string 
     `Gates: ${gates.length}`,
     `Artifacts: ${artifacts.length}`,
     "",
+    "## Runs",
+    runs.length === 0
+      ? "- none"
+      : runs
+          .map(
+            (attempt) =>
+              `- ${attempt.runId} status=${attempt.status} taskRevision=${attempt.taskRevision} ${formatRunRuntimeSummary(attempt.runtime)}`,
+          )
+          .join("\n"),
+    "",
     "## Dependencies",
     dependencies.length === 0
       ? "- none"
@@ -464,6 +476,7 @@ export function buildProjectBriefForRepo(
   });
   const recentEventLimit = Math.max(1, Math.min(input.recentEventLimit ?? 10, 50));
   const recentEvents = run.events.slice(-recentEventLimit);
+  const activeRuns = run.runs.filter((attempt) => !attempt.finishedAt);
   const lines = [
     "# Conductor Project Brief",
     "",
@@ -486,6 +499,16 @@ export function buildProjectBriefForRepo(
       ? "- none"
       : blockers
           .map((gate) => `- ${gate.type} [${gate.gateId}] ${gate.requestedDecision} operation=${gate.operation}`)
+          .join("\n"),
+    "",
+    "## Active Runs",
+    activeRuns.length === 0
+      ? "- none"
+      : activeRuns
+          .map(
+            (attempt) =>
+              `- ${attempt.runId} task=${attempt.taskId} worker=${attempt.workerId} status=${attempt.status} ${formatRunRuntimeSummary(attempt.runtime)} cancel=conductor_cancel_task_run({"runId":"${attempt.runId}","reason":"<reason>"})`,
+          )
           .join("\n"),
     "",
     "## Recommended Next Actions",
@@ -799,6 +822,7 @@ export async function dispatchTaskRunForRepo(
     leaseSeconds?: number;
     runId?: string;
     backend?: RunAttemptRecord["backend"];
+    runtimeMode?: RunRuntimeMode;
     allowFollowUpTasks?: boolean;
     dispatcher?: ConductorBackendDispatcher;
     resolvePackage?: (specifier: string) => string | null;
@@ -1838,11 +1862,18 @@ function mapWorkerRunStatusToRunStatus(status: WorkerRunResult["status"]): "succ
   }
 }
 
-export async function runTaskForRepo(repoRoot: string, taskId: string, signal?: AbortSignal): Promise<WorkerRunResult> {
-  const started = startTaskRunForRepo(repoRoot, { taskId });
+export async function runTaskForRepo(
+  repoRoot: string,
+  taskId: string,
+  signal?: AbortSignal,
+  input: { runtimeMode?: RunRuntimeMode } = {},
+): Promise<WorkerRunResult> {
+  const runtimeMode = input.runtimeMode ?? "headless";
+  const runtimeBackend = getWorkerRunRuntimeBackend(runtimeMode);
   const currentRun = getOrCreateRunForRepo(repoRoot);
-  const worker = currentRun.workers.find((entry) => entry.workerId === started.run.workerId);
   const task = currentRun.tasks.find((entry) => entry.taskId === taskId);
+  const workerId = task?.assignedWorkerId;
+  const worker = workerId ? currentRun.workers.find((entry) => entry.workerId === workerId) : null;
   if (!worker || !task) {
     throw new Error(`Task ${taskId} has invalid worker/run references`);
   }
@@ -1852,10 +1883,9 @@ export async function runTaskForRepo(repoRoot: string, taskId: string, signal?: 
   if (!worker.worktreePath || !existsSync(worker.worktreePath)) {
     throw new Error(`Worker ${worker.name} is missing its worktree; recover the worker first`);
   }
-
-  const runtimeBackend = getWorkerRunRuntimeBackend("headless");
   await runtimeBackend.preflight({ worktreePath: worker.worktreePath, sessionFile: worker.sessionFile });
 
+  const started = startTaskRunForRepo(repoRoot, { taskId, workerId: worker.workerId, runtimeMode });
   const linkedSignal = createLinkedAbortController(signal);
   const unregisterLiveRun = registerLiveWorkAbortHandle({
     runId: started.run.runId,

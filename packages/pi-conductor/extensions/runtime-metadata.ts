@@ -58,33 +58,63 @@ export function mapRunStatusToRuntimeStatus(status: RunAttemptRecord["status"] |
   }
 }
 
+function isTerminalRunStatus(status: RunAttemptRecord["status"] | undefined): boolean {
+  return ["succeeded", "partial", "blocked", "failed", "aborted", "stale", "interrupted", "unknown_dispatch"].includes(
+    status ?? "",
+  );
+}
+
 export function normalizeRunRuntimeMetadata(run: RunAttemptRecord): RunRuntimeMetadata {
-  if (run.runtime) {
+  const runtime = run.runtime
+    ? {
+        mode: run.runtime.mode,
+        status: run.runtime.status,
+        sessionId: run.runtime.sessionId ?? run.sessionId ?? null,
+        cwd: run.runtime.cwd ?? null,
+        command: run.runtime.command ?? null,
+        runnerPid: run.runtime.runnerPid ?? null,
+        processGroupId: run.runtime.processGroupId ?? null,
+        tmux: run.runtime.tmux ?? null,
+        logPath: run.runtime.logPath ?? null,
+        viewerCommand: run.runtime.viewerCommand ?? null,
+        viewerStatus: run.runtime.viewerStatus ?? (run.runtime.mode === "headless" ? "not_applicable" : "pending"),
+        diagnostics: run.runtime.diagnostics ?? [],
+        heartbeatAt: run.runtime.heartbeatAt ?? run.lastHeartbeatAt ?? null,
+        cleanupStatus: run.runtime.cleanupStatus ?? (run.runtime.mode === "headless" ? "not_required" : "pending"),
+        startedAt: run.runtime.startedAt ?? run.startedAt ?? null,
+        finishedAt: run.runtime.finishedAt ?? run.finishedAt ?? null,
+      }
+    : createRunRuntimeMetadata({
+        mode: mapLegacyBackendToRuntimeMode(run.backend),
+        status: mapRunStatusToRuntimeStatus(run.status),
+        sessionId: run.sessionId ?? null,
+        startedAt: run.startedAt ?? null,
+        finishedAt: run.finishedAt ?? null,
+      });
+
+  if (isTerminalRunStatus(run.status)) {
     return {
-      mode: run.runtime.mode,
-      status: run.runtime.status,
-      sessionId: run.runtime.sessionId ?? run.sessionId ?? null,
-      cwd: run.runtime.cwd ?? null,
-      command: run.runtime.command ?? null,
-      runnerPid: run.runtime.runnerPid ?? null,
-      processGroupId: run.runtime.processGroupId ?? null,
-      tmux: run.runtime.tmux ?? null,
-      logPath: run.runtime.logPath ?? null,
-      viewerCommand: run.runtime.viewerCommand ?? null,
-      viewerStatus: run.runtime.viewerStatus ?? (run.runtime.mode === "headless" ? "not_applicable" : "pending"),
-      diagnostics: run.runtime.diagnostics ?? [],
-      heartbeatAt: run.runtime.heartbeatAt ?? run.lastHeartbeatAt ?? null,
-      cleanupStatus: run.runtime.cleanupStatus ?? (run.runtime.mode === "headless" ? "not_required" : "pending"),
-      startedAt: run.runtime.startedAt ?? run.startedAt ?? null,
-      finishedAt: run.runtime.finishedAt ?? run.finishedAt ?? null,
+      ...runtime,
+      status: mapRunStatusToRuntimeStatus(run.status),
+      finishedAt: run.finishedAt ?? runtime.finishedAt,
+      cleanupStatus: runtime.mode === "headless" ? "not_required" : runtime.cleanupStatus,
     };
   }
 
-  return createRunRuntimeMetadata({
-    mode: mapLegacyBackendToRuntimeMode(run.backend),
-    status: mapRunStatusToRuntimeStatus(run.status),
-    sessionId: run.sessionId ?? null,
-    startedAt: run.startedAt ?? null,
-    finishedAt: run.finishedAt ?? null,
-  });
+  return runtime;
+}
+
+export function formatRunRuntimeSummary(runtime: RunRuntimeMetadata): string {
+  const diagnostics = runtime.diagnostics.at(-1);
+  return [
+    `runtimeMode=${runtime.mode}`,
+    `runtimeStatus=${runtime.status}`,
+    `viewer=${runtime.viewerStatus}`,
+    `cleanup=${runtime.cleanupStatus}`,
+    `log=${runtime.logPath ?? "none"}`,
+    `heartbeat=${runtime.heartbeatAt ?? "none"}`,
+    diagnostics ? `diagnostic=${diagnostics}` : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" ");
 }

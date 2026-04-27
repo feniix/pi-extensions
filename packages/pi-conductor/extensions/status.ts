@@ -1,3 +1,4 @@
+import { formatRunRuntimeSummary } from "./runtime-metadata.js";
 import { getConductorProjectDir } from "./storage.js";
 import type { RunRecord, WorkerRecord } from "./types.js";
 
@@ -28,6 +29,17 @@ export function formatRunStatus(run: RunRecord): string {
         `assignedWorker=${task.assignedWorkerId ?? "none"} ` +
         `activeRun=${task.activeRunId ?? "none"} ` +
         `latestProgress=${task.latestProgress ?? "none"}`,
+    );
+  }
+
+  for (const attempt of run.runs) {
+    lines.push(
+      `- run ${attempt.runId} ` +
+        `task=${attempt.taskId} ` +
+        `worker=${attempt.workerId} ` +
+        `status=${attempt.status} ` +
+        `backend=${attempt.backend} ` +
+        formatRunRuntimeSummary(attempt.runtime),
     );
   }
 
