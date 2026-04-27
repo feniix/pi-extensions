@@ -952,7 +952,7 @@ case "$*" in *has-session*) exit 1 ;; *) exit 0 ;; esac
     }
   });
 
-  it("cleans up repeated alive-pid stale heartbeats after marking terminal", async () => {
+  it("keeps repeated alive-pid stale heartbeats active without killing tmux", async () => {
     const originalPath = process.env.PATH;
     const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));
     const killMarker = join(binDir, "killed-session");
@@ -1000,14 +1000,13 @@ esac
 
       const reconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:10:00.000Z" });
 
-      expect(reconciled.runs[0]).toMatchObject({ status: "stale", runtime: { cleanupStatus: "succeeded" } });
-      expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
-      expect(existsSync(killMarker)).toBe(true);
-      rmSync(killMarker, { force: true });
+      expect(reconciled.runs[0]).toMatchObject({ status: "running", runtime: { cleanupStatus: "pending" } });
+      expect(reconciled.tasks[0]).toMatchObject({ state: "running", activeRunId: started.run.runId });
+      expect(existsSync(killMarker)).toBe(false);
 
       const rereconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:11:00.000Z" });
 
-      expect(rereconciled.runs[0]).toMatchObject({ status: "stale", runtime: { cleanupStatus: "succeeded" } });
+      expect(rereconciled.runs[0]).toMatchObject({ status: "running", runtime: { cleanupStatus: "pending" } });
       expect(existsSync(killMarker)).toBe(false);
     } finally {
       process.env.PATH = originalPath;

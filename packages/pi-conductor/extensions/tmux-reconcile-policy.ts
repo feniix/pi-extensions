@@ -42,12 +42,10 @@ export function decideTmuxHeartbeatReconciliation(input: {
   }
   if (input.runnerAlive) {
     const diagnostic = tmuxAliveHeartbeatDiagnostic(input.attempt.runtime.runnerPid);
-    return input.attempt.runtime.diagnostics.includes(diagnostic)
-      ? {
-          action: "mark_stale",
-          diagnostic: `tmux runner heartbeat remained stale while runner pid ${input.attempt.runtime.runnerPid} stayed alive`,
-        }
-      : { action: "append_diagnostic", diagnostic };
+    return {
+      action: input.attempt.runtime.diagnostics.includes(diagnostic) ? "none" : "append_diagnostic",
+      diagnostic,
+    };
   }
   return {
     action: "mark_stale",

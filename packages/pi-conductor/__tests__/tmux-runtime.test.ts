@@ -784,9 +784,9 @@ describe("tmux conductor runtime", () => {
       now: "2026-04-27T00:06:00.000Z",
       staleHeartbeatMs: 60_000,
     });
-    expect(secondReconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
-    expect(secondReconciled.runs[0]).toMatchObject({ status: "stale" });
-    expect(adapter.calls.some((call) => call.args.includes("kill-session"))).toBe(true);
+    expect(secondReconciled.tasks[0]).toMatchObject({ state: "running", activeRunId: started.run.runId });
+    expect(secondReconciled.runs[0]).toMatchObject({ status: "running", finishedAt: null });
+    expect(adapter.calls.some((call) => call.args.includes("kill-session"))).toBe(false);
   });
 
   it("does not kill a tmux session from a stale heartbeat snapshot after a fresh heartbeat", async () => {
