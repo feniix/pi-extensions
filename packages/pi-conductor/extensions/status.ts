@@ -1,3 +1,4 @@
+import { isTerminalRunStatus } from "./run-status.js";
 import { formatRunRuntimeSummary } from "./runtime-metadata.js";
 import { getConductorProjectDir } from "./storage.js";
 import type { RunAttemptRecord, RunRecord, WorkerRecord } from "./types.js";
@@ -7,12 +8,6 @@ function getWorkerHealth(worker: WorkerRecord): "healthy" | "broken" {
     return "broken";
   }
   return "healthy";
-}
-
-function isTerminalRunStatus(status: RunAttemptRecord["status"]): boolean {
-  return ["succeeded", "partial", "blocked", "failed", "aborted", "stale", "interrupted", "unknown_dispatch"].includes(
-    status,
-  );
 }
 
 function isActiveRun(attempt: RunAttemptRecord): boolean {

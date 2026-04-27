@@ -1,3 +1,4 @@
+import { isTerminalRunStatus } from "./run-status.js";
 import type {
   PersistedRunAttemptRecord,
   RunAttemptRecord,
@@ -64,12 +65,6 @@ export function mapRunStatusToRuntimeStatus(status: RunAttemptRecord["status"] |
     default:
       return "unknown";
   }
-}
-
-function isTerminalRunStatus(status: RunAttemptRecord["status"] | undefined): boolean {
-  return ["succeeded", "partial", "blocked", "failed", "aborted", "stale", "interrupted", "unknown_dispatch"].includes(
-    status ?? "",
-  );
 }
 
 export function normalizeRunRuntimeMetadata(run: PersistedRunAttemptRecord): RunRuntimeMetadata {

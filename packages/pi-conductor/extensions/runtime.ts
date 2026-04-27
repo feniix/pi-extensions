@@ -168,6 +168,15 @@ const artifactTypeSchema = Type.Union([
   Type.Literal("other"),
 ]);
 
+const childArtifactMetadataSchema = Type.Object(
+  {},
+  {
+    additionalProperties: true,
+    description:
+      "Freeform child metadata. root and worktreeRoot round-trip for child artifacts but are not trusted as read roots.",
+  },
+);
+
 export function buildRunScopedConductorTools(input: {
   taskContract?: TaskContractInput;
   onConductorProgress?: (params: ConductorProgressReportInput) => void | Promise<void>;
@@ -200,7 +209,7 @@ export function buildRunScopedConductorTools(input: {
           Type.Object({
             type: artifactTypeSchema,
             ref: Type.String(),
-            metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),
+            metadata: Type.Optional(childArtifactMetadataSchema),
           }),
         ),
       }),
@@ -272,7 +281,7 @@ export function buildRunScopedConductorTools(input: {
           Type.Object({
             type: artifactTypeSchema,
             ref: Type.String(),
-            metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),
+            metadata: Type.Optional(childArtifactMetadataSchema),
           }),
         ),
       }),

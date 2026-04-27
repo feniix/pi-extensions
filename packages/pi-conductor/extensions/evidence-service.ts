@@ -1,12 +1,7 @@
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
+import { isTerminalRunStatus } from "./run-status.js";
 import { addConductorArtifact } from "./storage.js";
 import type { EvidenceBundle, EvidenceBundlePurpose, ReadinessCheck, ReadinessPurpose } from "./types.js";
-
-function isTerminalStatus(status: string): boolean {
-  return ["succeeded", "partial", "blocked", "failed", "aborted", "stale", "interrupted", "unknown_dispatch"].includes(
-    status,
-  );
-}
 
 export function buildEvidenceBundleForRepo(
   repoRoot: string,
@@ -102,7 +97,7 @@ export function buildEvidenceBundleForRepo(
       runCount: runs.length,
       openGateCount: gates.filter((gate) => gate.status === "open").length,
       artifactCount: artifacts.length,
-      terminalRunCount: runs.filter((entry) => isTerminalStatus(entry.status)).length,
+      terminalRunCount: runs.filter((entry) => isTerminalRunStatus(entry.status)).length,
       completedTaskCount: tasks.filter((entry) => entry.state === "completed").length,
       needsReviewTaskCount: tasks.filter((entry) => entry.state === "needs_review").length,
       blockedTaskCount: tasks.filter((entry) => entry.state === "blocked").length,

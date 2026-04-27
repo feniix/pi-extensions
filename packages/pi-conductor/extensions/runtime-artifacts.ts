@@ -1,12 +1,7 @@
 import { relative } from "node:path";
+import { isTerminalRunStatus } from "./run-status.js";
 import { addConductorArtifact } from "./storage.js";
 import type { RunRecord, RunRuntimeMetadata, RunRuntimeMode } from "./types.js";
-
-function isTerminalRunStatus(status: string): boolean {
-  return ["succeeded", "partial", "blocked", "failed", "aborted", "stale", "interrupted", "unknown_dispatch"].includes(
-    status,
-  );
-}
 
 function isNonTerminalRuntimeStatus(status: string | undefined): boolean {
   return status === "starting" || status === "running" || status === "unavailable" || status === "unknown";
@@ -36,7 +31,9 @@ export function recordRuntimeMetadataForRun(input: {
           ...input.metadata,
           status: entry.runtime.status,
           cleanupStatus:
-            input.metadata.cleanupStatus === "pending" ? entry.runtime.cleanupStatus : input.metadata.cleanupStatus,
+            input.metadata.cleanupStatus === undefined || input.metadata.cleanupStatus === "pending"
+              ? entry.runtime.cleanupStatus
+              : input.metadata.cleanupStatus,
         }
       : input.metadata;
     return {
