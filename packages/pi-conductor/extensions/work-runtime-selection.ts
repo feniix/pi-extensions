@@ -11,8 +11,13 @@ function hasHeadlessRuntimeIntent(request: string): boolean {
 }
 
 function hasStatusOnlyIntent(request: string): boolean {
+  const startsWithInspectionVerb =
+    /^(?:please\s+|can you\s+|could you\s+)?\s*(show|list|display|view|inspect|status)\b/i.test(request);
+  const startsWithViewerInspectionVerb =
+    /^(?:please\s+|can you\s+|could you\s+)?\s*(watch|open)\b/i.test(request) &&
+    /\b(current|active|existing|all|status)\b/i.test(request);
   return (
-    /^(?:please\s+|can you\s+|could you\s+)?\s*(show|list|display|view|inspect|status)\b/i.test(request) &&
+    (startsWithInspectionVerb || startsWithViewerInspectionVerb) &&
     /\b(current|active|existing|all)?\s*(worker|workers|run|runs|task|tasks|project|status|session|sessions|pane|panes|terminal|terminals|tmux|iterm)\b/i.test(
       request,
     )
