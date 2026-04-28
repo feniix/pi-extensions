@@ -1080,7 +1080,7 @@ case "$*" in *has-session*) exit 1 ;; *) exit 0 ;; esac
     const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));
     writeFileSync(
       join(binDir, "tmux"),
-      "#!/bin/sh\ncase \"$*\" in *display-message*) printf 'zsh\\n' ;; *) exit 0 ;; esac\n",
+      "#!/bin/sh\ncase \"$*\" in *display-message*) printf 'vim\\n' ;; *) exit 0 ;; esac\n",
       { mode: 0o755 },
     );
     process.env.PATH = `${binDir}:${originalPath ?? ""}`;

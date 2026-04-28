@@ -12,7 +12,7 @@ import { createRunnerContract, hashRunnerNonce, writeRunnerContract } from "./ru
 import { markRunAttemptStale } from "./runtime-stale.js";
 import { releaseTerminalTmuxWorkerForRepo } from "./runtime-worker-release.js";
 import { getConductorProjectDir } from "./storage.js";
-import { applyTmuxReconciliationState } from "./tmux-reconcile-policy.js";
+import { applyTmuxReconciliationState, tmuxPaneCommandChanged } from "./tmux-reconcile-policy.js";
 import type {
   RunAttemptRecord,
   RunRecord,
@@ -384,7 +384,7 @@ export async function cancelTmuxRuntime(input: {
           diagnostic: `tmux pane command verification failed before cancel: ${message}`,
         };
       }
-      if (currentPaneCommand && !input.runtime.command.includes(currentPaneCommand)) {
+      if (tmuxPaneCommandChanged({ recordedCommand: input.runtime.command, currentCommand: currentPaneCommand })) {
         return {
           cleanupStatus: "failed",
           diagnostic: `tmux pane command verification differed before cancel: ${currentPaneCommand}`,

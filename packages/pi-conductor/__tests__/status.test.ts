@@ -250,7 +250,7 @@ describe("formatRunStatus", () => {
       runtimeStatus: "aborted" as const,
       viewerStatus: "opened" as const,
       cleanupStatus: "failed" as const,
-      diagnostic: "tmux pane command verification failed before cancel: zsh",
+      diagnostic: "tmux pane command verification failed before cancel: vim",
       visibleRuns: "activeVisibleRuns: none",
       finished: true,
       cancel: false,
