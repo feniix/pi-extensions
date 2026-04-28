@@ -5,8 +5,25 @@ import {
   reconcileProjectForRepo,
   reconcileWorkerHealth,
 } from "./conductor.js";
+import { isTerminalRunStatus } from "./run-status.js";
+import { formatRunRuntimeSummary } from "./runtime-metadata.js";
 import { formatRunStatus } from "./status.js";
 import { queryConductorEvents } from "./storage.js";
+import type { RunAttemptRecord } from "./types.js";
+
+function isActiveRun(attempt: RunAttemptRecord): boolean {
+  return !attempt.finishedAt && !isTerminalRunStatus(attempt.status);
+}
+
+function formatRunInspection(attempt: RunAttemptRecord): string {
+  const cancelCommand = isActiveRun(attempt)
+    ? ` cancel=conductor_cancel_task_run({"runId":"${attempt.runId}","reason":"<reason>"})`
+    : "";
+  return (
+    `${attempt.runId} task=${attempt.taskId} worker=${attempt.workerId} status=${attempt.status} ` +
+    `backend=${attempt.backend} ${formatRunRuntimeSummary(attempt.runtime)}${cancelCommand}`
+  );
+}
 
 function getUsage(): string {
   return [
@@ -70,20 +87,11 @@ export async function runConductorCommand(cwd: string, args: string): Promise<st
         : `task not found: ${idOrName ?? ""}`;
     }
     if (resource === "runs") {
-      return run.runs.length === 0
-        ? "runs: none"
-        : run.runs
-            .map(
-              (attempt) =>
-                `${attempt.runId} task=${attempt.taskId} worker=${attempt.workerId} status=${attempt.status}`,
-            )
-            .join("\n");
+      return run.runs.length === 0 ? "runs: none" : run.runs.map(formatRunInspection).join("\n");
     }
     if (resource === "run") {
       const attempt = run.runs.find((entry) => entry.runId === idOrName);
-      return attempt
-        ? `${attempt.runId} task=${attempt.taskId} worker=${attempt.workerId} status=${attempt.status} backend=${attempt.backend}`
-        : `run not found: ${idOrName ?? ""}`;
+      return attempt ? formatRunInspection(attempt) : `run not found: ${idOrName ?? ""}`;
     }
     if (resource === "gates") {
       return run.gates.length === 0

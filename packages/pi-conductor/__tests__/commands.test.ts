@@ -11,6 +11,8 @@ import {
   resolveGateForRepo,
   startTaskRunForRepo,
 } from "../extensions/conductor.js";
+import { createRunRuntimeMetadata } from "../extensions/runtime-metadata.js";
+import { writeRun } from "../extensions/storage.js";
 
 describe("runConductorCommand", () => {
   let repoDir: string;
@@ -82,6 +84,51 @@ describe("runConductorCommand", () => {
     await expect(runConductorCommand(repoDir, `get worker ${worker.name}`)).resolves.toContain(worker.workerId);
     await expect(runConductorCommand(repoDir, `get task ${task.taskId}`)).resolves.toContain("state=running");
     await expect(runConductorCommand(repoDir, `get run ${started.run.runId}`)).resolves.toContain("status=running");
+  });
+
+  it("shows visible runtime details for run inspection commands", async () => {
+    await runConductorCommand(repoDir, "create worker backend");
+    await runConductorCommand(repoDir, "create task Build Implement it");
+    const run = getOrCreateRunForRepo(repoDir);
+    const worker = run.workers[0];
+    const task = run.tasks[0];
+    if (!worker || !task) {
+      throw new Error("test resources missing");
+    }
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, {
+      taskId: task.taskId,
+      workerId: worker.workerId,
+      runtimeMode: "iterm-tmux",
+    });
+    writeRun({
+      ...getOrCreateRunForRepo(repoDir),
+      runs: getOrCreateRunForRepo(repoDir).runs.map((entry) =>
+        entry.runId === started.run.runId
+          ? {
+              ...entry,
+              runtime: {
+                ...createRunRuntimeMetadata({ mode: "iterm-tmux", status: "running" }),
+                viewerStatus: "opened" as const,
+                viewerCommand: "tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'",
+                logPath: "/tmp/pi-conductor/runtime/run-1/runner.log",
+                diagnostics: ["iTerm2 viewer opened"],
+              },
+            }
+          : entry,
+      ),
+    });
+
+    const runs = await runConductorCommand(repoDir, "get runs");
+    const oneRun = await runConductorCommand(repoDir, `get run ${started.run.runId}`);
+
+    for (const text of [runs, oneRun]) {
+      expect(text).toContain(`task=${task.taskId}`);
+      expect(text).toContain("runtimeMode=iterm-tmux runtimeStatus=running viewer=opened");
+      expect(text).toContain("viewerCommand=tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'");
+      expect(text).toContain("log=/tmp/pi-conductor/runtime/run-1/runner.log");
+      expect(text).toContain(`cancel=conductor_cancel_task_run({"runId":"${started.run.runId}","reason":"<reason>"})`);
+    }
   });
 
   it("shows resource-shaped run, gate, event, and artifact inspection commands", async () => {

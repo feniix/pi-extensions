@@ -446,6 +446,7 @@ export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string 
     `State: ${task.state}`,
     objective ? `Objective: ${objective.title} [${objective.objectiveId}]` : "Objective: none",
     worker ? `Worker: ${worker.name} [${worker.workerId}] lifecycle=${worker.lifecycle}` : "Worker: unassigned",
+    `Latest progress: ${task.latestProgress ?? "none"}`,
     "",
     "## Prompt",
     task.prompt,
@@ -459,10 +460,12 @@ export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string 
     runs.length === 0
       ? "- none"
       : runs
-          .map(
-            (attempt) =>
-              `- ${attempt.runId} status=${attempt.status} taskRevision=${attempt.taskRevision} ${formatRunRuntimeSummary(attempt.runtime)}`,
-          )
+          .map((attempt) => {
+            const cancelCommand = isActiveRunAttempt(attempt)
+              ? ` cancel=conductor_cancel_task_run({"runId":"${attempt.runId}","reason":"<reason>"})`
+              : "";
+            return `- ${attempt.runId} status=${attempt.status} taskRevision=${attempt.taskRevision} ${formatRunRuntimeSummary(attempt.runtime)}${cancelCommand}`;
+          })
           .join("\n"),
     "",
     "## Dependencies",
@@ -527,10 +530,10 @@ export function buildProjectBriefForRepo(
     activeRuns.length === 0
       ? "- none"
       : activeRuns
-          .map(
-            (attempt) =>
-              `- ${attempt.runId} task=${attempt.taskId} worker=${attempt.workerId} status=${attempt.status} ${formatRunRuntimeSummary(attempt.runtime)} cancel=conductor_cancel_task_run({"runId":"${attempt.runId}","reason":"<reason>"})`,
-          )
+          .map((attempt) => {
+            const task = run.tasks.find((entry) => entry.taskId === attempt.taskId);
+            return `- ${attempt.runId} task=${attempt.taskId} worker=${attempt.workerId} status=${attempt.status} ${formatRunRuntimeSummary(attempt.runtime)} progress=${task?.latestProgress ?? "none"} cancel=conductor_cancel_task_run({"runId":"${attempt.runId}","reason":"<reason>"})`;
+          })
           .join("\n"),
     "",
     "## Recommended Next Actions",
