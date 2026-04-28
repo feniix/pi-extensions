@@ -15,6 +15,7 @@ import conductorExtension from "../extensions/index.js";
 
 type RegisteredTool = {
   name: string;
+  description?: string;
   parameters?: unknown;
   execute?: (
     toolCallId: string,
@@ -63,6 +64,12 @@ describe("conductor runtime-mode tool contracts", () => {
     delete process.env.PI_CONDUCTOR_HOME;
     if (existsSync(repoDir)) rmSync(repoDir, { recursive: true, force: true });
     if (existsSync(conductorHome)) rmSync(conductorHome, { recursive: true, force: true });
+  });
+
+  it("documents parallel pre-run startup cancellation semantics", () => {
+    const tool = collectTools().find((entry) => entry.name === "conductor_run_parallel_work");
+
+    expect(tool?.description).toContain("fails before active run creation");
   });
 
   it("forwards runtimeMode through registered start, run, retry, and delegate tools", async () => {

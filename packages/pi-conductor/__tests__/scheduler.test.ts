@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  assignTaskForRepo,
   createObjectiveForRepo,
   createTaskForRepo,
   getOrCreateRunForRepo,
@@ -243,6 +244,35 @@ describe("conductor scheduler and async next action", () => {
     expect(task).toBeTruthy();
   });
 
+  it("cancels run-next-action tasks when runtime preflight fails before run start", async () => {
+    const task = addUsableWorkerAndAssignedTask();
+    runtimeTracking.preflightError = "runtime disappeared before active run";
+
+    await expect(runNextActionForRepo(repoRoot, { executeRuns: true })).rejects.toThrow(/runtime disappeared/i);
+
+    const run = getOrCreateRunForRepo(repoRoot);
+    expect(run.runs).toHaveLength(0);
+    expect(run.tasks.find((entry) => entry.taskId === task.taskId)).toMatchObject({
+      state: "canceled",
+      activeRunId: null,
+    });
+  });
+
+  it("cancels scheduler tick run-task actions when runtime preflight fails before run start", async () => {
+    const task = addUsableWorkerAndAssignedTask();
+    runtimeTracking.preflightError = "runtime disappeared before active run";
+
+    await expect(schedulerTickForRepo(repoRoot, { policy: "execute" })).rejects.toThrow(/runtime disappeared/i);
+
+    const run = getOrCreateRunForRepo(repoRoot);
+    expect(run.runs).toHaveLength(0);
+    expect(run.tasks.find((entry) => entry.taskId === task.taskId)).toMatchObject({
+      state: "canceled",
+      activeRunId: null,
+    });
+    expect(run.events.at(-1)).toMatchObject({ type: "scheduler.tick_failed" });
+  });
+
   it("cancels assigned objective tasks when runtime preflight fails before run start", async () => {
     const objective = createObjectiveForRepo(repoRoot, { title: "Objective", prompt: "Prompt" });
     const task = createTaskForRepo(repoRoot, {
@@ -265,6 +295,34 @@ describe("conductor scheduler and async next action", () => {
     expect(run.runs).toHaveLength(0);
     expect(run.tasks.find((entry) => entry.taskId === task.taskId)).toMatchObject({
       state: "canceled",
+      activeRunId: null,
+    });
+    expect(run.tasks.find((entry) => entry.taskId === unrelated.taskId)).toMatchObject({ state: "assigned" });
+  });
+
+  it("does not cancel pre-existing assigned objective tasks on runtime preflight failure", async () => {
+    const objective = createObjectiveForRepo(repoRoot, { title: "Objective", prompt: "Prompt" });
+    const task = createTaskForRepo(repoRoot, {
+      title: "Already assigned",
+      prompt: "Do work",
+      objectiveId: objective.objectiveId,
+    });
+    const unrelated = addUsableWorkerAndAssignedTask();
+    assignTaskForRepo(repoRoot, task.taskId, "worker-1");
+    runtimeTracking.preflightError = "runtime disappeared before active run";
+
+    await expect(
+      scheduleObjectiveForRepo(repoRoot, {
+        objectiveId: objective.objectiveId,
+        maxConcurrency: 1,
+        executeRuns: true,
+      }),
+    ).rejects.toThrow(/runtime disappeared/i);
+
+    const run = getOrCreateRunForRepo(repoRoot);
+    expect(run.runs).toHaveLength(0);
+    expect(run.tasks.find((entry) => entry.taskId === task.taskId)).toMatchObject({
+      state: "assigned",
       activeRunId: null,
     });
     expect(run.tasks.find((entry) => entry.taskId === unrelated.taskId)).toMatchObject({ state: "assigned" });

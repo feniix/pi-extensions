@@ -63,7 +63,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
     name: "conductor_run_parallel_work",
     label: "Conductor Run Parallel Work",
     description:
-      "Autonomously split a natural-language request into parallel conductor worker tasks, run them under one foreground orchestration boundary, and cancel owned runs/tasks if the user interrupts with Escape",
+      "Autonomously split a natural-language request into parallel conductor worker tasks, run them under one foreground orchestration boundary, and cancel owned runs/tasks if the user interrupts with Escape or a task fails before active run creation",
     parameters: Type.Object({
       tasks: Type.Array(
         Type.Object({
@@ -86,9 +86,11 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
       const result = await conductor.runParallelWorkForRepo(ctx.cwd, params, signal);
       const completed = result.results.filter((entry) => entry.result?.status === "success").length;
       const runtimeText = `runtime=${result.runtimeMode}${result.runtimeRuns.length > 0 ? ` runs=${result.runtimeRuns.length}` : ""}`;
+      const canceledText =
+        result.canceledTasks.length > 0 ? `; canceled ${result.canceledTasks.length} pre-run task(s)` : "";
       const text = signal?.aborted
         ? `interrupted parallel conductor work with ${runtimeText}; canceled ${result.canceledRuns.length} active run(s) and ${result.canceledTasks.length} task(s)`
-        : `ran ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${completed} succeeded, ${result.results.length - completed} need follow-up`;
+        : `ran ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${completed} succeeded, ${result.results.length - completed} need follow-up${canceledText}`;
       return { content: [{ type: "text", text }], details: result };
     },
   });
