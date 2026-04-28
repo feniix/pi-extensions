@@ -41,6 +41,8 @@ The current headless/native `AgentSession` path remains the default. Visible run
 
 * R9. Store logs as bounded artifact/local refs, not inline project-state blobs.
 * R10. Cover backend selection, launch metadata, cancellation, iTerm fallback, and reconciliation with tests.
+* R11. Guard natural-language runtime selection with a maintained phrase matrix covering status-only, execution, visible supervision, explicit runtime, and negated runtime wording.
+* R12. Clean up conductor-owned pending work if runtime startup fails after high-level preflight but before a durable run becomes active, without touching unrelated pre-existing work.
 
 ## Supervision Approach Rationale
 
@@ -500,30 +502,65 @@ Runtime ownership boundaries:
 * Visible runtime preflight failure returns actionable diagnostics without creating misleading active runs.
 * Natural-language stop cancels visible active work without user-supplied IDs.
 
-### U7. Add smoke tests and documentation
+### U7. Add smoke tests, phrase matrix coverage, and documentation
 
-**Goal:** Provide human-style validation for visible supervision and make cleanup/recovery clear.
+**Goal:** Provide human-style validation for visible supervision, keep runtime-selection heuristics regression-resistant, and make cleanup/recovery clear.
 
-**Requirements:** Validates R1-R10; implements documentation/test coverage for R6, R8, R9, and R10.
+**Requirements:** Validates R1-R11; implements documentation/test coverage for R6, R7, R8, R9, R10, and R11.
 
 **Files:**
 
 * Modify: `packages/pi-conductor/README.md`
 * Add or modify: `packages/pi-conductor/__tests__/package-smoke.test.ts`
+* Add: `packages/pi-conductor/__tests__/work-runtime-selection.test.ts`
 * Add optional script/docs note for local real-tmux smoke testing.
 
 **Approach:**
 
 * Add a real-tmux smoke test that skips when `tmux` is unavailable.
 * Smoke: start visible parallel work, inspect tmux sessions/log paths, cancel active work, verify sessions gone and persisted state terminal.
-* Document manual attach, iTerm fallback, cancellation, stale reconciliation, log retention, and cleanup commands.
-* Do not use U7 as a catch-all feature slice. Required cleanup/reconciliation implementation belongs in U3-U6. Defects discovered during smoke testing become focused bug-fix tasks unless they are necessary for the smoke test to pass.
+* Add a table-driven runtime-selection phrase matrix for status-only, normal execution, visible supervision, direct `tmux`/`iterm-tmux`, negated runtime wording, and explicit `runtimeMode` override precedence.
+* Include regression phrases that previously confused noun/verb intent, such as `show run status`, `inspect current run`, `list active task`, `watch current worker status`, `open current run output`, `show tmux sessions`, and `run this without tmux`.
+* Document manual attach, iTerm fallback, status-only request guidance, cancellation, stale reconciliation, log retention, and cleanup commands.
+* Verify that agent-visible tool output/details expose `runtimeMode`, `runtimeRuns`, viewer/log fields, and cancellation affordances for visible runs.
+* Do not use U7 as a catch-all feature slice. Runtime startup cleanup belongs in U8. Other defects discovered during smoke testing become focused bug-fix tasks unless they are necessary for the smoke test to pass.
 
 **Verification:**
 
 * `npm run typecheck`
 * `npx vitest run packages/pi-conductor/__tests__`
 * Local smoke with tmux installed proves visible runtime can start, be watched, canceled, and reconciled.
+* Phrase matrix tests prove status-only wording never launches visible runtime and explicit runtime params still win.
+
+### U8. Clean up owned startup failures after preflight races
+
+**Goal:** Close the remaining post-preflight startup-failure race by ensuring high-level visible orchestration does not leave conductor-owned tasks stuck as assigned/ready when the runtime disappears between preflight and run start.
+
+**Requirements:** R5, R8, R10, R12.
+
+**Files:**
+
+* Modify: `packages/pi-conductor/extensions/conductor.ts`
+* Modify or add helper module if extraction keeps `conductor.ts` under the static safety line-count guard.
+* Test: `packages/pi-conductor/__tests__/conductor.test.ts`
+* Test: `packages/pi-conductor/__tests__/tmux-cancel.test.ts`
+* Test: `packages/pi-conductor/__tests__/scheduler.test.ts` or objective-specific tests if objective startup cleanup touches scheduling behavior.
+
+**Approach:**
+
+* Track the task IDs and worker IDs created or assigned by each high-level orchestration boundary before dispatching runtime work.
+* When runtime/backend startup fails after top-level preflight but before an active run is created, cancel or mark failed only the owned pending tasks and release/recover only the owned workers that were part of the failed startup attempt.
+* Preserve existing active-run cleanup semantics for failures after `startTaskRunForRepo` creates a run; those remain runtime cleanup/reconciliation concerns.
+* Keep cleanup scoped: unrelated pre-existing tasks, workers, objectives, and runs must not be modified.
+* Make failure contracts consistent enough for callers to understand which owned tasks were canceled, which active runs were cleaned up, and which failures still require review.
+* Cover single, parallel, and objective high-level paths separately; do not make sibling task cancellation automatic after the task execution start barrier has been crossed.
+
+**Verification:**
+
+* Tests simulate runtime availability passing at high-level preflight and failing during lower-level runtime/backend startup before active run creation.
+* Single, parallel, and objective tests assert owned pending tasks are terminalized or canceled instead of remaining assigned/ready.
+* Tests assert unrelated pre-existing work remains unchanged.
+* Existing cancellation, reconciliation, and headless tests continue to pass.
 
 ## Suggested PR Slices
 
@@ -531,7 +568,8 @@ Runtime ownership boundaries:
 2. **PR B — supervised tmux runtime:** U3 + U4 with mocked tests only; real-tmux smoke belongs to PR E.
 3. **PR C — iTerm viewer and status output:** U5.
 4. **PR D — natural-language visible ergonomics:** U6.
-5. **PR E — docs/smoke hardening:** U7 only; add the real-tmux smoke test and docs, with no open-ended cleanup/reconciliation feature work.
+5. **PR E — docs/smoke/phrase-matrix hardening:** U7 only; add real-tmux smoke, runtime-selection phrase matrix coverage, agent-visible output checks, and docs.
+6. **PR F — startup-failure cleanup hardening:** U8 only; close post-preflight runtime disappearance cases without broad runtime refactors.
 
 ## Test Plan
 
@@ -552,6 +590,7 @@ npm run test
 
 Manual smoke for final feature:
 
+0. Run the runtime-selection phrase matrix and confirm status-only phrases do not create work or infer visible runtime.
 1. Start parallel natural-language conductor work with visible runtime intent.
 2. Confirm tmux sessions/log paths exist and viewer details are returned.
 3. Confirm status output maps worker name, task title, run ID, conductor state, runtime state, attach command, log ref, and cancel command.
