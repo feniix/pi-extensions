@@ -78,7 +78,7 @@ function buildMergeCommand(
   const commandParts = [`gh pr merge ${prNumber}`, squash ? "--squash" : "--merge"];
 
   if (squash && commitTitle) {
-    commandParts.push(`--title ${shellQuote(commitTitle)}`);
+    commandParts.push(`--subject ${shellQuote(commitTitle)}`);
   }
   if (squash && commitMessage) {
     commandParts.push(`--body ${shellQuote(commitMessage)}`);

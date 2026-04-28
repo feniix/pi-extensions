@@ -245,7 +245,7 @@ describe("pi-devtools", () => {
       expect(result.details.mergeType).toBe("squash-merged");
     });
 
-    it("squash merges with commit title", () => {
+    it("squash merges with commit title using GitHub CLI subject flag", () => {
       vi.mocked(execGh)
         .mockReturnValueOnce(JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "OPEN" }))
         .mockReturnValueOnce("");
@@ -253,7 +253,8 @@ describe("pi-devtools", () => {
       mergePrTool(123, true, true, "Custom Title");
 
       const mergeCall = vi.mocked(execGh).mock.calls[1][0] as string;
-      expect(mergeCall).toContain("--title");
+      expect(mergeCall).toContain("--subject 'Custom Title'");
+      expect(mergeCall).not.toContain("--title");
     });
 
     it("squash merges with commit message", () => {
