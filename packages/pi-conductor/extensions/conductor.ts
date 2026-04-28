@@ -605,12 +605,20 @@ async function executeConductorAction(
     if (!input.executeRuns) {
       return { executed: false, reason: "run execution disabled by scheduler policy", action, result: null };
     }
-    return {
-      executed: true,
-      reason: null,
-      action,
-      result: await runTaskForRepo(repoRoot, action.toolCall.params.taskId, signal),
-    };
+    try {
+      return {
+        executed: true,
+        reason: null,
+        action,
+        result: await runTaskForRepo(repoRoot, action.toolCall.params.taskId, signal),
+      };
+    } catch (error) {
+      cancelPendingStartupFailureForRepo(repoRoot, {
+        reason: `Conductor run_task failed before run start: ${errorMessage(error)}`,
+        taskIds: [action.toolCall.params.taskId],
+      });
+      throw error;
+    }
   }
   if (action.kind === "retry_task" && typeof action.toolCall?.params.taskId === "string") {
     return {
@@ -693,6 +701,7 @@ export async function scheduleObjectiveForRepo(
     (worker) => worker.lifecycle === "idle" && !worker.recoverable && worker.worktreePath && worker.sessionFile,
   );
   const assigned: TaskRecord[] = [];
+  const assignedByThisCall = new Set<string>();
   const executed: Array<{ taskId: string; result: unknown }> = [];
   const skipped: string[] = [];
   for (const task of runnableTasks) {
@@ -705,10 +714,23 @@ export async function scheduleObjectiveForRepo(
       }
       schedulableTask = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
       assigned.push(schedulableTask);
+      assignedByThisCall.add(schedulableTask.taskId);
     }
     if (schedulerPolicy.executeRuns) {
-      const result = await runTaskForRepo(repoRoot, schedulableTask.taskId, signal, { runtimeMode: input.runtimeMode });
-      executed.push({ taskId: schedulableTask.taskId, result });
+      try {
+        const result = await runTaskForRepo(repoRoot, schedulableTask.taskId, signal, {
+          runtimeMode: input.runtimeMode,
+        });
+        executed.push({ taskId: schedulableTask.taskId, result });
+      } catch (error) {
+        if (assignedByThisCall.has(schedulableTask.taskId)) {
+          cancelPendingStartupFailureForRepo(repoRoot, {
+            reason: `Objective scheduling failed before run start: ${errorMessage(error)}`,
+            taskIds: [schedulableTask.taskId],
+          });
+        }
+        throw error;
+      }
     }
   }
   return { objectiveId: input.objectiveId ?? null, assigned, executed, skipped };
@@ -1228,7 +1250,17 @@ export async function runParallelWorkForRepo(
     }
     const settled = await Promise.allSettled(
       tasks.map((task, index) =>
-        runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal, { runtimeMode }),
+        Promise.resolve()
+          .then(() => runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal, { runtimeMode }))
+          .catch((error) => {
+            applyCanceledWork(
+              cancelPendingStartupFailureForRepo(repoRoot, {
+                reason: "Parent conductor parallel work failed before run start",
+                taskIds: [task.taskId],
+              }),
+            );
+            throw error;
+          }),
       ),
     );
     if (signal?.aborted) await requestCancelOwnedWork();
@@ -1355,18 +1387,27 @@ export async function runWorkForRepo(
         workers = [await createWorkerForRepo(repoRoot, `${workerPrefix}-objective-1`)];
       }
     }
-    const schedule = execute
-      ? await scheduleObjectiveForRepo(
-          repoRoot,
-          {
-            objectiveId: objective.objectiveId,
-            policy: "execute",
-            maxConcurrency: input.maxWorkers,
-            runtimeMode,
-          },
-          signal,
-        )
-      : null;
+    let schedule: Awaited<ReturnType<typeof scheduleObjectiveForRepo>> | null = null;
+    try {
+      schedule = execute
+        ? await scheduleObjectiveForRepo(
+            repoRoot,
+            {
+              objectiveId: objective.objectiveId,
+              policy: "execute",
+              maxConcurrency: input.maxWorkers,
+              runtimeMode,
+            },
+            signal,
+          )
+        : null;
+    } catch (error) {
+      cancelPendingStartupFailureForRepo(repoRoot, {
+        reason: `Parent conductor objective work failed before run start: ${errorMessage(error)}`,
+        taskIds: planned.tasks.map((task) => task.taskId),
+      });
+      throw error;
+    }
     const scheduledWorkerIds = new Set(schedule?.assigned.map((task) => task.assignedWorkerId).filter(Boolean));
     return {
       decision,
@@ -1413,7 +1454,19 @@ export async function runWorkForRepo(
       runtimeRuns: summarizeRunWorkRuntime(repoRoot, [delegated.task.taskId]),
     };
   }
-  const result = execute ? await runner(repoRoot, delegated.task.taskId, signal, { runtimeMode }) : null;
+  let result: WorkerRunResult | null = null;
+  if (execute) {
+    try {
+      result = await runner(repoRoot, delegated.task.taskId, signal, { runtimeMode });
+    } catch (error) {
+      cancelPendingStartupFailureForRepo(repoRoot, {
+        reason: `Parent conductor work failed before run start: ${errorMessage(error)}`,
+        taskIds: [delegated.task.taskId],
+        workerIds: [delegated.worker.workerId],
+      });
+      throw error;
+    }
+  }
   return {
     decision,
     workers: [delegated.worker],
@@ -1423,6 +1476,20 @@ export async function runWorkForRepo(
     objective: null,
     runtimeMode,
     runtimeRuns: summarizeRunWorkRuntime(repoRoot, [delegated.task.taskId]),
+  };
+}
+
+function cancelPendingStartupFailureForRepo(
+  repoRoot: string,
+  input: { reason: string; taskIds: string[]; workerIds?: string[] },
+): { canceledRuns: string[]; canceledTasks: string[] } {
+  return {
+    canceledRuns: [],
+    canceledTasks: cancelPendingWorkForRepo(repoRoot, {
+      reason: input.reason,
+      taskIds: new Set(input.taskIds),
+      workerIds: new Set(input.workerIds ?? []),
+    }).canceledTasks,
   };
 }
 
