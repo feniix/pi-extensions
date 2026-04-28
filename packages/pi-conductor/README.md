@@ -146,6 +146,18 @@ The native backend uses curated tools and explicit conductor child tools. Backen
 
 Optional backend adapters such as `pi-subagents` may be used later, but they do not own canonical state. The current `pi-subagents` adapter fails closed unless a trusted host injects an explicit dispatcher; injected dispatch records backend run evidence through `backend.dispatch_*` events while conductor owns task/run state.
 
+### Supervised visible runtime
+
+Run tools accept `runtimeMode: "headless" | "tmux" | "iterm-tmux"`. `headless` remains the default. `tmux` launches the conductor runner in a private tmux session and records the attach command, runtime log path, heartbeat, diagnostics, and cleanup state on the durable run. `iterm-tmux` uses the same tmux control plane and best-effort opens iTerm2 as a viewer on macOS; if iTerm2 is unavailable or launch fails, the tmux run remains active and status output shows a warning plus the manual read-only attach command.
+
+Use conductor status tools rather than typing into worker panes to supervise work. Active visible runs include:
+
+- `viewer=<opened|warning|unavailable|pending>` and `viewerCommand=tmux ... attach-session -r ...`
+- `log=<path-or-ref>` and the latest runtime diagnostic/heartbeat
+- `cancel=conductor_cancel_task_run({"runId":"...","reason":"<reason>"})`
+
+`conductor_backend_status` reports tmux startability separately from iTerm2 viewer availability. Explicit visible runtime requests fail closed when tmux is unavailable; iTerm2 viewer failures degrade to tmux-only supervision.
+
 ## Workflow recipes
 
 ### Plan and execute an objective

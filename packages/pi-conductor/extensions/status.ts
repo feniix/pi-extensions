@@ -1,4 +1,4 @@
-import { isTerminalRunStatus } from "./run-status.js";
+import { isTerminalRunStatus, isTmuxRuntimeMode } from "./run-status.js";
 import { formatRunRuntimeSummary } from "./runtime-metadata.js";
 import { getConductorProjectDir } from "./storage.js";
 import type { RunAttemptRecord, RunRecord, WorkerRecord } from "./types.js";
@@ -25,6 +25,9 @@ function runsForStatusOutput(runs: RunAttemptRecord[]): { visible: RunAttemptRec
 }
 
 export function formatRunStatus(run: RunRecord): string {
+  const activeVisibleRuns = run.runs.filter(
+    (attempt) => isActiveRun(attempt) && isTmuxRuntimeMode(attempt.runtime.mode),
+  );
   const lines = [
     `projectKey: ${run.projectKey}`,
     `repoRoot: ${run.repoRoot}`,
@@ -35,6 +38,7 @@ export function formatRunStatus(run: RunRecord): string {
     `gates: ${run.gates.length}`,
     `artifacts: ${run.artifacts.length}`,
     `events: ${run.events.length}`,
+    `visibleRuns: ${activeVisibleRuns.length === 0 ? "none active" : `${activeVisibleRuns.length} active`}`,
   ];
 
   for (const task of run.tasks) {
@@ -49,13 +53,17 @@ export function formatRunStatus(run: RunRecord): string {
 
   const runStatusOutput = runsForStatusOutput(run.runs);
   for (const attempt of runStatusOutput.visible) {
+    const cancelCommand = isActiveRun(attempt)
+      ? ` cancel=conductor_cancel_task_run({"runId":"${attempt.runId}","reason":"<reason>"})`
+      : "";
     lines.push(
       `- run ${attempt.runId} ` +
         `task=${attempt.taskId} ` +
         `worker=${attempt.workerId} ` +
         `status=${attempt.status} ` +
         `backend=${attempt.backend} ` +
-        formatRunRuntimeSummary(attempt.runtime),
+        formatRunRuntimeSummary(attempt.runtime) +
+        cancelCommand,
     );
   }
   if (runStatusOutput.omittedCount > 0) {
