@@ -211,7 +211,7 @@ If the user interrupts or asks in natural language to stop conductor work, use `
 
 ### Local visible-runtime smoke
 
-The package test suite includes a real-tmux lifecycle smoke that skips when `tmux` is not installed. To exercise the full visible supervision flow manually on a machine with tmux, run:
+The package test suite includes a low-level real-tmux lifecycle smoke that skips when `tmux` is not installed. It verifies the terminal primitive used by visible supervision; the full conductor-visible runtime checklist remains the manual smoke below. On a machine with tmux, run:
 
 ```bash
 npx vitest run packages/pi-conductor/__tests__/package-smoke.test.ts packages/pi-conductor/__tests__/work-runtime-selection.test.ts
