@@ -158,6 +158,8 @@ Use conductor status tools rather than typing into worker panes to supervise wor
 
 `conductor_backend_status` reports tmux startability separately from iTerm2 viewer availability. Explicit visible runtime requests fail closed when tmux is unavailable; iTerm2 viewer failures degrade to tmux-only supervision.
 
+For inspection-only requests, call status/list tools instead of `conductor_run_work`. Phrases such as “show current workers”, “show run status”, “inspect current run”, “open current run output”, and “watch current worker status” are treated as status-only guidance, not as permission to launch visible worker execution. Passing `runtimeMode` only selects a runtime after the request is clearly execution/planning work; it does not turn status-only text into new work. If a user actually wants new visible work, make the execution intent explicit, for example “run these shards in parallel and show me the workers” with `runtimeMode: "tmux" | "iterm-tmux"` when direct runtime selection is needed.
+
 ## Workflow recipes
 
 ### Plan and execute an objective
@@ -206,6 +208,22 @@ conductor_run_parallel_work({
 ```
 
 If the user interrupts or asks in natural language to stop conductor work, use `conductor_cancel_active_work({ reason: "user requested stop" })`. It cancels active runs and conductor-owned queued tasks without requiring run IDs.
+
+### Local visible-runtime smoke
+
+The package test suite includes a low-level real-tmux lifecycle smoke that skips when `tmux` is not installed. It verifies the terminal primitive used by visible supervision; the full conductor-visible runtime checklist remains the manual smoke below. On a machine with tmux, run:
+
+```bash
+npx vitest run packages/pi-conductor/__tests__/package-smoke.test.ts packages/pi-conductor/__tests__/work-runtime-selection.test.ts
+```
+
+Then perform a conductor-level smoke in an isolated `PI_CONDUCTOR_HOME`:
+
+1. Start visible parallel work with an explicit or inferred visible runtime request.
+2. Confirm the tool details include `runtimeMode`, `runtimeRuns`, `viewerCommand`, `logPath`, diagnostics/progress, and a cancellation affordance.
+3. Attach read-only with the reported tmux command, or confirm iTerm2 opens as a best-effort viewer on macOS.
+4. Cancel with `conductor_cancel_active_work({ reason: "smoke cleanup" })` or the returned `cancelTool` for a specific active run.
+5. Verify tmux sessions are gone, run/task state is terminal, logs remain under conductor storage, and reconciliation does not resurrect terminal runs or invent success.
 
 ### Inspect dependency scheduling for parallel-safe work
 

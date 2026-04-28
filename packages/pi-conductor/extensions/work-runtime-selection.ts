@@ -10,12 +10,44 @@ function hasHeadlessRuntimeIntent(request: string): boolean {
   );
 }
 
-function hasStatusOnlyIntent(request: string): boolean {
+function hasStatusBlockingExecutionIntent(request: string): boolean {
   return (
-    /^(?:please\s+|can you\s+|could you\s+)?\s*(show|list|display|view|inspect|status)\b/i.test(request) &&
-    /\b(current|active|existing|all)?\s*(worker|workers|run|runs|task|tasks|project|status|session|sessions|pane|panes|terminal|terminals|tmux|iterm)\b/i.test(
+    /\b(start|execute|launch|implement|fix|build|ship|create|work on)\b/i.test(request) ||
+    /\bdo\s+(?:this|that|the\s+work|the\s+task|work|task)\b/i.test(request) ||
+    /^(?:please\s+|can you\s+|could you\s+)?\s*run\b/i.test(request) ||
+    /\b(?:and|then|to)\s+run\b/i.test(request) ||
+    /\bworkers?\s+run\b/i.test(request)
+  );
+}
+
+function hasStatusOnlyIntent(request: string): boolean {
+  if (hasStatusBlockingExecutionIntent(request)) {
+    return false;
+  }
+
+  const statusResource =
+    /\b(worker|workers|run|runs|running|task|tasks|project|status|session|sessions|pane|panes|terminal|terminals|tmux|iterm|output|log|logs)\b/i;
+  const startsWithInspectionVerb =
+    /^(?:please\s+|can you\s+|could you\s+)?\s*(show|list|display|view|inspect|status|check|get)\b/i.test(request);
+  const startsWithViewerInspectionVerb =
+    /^(?:please\s+|can you\s+|could you\s+)?\s*(watch|open|tail)\s+(?:the\s+)?(?:(?:current|active|existing|all|status)\s+)?(worker|workers|run|runs|task|tasks|session|sessions|pane|panes|terminal|terminals|tmux|iterm|output|log|logs)\b/i.test(
       request,
-    )
+    );
+  const startsWithStatusQuestion =
+    /^(?:please\s+|can you\s+|could you\s+)?\s*(what(?:'s| is)|what are|are there|are any|do i have|is there|is any)\b/i.test(
+      request,
+    );
+  const startsWithResourceStatus =
+    /^(?:please\s+|can you\s+|could you\s+)?\s*(?:the\s+)?(?:current|active|existing|all)\s+(worker|workers|run|runs|task|tasks|project|session|sessions|pane|panes|terminal|terminals|tmux|iterm)\b/i.test(
+      request,
+    );
+
+  return (
+    (startsWithInspectionVerb ||
+      startsWithViewerInspectionVerb ||
+      startsWithStatusQuestion ||
+      startsWithResourceStatus) &&
+    statusResource.test(request)
   );
 }
 
@@ -35,12 +67,12 @@ export function selectRuntimeModeForWork(input: {
   request: string;
   explicitRuntimeMode?: RunRuntimeMode;
 }): RunRuntimeMode | undefined {
-  if (input.explicitRuntimeMode) {
-    return input.explicitRuntimeMode;
-  }
   const request = input.request.trim();
   if (!request || hasStatusOnlyIntent(request)) {
     return undefined;
+  }
+  if (input.explicitRuntimeMode) {
+    return input.explicitRuntimeMode;
   }
   if (hasHeadlessRuntimeIntent(request)) {
     return "headless";

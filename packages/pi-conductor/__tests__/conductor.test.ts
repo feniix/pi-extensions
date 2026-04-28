@@ -538,10 +538,19 @@ describe("conductor service", () => {
     expect(run.runs).toHaveLength(0);
   });
 
-  it("rejects status-only work-router requests before mutating conductor state", async () => {
-    await expect(runWorkForRepo(repoDir, { request: "show me current workers" })).rejects.toThrow(
-      /status-only requests/i,
-    );
+  it.each([
+    "show me current workers",
+    "watch current worker status",
+    "open current run output",
+    "open run output",
+    "tail run log",
+    "watch worker status",
+    "open logs",
+    "what's running?",
+    "are any workers active?",
+    "current worker status",
+  ])("rejects status-only work-router requests before mutating conductor state: %s", async (request) => {
+    await expect(runWorkForRepo(repoDir, { request })).rejects.toThrow(/status-only requests/i);
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers).toHaveLength(0);
@@ -553,6 +562,21 @@ describe("conductor service", () => {
     await expect(runWorkForRepo(repoDir, { request: "show run status", execute: false })).rejects.toThrow(
       /status-only requests/i,
     );
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers).toHaveLength(0);
+    expect(run.tasks).toHaveLength(0);
+    expect(run.runs).toHaveLength(0);
+  });
+
+  it("rejects status-only requests with explicit runtime before mutating conductor state", async () => {
+    await expect(
+      runWorkForRepo(repoDir, {
+        request: "show me current workers",
+        runtimeMode: "iterm-tmux",
+        tasks: [{ title: "Inspect workers", prompt: "Inspect current workers", writeScope: ["README.md"] }],
+      }),
+    ).rejects.toThrow(/status-only requests/i);
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers).toHaveLength(0);
@@ -1056,7 +1080,7 @@ case "$*" in *has-session*) exit 1 ;; *) exit 0 ;; esac
     const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));
     writeFileSync(
       join(binDir, "tmux"),
-      "#!/bin/sh\ncase \"$*\" in *display-message*) printf 'zsh\\n' ;; *) exit 0 ;; esac\n",
+      "#!/bin/sh\ncase \"$*\" in *display-message*) printf 'vim\\n' ;; *) exit 0 ;; esac\n",
       { mode: 0o755 },
     );
     process.env.PATH = `${binDir}:${originalPath ?? ""}`;

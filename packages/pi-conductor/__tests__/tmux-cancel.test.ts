@@ -211,7 +211,7 @@ describe("tmux durable cancellation", () => {
   it("keeps workers out of the idle pool when tmux cleanup fails", async () => {
     tmuxMocks.cancelTmuxRuntime.mockResolvedValueOnce({
       cleanupStatus: "failed" as const,
-      diagnostic: "pane command verification failed before cancel: zsh",
+      diagnostic: "pane command verification failed before cancel: vim",
     });
     const started = await createPersistedTmuxRun();
 

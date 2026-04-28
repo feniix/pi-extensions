@@ -1,9 +1,40 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { execFileSync, type StdioOptions } from "node:child_process";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { shellQuote } from "../extensions/tmux-runtime.js";
 
 const packageRoot = join(__dirname, "..");
+const TMUX_SMOKE_TIMEOUT_MS = 5_000;
+
+function hasTmux(): boolean {
+  try {
+    execFileSync("tmux", ["-V"], { stdio: "ignore", timeout: TMUX_SMOKE_TIMEOUT_MS });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runTmux(socketPath: string, args: string[], options: { stdio?: StdioOptions } = {}): void {
+  execFileSync("tmux", ["-S", socketPath, ...args], {
+    stdio: options.stdio ?? "pipe",
+    timeout: TMUX_SMOKE_TIMEOUT_MS,
+  });
+}
+
+async function waitForFileText(path: string, expected: string): Promise<string> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) {
+      const text = readFileSync(path, "utf-8");
+      if (text.includes(expected)) return text;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return existsSync(path) ? readFileSync(path, "utf-8") : "";
+}
 
 function parseFrontmatter(markdown: string): Record<string, string> {
   const match = markdown.match(/^---\n([\s\S]*?)\n---/);
@@ -56,6 +87,33 @@ describe("pi-conductor package smoke", () => {
 
     expect(status).toBe(1);
     expect(output).toContain("Usage: pi-conductor-runner run --contract");
+  });
+
+  it.skipIf(!hasTmux())("smokes raw tmux session lifecycle used by visible supervision", async () => {
+    const runtimeDir = mkdtempSync(join(tmpdir(), "pi-conductor-tmux-smoke-"));
+    const socketPath = join(runtimeDir, "tmux.sock");
+    const logPath = join(runtimeDir, "runner.log");
+    const sessionName = `pi-cond-smoke-${process.pid}-${Date.now()}`;
+    const script =
+      "require('node:fs').writeFileSync(process.argv[1], 'pi-conductor smoke start\\n'); setTimeout(() => {}, 30000);";
+    const command = `${shellQuote(process.execPath)} -e ${shellQuote(script)} ${shellQuote(logPath)}`;
+
+    try {
+      runTmux(socketPath, ["new-session", "-d", "-s", sessionName, command]);
+      runTmux(socketPath, ["has-session", "-t", sessionName]);
+
+      expect(await waitForFileText(logPath, "pi-conductor smoke start")).toContain("pi-conductor smoke start");
+
+      runTmux(socketPath, ["kill-session", "-t", sessionName]);
+      expect(() => runTmux(socketPath, ["has-session", "-t", sessionName], { stdio: "ignore" })).toThrow();
+    } finally {
+      try {
+        runTmux(socketPath, ["kill-server"], { stdio: "ignore" });
+      } catch {
+        // Session may already be gone, which is the expected cleanup state.
+      }
+      rmSync(runtimeDir, { recursive: true, force: true });
+    }
   });
 
   it("keeps skill guidance aligned with the conductor safety workflow", () => {

@@ -28,6 +28,7 @@ class FakeTmuxAdapter implements TmuxCommandAdapter {
   failKill = false;
   failPs = false;
   replacedPaneCommand = false;
+  paneCurrentCommand = "node";
 
   async execFile(command: string, args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv }) {
     this.calls.push({ command, args, cwd: options?.cwd, env: options?.env });
@@ -38,7 +39,7 @@ class FakeTmuxAdapter implements TmuxCommandAdapter {
       throw new Error("can't find session: missing");
     }
     if (args.includes("display-message") && args.includes("#{pane_current_command}")) {
-      return { stdout: this.replacedPaneCommand ? "zsh\n" : "node\n", stderr: "" };
+      return { stdout: this.replacedPaneCommand ? "vim\n" : `${this.paneCurrentCommand}\n`, stderr: "" };
     }
     if (args.includes("display-message")) {
       return { stdout: "@42 %7 4242\n", stderr: "" };
@@ -737,6 +738,34 @@ describe("tmux conductor runtime", () => {
     expect(adapter.calls.some((call) => call.args.includes("kill-session"))).toBe(false);
   });
 
+  it("allows tmux shell wrapper commands during cancellation verification", async () => {
+    const adapter = new FakeTmuxAdapter();
+    adapter.paneCurrentCommand = "zsh";
+    const runtime: RunRuntimeMetadata = {
+      mode: "tmux",
+      status: "running",
+      sessionId: null,
+      cwd: repoDir,
+      command: "'node' '/tmp/pi-conductor-runner' 'run'",
+      contractPath: null,
+      nonceHash: null,
+      runnerPid: null,
+      processGroupId: null,
+      tmux: { socketPath: "/tmp/tmux.sock", sessionName: "owned", windowId: null, paneId: "%7" },
+      logPath: null,
+      viewerCommand: null,
+      viewerStatus: "pending",
+      diagnostics: [],
+      heartbeatAt: null,
+      cleanupStatus: "pending",
+      startedAt: null,
+      finishedAt: null,
+    };
+
+    await expect(cancelTmuxRuntime({ adapter, runtime })).resolves.toMatchObject({ cleanupStatus: "succeeded" });
+    expect(adapter.calls.some((call) => call.args.includes("kill-session"))).toBe(true);
+  });
+
   it("fails closed without killing when pane command verification differs", async () => {
     const adapter = new FakeTmuxAdapter();
     adapter.replacedPaneCommand = true;
@@ -1083,6 +1112,48 @@ describe("tmux conductor runtime", () => {
     expect(reconciled.workers[0]).toMatchObject({ lifecycle: "broken", recoverable: true });
     expect(reconciled.runs[0]).toMatchObject({ status: "stale", errorMessage: expect.stringContaining("runner pid") });
     expect(reconciled.runs[0]?.runtime.status).toBe("exited_error");
+  });
+
+  it("keeps tmux shell wrapper pane commands active during reconciliation", async () => {
+    const { worker, started } = await createStartedTask();
+    const adapter = new FakeTmuxAdapter();
+    const backend = createTmuxWorkerRunRuntimeBackend({
+      commandAdapter: adapter,
+      runnerCommand: ["node", "/tmp/pi-conductor-runner", "run"],
+      waitForCompletion: false,
+      randomHex: () => "f00df00df00df00df00df00df00df00d",
+    });
+    await backend.run({
+      repoRoot: repoDir,
+      worktreePath: worker.worktreePath ?? repoDir,
+      sessionFile: worker.sessionFile ?? join(repoDir, "session.jsonl"),
+      task: "Run in tmux",
+      taskContract: started.taskContract,
+      onRuntimeMetadata: async (metadata) => {
+        const { writeRun } = await import("../extensions/storage.js");
+        const latest = getOrCreateRunForRepo(repoDir);
+        writeRun({
+          ...latest,
+          runs: latest.runs.map((entry) =>
+            entry.runId === started.run.runId ? { ...entry, runtime: { ...entry.runtime, ...metadata } } : entry,
+          ),
+        });
+      },
+    });
+    const logPath = getOrCreateRunForRepo(repoDir).runs[0]?.runtime.logPath;
+    writeFileSync(logPath ?? join(repoDir, "missing-log-path"), "runner output\n", "utf-8");
+    adapter.paneCurrentCommand = "zsh";
+
+    const reconciled = await reconcileTmuxRuntimeForRepo({
+      repoRoot: repoDir,
+      runId: started.run.runId,
+      adapter,
+      now: "2026-04-27T00:00:00.000Z",
+    });
+
+    expect(reconciled.tasks[0]).toMatchObject({ state: "running", activeRunId: started.run.runId });
+    expect(reconciled.workers[0]).toMatchObject({ lifecycle: "running", recoverable: false });
+    expect(reconciled.runs[0]).toMatchObject({ status: "running", errorMessage: null });
   });
 
   it("reconciles a replaced tmux pane command to needs-review", async () => {

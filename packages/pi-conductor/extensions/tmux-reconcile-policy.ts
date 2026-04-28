@@ -3,12 +3,19 @@ import type { RunAttemptRecord, RunRecord } from "./types.js";
 
 export type TmuxReconciliationAction = "unchanged" | "lease_cleared" | "diagnostic" | "stale";
 
+function isTmuxShellWrapperCommand(command: string): boolean {
+  return /^(?:sh|bash|zsh|fish|dash|ash|ksh|csh|tcsh)$/i.test(command);
+}
+
 export function tmuxPaneCommandChanged(input: {
   recordedCommand: string | null;
   currentCommand: string | null;
 }): boolean {
   return Boolean(
-    input.currentCommand && input.recordedCommand && !input.recordedCommand.includes(input.currentCommand),
+    input.currentCommand &&
+      input.recordedCommand &&
+      !isTmuxShellWrapperCommand(input.currentCommand) &&
+      !input.recordedCommand.includes(input.currentCommand),
   );
 }
 
