@@ -276,6 +276,18 @@ describe("tmux durable cancellation", () => {
     expect(getOrCreateRunForRepo(repoDir).runs[0]).toMatchObject({ runtime: { cleanupStatus: "succeeded" } });
   });
 
+  it("cancels visible iterm-tmux active work without caller-supplied run IDs", async () => {
+    await createPersistedTmuxRun("iterm-tmux");
+
+    const canceled = await cancelActiveWorkForRepoWithRuntimeCleanup(repoDir, { reason: "natural-language stop" });
+
+    expect(canceled.canceledRuns).toHaveLength(1);
+    expect(tmuxMocks.cancelTmuxRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({ runtime: expect.objectContaining({ mode: "iterm-tmux" }) }),
+    );
+    expect(canceled.project.runs[0]).toMatchObject({ status: "aborted", runtime: { cleanupStatus: "succeeded" } });
+  });
+
   it("kills persisted tmux runtime resources during bulk active-work cancellation", async () => {
     await createPersistedTmuxRun();
 
