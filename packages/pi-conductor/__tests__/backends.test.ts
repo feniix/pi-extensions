@@ -54,12 +54,34 @@ describe("conductor backend inspection", () => {
     expect(status.tmux.capabilities.canStartRun).toBe(status.tmux.available);
     expect(status["iterm-tmux"]).toMatchObject({
       mode: "iterm-tmux",
-      available: false,
       capabilities: { viewerOnly: true },
     });
+    expect(status["iterm-tmux"].available).toBe(status.tmux.available);
     expect(status.itermTmux).toBe(status["iterm-tmux"]);
     expect(getConductorRuntimeModeStatus("headless").available).toBe(true);
     expect(getConductorRuntimeModeStatus("tmux")).toMatchObject({ mode: "tmux" });
+  });
+
+  it("treats iterm-tmux availability as tmux startability plus viewer diagnostics", () => {
+    const tmuxReadyItermMissing = inspectConductorRuntimeModes({
+      tmuxAvailability: { available: true, diagnostic: null },
+      itermViewerAvailability: { available: false, diagnostic: "iTerm2 is not installed" },
+    });
+    expect(tmuxReadyItermMissing["iterm-tmux"]).toMatchObject({
+      available: true,
+      capabilities: { canStartRun: true, viewerOnly: true },
+      diagnostic: "iTerm2 is not installed",
+    });
+
+    const tmuxMissing = inspectConductorRuntimeModes({
+      tmuxAvailability: { available: false, diagnostic: "tmux missing" },
+      itermViewerAvailability: { available: true, diagnostic: null },
+    });
+    expect(tmuxMissing["iterm-tmux"]).toMatchObject({
+      available: false,
+      capabilities: { canStartRun: false, viewerOnly: true },
+      diagnostic: "tmux missing",
+    });
   });
 
   it("reports pi-subagents available when an explicit dispatcher is injected", async () => {

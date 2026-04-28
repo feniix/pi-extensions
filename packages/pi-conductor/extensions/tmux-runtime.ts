@@ -4,9 +4,10 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { type ItermViewerCommandAdapter, openItermTmuxViewer } from "./iterm-viewer.js";
 import { deriveProjectKey } from "./project-key.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
-import { isTerminalRunStatus } from "./run-status.js";
+import { isTerminalRunStatus, isTmuxRuntimeMode } from "./run-status.js";
 import { createRunnerContract, hashRunnerNonce, writeRunnerContract } from "./runner-contract.js";
 import { markRunAttemptStale } from "./runtime-stale.js";
 import { releaseTerminalTmuxWorkerForRepo } from "./runtime-worker-release.js";
@@ -58,6 +59,8 @@ export interface TmuxRuntimeOptions {
   runnerHeartbeatIntervalMs?: number;
   now?: () => string;
   randomHex?: (bytes: number) => string;
+  itermViewerAdapter?: ItermViewerCommandAdapter;
+  itermPlatform?: NodeJS.Platform | string;
 }
 
 type TmuxRuntimePaths = {
@@ -310,7 +313,7 @@ async function waitForTerminalRun(input: {
       return { status: "error", finalText: null, errorMessage: `Run ${input.runId} disappeared`, sessionId: null };
     }
     if (attempt.finishedAt || isTerminalRunStatus(attempt.status)) {
-      if (attempt.runtime.mode === "tmux" && input.adapter && attempt.runtime.cleanupStatus === "pending") {
+      if (isTmuxRuntimeMode(attempt.runtime.mode) && input.adapter && attempt.runtime.cleanupStatus === "pending") {
         const cleanup = await cancelTmuxRuntime({ adapter: input.adapter, runtime: attempt.runtime });
         releaseTerminalTmuxWorkerForRepo({
           repoRoot: input.repoRoot,
@@ -325,7 +328,7 @@ async function waitForTerminalRun(input: {
         getOrCreateRunForRepo(input.repoRoot).runs.find((entry) => entry.runId === input.runId) ?? attempt,
       );
     }
-    if (attempt.runtime.mode === "tmux" && input.adapter) {
+    if (isTmuxRuntimeMode(attempt.runtime.mode) && input.adapter) {
       const reconciled = await reconcileTmuxRuntimeForRepo({
         repoRoot: input.repoRoot,
         runId: input.runId,
@@ -695,6 +698,10 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
           return mapTerminalRunToRuntimeResult(durableRun);
         }
         const paneMetadata = await inspectTmuxPaneMetadata({ adapter, socketPath: paths.socketPath, sessionName });
+        const runningDiagnostics = [
+          `tmux session ${sessionName} launched`,
+          ...(paneMetadata.diagnostic ? [paneMetadata.diagnostic] : []),
+        ];
         await input.onRuntimeMetadata?.({
           ...baseRuntime,
           status: "running",
@@ -706,12 +713,32 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
             windowId: paneMetadata.windowId,
             paneId: paneMetadata.paneId,
           },
-          diagnostics: [
-            `tmux session ${sessionName} launched`,
-            ...(paneMetadata.diagnostic ? [paneMetadata.diagnostic] : []),
-          ],
+          diagnostics: runningDiagnostics,
           heartbeatAt: now(),
         });
+        if (mode === "iterm-tmux") {
+          try {
+            const viewer = await openItermTmuxViewer({
+              attachCommand: launch.attachCommand,
+              title: `pi-conductor ${input.taskContract.runId}`,
+              adapter: options.itermViewerAdapter,
+              platform: options.itermPlatform,
+            });
+            await input.onRuntimeMetadata?.({
+              viewerCommand: viewer.command,
+              viewerStatus: viewer.status,
+              diagnostics: [
+                ...runningDiagnostics,
+                viewer.status === "opened"
+                  ? "iTerm2 viewer opened"
+                  : (viewer.diagnostic ?? "iTerm2 viewer unavailable"),
+              ],
+            });
+          } catch {
+            // iTerm is a best-effort viewer over the already-launched tmux control plane.
+            // Viewer telemetry persistence must not tear down active worker execution.
+          }
+        }
       } catch (error) {
         const cleanup = await cancelTmuxRuntime({ adapter, runtime: buildCancellationRuntime() });
         throw errorWithCleanupStatus(error, cleanup.cleanupStatus);

@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { type ItermViewerAvailability, inspectItermViewerAvailability } from "./iterm-viewer.js";
 import { inspectTmuxRuntimeAvailability } from "./tmux-runtime.js";
 import type { RunRuntimeMode } from "./types.js";
 
@@ -95,6 +96,13 @@ const unavailableVisibleRuntimeCapabilities: ConductorRuntimeModeCapabilities = 
   viewerOnly: false,
 };
 
+const itermViewerRuntimeCapabilities: ConductorRuntimeModeCapabilities = {
+  canStartRun: true,
+  canSuperviseLiveOutput: true,
+  requiresExternalRunner: true,
+  viewerOnly: true,
+};
+
 const unavailableItermViewerCapabilities: ConductorRuntimeModeCapabilities = {
   canStartRun: false,
   canSuperviseLiveOutput: true,
@@ -142,14 +150,20 @@ export function inspectConductorBackends(
   };
 }
 
-export function inspectConductorRuntimeModes(): ConductorRuntimeModesStatus {
-  const tmuxAvailability = inspectTmuxRuntimeAvailability();
+export function inspectConductorRuntimeModes(
+  input: {
+    tmuxAvailability?: { available: boolean; diagnostic: string | null };
+    itermViewerAvailability?: ItermViewerAvailability;
+  } = {},
+): ConductorRuntimeModesStatus {
+  const tmuxAvailability = input.tmuxAvailability ?? inspectTmuxRuntimeAvailability();
+  const itermViewerAvailability = input.itermViewerAvailability ?? inspectItermViewerAvailability();
   const itermTmux: ConductorRuntimeModeStatus = {
     mode: "iterm-tmux",
-    available: false,
+    available: tmuxAvailability.available,
     canonicalStateOwner: "conductor",
-    capabilities: unavailableItermViewerCapabilities,
-    diagnostic: "iTerm2 viewer depends on the tmux supervised runtime adapter, which is not implemented yet",
+    capabilities: tmuxAvailability.available ? itermViewerRuntimeCapabilities : unavailableItermViewerCapabilities,
+    diagnostic: tmuxAvailability.available ? itermViewerAvailability.diagnostic : tmuxAvailability.diagnostic,
   };
   return {
     headless: {

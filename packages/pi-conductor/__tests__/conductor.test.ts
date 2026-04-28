@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -28,6 +28,19 @@ function requireValue<T>(value: T | null | undefined, message: string): T {
     throw new Error(message);
   }
   return value;
+}
+
+function forceTmuxUnavailable(): () => void {
+  const originalPath = process.env.PATH;
+  const fakeBin = mkdtempSync(join(tmpdir(), "pi-conductor-fake-bin-"));
+  const fakeTmux = join(fakeBin, "tmux");
+  writeFileSync(fakeTmux, "#!/bin/sh\nexit 127\n", "utf-8");
+  chmodSync(fakeTmux, 0o755);
+  process.env.PATH = `${fakeBin}:${originalPath ?? ""}`;
+  return () => {
+    process.env.PATH = originalPath;
+    rmSync(fakeBin, { recursive: true, force: true });
+  };
 }
 
 describe("conductor service", () => {
@@ -214,19 +227,24 @@ describe("conductor service", () => {
   });
 
   it("fails closed when a delegated start requests an unavailable runtime mode", async () => {
-    await expect(
-      delegateTaskForRepo(repoDir, {
-        title: "Visible delegated work",
-        prompt: "Run visibly",
-        workerName: "visible-worker",
-        startRun: true,
-        runtimeMode: "iterm-tmux",
-      }),
-    ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
+    const restorePath = forceTmuxUnavailable();
+    try {
+      await expect(
+        delegateTaskForRepo(repoDir, {
+          title: "Visible delegated work",
+          prompt: "Run visibly",
+          workerName: "visible-worker",
+          startRun: true,
+          runtimeMode: "iterm-tmux",
+        }),
+      ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
 
-    const run = getOrCreateRunForRepo(repoDir);
-    expect(run.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null, runIds: [] });
-    expect(run.runs).toHaveLength(0);
+      const run = getOrCreateRunForRepo(repoDir);
+      expect(run.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null, runIds: [] });
+      expect(run.runs).toHaveLength(0);
+    } finally {
+      restorePath();
+    }
   });
 
   it("cancels active conductor work without requiring run IDs", async () => {
@@ -576,10 +594,15 @@ describe("conductor service", () => {
     expect(canceled.runs[0]).toMatchObject({ status: "aborted" });
     expect(canceled.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
 
-    expect(() => retryTaskForRepo(repoDir, { taskId: task.taskId, runtimeMode: "iterm-tmux" })).toThrow(
-      /Runtime mode iterm-tmux unavailable/i,
-    );
-    expect(getOrCreateRunForRepo(repoDir).tasks[0]?.runIds).toHaveLength(1);
+    const restorePath = forceTmuxUnavailable();
+    try {
+      expect(() => retryTaskForRepo(repoDir, { taskId: task.taskId, runtimeMode: "iterm-tmux" })).toThrow(
+        /Runtime mode iterm-tmux unavailable/i,
+      );
+      expect(getOrCreateRunForRepo(repoDir).tasks[0]?.runIds).toHaveLength(1);
+    } finally {
+      restorePath();
+    }
 
     const retried = retryTaskForRepo(repoDir, { taskId: task.taskId, leaseSeconds: 300 });
     expect(retried.run.runId).not.toBe(started.run.runId);

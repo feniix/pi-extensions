@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,7 +16,9 @@ vi.mock("../extensions/runtime.js", async (importOriginal) => {
     preflightWorkerRunRuntime: runtimeMocks.preflightWorkerRunRuntime,
     runWorkerPromptRuntime: runtimeMocks.runWorkerPromptRuntime,
     getWorkerRunRuntimeBackend: vi.fn((mode = "headless") => {
-      if (mode !== "headless" && mode !== "tmux") throw new Error(`${mode} runtime is not implemented yet`);
+      if (mode !== "headless" && mode !== "tmux" && mode !== "iterm-tmux") {
+        throw new Error(`${mode} runtime is not implemented yet`);
+      }
       return {
         mode,
         preflight: runtimeMocks.preflightWorkerRunRuntime,
@@ -38,6 +40,19 @@ import {
 import { deriveProjectKey } from "../extensions/project-key.js";
 import { getRunLockFile, readArtifactContentForRepo } from "../extensions/storage.js";
 import { createTmuxRuntimePaths } from "../extensions/tmux-runtime.js";
+
+function forceTmuxUnavailable(): () => void {
+  const originalPath = process.env.PATH;
+  const fakeBin = mkdtempSync(join(tmpdir(), "pi-conductor-fake-bin-"));
+  const fakeTmux = join(fakeBin, "tmux");
+  writeFileSync(fakeTmux, "#!/bin/sh\nexit 127\n", "utf-8");
+  chmodSync(fakeTmux, 0o755);
+  process.env.PATH = `${fakeBin}:${originalPath ?? ""}`;
+  return () => {
+    process.env.PATH = originalPath;
+    rmSync(fakeBin, { recursive: true, force: true });
+  };
+}
 
 describe("durable task run flows", () => {
   let repoDir: string;
@@ -337,13 +352,18 @@ describe("durable task run flows", () => {
     const task = createTaskForRepo(repoDir, { title: "Visible start", prompt: "Start visible work" });
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
 
-    expect(() => startTaskRunForRepo(repoDir, { taskId: task.taskId, runtimeMode: "iterm-tmux" })).toThrow(
-      /Runtime mode iterm-tmux unavailable/i,
-    );
+    const restorePath = forceTmuxUnavailable();
+    try {
+      expect(() => startTaskRunForRepo(repoDir, { taskId: task.taskId, runtimeMode: "iterm-tmux" })).toThrow(
+        /Runtime mode iterm-tmux unavailable/i,
+      );
 
-    const persisted = getOrCreateRunForRepo(repoDir);
-    expect(persisted.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null, runIds: [] });
-    expect(persisted.runs).toHaveLength(0);
+      const persisted = getOrCreateRunForRepo(repoDir);
+      expect(persisted.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null, runIds: [] });
+      expect(persisted.runs).toHaveLength(0);
+    } finally {
+      restorePath();
+    }
   });
 
   it("fails closed for explicit unavailable viewer runtime execution before creating a run", async () => {
@@ -351,13 +371,18 @@ describe("durable task run flows", () => {
     const task = createTaskForRepo(repoDir, { title: "Visible task", prompt: "Do visible work" });
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
 
-    await expect(runTaskForRepo(repoDir, task.taskId, undefined, { runtimeMode: "iterm-tmux" })).rejects.toThrow(
-      /Runtime mode iterm-tmux unavailable/i,
-    );
+    const restorePath = forceTmuxUnavailable();
+    try {
+      await expect(runTaskForRepo(repoDir, task.taskId, undefined, { runtimeMode: "iterm-tmux" })).rejects.toThrow(
+        /Runtime mode iterm-tmux unavailable/i,
+      );
 
-    const persisted = getOrCreateRunForRepo(repoDir);
-    expect(persisted.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null, runIds: [] });
-    expect(persisted.runs).toHaveLength(0);
+      const persisted = getOrCreateRunForRepo(repoDir);
+      expect(persisted.tasks[0]).toMatchObject({ state: "assigned", activeRunId: null, runIds: [] });
+      expect(persisted.runs).toHaveLength(0);
+    } finally {
+      restorePath();
+    }
   });
 
   it("aborts live worker runtime when canceling a specific active run", async () => {

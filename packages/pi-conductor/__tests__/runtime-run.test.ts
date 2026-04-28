@@ -385,9 +385,9 @@ describe("worker run runtime helpers", () => {
     expect(mapRunStatusToRuntimeStatus(undefined)).toBe("unknown");
   });
 
-  it("selects the tmux backend while keeping the iTerm viewer mode fail-closed", () => {
+  it("selects supervised tmux backends including the iTerm2 viewer mode", () => {
     expect(getWorkerRunRuntimeBackend("tmux")).toMatchObject({ mode: "tmux" });
-    expect(() => getWorkerRunRuntimeBackend("iterm-tmux")).toThrow(/iterm-tmux runtime is not implemented/i);
+    expect(getWorkerRunRuntimeBackend("iterm-tmux")).toMatchObject({ mode: "iterm-tmux" });
   });
 
   it("returns successful outcome from assistant final state and text extraction", async () => {
