@@ -425,6 +425,68 @@ describe("conductor service", () => {
     expect(seenRuntimeModes).toEqual(["tmux", "tmux"]);
   });
 
+  it("infers visible runtime for natural-language visible parallel requests", async () => {
+    const seenRuntimeModes: Array<string | undefined> = [];
+
+    const result = await runWorkForRepo(
+      repoDir,
+      {
+        request: "Run these independent shards in parallel and show me the workers",
+        tasks: [
+          { title: "Inspect README", prompt: "Inspect README.md", writeScope: ["README.md"] },
+          { title: "Inspect package", prompt: "Inspect package metadata", writeScope: ["package.json"] },
+        ],
+      },
+      undefined,
+      async (_root, taskId, _signal, options) => {
+        seenRuntimeModes.push(options?.runtimeMode);
+        return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
+      },
+    );
+
+    expect(result.decision.mode).toBe("parallel");
+    expect(result.runtimeMode).toBe("iterm-tmux");
+    expect(seenRuntimeModes).toEqual(["iterm-tmux", "iterm-tmux"]);
+  });
+
+  it("does not infer visible runtime for status-only show requests", async () => {
+    let seenRuntimeMode: string | undefined;
+
+    const result = await runWorkForRepo(
+      repoDir,
+      {
+        request: "show me current workers",
+        tasks: [{ title: "Inspect workers", prompt: "Inspect current workers", writeScope: ["README.md"] }],
+      },
+      undefined,
+      async (_root, taskId, _signal, options) => {
+        seenRuntimeMode = options?.runtimeMode;
+        return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
+      },
+    );
+
+    expect(result.runtimeMode).toBe("headless");
+    expect(seenRuntimeMode).toBe("headless");
+  });
+
+  it("fails inferred visible runtime preflight without creating active runs", async () => {
+    const restorePath = forceTmuxUnavailable();
+    try {
+      await expect(
+        runWorkForRepo(repoDir, {
+          request: "Run this focused task and show me the worker",
+          tasks: [{ title: "Visible focused task", prompt: "Do visible work", writeScope: ["README.md"] }],
+        }),
+      ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
+
+      const run = getOrCreateRunForRepo(repoDir);
+      expect(run.runs).toHaveLength(0);
+      expect(run.tasks[0]).toMatchObject({ title: "Visible focused task", activeRunId: null });
+    } finally {
+      restorePath();
+    }
+  });
+
   it("passes runtimeMode through single natural-language work runners", async () => {
     let seenRuntimeMode: string | undefined;
 

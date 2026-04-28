@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createObjectiveForRepo, planObjectiveForRepo } from "../extensions/conductor.js";
+import { createObjectiveForRepo, planObjectiveForRepo, selectRuntimeModeForWork } from "../extensions/conductor.js";
 
 describe("conductor objective planner quality gates", () => {
   let conductorHome: string;
@@ -30,6 +30,22 @@ describe("conductor objective planner quality gates", () => {
         ],
       }),
     ).toThrow(/duplicate task title/i);
+  });
+
+  it("infers visible runtime only for unambiguous execution requests", () => {
+    expect(
+      selectRuntimeModeForWork({
+        request: "Run these independent shards in parallel and show me the workers",
+      }),
+    ).toBe("iterm-tmux");
+    expect(selectRuntimeModeForWork({ request: "Run this in tmux so I can watch it" })).toBe("tmux");
+    expect(selectRuntimeModeForWork({ request: "show me current workers" })).toBeUndefined();
+    expect(
+      selectRuntimeModeForWork({
+        request: "Run this in parallel and show me the workers",
+        explicitRuntimeMode: "headless",
+      }),
+    ).toBe("headless");
   });
 
   it("rejects unresolved dependencies and vague prompts", () => {

@@ -2,7 +2,11 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import * as conductor from "../conductor.js";
 
-const runtimeModeSchema = Type.Union([Type.Literal("headless"), Type.Literal("tmux"), Type.Literal("iterm-tmux")]);
+function runtimeModeSchema(description?: string) {
+  return Type.Union([Type.Literal("headless"), Type.Literal("tmux"), Type.Literal("iterm-tmux")], {
+    ...(description ? { description } : {}),
+  });
+}
 
 export function registerOrchestrationTools(pi: ExtensionAPI): void {
   const workItemSchema = Type.Object({
@@ -36,16 +40,21 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
       ),
       maxWorkers: Type.Optional(Type.Number({ description: "Maximum workers conductor may start in this request" })),
       execute: Type.Optional(Type.Boolean({ description: "Whether to execute after planning; defaults to true" })),
-      runtimeMode: Type.Optional(runtimeModeSchema),
+      runtimeMode: Type.Optional(
+        runtimeModeSchema(
+          "Explicit runtime mode. Omit to allow conservative visible-runtime inference from the request.",
+        ),
+      ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const result = await conductor.runWorkForRepo(ctx.cwd, params, signal);
+      const runtimeText = `runtime=${result.runtimeMode}${result.runtimeRuns.length > 0 ? ` runs=${result.runtimeRuns.length}` : ""}`;
       const text =
         result.decision.mode === "parallel"
-          ? `routed work to ${result.tasks.length} parallel conductor worker(s): ${result.decision.reason}`
+          ? `routed work to ${result.tasks.length} parallel conductor worker(s) with ${runtimeText}: ${result.decision.reason}`
           : result.decision.mode === "objective"
-            ? `routed work to an objective with ${result.tasks.length} task(s): ${result.decision.reason}`
-            : `routed work to one conductor worker: ${result.decision.reason}`;
+            ? `routed work to an objective with ${result.tasks.length} task(s) with ${runtimeText}: ${result.decision.reason}`
+            : `routed work to one conductor worker with ${runtimeText}: ${result.decision.reason}`;
       return { content: [{ type: "text", text }], details: result };
     },
   });
@@ -67,7 +76,11 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
       workerPrefix: Type.Optional(
         Type.String({ description: "Prefix for generated worker names; defaults to parallel-worker" }),
       ),
-      runtimeMode: Type.Optional(runtimeModeSchema),
+      runtimeMode: Type.Optional(
+        runtimeModeSchema(
+          "Explicit runtime mode for every parallel worker; use iterm-tmux for tmux plus best-effort iTerm2 viewer.",
+        ),
+      ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const result = await conductor.runParallelWorkForRepo(ctx.cwd, params, signal);
