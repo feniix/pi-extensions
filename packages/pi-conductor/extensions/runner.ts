@@ -2,7 +2,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { createGateForRepo } from "./gate-service.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
 import { withStateLockRetry } from "./repo-run-retry.js";
-import { isTerminalRunStatus } from "./run-status.js";
+import { isTerminalRunStatus, isTmuxRuntimeMode } from "./run-status.js";
 import {
   createRunnerContract,
   RUNNER_CONTRACT_SCHEMA_VERSION,
@@ -97,7 +97,7 @@ export function finalizeRunnerExitForRepo(input: {
     return;
   }
   if (runAttempt.finishedAt || isTerminalRunStatus(runAttempt.status)) {
-    if (runAttempt.runtime.mode === "tmux") {
+    if (isTmuxRuntimeMode(runAttempt.runtime.mode)) {
       releaseTerminalTmuxWorkerForRepo({
         repoRoot: input.repoRoot,
         runId: input.contract.taskContract.runId,

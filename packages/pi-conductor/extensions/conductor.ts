@@ -19,7 +19,7 @@ import { createObjectiveForRepo, planObjectiveForRepo, refreshObjectiveStatusFor
 import { reconcileProjectForRepo } from "./project-reconcile.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
 import { mutateRepoRunWithLockRetry } from "./repo-run-retry.js";
-import { isTerminalRunStatus } from "./run-status.js";
+import { isTerminalRunStatus, isTmuxRuntimeMode } from "./run-status.js";
 import { createWorkerSessionRuntime, getWorkerRunRuntimeBackend, recoverWorkerSessionRuntime } from "./runtime.js";
 import { recordRuntimeMetadataForRun } from "./runtime-artifacts.js";
 import { cleanupCanceledTmuxRunForRepo } from "./runtime-cancel.js";
@@ -1009,7 +1009,7 @@ export async function cancelTaskRunForRepoWithRuntimeCleanup(
 ): Promise<RunRecord> {
   let project = cancelTaskRunForRepo(repoRoot, input);
   const run = project.runs.find((entry) => entry.runId === input.runId);
-  if (run?.status === "aborted" && run.runtime.mode === "tmux") {
+  if (run?.status === "aborted" && isTmuxRuntimeMode(run.runtime.mode)) {
     project = await cleanupCanceledTmuxRunForRepo({ repoRoot, runId: input.runId, run });
   }
   return project;
@@ -1065,7 +1065,7 @@ export async function cancelActiveWorkForRepoWithRuntimeCleanup(
   let project = canceled.project;
   for (const runId of canceled.canceledRuns) {
     const run = project.runs.find((entry) => entry.runId === runId);
-    if (run?.status === "aborted" && run.runtime.mode === "tmux") {
+    if (run?.status === "aborted" && isTmuxRuntimeMode(run.runtime.mode)) {
       project = await cleanupCanceledTmuxRunForRepo({ repoRoot, runId, run });
     }
   }
@@ -2044,7 +2044,7 @@ export async function runTaskForRepo(
         errorMessage: runtimeResult.errorMessage,
       });
     });
-    if (createdFallbackCompletion && runtimeMode === "tmux") {
+    if (createdFallbackCompletion && isTmuxRuntimeMode(runtimeMode)) {
       releaseTerminalTmuxWorkerForRepo({
         repoRoot,
         runId: started.run.runId,
@@ -2080,7 +2080,7 @@ export async function runTaskForRepo(
         errorMessage: message,
       });
     });
-    if (runtimeMode === "tmux") {
+    if (isTmuxRuntimeMode(runtimeMode)) {
       const cleanupStatus = runtimeCleanupStatus(error);
       releaseTerminalTmuxWorkerForRepo({
         repoRoot,

@@ -1,5 +1,5 @@
 import { mutateRepoRunSync } from "./repo-run.js";
-import { isTerminalRunStatus } from "./run-status.js";
+import { isTerminalRunStatus, isTmuxRuntimeMode } from "./run-status.js";
 import { cancelTmuxRuntime } from "./tmux-runtime.js";
 import type { RunAttemptRecord, RunRecord } from "./types.js";
 
@@ -19,7 +19,7 @@ export async function cleanupCanceledTmuxRunForRepo(input: {
     );
     const mayReleaseWorker =
       latestRun?.status === "aborted" &&
-      latestRun.runtime.mode === "tmux" &&
+      isTmuxRuntimeMode(latestRun.runtime.mode) &&
       !hasNewerActiveRun &&
       (!hasLaunchMetadata || cleanupOnlyProvedAbsent || cleanup.cleanupStatus === "succeeded");
     return {

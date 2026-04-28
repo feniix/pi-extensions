@@ -59,7 +59,7 @@ describe("tmux durable cancellation", () => {
     }
   });
 
-  async function createPersistedTmuxRun() {
+  async function createPersistedTmuxRun(runtimeMode: "tmux" | "iterm-tmux" = "tmux") {
     const worker = await createWorkerForRepo(repoDir, "tmux-worker");
     const task = createTaskForRepo(repoDir, { title: "Detached tmux", prompt: "Run visibly" });
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
@@ -73,7 +73,7 @@ describe("tmux durable cancellation", () => {
               ...run,
               runtime: {
                 ...run.runtime,
-                mode: "tmux",
+                mode: runtimeMode,
                 cleanupStatus: "pending",
                 tmux: { socketPath: "/tmp/tmux.sock", sessionName: "detached", windowId: "@1", paneId: "%2" },
               },
@@ -148,6 +148,21 @@ describe("tmux durable cancellation", () => {
       status: "aborted",
       runtime: { cleanupStatus: "succeeded", diagnostics: expect.arrayContaining(["killed detached tmux"]) },
     });
+    expect(canceled.workers[0]).toMatchObject({ lifecycle: "idle", recoverable: false });
+  });
+
+  it("kills persisted iterm-tmux runtime resources when no live abort handle exists", async () => {
+    const started = await createPersistedTmuxRun("iterm-tmux");
+
+    const canceled = await cancelTaskRunForRepoWithRuntimeCleanup(repoDir, {
+      runId: started.run.runId,
+      reason: "stop detached viewer run",
+    });
+
+    expect(tmuxMocks.cancelTmuxRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({ runtime: expect.objectContaining({ mode: "iterm-tmux" }) }),
+    );
+    expect(canceled.runs[0]).toMatchObject({ status: "aborted", runtime: { cleanupStatus: "succeeded" } });
     expect(canceled.workers[0]).toMatchObject({ lifecycle: "idle", recoverable: false });
   });
 
