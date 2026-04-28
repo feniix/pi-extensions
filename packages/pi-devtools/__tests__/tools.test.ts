@@ -169,23 +169,27 @@ describe("pi-devtools", () => {
   });
 
   describe("createPrTool", () => {
-    it("creates PR successfully", () => {
-      vi.mocked(execGit).mockReturnValue("main");
+    it("creates PR successfully with an explicit head branch", () => {
+      vi.mocked(execGit).mockReturnValue("feature-branch");
       vi.mocked(execGh).mockReturnValue("https://github.com/owner/repo/pull/123");
 
       const result = createPrTool("Add new feature", "Description");
 
       expect(result.content[0].text).toContain("Created PR");
       expect(result.details.prUrl).toContain("github.com");
+      const ghCall = vi.mocked(execGh).mock.calls[0][0] as string;
+      expect(ghCall).toContain("--head 'feature-branch'");
     });
 
-    it("creates PR without body", () => {
+    it("creates PR with an explicit empty body when body is omitted", () => {
       vi.mocked(execGit).mockReturnValue("main");
       vi.mocked(execGh).mockReturnValue("https://github.com/owner/repo/pull/123");
 
       const result = createPrTool("Test PR");
 
       expect(result.content[0].text).toContain("Created PR");
+      const ghCall = vi.mocked(execGh).mock.calls[0][0] as string;
+      expect(ghCall).toContain("--body ''");
     });
 
     it("creates draft PR", () => {
@@ -245,7 +249,7 @@ describe("pi-devtools", () => {
       expect(result.details.mergeType).toBe("squash-merged");
     });
 
-    it("squash merges with commit title", () => {
+    it("squash merges with commit title using GitHub CLI subject flag", () => {
       vi.mocked(execGh)
         .mockReturnValueOnce(JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "OPEN" }))
         .mockReturnValueOnce("");
@@ -253,7 +257,8 @@ describe("pi-devtools", () => {
       mergePrTool(123, true, true, "Custom Title");
 
       const mergeCall = vi.mocked(execGh).mock.calls[1][0] as string;
-      expect(mergeCall).toContain("--title");
+      expect(mergeCall).toContain("--subject 'Custom Title'");
+      expect(mergeCall).not.toContain("--title");
     });
 
     it("squash merges with commit message", () => {
@@ -531,6 +536,18 @@ describe("pi-devtools", () => {
 
       expect(result.content[0].text).toContain("Created release");
       expect(result.details.tag).toBe("v1.0.0");
+      const ghCall = vi.mocked(execGh).mock.calls[0][0] as string;
+      expect(ghCall).toContain("--notes 'Release notes'");
+    });
+
+    it("creates release with explicit empty notes when body is omitted", () => {
+      vi.mocked(execGh).mockReturnValue("https://github.com/owner/repo/releases/tag/v1.0.0");
+
+      const result = createReleaseTool("v1.0.0", "Version 1.0.0");
+
+      expect(result.content[0].text).toContain("Created release");
+      const ghCall = vi.mocked(execGh).mock.calls[0][0] as string;
+      expect(ghCall).toContain("--notes ''");
     });
 
     it("handles release creation error", () => {

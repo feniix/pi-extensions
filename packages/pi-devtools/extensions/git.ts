@@ -10,21 +10,21 @@ import { execSync } from "node:child_process";
 
 export function isGitRepo(): boolean {
   try {
-    return execGit("rev-parse --is-inside-work-tree") === "true";
+    return execGit("git rev-parse --is-inside-work-tree") === "true";
   } catch {
     return false;
   }
 }
 
 export function getCurrentBranch(): string {
-  const branch = execGit("branch --show-current");
+  const branch = execGit("git branch --show-current");
   if (branch) return branch;
-  const sha = execGit("rev-parse --short HEAD");
+  const sha = execGit("git rev-parse --short HEAD");
   return sha ? `Detached HEAD at ${sha}` : "unknown";
 }
 
 export function getWorkingTreeStatus(): string {
-  const output = execGit("status --porcelain");
+  const output = execGit("git status --porcelain");
   if (!output) return "clean";
 
   const lines = output.split("\n").filter(Boolean);
@@ -54,7 +54,7 @@ export function compareVersions(a: number[], b: number[]): number {
 }
 
 export function getTagInfo(): string {
-  const output = execGit('tag -l "v*"');
+  const output = execGit('git tag -l "v*"');
   if (!output) return "No version tags found";
 
   const tags = output.split("\n").filter(Boolean);
@@ -64,7 +64,7 @@ export function getTagInfo(): string {
   const latest = tags.at(-1) ?? tags[0];
 
   try {
-    const count = execGit(`rev-list ${latest}..HEAD --count`);
+    const count = execGit(`git rev-list ${latest}..HEAD --count`);
     if (count !== null) return `Tag: ${latest} (${count} unreleased commits)`;
   } catch {
     // Fall through

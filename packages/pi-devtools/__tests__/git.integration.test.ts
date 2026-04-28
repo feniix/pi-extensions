@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { execGh, execGit, getDefaultBranch } from "../extensions/git.js";
+import { execGh, execGit, getDefaultBranch, getGitContext } from "../extensions/git.js";
 
 describe("pi-devtools git integration", () => {
   let tempDir: string;
@@ -52,6 +52,18 @@ describe("pi-devtools git integration", () => {
 
     it("handles error in command execution", () => {
       expect(() => execGit(`git -C ${tempDir} log --invalid-flag`)).toThrow();
+    });
+  });
+
+  describe("session git context", () => {
+    it("builds context inside a git repository", () => {
+      const originalCwd = process.cwd();
+      process.chdir(tempDir);
+      try {
+        expect(getGitContext()).toContain("Branch: main");
+      } finally {
+        process.chdir(originalCwd);
+      }
     });
   });
 

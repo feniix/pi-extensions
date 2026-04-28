@@ -29,10 +29,8 @@ export function createPrTool(
     const targetBase = base || getDefaultBranch();
     const headBranch = execGit("git branch --show-current");
 
-    let command = `gh pr create --title ${shellQuote(title)} --base ${shellQuote(targetBase)}`;
-    if (body) {
-      command += ` --body ${shellQuote(body)}`;
-    }
+    let command = `gh pr create --title ${shellQuote(title)} --base ${shellQuote(targetBase)} --head ${shellQuote(headBranch)}`;
+    command += ` --body ${shellQuote(body ?? "")}`;
     if (draft) {
       command += " --draft";
     }
@@ -78,7 +76,7 @@ function buildMergeCommand(
   const commandParts = [`gh pr merge ${prNumber}`, squash ? "--squash" : "--merge"];
 
   if (squash && commitTitle) {
-    commandParts.push(`--title ${shellQuote(commitTitle)}`);
+    commandParts.push(`--subject ${shellQuote(commitTitle)}`);
   }
   if (squash && commitMessage) {
     commandParts.push(`--body ${shellQuote(commitMessage)}`);

@@ -146,9 +146,7 @@ export function createReleaseTool(
 ): ToolResult {
   try {
     let command = `gh release create ${shellQuote(tag)} --title ${shellQuote(title)}`;
-    if (body) {
-      command += ` --notes ${shellQuote(body)}`;
-    }
+    command += ` --notes ${shellQuote(body ?? "")}`;
     if (draft) {
       command += " --draft";
     }
