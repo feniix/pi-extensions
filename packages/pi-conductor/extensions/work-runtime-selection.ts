@@ -12,11 +12,10 @@ function hasHeadlessRuntimeIntent(request: string): boolean {
 
 function hasStatusOnlyIntent(request: string): boolean {
   return (
-    /\b(show|list|display|view|inspect|status)\b/i.test(request) &&
-    /\b(current|active|existing|all)?\s*(workers|runs|tasks|project|status|sessions|panes|terminals|tmux|iterm)\b/i.test(
+    /^(?:please\s+|can you\s+|could you\s+)?\s*(show|list|display|view|inspect|status)\b/i.test(request) &&
+    /\b(current|active|existing|all)?\s*(worker|workers|run|runs|task|tasks|project|status|session|sessions|pane|panes|terminal|terminals|tmux|iterm)\b/i.test(
       request,
-    ) &&
-    !hasExecutionIntent(request)
+    )
   );
 }
 

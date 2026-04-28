@@ -22,6 +22,7 @@ import {
 } from "../extensions/conductor.js";
 import { deriveProjectKey } from "../extensions/project-key.js";
 import { getRunFile, writeRun } from "../extensions/storage.js";
+import { summarizeRunWorkRuntime } from "../extensions/work-runtime-summary.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
   if (value == null) {
@@ -410,6 +411,26 @@ describe("conductor service", () => {
     expect(run.tasks).toHaveLength(1);
   });
 
+  it("passes normalized headless runtimeMode through default natural-language work runners", async () => {
+    let seenRuntimeMode: string | undefined;
+
+    const result = await runWorkForRepo(
+      repoDir,
+      {
+        request: "Fix the typo in README.md",
+        tasks: [{ title: "Fix README typo", prompt: "Fix the typo in README.md", writeScope: ["README.md"] }],
+      },
+      undefined,
+      async (_root, taskId, _signal, options) => {
+        seenRuntimeMode = options?.runtimeMode;
+        return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
+      },
+    );
+
+    expect(result.runtimeMode).toBe("headless");
+    expect(seenRuntimeMode).toBe("headless");
+  });
+
   it("passes runtimeMode through parallel work runners", async () => {
     const restorePath = forceTmuxAvailable();
     const seenRuntimeModes: Array<string | undefined> = [];
@@ -436,6 +457,29 @@ describe("conductor service", () => {
     }
 
     expect(seenRuntimeModes).toEqual(["tmux", "tmux"]);
+  });
+
+  it("fails direct visible parallel runtime preflight before creating workers or tasks", async () => {
+    const restorePath = forceTmuxUnavailable();
+    try {
+      await expect(
+        runParallelWorkForRepo(repoDir, {
+          workerPrefix: "parallel",
+          runtimeMode: "tmux",
+          tasks: [
+            { title: "First shard", prompt: "Do first shard" },
+            { title: "Second shard", prompt: "Do second shard" },
+          ],
+        }),
+      ).rejects.toThrow(/Runtime mode tmux unavailable/i);
+
+      const run = getOrCreateRunForRepo(repoDir);
+      expect(run.workers).toHaveLength(0);
+      expect(run.tasks).toHaveLength(0);
+      expect(run.runs).toHaveLength(0);
+    } finally {
+      restorePath();
+    }
   });
 
   it("infers visible runtime for natural-language visible parallel requests", async () => {
@@ -469,28 +513,44 @@ describe("conductor service", () => {
     expect(seenRuntimeModes).toEqual(["iterm-tmux", "iterm-tmux"]);
   });
 
-  it("does not infer visible runtime for status-only show requests", async () => {
-    let seenRuntimeMode: string | undefined;
+  it("rejects status-only work-router requests with candidate tasks before mutating conductor state", async () => {
+    await expect(
+      runWorkForRepo(
+        repoDir,
+        {
+          request: "show me current workers",
+          tasks: [{ title: "Inspect workers", prompt: "Inspect current workers", writeScope: ["README.md"] }],
+        },
+        undefined,
+        async (_root, taskId) => ({
+          workerName: taskId,
+          status: "success",
+          finalText: "done",
+          errorMessage: null,
+          sessionId: null,
+        }),
+      ),
+    ).rejects.toThrow(/status-only requests/i);
 
-    const result = await runWorkForRepo(
-      repoDir,
-      {
-        request: "show me current workers",
-        tasks: [{ title: "Inspect workers", prompt: "Inspect current workers", writeScope: ["README.md"] }],
-      },
-      undefined,
-      async (_root, taskId, _signal, options) => {
-        seenRuntimeMode = options?.runtimeMode;
-        return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
-      },
-    );
-
-    expect(result.runtimeMode).toBe("headless");
-    expect(seenRuntimeMode).toBeUndefined();
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers).toHaveLength(0);
+    expect(run.tasks).toHaveLength(0);
+    expect(run.runs).toHaveLength(0);
   });
 
   it("rejects status-only work-router requests before mutating conductor state", async () => {
     await expect(runWorkForRepo(repoDir, { request: "show me current workers" })).rejects.toThrow(
+      /status-only requests/i,
+    );
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers).toHaveLength(0);
+    expect(run.tasks).toHaveLength(0);
+    expect(run.runs).toHaveLength(0);
+  });
+
+  it("rejects status-only planning requests before mutating conductor state", async () => {
+    await expect(runWorkForRepo(repoDir, { request: "show run status", execute: false })).rejects.toThrow(
       /status-only requests/i,
     );
 
@@ -595,9 +655,32 @@ describe("conductor service", () => {
       logPath: "/tmp/pi-conductor/runtime/run-1/runner.log",
       diagnostic: "iTerm2 viewer opened",
       latestProgress: "opening viewer",
-      cancelTool: { name: "conductor_cancel_task_run", params: { reason: "<reason>" } },
+      cancelTool: { name: "conductor_cancel_task_run", params: { reason: "Parent requested cancellation" } },
     });
-    expect(result.runtimeRuns[0]?.cancelCommand).toContain("conductor_cancel_task_run");
+    expect(result.runtimeRuns[0]?.cancelCommand).toContain("Parent requested cancellation");
+  });
+
+  it("omits runtime cancellation details for terminal run summaries", async () => {
+    const delegated = await delegateTaskForRepo(repoDir, {
+      title: "Terminal summary",
+      prompt: "Summarize terminal runtime",
+      workerName: "terminal-summary",
+      startRun: false,
+    });
+    const started = startTaskRunForRepo(repoDir, {
+      taskId: delegated.task.taskId,
+      workerId: delegated.worker.workerId,
+    });
+    const latest = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...latest,
+      runs: latest.runs.map((run) =>
+        run.runId === started.run.runId ? { ...run, status: "succeeded", finishedAt: new Date().toISOString() } : run,
+      ),
+    });
+
+    const summary = summarizeRunWorkRuntime(repoDir, [delegated.task.taskId]);
+    expect(summary[0]).toMatchObject({ cancelCommand: null, cancelTool: null });
   });
 
   it("passes runtimeMode through single natural-language work runners", async () => {

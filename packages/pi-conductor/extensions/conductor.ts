@@ -1228,7 +1228,7 @@ export async function runParallelWorkForRepo(
     }
     const settled = await Promise.allSettled(
       tasks.map((task, index) =>
-        runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal, { runtimeMode: input.runtimeMode }),
+        runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal, { runtimeMode }),
       ),
     );
     if (signal?.aborted) await requestCancelOwnedWork();
@@ -1292,9 +1292,9 @@ export async function runWorkForRepo(
   runtimeRuns: RunWorkRuntimeSummary[];
 }> {
   const execute = input.execute ?? true;
-  if (execute && !input.tasks?.length && isStatusOnlyWorkRequest(input.request)) {
+  if (isStatusOnlyWorkRequest(input.request)) {
     throw new Error(
-      "conductor_run_work is for executing work; use conductor_get_project, conductor_list_workers, or conductor_list_runs for status-only requests",
+      "conductor_run_work is for planning or executing work; use conductor_get_project, conductor_list_workers, or conductor_list_runs for status-only requests",
     );
   }
   const decision = planWorkRouting(input);
@@ -1313,7 +1313,7 @@ export async function runWorkForRepo(
       repoRoot,
       {
         workerPrefix,
-        runtimeMode: selectedRuntimeMode,
+        runtimeMode,
         tasks: decision.tasks.map((task) => ({
           title: task.title,
           prompt: task.prompt,
@@ -1331,10 +1331,7 @@ export async function runWorkForRepo(
       parallel,
       objective: null,
       runtimeMode,
-      runtimeRuns: summarizeRunWorkRuntime(
-        repoRoot,
-        parallel.tasks.map((task) => task.taskId),
-      ),
+      runtimeRuns: parallel.runtimeRuns,
     };
   }
 
@@ -1365,7 +1362,7 @@ export async function runWorkForRepo(
             objectiveId: objective.objectiveId,
             policy: "execute",
             maxConcurrency: input.maxWorkers,
-            runtimeMode: selectedRuntimeMode,
+            runtimeMode,
           },
           signal,
         )
@@ -1416,9 +1413,7 @@ export async function runWorkForRepo(
       runtimeRuns: summarizeRunWorkRuntime(repoRoot, [delegated.task.taskId]),
     };
   }
-  const result = execute
-    ? await runner(repoRoot, delegated.task.taskId, signal, { runtimeMode: selectedRuntimeMode })
-    : null;
+  const result = execute ? await runner(repoRoot, delegated.task.taskId, signal, { runtimeMode }) : null;
   return {
     decision,
     workers: [delegated.worker],

@@ -39,9 +39,14 @@ export function summarizeRunWorkRuntime(repoRoot: string, taskIds: string[]): Ru
         logPath: attempt.runtime.logPath,
         diagnostic: attempt.runtime.diagnostics.at(-1) ?? null,
         latestProgress: task?.latestProgress ?? null,
-        cancelCommand: isActive ? `conductor_cancel_task_run({"runId":"${attempt.runId}","reason":"<reason>"})` : null,
+        cancelCommand: isActive
+          ? `conductor_cancel_task_run({"runId":"${attempt.runId}","reason":"Parent requested cancellation"})`
+          : null,
         cancelTool: isActive
-          ? { name: "conductor_cancel_task_run", params: { runId: attempt.runId, reason: "<reason>" } }
+          ? {
+              name: "conductor_cancel_task_run",
+              params: { runId: attempt.runId, reason: "Parent requested cancellation" },
+            }
           : null,
       };
     });

@@ -41,6 +41,9 @@ describe("conductor objective planner quality gates", () => {
     expect(selectRuntimeModeForWork({ request: "Run this in tmux so I can watch it" })).toBe("tmux");
     expect(selectRuntimeModeForWork({ request: "show me current workers" })).toBeUndefined();
     expect(selectRuntimeModeForWork({ request: "show tmux sessions" })).toBeUndefined();
+    expect(selectRuntimeModeForWork({ request: "show run status" })).toBeUndefined();
+    expect(selectRuntimeModeForWork({ request: "inspect current run" })).toBeUndefined();
+    expect(selectRuntimeModeForWork({ request: "list active task" })).toBeUndefined();
     expect(selectRuntimeModeForWork({ request: "Run these shards without tmux" })).toBe("headless");
     expect(
       selectRuntimeModeForWork({

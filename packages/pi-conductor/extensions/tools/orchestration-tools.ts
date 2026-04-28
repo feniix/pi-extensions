@@ -23,7 +23,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
     name: "conductor_run_work",
     label: "Conductor Run Work",
     description:
-      "Run natural-language pi-conductor work and let conductor decide whether to use one worker, parallel workers, or an objective DAG based on dependencies, write scopes, and user intent",
+      "Run natural-language pi-conductor work and let conductor decide whether to use one worker, parallel workers, or an objective DAG. Omit runtimeMode for conservative visible-runtime inference; use conductor_get_project, conductor_list_workers, or conductor_list_runs for status-only requests. Runtime preflight errors can be investigated with conductor_backend_status, and active runtimeRuns include cancelTool details.",
     parameters: Type.Object({
       request: Type.String({ description: "The user's natural-language work request" }),
       mode: Type.Optional(
@@ -85,9 +85,10 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const result = await conductor.runParallelWorkForRepo(ctx.cwd, params, signal);
       const completed = result.results.filter((entry) => entry.result?.status === "success").length;
+      const runtimeText = `runtime=${result.runtimeMode}${result.runtimeRuns.length > 0 ? ` runs=${result.runtimeRuns.length}` : ""}`;
       const text = signal?.aborted
-        ? `interrupted parallel conductor work; canceled ${result.canceledRuns.length} active run(s) and ${result.canceledTasks.length} task(s)`
-        : `ran ${result.tasks.length} parallel conductor task(s); ${completed} succeeded, ${result.results.length - completed} need follow-up`;
+        ? `interrupted parallel conductor work with ${runtimeText}; canceled ${result.canceledRuns.length} active run(s) and ${result.canceledTasks.length} task(s)`
+        : `ran ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${completed} succeeded, ${result.results.length - completed} need follow-up`;
       return { content: [{ type: "text", text }], details: result };
     },
   });
