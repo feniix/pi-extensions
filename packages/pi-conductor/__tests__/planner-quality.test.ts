@@ -40,6 +40,8 @@ describe("conductor objective planner quality gates", () => {
     ).toBe("iterm-tmux");
     expect(selectRuntimeModeForWork({ request: "Run this in tmux so I can watch it" })).toBe("tmux");
     expect(selectRuntimeModeForWork({ request: "show me current workers" })).toBeUndefined();
+    expect(selectRuntimeModeForWork({ request: "show tmux sessions" })).toBeUndefined();
+    expect(selectRuntimeModeForWork({ request: "Run these shards without tmux" })).toBe("headless");
     expect(
       selectRuntimeModeForWork({
         request: "Run this in parallel and show me the workers",

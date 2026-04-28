@@ -69,11 +69,8 @@ import {
   type WorkRoutingDecision,
   type WorkRoutingMode,
 } from "./work-routing.js";
-import {
-  type RunWorkRuntimeSummary,
-  selectRuntimeModeForWork,
-  summarizeRunWorkRuntime,
-} from "./work-runtime-selection.js";
+import { isStatusOnlyWorkRequest, selectRuntimeModeForWork } from "./work-runtime-selection.js";
+import { type RunWorkRuntimeSummary, summarizeRunWorkRuntime } from "./work-runtime-summary.js";
 
 export { buildEvidenceBundleForRepo, checkReadinessForRepo } from "./evidence-service.js";
 export { createGateForRepo, resolveGateForRepo, resolveGateFromTrustedHumanForRepo } from "./gate-service.js";
@@ -102,6 +99,7 @@ export {
 export type { RunWorkItemInput, WorkRoutingDecision, WorkRoutingMode } from "./work-routing.js";
 export { planWorkRouting } from "./work-routing.js";
 export { selectRuntimeModeForWork } from "./work-runtime-selection.js";
+export type { RunWorkRuntimeSummary } from "./work-runtime-summary.js";
 
 export type ParallelWorkItemInput = {
   title: string;
@@ -115,6 +113,15 @@ export type ParallelWorkRunner = (
   signal?: AbortSignal,
   input?: { runtimeMode?: RunRuntimeMode },
 ) => Promise<WorkerRunResult>;
+
+function assertRuntimeModeAvailable(runtimeMode: RunRuntimeMode): void {
+  const runtimeStatus = getConductorRuntimeModeStatus(runtimeMode);
+  if (!runtimeStatus.available) {
+    throw new Error(
+      `Runtime mode ${runtimeMode} unavailable: ${runtimeStatus.diagnostic ?? "not available"}. Use conductor_backend_status to inspect available runtime modes; headless is available.`,
+    );
+  }
+}
 
 type LiveWorkAbortHandle = {
   runId?: string;
@@ -1094,6 +1101,8 @@ export async function runParallelWorkForRepo(
   }>;
   canceledRuns: string[];
   canceledTasks: string[];
+  runtimeMode: RunRuntimeMode;
+  runtimeRuns: RunWorkRuntimeSummary[];
 }> {
   if (input.tasks.length === 0) {
     throw new Error("At least one parallel work item is required");
@@ -1111,6 +1120,10 @@ export async function runParallelWorkForRepo(
       workerName: item.workerName?.trim() || `${workerPrefix}-${index + 1}`,
     };
   });
+  const runtimeMode = input.runtimeMode ?? "headless";
+  if (runtimeMode !== "headless") {
+    assertRuntimeModeAvailable(runtimeMode);
+  }
   const workerNames = new Set<string>();
   for (const item of items) {
     if (workerNames.has(item.workerName)) {
@@ -1211,7 +1224,7 @@ export async function runParallelWorkForRepo(
   try {
     if (signal?.aborted) {
       await Promise.allSettled(pendingCancellations);
-      return { workers, tasks, results: [], canceledRuns, canceledTasks };
+      return { workers, tasks, results: [], canceledRuns, canceledTasks, runtimeMode, runtimeRuns: [] };
     }
     const settled = await Promise.allSettled(
       tasks.map((task, index) =>
@@ -1231,7 +1244,18 @@ export async function runParallelWorkForRepo(
             error: errorMessage(entry.reason),
           },
     );
-    return { workers, tasks, results, canceledRuns, canceledTasks };
+    return {
+      workers,
+      tasks,
+      results,
+      canceledRuns,
+      canceledTasks,
+      runtimeMode,
+      runtimeRuns: summarizeRunWorkRuntime(
+        repoRoot,
+        tasks.map((task) => task.taskId),
+      ),
+    };
   } finally {
     signal?.removeEventListener("abort", onAbort);
     for (const controller of liveControllers) {
@@ -1267,18 +1291,29 @@ export async function runWorkForRepo(
   runtimeMode: RunRuntimeMode;
   runtimeRuns: RunWorkRuntimeSummary[];
 }> {
-  const decision = planWorkRouting(input);
-  const runtimeMode =
-    selectRuntimeModeForWork({ request: input.request, explicitRuntimeMode: input.runtimeMode }) ?? "headless";
-  const workerPrefix = input.workerPrefix?.trim() || "run-work";
   const execute = input.execute ?? true;
+  if (execute && !input.tasks?.length && isStatusOnlyWorkRequest(input.request)) {
+    throw new Error(
+      "conductor_run_work is for executing work; use conductor_get_project, conductor_list_workers, or conductor_list_runs for status-only requests",
+    );
+  }
+  const decision = planWorkRouting(input);
+  const selectedRuntimeMode = selectRuntimeModeForWork({
+    request: input.request,
+    explicitRuntimeMode: input.runtimeMode,
+  });
+  const runtimeMode = selectedRuntimeMode ?? "headless";
+  if (execute && runtimeMode !== "headless") {
+    assertRuntimeModeAvailable(runtimeMode);
+  }
+  const workerPrefix = input.workerPrefix?.trim() || "run-work";
 
   if (decision.mode === "parallel") {
     const parallel = await runParallelWorkForRepo(
       repoRoot,
       {
         workerPrefix,
-        runtimeMode,
+        runtimeMode: selectedRuntimeMode,
         tasks: decision.tasks.map((task) => ({
           title: task.title,
           prompt: task.prompt,
@@ -1330,7 +1365,7 @@ export async function runWorkForRepo(
             objectiveId: objective.objectiveId,
             policy: "execute",
             maxConcurrency: input.maxWorkers,
-            runtimeMode,
+            runtimeMode: selectedRuntimeMode,
           },
           signal,
         )
@@ -1381,7 +1416,9 @@ export async function runWorkForRepo(
       runtimeRuns: summarizeRunWorkRuntime(repoRoot, [delegated.task.taskId]),
     };
   }
-  const result = execute ? await runner(repoRoot, delegated.task.taskId, signal, { runtimeMode }) : null;
+  const result = execute
+    ? await runner(repoRoot, delegated.task.taskId, signal, { runtimeMode: selectedRuntimeMode })
+    : null;
   return {
     decision,
     workers: [delegated.worker],
