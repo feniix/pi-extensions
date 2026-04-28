@@ -1,4 +1,5 @@
 import { mutateRepoRunSync } from "./repo-run.js";
+import { isTerminalRunStatus } from "./run-status.js";
 import { createConductorGate, resolveConductorGate } from "./storage.js";
 import type { ConductorActor, ConductorResourceRefs, GateOperation, GateRecord, GateStatus } from "./types.js";
 
@@ -16,10 +17,22 @@ export function createGateForRepo(
     operation?: GateOperation;
     targetRevision?: number | null;
     expiresAt?: string | null;
+    requireActiveRun?: boolean;
   },
 ): GateRecord {
   const gateId = input.gateId ?? createGateId();
-  const updatedRun = mutateRepoRunSync(repoRoot, (run) => createConductorGate(run, { ...input, gateId }));
+  const updatedRun = mutateRepoRunSync(repoRoot, (run) => {
+    const runId = input.resourceRefs.runId;
+    const taskId = input.resourceRefs.taskId;
+    if (input.requireActiveRun && runId && taskId) {
+      const attempt = run.runs.find((entry) => entry.runId === runId);
+      const task = run.tasks.find((entry) => entry.taskId === taskId);
+      if (!attempt || attempt.finishedAt || isTerminalRunStatus(attempt.status) || task?.activeRunId !== runId) {
+        throw new Error(`Cannot create gate for inactive run ${runId}`);
+      }
+    }
+    return createConductorGate(run, { ...input, gateId });
+  });
   const gate = updatedRun.gates.find((entry) => entry.gateId === gateId);
   if (!gate) {
     throw new Error(`Gate ${gateId} disappeared during creation`);

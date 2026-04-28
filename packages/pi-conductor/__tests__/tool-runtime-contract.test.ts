@@ -74,36 +74,36 @@ describe("conductor runtime-mode tool contracts", () => {
     await expect(
       getTool(tools, "conductor_start_task_run").execute?.(
         "tool-call-1",
-        { taskId: task.taskId, runtimeMode: "tmux" },
+        { taskId: task.taskId, runtimeMode: "iterm-tmux" },
         undefined,
         undefined,
         { cwd: repoDir },
       ),
-    ).rejects.toThrow(/Runtime mode tmux unavailable/i);
+    ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
     expect(getOrCreateRunForRepo(repoDir).runs).toHaveLength(0);
 
     await expect(
       getTool(tools, "conductor_run_task").execute?.(
         "tool-call-2",
-        { taskId: task.taskId, runtimeMode: "tmux" },
+        { taskId: task.taskId, runtimeMode: "iterm-tmux" },
         undefined,
         undefined,
         { cwd: repoDir },
       ),
-    ).rejects.toThrow(/Runtime mode tmux unavailable/i);
+    ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
     expect(getOrCreateRunForRepo(repoDir).runs).toHaveLength(0);
 
     const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
-    cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "prepare retry" });
+    await cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "prepare retry" });
     await expect(
       getTool(tools, "conductor_retry_task").execute?.(
         "tool-call-3",
-        { taskId: task.taskId, runtimeMode: "tmux" },
+        { taskId: task.taskId, runtimeMode: "iterm-tmux" },
         undefined,
         undefined,
         { cwd: repoDir },
       ),
-    ).rejects.toThrow(/Runtime mode tmux unavailable/i);
+    ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
     expect(getOrCreateRunForRepo(repoDir).runs).toHaveLength(1);
 
     await expect(
@@ -114,13 +114,13 @@ describe("conductor runtime-mode tool contracts", () => {
           prompt: "Run visibly",
           workerName: "delegate-visible",
           startRun: true,
-          runtimeMode: "tmux",
+          runtimeMode: "iterm-tmux",
         },
         undefined,
         undefined,
         { cwd: repoDir },
       ),
-    ).rejects.toThrow(/Runtime mode tmux unavailable/i);
+    ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.tasks.at(-1)).toMatchObject({ title: "Visible delegate", state: "assigned", activeRunId: null });
   });
@@ -147,8 +147,8 @@ describe("conductor runtime-mode tool contracts", () => {
       { cwd: repoDir },
     )) as { content: Array<{ text: string }>; details: { runtimes: Record<string, { available: boolean }> } };
     expect(backendStatus.content[0]?.text).toContain("runtime headless: available=true");
-    expect(backendStatus.content[0]?.text).toContain("runtime tmux: available=false");
+    expect(backendStatus.content[0]?.text).toContain("runtime tmux: available=");
     expect(backendStatus.details.runtimes.headless).toMatchObject({ available: true });
-    expect(backendStatus.details.runtimes.tmux).toMatchObject({ available: false });
+    expect(backendStatus.details.runtimes.tmux).toMatchObject({ mode: "tmux" });
   });
 });

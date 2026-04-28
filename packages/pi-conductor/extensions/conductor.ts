@@ -16,9 +16,15 @@ import {
 } from "./git-pr.js";
 import { computeNextActions } from "./next-actions.js";
 import { createObjectiveForRepo, planObjectiveForRepo, refreshObjectiveStatusForRepo } from "./objective-service.js";
+import { reconcileProjectForRepo } from "./project-reconcile.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
+import { mutateRepoRunWithLockRetry } from "./repo-run-retry.js";
+import { isTerminalRunStatus } from "./run-status.js";
 import { createWorkerSessionRuntime, getWorkerRunRuntimeBackend, recoverWorkerSessionRuntime } from "./runtime.js";
+import { recordRuntimeMetadataForRun } from "./runtime-artifacts.js";
+import { cleanupCanceledTmuxRunForRepo } from "./runtime-cancel.js";
 import { formatRunRuntimeSummary } from "./runtime-metadata.js";
+import { releaseTerminalTmuxWorkerForRepo } from "./runtime-worker-release.js";
 import { type SchedulerFairness, type SchedulerPolicyName, selectSchedulerActions } from "./scheduler-selection.js";
 import {
   addConductorArtifact,
@@ -27,7 +33,6 @@ import {
   completeTaskRun,
   createWorkerRecord,
   markConductorGateUsed,
-  reconcileRunLeases,
   removeWorker,
   setWorkerPrState,
 } from "./storage.js";
@@ -41,6 +46,7 @@ import {
   retryTaskForRepo,
   startTaskRunForRepo,
 } from "./task-service.js";
+
 import type {
   ConductorEventType,
   ConductorNextAction,
@@ -68,6 +74,7 @@ export {
   refreshObjectiveStatusForRepo,
   updateObjectiveForRepo,
 } from "./objective-service.js";
+export { reconcileProjectForRepo, reconcileWorkerHealth } from "./project-reconcile.js";
 export { getOrCreateRunForRepo } from "./repo-run.js";
 export { buildBlockingDiagnosisForRepo, prepareHumanReviewForRepo } from "./review-service.js";
 export type { SchedulerFairness, SchedulerPolicyName } from "./scheduler-selection.js";
@@ -181,6 +188,12 @@ function resolveSchedulerPolicy(input: { policy?: SchedulerPolicyName; executeRu
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function runtimeCleanupStatus(error: unknown): "succeeded" | "failed" | undefined {
+  if (!error || typeof error !== "object" || !("cleanupStatus" in error)) return undefined;
+  const status = (error as { cleanupStatus?: unknown }).cleanupStatus;
+  return status === "succeeded" || status === "failed" ? status : undefined;
 }
 
 function eventTypeForOperation(status: "succeeded" | "failed", operation: unknown): ConductorEventType {
@@ -990,6 +1003,18 @@ export function cancelTaskRunForRepo(repoRoot: string, input: { runId: string; r
   return project;
 }
 
+export async function cancelTaskRunForRepoWithRuntimeCleanup(
+  repoRoot: string,
+  input: { runId: string; reason: string },
+): Promise<RunRecord> {
+  let project = cancelTaskRunForRepo(repoRoot, input);
+  const run = project.runs.find((entry) => entry.runId === input.runId);
+  if (run?.status === "aborted" && run.runtime.mode === "tmux") {
+    project = await cleanupCanceledTmuxRunForRepo({ repoRoot, runId: input.runId, run });
+  }
+  return project;
+}
+
 export function cancelActiveWorkForRepo(
   repoRoot: string,
   input: {
@@ -1030,6 +1055,21 @@ export function cancelActiveWorkForRepo(
   for (const taskId of pending.canceledTasks) canceledTasks.add(taskId);
 
   return { canceledRuns, canceledTasks: [...canceledTasks], project };
+}
+
+export async function cancelActiveWorkForRepoWithRuntimeCleanup(
+  repoRoot: string,
+  input: { reason?: string; taskIds?: string[]; workerIds?: string[] } = {},
+): Promise<{ canceledRuns: string[]; canceledTasks: string[]; project: RunRecord }> {
+  const canceled = cancelActiveWorkForRepo(repoRoot, input);
+  let project = canceled.project;
+  for (const runId of canceled.canceledRuns) {
+    const run = project.runs.find((entry) => entry.runId === runId);
+    if (run?.status === "aborted" && run.runtime.mode === "tmux") {
+      project = await cleanupCanceledTmuxRunForRepo({ repoRoot, runId, run });
+    }
+  }
+  return { ...canceled, project };
 }
 
 export async function runParallelWorkForRepo(
@@ -1100,8 +1140,8 @@ export async function runParallelWorkForRepo(
   }
 
   const cancelReason = "Parent conductor parallel work was interrupted";
-  const cancelOwnedWork = () =>
-    cancelActiveWorkForRepo(repoRoot, {
+  const cancelOwnedWork = async () =>
+    cancelActiveWorkForRepoWithRuntimeCleanup(repoRoot, {
       reason: cancelReason,
       taskIds: tasks.map((task) => task.taskId),
       workerIds: workers.map((worker) => worker.workerId),
@@ -1130,13 +1170,25 @@ export async function runParallelWorkForRepo(
       ]),
     ];
   };
-  const onAbort = () => {
-    const canceled = cancelOwnedWork();
+  const applyCanceledWork = (canceled: { canceledRuns: string[]; canceledTasks: string[] }) => {
     canceledRuns = [...new Set([...canceledRuns, ...canceled.canceledRuns])];
     canceledTasks = [...new Set([...canceledTasks, ...canceled.canceledTasks])];
   };
+  const pendingCancellations: Array<Promise<void>> = [];
+  const requestCancelOwnedWork = () => {
+    const pending = cancelOwnedWork()
+      .then(applyCanceledWork)
+      .catch((error) => {
+        console.error(`pi-conductor cancellation cleanup failed: ${errorMessage(error)}`);
+      });
+    pendingCancellations.push(pending);
+    return pending;
+  };
+  const onAbort = () => {
+    void requestCancelOwnedWork();
+  };
   signal?.addEventListener("abort", onAbort);
-  if (signal?.aborted) onAbort();
+  if (signal?.aborted) await requestCancelOwnedWork();
 
   const liveControllers = tasks.map((task, index) => {
     const linked = createLinkedAbortController(signal);
@@ -1156,6 +1208,7 @@ export async function runParallelWorkForRepo(
 
   try {
     if (signal?.aborted) {
+      await Promise.allSettled(pendingCancellations);
       return { workers, tasks, results: [], canceledRuns, canceledTasks };
     }
     const settled = await Promise.allSettled(
@@ -1163,7 +1216,8 @@ export async function runParallelWorkForRepo(
         runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal, { runtimeMode: input.runtimeMode }),
       ),
     );
-    if (signal?.aborted) onAbort();
+    if (signal?.aborted) await requestCancelOwnedWork();
+    await Promise.allSettled(pendingCancellations);
     collectOwnedCanceledWork();
     const results = settled.map((entry, index) =>
       entry.status === "fulfilled"
@@ -1461,7 +1515,7 @@ export async function runWorkForRepo(
     startRun: false,
   });
   if (signal?.aborted) {
-    cancelActiveWorkForRepo(repoRoot, {
+    await cancelActiveWorkForRepoWithRuntimeCleanup(repoRoot, {
       reason: "Parent conductor work was interrupted",
       taskIds: [delegated.task.taskId],
       workerIds: [delegated.worker.workerId],
@@ -1572,36 +1626,6 @@ export async function createWorkerForRepo(repoRoot: string, workerName: string):
     throw error;
   }
   return worker;
-}
-
-export function reconcileProjectForRepo(repoRoot: string, input: { now?: string; dryRun?: boolean } = {}): RunRecord {
-  const healthReconciled = reconcileWorkerHealth(getOrCreateRunForRepo(repoRoot));
-  const leaseReconciled = reconcileRunLeases(healthReconciled, input);
-  if (!input.dryRun) {
-    return mutateRepoRunSync(repoRoot, (latest) => reconcileRunLeases(reconcileWorkerHealth(latest), input));
-  }
-  return leaseReconciled;
-}
-
-export function reconcileWorkerHealth(run: RunRecord): RunRecord {
-  const workers = run.workers.map((worker) => {
-    const worktreeMissing = !worker.worktreePath || !existsSync(worker.worktreePath);
-    const sessionMissing = !worker.sessionFile || !existsSync(worker.sessionFile);
-    if (!worktreeMissing && !sessionMissing) {
-      return worker;
-    }
-    return {
-      ...worker,
-      lifecycle: "broken" as const,
-      recoverable: true,
-      updatedAt: new Date().toISOString(),
-    };
-  });
-  return {
-    ...run,
-    workers,
-    updatedAt: new Date().toISOString(),
-  };
 }
 
 export function removeWorkerForRepo(repoRoot: string, workerName: string): WorkerRecord {
@@ -1912,14 +1936,8 @@ export function createWorkerPrForRepo(
   }
 }
 
-function isTerminalRunAttemptStatus(status: RunAttemptRecord["status"]): boolean {
-  return ["succeeded", "partial", "blocked", "failed", "aborted", "stale", "interrupted", "unknown_dispatch"].includes(
-    status,
-  );
-}
-
 function isActiveRunAttempt(attempt: RunAttemptRecord): boolean {
-  return !attempt.finishedAt && !isTerminalRunAttemptStatus(attempt.status);
+  return !attempt.finishedAt && !isTerminalRunStatus(attempt.status);
 }
 
 function mapWorkerRunStatusToRunStatus(status: WorkerRunResult["status"]): "succeeded" | "failed" | "aborted" {
@@ -1973,11 +1991,24 @@ export async function runTaskForRepo(
 
   try {
     const runtimeResult = await runtimeBackend.run({
+      repoRoot,
       worktreePath: worker.worktreePath,
       sessionFile: worker.sessionFile,
       task: task.prompt,
       signal: linkedSignal.signal,
       taskContract: started.taskContract,
+      onRuntimeMetadata: async (metadata) => {
+        await mutateRepoRunWithLockRetry(repoRoot, (latest) =>
+          recordRuntimeMetadataForRun({
+            run: latest,
+            runId: started.run.runId,
+            taskId,
+            workerId: worker.workerId,
+            runtimeMode,
+            metadata,
+          }),
+        );
+      },
       onConductorProgress: async (progress) => {
         recordTaskProgressForRepo(repoRoot, progress);
       },
@@ -1989,6 +2020,7 @@ export async function runTaskForRepo(
           type: gate.type,
           resourceRefs: { taskId: gate.taskId, runId: gate.runId, workerId: worker.workerId },
           requestedDecision: gate.requestedDecision,
+          requireActiveRun: true,
         });
       },
       onConductorFollowUpTask: async (followUp) => {
@@ -1997,7 +2029,7 @@ export async function runTaskForRepo(
     });
 
     let createdFallbackCompletion = false;
-    mutateRepoRunSync(repoRoot, (latest) => {
+    await mutateRepoRunWithLockRetry(repoRoot, (latest) => {
       const runAttempt = latest.runs.find((entry) => entry.runId === started.run.runId);
       if (!runAttempt || runAttempt.finishedAt) {
         return latest;
@@ -2012,6 +2044,13 @@ export async function runTaskForRepo(
         errorMessage: runtimeResult.errorMessage,
       });
     });
+    if (createdFallbackCompletion && runtimeMode === "tmux") {
+      releaseTerminalTmuxWorkerForRepo({
+        repoRoot,
+        runId: started.run.runId,
+        diagnostic: `tmux runtime returned terminal result: ${runtimeResult.status}`,
+      });
+    }
     if (createdFallbackCompletion && runtimeResult.status === "success") {
       createGateForRepo(repoRoot, {
         type: "needs_review",
@@ -2027,6 +2066,32 @@ export async function runTaskForRepo(
       errorMessage: runtimeResult.errorMessage,
       sessionId: runtimeResult.sessionId,
     };
+  } catch (error) {
+    const message = errorMessage(error);
+    await mutateRepoRunWithLockRetry(repoRoot, (latest) => {
+      const runAttempt = latest.runs.find((entry) => entry.runId === started.run.runId);
+      if (!runAttempt || runAttempt.finishedAt) {
+        return latest;
+      }
+      return completeTaskRun(latest, {
+        runId: started.run.runId,
+        status: "failed",
+        completionSummary: message,
+        errorMessage: message,
+      });
+    });
+    if (runtimeMode === "tmux") {
+      const cleanupStatus = runtimeCleanupStatus(error);
+      releaseTerminalTmuxWorkerForRepo({
+        repoRoot,
+        runId: started.run.runId,
+        diagnostic: `tmux runtime ended after backend error: ${message}`,
+        cleanupStatus,
+        workerLifecycle: cleanupStatus === "failed" ? "broken" : undefined,
+        workerRecoverable: cleanupStatus === "failed" ? true : undefined,
+      });
+    }
+    throw error;
   } finally {
     unregisterLiveRun();
     linkedSignal.dispose();

@@ -10,6 +10,7 @@ import {
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
+import { createTmuxWorkerRunRuntimeBackend } from "./tmux-runtime.js";
 import type {
   ConductorCompletionReportInput,
   ConductorFollowUpTaskInput,
@@ -41,6 +42,9 @@ export function getWorkerRunRuntimeBackend(mode: RunRuntimeMode = "headless"): W
       preflight: preflightWorkerRunRuntime,
       run: runWorkerPromptRuntime,
     };
+  }
+  if (mode === "tmux") {
+    return createTmuxWorkerRunRuntimeBackend();
   }
   throw new Error(`${mode} runtime is not implemented yet`);
 }
@@ -164,6 +168,15 @@ const artifactTypeSchema = Type.Union([
   Type.Literal("other"),
 ]);
 
+const childArtifactMetadataSchema = Type.Object(
+  {},
+  {
+    additionalProperties: true,
+    description:
+      "Freeform child metadata. root and worktreeRoot round-trip for child artifacts but are not trusted as read roots.",
+  },
+);
+
 export function buildRunScopedConductorTools(input: {
   taskContract?: TaskContractInput;
   onConductorProgress?: (params: ConductorProgressReportInput) => void | Promise<void>;
@@ -196,7 +209,7 @@ export function buildRunScopedConductorTools(input: {
           Type.Object({
             type: artifactTypeSchema,
             ref: Type.String(),
-            metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),
+            metadata: Type.Optional(childArtifactMetadataSchema),
           }),
         ),
       }),
@@ -268,7 +281,7 @@ export function buildRunScopedConductorTools(input: {
           Type.Object({
             type: artifactTypeSchema,
             ref: Type.String(),
-            metadata: Type.Optional(Type.Object({}, { additionalProperties: true })),
+            metadata: Type.Optional(childArtifactMetadataSchema),
           }),
         ),
       }),

@@ -14,7 +14,9 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { deriveProjectKey } from "./project-key.js";
+import { isTerminalRunStatus } from "./run-status.js";
 import { createRunRuntimeMetadata, mapRunStatusToRuntimeStatus } from "./runtime-metadata.js";
+import { markRunAttemptStale } from "./runtime-stale.js";
 import { defaultOperationForGate, normalizeProjectRecord } from "./storage-normalize.js";
 import { validateRunRecord } from "./storage-validation.js";
 
@@ -627,7 +629,11 @@ export function cancelTaskRun(run: RunRecord, input: { runId: string; reason: st
         : entry,
     ),
     workers: normalized.workers.map((entry) =>
-      entry.workerId === runAttempt.workerId ? { ...entry, lifecycle: "idle" as const, updatedAt: now } : entry,
+      entry.workerId === runAttempt.workerId
+        ? runAttempt.runtime.mode === "headless"
+          ? { ...entry, lifecycle: "idle" as const, updatedAt: now }
+          : { ...entry, lifecycle: "broken" as const, recoverable: true, updatedAt: now }
+        : entry,
     ),
     updatedAt: now,
   };
@@ -690,12 +696,6 @@ export function recordRunHeartbeat(
   });
 }
 
-function isTerminalRunStatus(status: RunStatus): boolean {
-  return ["succeeded", "partial", "blocked", "failed", "aborted", "stale", "interrupted", "unknown_dispatch"].includes(
-    status,
-  );
-}
-
 function requiresHumanApproval(gateType: GateRecord["type"]): boolean {
   return ["approval_required", "ready_for_pr", "destructive_cleanup"].includes(gateType);
 }
@@ -708,32 +708,14 @@ export function reconcileRunLeases(run: RunRecord, input: { now?: string } = {})
   );
 
   for (const expired of expiredRuns) {
-    const updated = {
-      ...current,
-      runs: current.runs.map((entry) =>
-        entry.runId === expired.runId
-          ? {
-              ...entry,
-              status: "stale" as const,
-              runtime: { ...entry.runtime, status: "exited_error" as const, finishedAt: now },
-              finishedAt: now,
-              leaseExpiresAt: null,
-              errorMessage: "Lease expired",
-            }
-          : entry,
-      ),
-      tasks: current.tasks.map((entry) =>
-        entry.taskId === expired.taskId && entry.activeRunId === expired.runId
-          ? { ...entry, state: "needs_review" as const, activeRunId: null, updatedAt: now }
-          : entry,
-      ),
-      workers: current.workers.map((entry) =>
-        entry.workerId === expired.workerId && entry.lifecycle === "running"
-          ? { ...entry, lifecycle: "idle" as const, updatedAt: now }
-          : entry,
-      ),
-      updatedAt: now,
-    };
+    const updated = markRunAttemptStale({
+      run: current,
+      attempt: expired,
+      now,
+      diagnostic: "Lease expired",
+      workerLifecycle: "idle",
+      workerRecoverable: false,
+    });
     const withLeaseExpired = appendConductorEvent(updated, {
       actor: { type: "system", id: "reconciler" },
       type: "run.lease_expired",
@@ -940,6 +922,10 @@ function createArtifactId(runId: string): string {
   return `artifact-${runId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function sanitizeChildArtifactMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
+  return { ...(metadata ?? {}) };
+}
+
 export function readArtifactContentForRepo(
   repoRoot: string,
   artifactId: string,
@@ -961,14 +947,15 @@ export function readArtifactContentForRepo(
     };
   }
   assertSafeArtifactRef(artifact.ref);
-  const metadataRoot = artifact.metadata.worktreeRoot;
+  const trustsMetadataRoots = artifact.producer.type !== "child_run";
+  const metadataRoot = trustsMetadataRoots ? artifact.metadata.worktreeRoot : undefined;
   const worker = artifact.resourceRefs.workerId
     ? [...(run?.workers ?? []), ...(run?.archivedWorkers ?? [])].find(
         (entry) => entry.workerId === artifact.resourceRefs.workerId,
       )
     : null;
   const readRoot =
-    artifact.metadata.root === "storage"
+    trustsMetadataRoots && artifact.metadata.root === "storage"
       ? (run?.storageDir ?? getConductorProjectDir(deriveProjectKey(normalizedRoot)))
       : typeof metadataRoot === "string"
         ? resolve(metadataRoot)
@@ -1120,7 +1107,7 @@ export function recordTaskProgress(
           runId: input.runId,
         },
         producer: { type: "child_run", id: input.runId },
-        metadata: input.artifact.metadata,
+        metadata: sanitizeChildArtifactMetadata(input.artifact.metadata),
       })
     : null;
   const artifactIds = artifact ? [artifact.artifactId] : [];
@@ -1198,7 +1185,7 @@ export function recordTaskCompletion(
           runId: input.runId,
         },
         producer: { type: "child_run", id: input.runId },
-        metadata: input.artifact.metadata,
+        metadata: sanitizeChildArtifactMetadata(input.artifact.metadata),
       })
     : null;
   const withArtifact = artifact
@@ -1245,7 +1232,13 @@ export function completeTaskRun(
       entry.taskId === runAttempt.taskId ? { ...entry, state: taskState, activeRunId: null, updatedAt: now } : entry,
     ),
     workers: normalized.workers.map((entry) =>
-      entry.workerId === runAttempt.workerId ? { ...entry, lifecycle: "idle" as const, updatedAt: now } : entry,
+      entry.workerId === runAttempt.workerId
+        ? {
+            ...entry,
+            lifecycle: runAttempt.runtime.mode === "tmux" ? ("running" as const) : ("idle" as const),
+            updatedAt: now,
+          }
+        : entry,
     ),
     runs: normalized.runs.map((entry) =>
       entry.runId === input.runId

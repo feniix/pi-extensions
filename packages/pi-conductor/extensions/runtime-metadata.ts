@@ -1,3 +1,4 @@
+import { isTerminalRunStatus } from "./run-status.js";
 import type {
   PersistedRunAttemptRecord,
   RunAttemptRecord,
@@ -22,6 +23,8 @@ export function createRunRuntimeMetadata(input: {
     sessionId: input.sessionId ?? null,
     cwd: input.cwd ?? null,
     command: input.command ?? null,
+    contractPath: null,
+    nonceHash: null,
     runnerPid: null,
     processGroupId: null,
     tmux: null,
@@ -64,12 +67,6 @@ export function mapRunStatusToRuntimeStatus(status: RunAttemptRecord["status"] |
   }
 }
 
-function isTerminalRunStatus(status: RunAttemptRecord["status"] | undefined): boolean {
-  return ["succeeded", "partial", "blocked", "failed", "aborted", "stale", "interrupted", "unknown_dispatch"].includes(
-    status ?? "",
-  );
-}
-
 export function normalizeRunRuntimeMetadata(run: PersistedRunAttemptRecord): RunRuntimeMetadata {
   const runtime = run.runtime
     ? {
@@ -78,6 +75,8 @@ export function normalizeRunRuntimeMetadata(run: PersistedRunAttemptRecord): Run
         sessionId: run.runtime.sessionId ?? run.sessionId ?? null,
         cwd: run.runtime.cwd ?? null,
         command: run.runtime.command ?? null,
+        contractPath: run.runtime.contractPath ?? null,
+        nonceHash: run.runtime.nonceHash ?? null,
         runnerPid: run.runtime.runnerPid ?? null,
         processGroupId: run.runtime.processGroupId ?? null,
         tmux: run.runtime.tmux ?? null,

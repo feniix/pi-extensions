@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { inspectTmuxRuntimeAvailability } from "./tmux-runtime.js";
 import type { RunRuntimeMode } from "./types.js";
 
 export type ConductorBackendKind = "native" | "pi-subagents";
@@ -80,6 +81,13 @@ const headlessRuntimeCapabilities: ConductorRuntimeModeCapabilities = {
   viewerOnly: false,
 };
 
+const tmuxRuntimeCapabilities: ConductorRuntimeModeCapabilities = {
+  canStartRun: true,
+  canSuperviseLiveOutput: true,
+  requiresExternalRunner: true,
+  viewerOnly: false,
+};
+
 const unavailableVisibleRuntimeCapabilities: ConductorRuntimeModeCapabilities = {
   canStartRun: false,
   canSuperviseLiveOutput: true,
@@ -135,6 +143,7 @@ export function inspectConductorBackends(
 }
 
 export function inspectConductorRuntimeModes(): ConductorRuntimeModesStatus {
+  const tmuxAvailability = inspectTmuxRuntimeAvailability();
   const itermTmux: ConductorRuntimeModeStatus = {
     mode: "iterm-tmux",
     available: false,
@@ -152,10 +161,10 @@ export function inspectConductorRuntimeModes(): ConductorRuntimeModesStatus {
     },
     tmux: {
       mode: "tmux",
-      available: false,
+      available: tmuxAvailability.available,
       canonicalStateOwner: "conductor",
-      capabilities: unavailableVisibleRuntimeCapabilities,
-      diagnostic: "tmux supervised runtime adapter is not implemented yet",
+      capabilities: tmuxAvailability.available ? tmuxRuntimeCapabilities : unavailableVisibleRuntimeCapabilities,
+      diagnostic: tmuxAvailability.diagnostic,
     },
     "iterm-tmux": itermTmux,
     itermTmux,

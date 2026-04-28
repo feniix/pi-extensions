@@ -13,6 +13,9 @@
     "session"
   ],
   "type": "module",
+  "bin": {
+    "pi-conductor-runner": "./extensions/runner-cli.mjs"
+  },
   "files": [
     "extensions/",
     "skills/",

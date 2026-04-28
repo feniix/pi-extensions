@@ -1,3 +1,4 @@
+import { isTerminalRunStatus } from "./run-status.js";
 import type {
   ConductorNextAction,
   ConductorNextActionPriority,
@@ -9,16 +10,6 @@ import type {
 } from "./types.js";
 
 const priorityRank: Record<ConductorNextActionPriority, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-const terminalRunStatuses = new Set([
-  "succeeded",
-  "partial",
-  "blocked",
-  "failed",
-  "aborted",
-  "stale",
-  "interrupted",
-  "unknown_dispatch",
-]);
 
 function nextAction(input: Omit<ConductorNextAction, "actionId">): ConductorNextAction {
   const refs = input.resourceRefs;
@@ -80,7 +71,7 @@ export function computeNextActions(
   const activeRuns = run.runs.filter(
     (attempt) =>
       !attempt.finishedAt &&
-      !terminalRunStatuses.has(attempt.status) &&
+      !isTerminalRunStatus(attempt.status) &&
       (!input.objectiveId || Boolean(objectiveTaskIds?.has(attempt.taskId))),
   );
   const usableWorkers = run.workers.filter(isUsableIdleWorker);

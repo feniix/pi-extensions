@@ -95,6 +95,12 @@ export function assertRunRuntimeMetadata(runtime: unknown, context: string): voi
   assertNullableString(runtime.sessionId, `${context}.sessionId`);
   assertNullableString(runtime.cwd, `${context}.cwd`);
   assertNullableString(runtime.command, `${context}.command`);
+  if ("contractPath" in runtime) {
+    assertNullableString(runtime.contractPath, `${context}.contractPath`);
+  }
+  if ("nonceHash" in runtime) {
+    assertNullableString(runtime.nonceHash, `${context}.nonceHash`);
+  }
   assertNullableNumber(runtime.runnerPid, `${context}.runnerPid`);
   assertNullableNumber(runtime.processGroupId, `${context}.processGroupId`);
   assertNullableString(runtime.logPath, `${context}.logPath`);

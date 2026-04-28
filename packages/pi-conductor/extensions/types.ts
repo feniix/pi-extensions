@@ -318,6 +318,8 @@ export interface RunRuntimeMetadata {
   sessionId: string | null;
   cwd: string | null;
   command: string | null;
+  contractPath?: string | null;
+  nonceHash?: string | null;
   runnerPid: number | null;
   processGroupId: number | null;
   tmux: {
@@ -491,12 +493,14 @@ export interface ConductorFollowUpTaskInput {
 }
 
 export interface RuntimeRunContext {
+  repoRoot?: string;
   worktreePath: string;
   sessionFile: string;
   task: string;
   taskContract?: TaskContractInput;
   signal?: AbortSignal;
   onSessionReady?: (sessionId: string) => void | Promise<void>;
+  onRuntimeMetadata?: (metadata: Partial<RunRuntimeMetadata>) => void | Promise<void>;
   onConductorProgress?: (input: ConductorProgressReportInput) => void | Promise<void>;
   onConductorComplete?: (input: ConductorCompletionReportInput) => void | Promise<void>;
   onConductorGate?: (input: ConductorGateReportInput) => void | Promise<void>;
