@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildItermViewerScript,
   type ItermViewerCommandAdapter,
+  inspectItermViewerAvailability,
   openItermTmuxViewer,
 } from "../extensions/iterm-viewer.js";
 
@@ -61,5 +62,30 @@ describe("iTerm2 tmux viewer", () => {
     expect(buildItermViewerScript({ attachCommand: "tmux attach -r", title: "Conductor" })).toContain(
       'tell application "iTerm"',
     );
+  });
+
+  it("detects iTerm2 viewer availability without probing on non-macOS platforms", () => {
+    const probe = vi.fn();
+
+    expect(inspectItermViewerAvailability({ platform: "linux", probe })).toMatchObject({
+      available: false,
+      diagnostic: expect.stringContaining("macOS"),
+    });
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("reports macOS iTerm2 probe success and failure", () => {
+    expect(inspectItermViewerAvailability({ platform: "darwin", probe: () => undefined })).toMatchObject({
+      available: true,
+      diagnostic: null,
+    });
+    expect(
+      inspectItermViewerAvailability({
+        platform: "darwin",
+        probe: () => {
+          throw new Error("iTerm is missing");
+        },
+      }),
+    ).toMatchObject({ available: false, diagnostic: expect.stringContaining("iTerm is missing") });
   });
 });

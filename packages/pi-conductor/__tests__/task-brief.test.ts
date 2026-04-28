@@ -91,7 +91,7 @@ describe("conductor task brief", () => {
     expect(brief.markdown).toContain("Latest progress: opening viewer");
     expect(brief.markdown).toContain(`- ${started.run.runId} status=running`);
     expect(brief.markdown).toContain("runtimeMode=iterm-tmux runtimeStatus=running viewer=opened");
-    expect(brief.markdown).toContain("viewerCommand=tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'");
+    expect(brief.markdown).toContain("viewerCommand=\"tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'\"");
     expect(brief.markdown).toContain("log=/tmp/pi-conductor/runtime/run-1/runner.log");
     expect(brief.markdown).toContain(
       `cancel=conductor_cancel_task_run({"runId":"${started.run.runId}","reason":"<reason>"})`,

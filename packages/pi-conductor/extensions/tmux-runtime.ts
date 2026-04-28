@@ -161,6 +161,11 @@ function mapTerminalRunToRuntimeResult(run: RunAttemptRecord): RuntimeRunResult 
   };
 }
 
+function durableRunIsActive(input: { repoRoot: string; runId: string }): boolean {
+  const latest = getOrCreateRunForRepo(input.repoRoot).runs.find((entry) => entry.runId === input.runId);
+  return Boolean(latest && !latest.finishedAt && !isTerminalRunStatus(latest.status));
+}
+
 export function shellQuote(value: string): string {
   if (value.length === 0) {
     return "''";
@@ -716,7 +721,11 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
           diagnostics: runningDiagnostics,
           heartbeatAt: now(),
         });
-        if (mode === "iterm-tmux") {
+        if (
+          mode === "iterm-tmux" &&
+          !input.signal?.aborted &&
+          durableRunIsActive({ repoRoot: input.repoRoot, runId: input.taskContract.runId })
+        ) {
           try {
             const viewer = await openItermTmuxViewer({
               attachCommand: launch.attachCommand,
@@ -724,19 +733,31 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
               adapter: options.itermViewerAdapter,
               platform: options.itermPlatform,
             });
-            await input.onRuntimeMetadata?.({
-              viewerCommand: viewer.command,
-              viewerStatus: viewer.status,
-              diagnostics: [
-                ...runningDiagnostics,
-                viewer.status === "opened"
-                  ? "iTerm2 viewer opened"
-                  : (viewer.diagnostic ?? "iTerm2 viewer unavailable"),
-              ],
-            });
-          } catch {
-            // iTerm is a best-effort viewer over the already-launched tmux control plane.
-            // Viewer telemetry persistence must not tear down active worker execution.
+            if (
+              !input.signal?.aborted &&
+              durableRunIsActive({ repoRoot: input.repoRoot, runId: input.taskContract.runId })
+            ) {
+              try {
+                await input.onRuntimeMetadata?.({
+                  viewerCommand: viewer.command,
+                  viewerStatus: viewer.status,
+                  diagnostics: [
+                    ...runningDiagnostics,
+                    viewer.status === "opened"
+                      ? "iTerm2 viewer opened"
+                      : (viewer.diagnostic ?? "iTerm2 viewer unavailable"),
+                  ],
+                });
+              } catch (error) {
+                console.error(
+                  `pi-conductor viewer metadata persistence failed for ${input.taskContract.runId}: ${errorMessage(error)}`,
+                );
+              }
+            }
+          } catch (error) {
+            console.error(
+              `pi-conductor iTerm2 viewer launch failed for ${input.taskContract.runId}: ${errorMessage(error)}`,
+            );
           }
         }
       } catch (error) {

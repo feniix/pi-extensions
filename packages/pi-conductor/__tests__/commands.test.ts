@@ -125,7 +125,7 @@ describe("runConductorCommand", () => {
     for (const text of [runs, oneRun]) {
       expect(text).toContain(`task=${task.taskId}`);
       expect(text).toContain("runtimeMode=iterm-tmux runtimeStatus=running viewer=opened");
-      expect(text).toContain("viewerCommand=tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'");
+      expect(text).toContain("viewerCommand=\"tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'\"");
       expect(text).toContain("log=/tmp/pi-conductor/runtime/run-1/runner.log");
       expect(text).toContain(`cancel=conductor_cancel_task_run({"runId":"${started.run.runId}","reason":"<reason>"})`);
     }

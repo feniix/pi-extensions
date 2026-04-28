@@ -150,6 +150,48 @@ export function inspectConductorBackends(
   };
 }
 
+function getHeadlessRuntimeStatus(): ConductorRuntimeModeStatus {
+  return {
+    mode: "headless",
+    available: true,
+    canonicalStateOwner: "conductor",
+    capabilities: headlessRuntimeCapabilities,
+    diagnostic: null,
+  };
+}
+
+function getTmuxRuntimeStatus(
+  input: { tmuxAvailability?: { available: boolean; diagnostic: string | null } } = {},
+): ConductorRuntimeModeStatus {
+  const tmuxAvailability = input.tmuxAvailability ?? inspectTmuxRuntimeAvailability();
+  return {
+    mode: "tmux",
+    available: tmuxAvailability.available,
+    canonicalStateOwner: "conductor",
+    capabilities: tmuxAvailability.available ? tmuxRuntimeCapabilities : unavailableVisibleRuntimeCapabilities,
+    diagnostic: tmuxAvailability.diagnostic,
+  };
+}
+
+function getItermTmuxRuntimeStatus(
+  input: {
+    tmuxAvailability?: { available: boolean; diagnostic: string | null };
+    itermViewerAvailability?: ItermViewerAvailability;
+  } = {},
+): ConductorRuntimeModeStatus {
+  const tmuxAvailability = input.tmuxAvailability ?? inspectTmuxRuntimeAvailability();
+  const itermViewerAvailability =
+    input.itermViewerAvailability ??
+    (tmuxAvailability.available ? inspectItermViewerAvailability() : { available: false, diagnostic: null });
+  return {
+    mode: "iterm-tmux",
+    available: tmuxAvailability.available,
+    canonicalStateOwner: "conductor",
+    capabilities: tmuxAvailability.available ? itermViewerRuntimeCapabilities : unavailableItermViewerCapabilities,
+    diagnostic: tmuxAvailability.available ? itermViewerAvailability.diagnostic : tmuxAvailability.diagnostic,
+  };
+}
+
 export function inspectConductorRuntimeModes(
   input: {
     tmuxAvailability?: { available: boolean; diagnostic: string | null };
@@ -157,37 +199,25 @@ export function inspectConductorRuntimeModes(
   } = {},
 ): ConductorRuntimeModesStatus {
   const tmuxAvailability = input.tmuxAvailability ?? inspectTmuxRuntimeAvailability();
-  const itermViewerAvailability = input.itermViewerAvailability ?? inspectItermViewerAvailability();
-  const itermTmux: ConductorRuntimeModeStatus = {
-    mode: "iterm-tmux",
-    available: tmuxAvailability.available,
-    canonicalStateOwner: "conductor",
-    capabilities: tmuxAvailability.available ? itermViewerRuntimeCapabilities : unavailableItermViewerCapabilities,
-    diagnostic: tmuxAvailability.available ? itermViewerAvailability.diagnostic : tmuxAvailability.diagnostic,
-  };
+  const headless = getHeadlessRuntimeStatus();
+  const tmux = getTmuxRuntimeStatus({ tmuxAvailability });
+  const itermTmux = getItermTmuxRuntimeStatus({ ...input, tmuxAvailability });
   return {
-    headless: {
-      mode: "headless",
-      available: true,
-      canonicalStateOwner: "conductor",
-      capabilities: headlessRuntimeCapabilities,
-      diagnostic: null,
-    },
-    tmux: {
-      mode: "tmux",
-      available: tmuxAvailability.available,
-      canonicalStateOwner: "conductor",
-      capabilities: tmuxAvailability.available ? tmuxRuntimeCapabilities : unavailableVisibleRuntimeCapabilities,
-      diagnostic: tmuxAvailability.diagnostic,
-    },
+    headless,
+    tmux,
     "iterm-tmux": itermTmux,
     itermTmux,
   };
 }
 
 export function getConductorRuntimeModeStatus(mode: RunRuntimeMode): ConductorRuntimeModeStatus {
-  const status = inspectConductorRuntimeModes();
-  return status[mode];
+  if (mode === "headless") {
+    return getHeadlessRuntimeStatus();
+  }
+  if (mode === "tmux") {
+    return getTmuxRuntimeStatus();
+  }
+  return getItermTmuxRuntimeStatus();
 }
 
 export function getConductorBackendAdapter(

@@ -38,7 +38,7 @@ export function formatRunStatus(run: RunRecord): string {
     `gates: ${run.gates.length}`,
     `artifacts: ${run.artifacts.length}`,
     `events: ${run.events.length}`,
-    `visibleRuns: ${activeVisibleRuns.length === 0 ? "none active" : `${activeVisibleRuns.length} active`}`,
+    `activeVisibleRuns: ${activeVisibleRuns.length === 0 ? "none" : activeVisibleRuns.length}`,
   ];
 
   for (const task of run.tasks) {

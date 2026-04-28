@@ -2,9 +2,10 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assignTaskForRepo,
+  cancelTaskRunForRepo,
   createTaskForRepo,
   createWorkerForRepo,
   getOrCreateRunForRepo,
@@ -69,6 +70,7 @@ describe("tmux conductor runtime", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     delete process.env.PI_CONDUCTOR_HOME;
     for (const dir of [repoDir, conductorHome]) {
       if (dir && existsSync(dir)) rmSync(dir, { recursive: true, force: true });
@@ -215,6 +217,7 @@ describe("tmux conductor runtime", () => {
   });
 
   it("does not tear down tmux when best-effort viewer metadata cannot be persisted", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { worker, started } = await createStartedTask();
     const adapter = new FakeTmuxAdapter();
     const itermViewerAdapter: ItermViewerCommandAdapter = { execFile: async () => ({ stdout: "", stderr: "" }) };
@@ -249,10 +252,60 @@ describe("tmux conductor runtime", () => {
 
     expect(result).toMatchObject({ status: "success" });
     expect(adapter.calls.some((call) => call.args.includes("kill-session"))).toBe(false);
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("viewer metadata persistence failed"));
     expect(getOrCreateRunForRepo(repoDir).runs[0]?.runtime).toMatchObject({
       mode: "iterm-tmux",
       status: "running",
       viewerStatus: "pending",
+    });
+    consoleError.mockRestore();
+  });
+
+  it("does not open an iTerm2 viewer after durable cancellation wins the launch race", async () => {
+    const { worker, started } = await createStartedTask();
+    const adapter = new FakeTmuxAdapter();
+    let viewerLaunchCount = 0;
+    const itermViewerAdapter: ItermViewerCommandAdapter = {
+      execFile: async () => {
+        viewerLaunchCount += 1;
+        return { stdout: "", stderr: "" };
+      },
+    };
+    const backend = createTmuxWorkerRunRuntimeBackend({
+      mode: "iterm-tmux",
+      commandAdapter: adapter,
+      runnerCommand: ["node", "/tmp/pi-conductor-runner", "run"],
+      itermViewerAdapter,
+      itermPlatform: "darwin",
+      waitForCompletion: false,
+      randomHex: () => "decafbaddecafbaddecafbaddecafbad",
+    });
+
+    await backend.run({
+      repoRoot: repoDir,
+      worktreePath: worker.worktreePath ?? repoDir,
+      sessionFile: worker.sessionFile ?? join(repoDir, "session.jsonl"),
+      task: "Run in tmux",
+      taskContract: started.taskContract,
+      onRuntimeMetadata: async (metadata) => {
+        const latest = getOrCreateRunForRepo(repoDir);
+        const { writeRun } = await import("../extensions/storage.js");
+        writeRun({
+          ...latest,
+          runs: latest.runs.map((entry) =>
+            entry.runId === started.run.runId ? { ...entry, runtime: { ...entry.runtime, ...metadata } } : entry,
+          ),
+        });
+        if (metadata.status === "running") {
+          cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "human canceled before viewer" });
+        }
+      },
+    });
+
+    expect(viewerLaunchCount).toBe(0);
+    expect(getOrCreateRunForRepo(repoDir).runs[0]).toMatchObject({
+      status: "aborted",
+      runtime: { mode: "iterm-tmux", viewerStatus: "pending" },
     });
   });
 

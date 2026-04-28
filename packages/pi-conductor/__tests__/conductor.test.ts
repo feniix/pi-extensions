@@ -715,6 +715,39 @@ case "$*" in *has-session*) exit 1 ;; *) exit 0 ;; esac
     expect(reconciled.runs[0]).toMatchObject({ status: "stale", errorMessage: expect.stringContaining("tmux") });
   });
 
+  it("reconciles missing iterm-tmux runtime sessions through project reconciliation", async () => {
+    const worker = await createWorkerForRepo(repoDir, "iterm-tmux-worker");
+    const task = createTaskForRepo(repoDir, { title: "Visible viewer lease task", prompt: "Do it visibly" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+    const run = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...run,
+      runs: run.runs.map((attempt) =>
+        attempt.runId === started.run.runId
+          ? {
+              ...attempt,
+              runtime: {
+                ...attempt.runtime,
+                mode: "iterm-tmux",
+                tmux: {
+                  socketPath: "/tmp/missing-iterm-tmux.sock",
+                  sessionName: "missing",
+                  windowId: "@1",
+                  paneId: "%2",
+                },
+              },
+            }
+          : attempt,
+      ),
+    });
+
+    const reconciled = reconcileProjectForRepo(repoDir, { now: "2026-04-27T00:00:00.000Z" });
+
+    expect(reconciled.tasks[0]).toMatchObject({ state: "needs_review", activeRunId: null });
+    expect(reconciled.runs[0]).toMatchObject({ status: "stale", errorMessage: expect.stringContaining("tmux") });
+  });
+
   it("does not expire active tmux runs while their tmux session is still present", async () => {
     const originalPath = process.env.PATH;
     const binDir = mkdtempSync(join(tmpdir(), "fake-tmux-bin-"));

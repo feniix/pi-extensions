@@ -152,7 +152,7 @@ Run tools accept `runtimeMode: "headless" | "tmux" | "iterm-tmux"`. `headless` r
 
 Use conductor status tools rather than typing into worker panes to supervise work. Active visible runs include:
 
-- `viewer=<opened|warning|unavailable|pending>` and `viewerCommand=tmux ... attach-session -r ...`
+- `viewer=<opened|warning|unavailable|pending>` and `viewerCommand="tmux ... attach-session -r ..."`
 - `log=<path-or-ref>` and the latest runtime diagnostic/heartbeat
 - `cancel=conductor_cancel_task_run({"runId":"...","reason":"<reason>"})`
 

@@ -81,7 +81,7 @@ describe("formatRunStatus", () => {
     expect(text).toContain("tasks: 0");
     expect(text).toContain("runs: 0");
     expect(text).toContain("events: 0");
-    expect(text).toContain("visibleRuns: none active");
+    expect(text).toContain("activeVisibleRuns: none");
   });
 
   it("includes concise durable task resource status", () => {
@@ -177,10 +177,10 @@ describe("formatRunStatus", () => {
 
     const text = formatRunStatus(withRuntime);
 
-    expect(text).toContain("visibleRuns: 1 active");
+    expect(text).toContain("activeVisibleRuns: 1");
     expect(text).toContain("latestProgress=editing files");
     expect(text).toContain("viewer=warning");
-    expect(text).toContain("viewerCommand=tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'");
+    expect(text).toContain("viewerCommand=\"tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'\"");
     expect(text).toContain("log=/tmp/pi-conductor/runtime/run-1/runner.log");
     expect(text).toContain('cancel=conductor_cancel_task_run({"runId":"run-1","reason":"<reason>"})');
   });
@@ -192,7 +192,7 @@ describe("formatRunStatus", () => {
       runtimeStatus: "starting" as const,
       viewerStatus: "pending" as const,
       diagnostic: "tmux session pi-cond-run prepared",
-      visibleRuns: "visibleRuns: 1 active",
+      visibleRuns: "activeVisibleRuns: 1",
       cancel: true,
     },
     {
@@ -201,7 +201,7 @@ describe("formatRunStatus", () => {
       runtimeStatus: "running" as const,
       viewerStatus: "opened" as const,
       diagnostic: "iTerm2 viewer opened",
-      visibleRuns: "visibleRuns: 1 active",
+      visibleRuns: "activeVisibleRuns: 1",
       cancel: true,
     },
     {
@@ -210,7 +210,7 @@ describe("formatRunStatus", () => {
       runtimeStatus: "running" as const,
       viewerStatus: "warning" as const,
       diagnostic: "iTerm2 viewer launch failed; attach manually with the tmux command",
-      visibleRuns: "visibleRuns: 1 active",
+      visibleRuns: "activeVisibleRuns: 1",
       cancel: true,
     },
     {
@@ -219,7 +219,7 @@ describe("formatRunStatus", () => {
       runtimeStatus: "exited_error" as const,
       viewerStatus: "warning" as const,
       diagnostic: "tmux session missing during reconciliation: can't find session",
-      visibleRuns: "visibleRuns: none active",
+      visibleRuns: "activeVisibleRuns: none",
       finished: true,
       cancel: false,
     },
@@ -229,7 +229,7 @@ describe("formatRunStatus", () => {
       runtimeStatus: "exited_success" as const,
       viewerStatus: "opened" as const,
       diagnostic: "tmux runner exited after fallback completion",
-      visibleRuns: "visibleRuns: none active",
+      visibleRuns: "activeVisibleRuns: none",
       finished: true,
       cancel: false,
     },
@@ -240,7 +240,7 @@ describe("formatRunStatus", () => {
       viewerStatus: "opened" as const,
       cleanupStatus: "succeeded" as const,
       diagnostic: "tmux session cleanup succeeded",
-      visibleRuns: "visibleRuns: none active",
+      visibleRuns: "activeVisibleRuns: none",
       finished: true,
       cancel: false,
     },
@@ -251,7 +251,7 @@ describe("formatRunStatus", () => {
       viewerStatus: "opened" as const,
       cleanupStatus: "failed" as const,
       diagnostic: "tmux pane command verification failed before cancel: zsh",
-      visibleRuns: "visibleRuns: none active",
+      visibleRuns: "activeVisibleRuns: none",
       finished: true,
       cancel: false,
     },
@@ -262,7 +262,7 @@ describe("formatRunStatus", () => {
     expect(text).toContain(`status=${state.runStatus}`);
     expect(text).toContain(`runtimeStatus=${state.runtimeStatus}`);
     expect(text).toContain(`viewer=${state.viewerStatus}`);
-    expect(text).toContain("viewerCommand=tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'");
+    expect(text).toContain("viewerCommand=\"tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'\"");
     expect(text).toContain("log=/tmp/pi-conductor/runtime/run-1/runner.log");
     expect(text).toContain("latestProgress=editing files");
     expect(text).toContain(`diagnostic=${state.diagnostic}`);

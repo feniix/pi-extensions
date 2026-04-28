@@ -101,7 +101,7 @@ describe("conductor project brief", () => {
     expect(brief.markdown).toContain("## Active Runs");
     expect(brief.markdown).toContain(`- ${started.run.runId} task=${task.taskId}`);
     expect(brief.markdown).toContain("runtimeMode=iterm-tmux runtimeStatus=running viewer=opened");
-    expect(brief.markdown).toContain("viewerCommand=tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'");
+    expect(brief.markdown).toContain("viewerCommand=\"tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'\"");
     expect(brief.markdown).toContain("log=/tmp/pi-conductor/runtime/run-1/runner.log");
     expect(brief.markdown).toContain("progress=opening viewer");
     expect(brief.markdown).toContain(
