@@ -138,6 +138,17 @@ describe("pi-devtools generated CLI command contract", () => {
       draft: true,
       prerelease: true,
     });
+    await executeTool("devtools_create_release", { tag: "v1.2.4", title: "Version 1.2.4" });
+
+    expect(generatedCommands.some((command) => command.startsWith("gh pr create") && command.includes("--head"))).toBe(
+      true,
+    );
+    expect(generatedCommands.some((command) => command.startsWith("gh pr create") && command.includes("--body"))).toBe(
+      true,
+    );
+    expect(
+      generatedCommands.some((command) => command.startsWith("gh release create") && command.includes("--notes")),
+    ).toBe(true);
 
     const helpByCommand = new Map<(typeof HELP_COMMANDS)[number], string>();
     for (const command of generatedCommands) {

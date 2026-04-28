@@ -29,7 +29,7 @@ export function createPrTool(
     const targetBase = base || getDefaultBranch();
     const headBranch = execGit("git branch --show-current");
 
-    let command = `gh pr create --title ${shellQuote(title)} --base ${shellQuote(targetBase)}`;
+    let command = `gh pr create --title ${shellQuote(title)} --base ${shellQuote(targetBase)} --head ${shellQuote(headBranch)}`;
     command += ` --body ${shellQuote(body ?? "")}`;
     if (draft) {
       command += " --draft";
