@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { checkCiTool, createPrTool, createReleaseTool, mergePrTool } from "../extensions/index.js";
+import { toolDefinitions } from "../extensions/index.js";
 
 vi.mock("../extensions/git.js", () => ({
   execGit: vi.fn(),
@@ -19,6 +19,21 @@ const HELP_COMMANDS = [
   "gh run list",
   "gh release create",
 ] as const;
+
+const TOOL_COVERAGE = {
+  devtools_create_branch: "git-integration",
+  devtools_commit: "git-integration",
+  devtools_push: "git-integration",
+  devtools_create_pr: "gh-contract",
+  devtools_merge_pr: "gh-contract",
+  devtools_squash_merge_pr: "gh-contract",
+  devtools_check_ci: "gh-contract",
+  devtools_get_repo_info: "git-integration",
+  devtools_get_latest_tag: "git-integration",
+  devtools_analyze_commits: "git-integration",
+  devtools_bump_version: "local-file",
+  devtools_create_release: "gh-contract",
+} as const satisfies Record<(typeof toolDefinitions)[number]["name"], string>;
 
 function hasGhCli(): boolean {
   try {
@@ -46,14 +61,45 @@ function longFlags(command: string): string[] {
   return Array.from(new Set(command.match(/--[a-z][a-z-]*/g) ?? []));
 }
 
-describe("pi-devtools generated GitHub CLI command contract", () => {
+function requestedJsonFields(command: string): string[] {
+  const match = command.match(/--json\s+([A-Za-z0-9_,]+)/);
+  return match ? match[1].split(",").filter(Boolean) : [];
+}
+
+function supportedJsonFields(help: string): Set<string> {
+  const jsonSection = help.split("JSON FIELDS")[1]?.split(/\n\s*\n/)[0] ?? "";
+  return new Set(jsonSection.match(/[A-Za-z][A-Za-z0-9_]*/g) ?? []);
+}
+
+function toolByName(name: (typeof toolDefinitions)[number]["name"]): (typeof toolDefinitions)[number] {
+  const tool = toolDefinitions.find((entry) => entry.name === name);
+  if (!tool) throw new Error(`Tool not found: ${name}`);
+  return tool;
+}
+
+async function executeTool(name: (typeof toolDefinitions)[number]["name"], params: Record<string, unknown> = {}) {
+  return toolByName(name).execute("contract-test", params);
+}
+
+describe("pi-devtools generated CLI command contract", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(execGit).mockReset();
     vi.mocked(execGh).mockReset();
   });
 
-  it.skipIf(!hasGhCli())("uses only long flags supported by the installed gh CLI", () => {
+  it("classifies every registered tool for command-contract coverage", () => {
+    expect(new Set(Object.keys(TOOL_COVERAGE))).toEqual(new Set(toolDefinitions.map((tool) => tool.name)));
+  });
+
+  it("uses only gh flags and JSON fields supported by the installed gh CLI", async () => {
+    if (!hasGhCli()) {
+      if (process.env.CI) {
+        throw new Error("GitHub CLI (`gh`) is required in CI to validate pi-devtools generated command contracts");
+      }
+      return;
+    }
+
     const generatedCommands: string[] = [];
     vi.mocked(execGh).mockImplementation((command: string) => {
       generatedCommands.push(command);
@@ -69,13 +115,29 @@ describe("pi-devtools generated GitHub CLI command contract", () => {
     });
     vi.mocked(execGit).mockReturnValue("feature/devtools-command-contract");
 
-    createPrTool("Validate CLI flags", "Body", "main", true, ["user1"]);
-    mergePrTool(123, false, true);
-    mergePrTool(123, true, true, "Squash title", "Squash body");
-    mergePrTool(undefined, true, false, "Detected PR title");
-    checkCiTool(123);
-    checkCiTool(undefined, "feature/devtools-command-contract");
-    createReleaseTool("v1.2.3", "Version 1.2.3", "Release notes", true, true);
+    await executeTool("devtools_create_pr", {
+      title: "Validate CLI flags",
+      base: "main",
+      draft: true,
+      assignees: ["user1"],
+    });
+    await executeTool("devtools_merge_pr", { prNumber: 123, deleteBranch: true });
+    await executeTool("devtools_merge_pr", {
+      prNumber: 123,
+      squash: true,
+      commitTitle: "Squash title",
+      commitMessage: "Squash body",
+    });
+    await executeTool("devtools_squash_merge_pr", { commitTitle: "Detected PR title", deleteBranch: false });
+    await executeTool("devtools_check_ci", { prNumber: 123 });
+    await executeTool("devtools_check_ci", { branch: "feature/devtools-command-contract" });
+    await executeTool("devtools_create_release", {
+      tag: "v1.2.3",
+      title: "Version 1.2.3",
+      body: "Release notes",
+      draft: true,
+      prerelease: true,
+    });
 
     const helpByCommand = new Map<(typeof HELP_COMMANDS)[number], string>();
     for (const command of generatedCommands) {
@@ -84,6 +146,16 @@ describe("pi-devtools generated GitHub CLI command contract", () => {
       helpByCommand.set(helpCommand, help);
       for (const flag of longFlags(command)) {
         expect(help, `${helpCommand} should support ${flag} used by ${command}`).toContain(flag);
+      }
+
+      const jsonFields = requestedJsonFields(command);
+      if (jsonFields.length > 0) {
+        const supportedFields = supportedJsonFields(help);
+        for (const field of jsonFields) {
+          expect(supportedFields, `${helpCommand} should support JSON field ${field} used by ${command}`).toContain(
+            field,
+          );
+        }
       }
     }
   });

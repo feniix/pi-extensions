@@ -179,13 +179,15 @@ describe("pi-devtools", () => {
       expect(result.details.prUrl).toContain("github.com");
     });
 
-    it("creates PR without body", () => {
+    it("creates PR with an explicit empty body when body is omitted", () => {
       vi.mocked(execGit).mockReturnValue("main");
       vi.mocked(execGh).mockReturnValue("https://github.com/owner/repo/pull/123");
 
       const result = createPrTool("Test PR");
 
       expect(result.content[0].text).toContain("Created PR");
+      const ghCall = vi.mocked(execGh).mock.calls[0][0] as string;
+      expect(ghCall).toContain("--body ''");
     });
 
     it("creates draft PR", () => {
