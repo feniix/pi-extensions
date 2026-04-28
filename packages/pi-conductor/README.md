@@ -158,7 +158,7 @@ Use conductor status tools rather than typing into worker panes to supervise wor
 
 `conductor_backend_status` reports tmux startability separately from iTerm2 viewer availability. Explicit visible runtime requests fail closed when tmux is unavailable; iTerm2 viewer failures degrade to tmux-only supervision.
 
-For inspection-only requests, call status/list tools instead of `conductor_run_work`. Phrases such as “show current workers”, “show run status”, “inspect current run”, “open current run output”, and “watch current worker status” are treated as status-only guidance, not as permission to launch visible worker execution. If a user actually wants new visible work, make the execution intent explicit, for example “run these shards in parallel and show me the workers” or pass `runtimeMode: "tmux" | "iterm-tmux"` directly.
+For inspection-only requests, call status/list tools instead of `conductor_run_work`. Phrases such as “show current workers”, “show run status”, “inspect current run”, “open current run output”, and “watch current worker status” are treated as status-only guidance, not as permission to launch visible worker execution. Passing `runtimeMode` only selects a runtime after the request is clearly execution/planning work; it does not turn status-only text into new work. If a user actually wants new visible work, make the execution intent explicit, for example “run these shards in parallel and show me the workers” with `runtimeMode: "tmux" | "iterm-tmux"` when direct runtime selection is needed.
 
 ## Workflow recipes
 

@@ -30,7 +30,7 @@ function hasStatusOnlyIntent(request: string): boolean {
   const startsWithInspectionVerb =
     /^(?:please\s+|can you\s+|could you\s+)?\s*(show|list|display|view|inspect|status|check|get)\b/i.test(request);
   const startsWithViewerInspectionVerb =
-    /^(?:please\s+|can you\s+|could you\s+)?\s*(watch|open|tail)\s+(?:the\s+)?(?:current|active|existing|all|status)\b/i.test(
+    /^(?:please\s+|can you\s+|could you\s+)?\s*(watch|open|tail)\s+(?:the\s+)?(?:(?:current|active|existing|all|status)\s+)?(worker|workers|run|runs|task|tasks|session|sessions|pane|panes|terminal|terminals|tmux|iterm|output|log|logs)\b/i.test(
       request,
     );
   const startsWithStatusQuestion =
@@ -67,12 +67,12 @@ export function selectRuntimeModeForWork(input: {
   request: string;
   explicitRuntimeMode?: RunRuntimeMode;
 }): RunRuntimeMode | undefined {
-  if (input.explicitRuntimeMode) {
-    return input.explicitRuntimeMode;
-  }
   const request = input.request.trim();
   if (!request || hasStatusOnlyIntent(request)) {
     return undefined;
+  }
+  if (input.explicitRuntimeMode) {
+    return input.explicitRuntimeMode;
   }
   if (hasHeadlessRuntimeIntent(request)) {
     return "headless";

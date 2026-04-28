@@ -542,6 +542,10 @@ describe("conductor service", () => {
     "show me current workers",
     "watch current worker status",
     "open current run output",
+    "open run output",
+    "tail run log",
+    "watch worker status",
+    "open logs",
     "what's running?",
     "are any workers active?",
     "current worker status",
@@ -558,6 +562,21 @@ describe("conductor service", () => {
     await expect(runWorkForRepo(repoDir, { request: "show run status", execute: false })).rejects.toThrow(
       /status-only requests/i,
     );
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers).toHaveLength(0);
+    expect(run.tasks).toHaveLength(0);
+    expect(run.runs).toHaveLength(0);
+  });
+
+  it("rejects status-only requests with explicit runtime before mutating conductor state", async () => {
+    await expect(
+      runWorkForRepo(repoDir, {
+        request: "show me current workers",
+        runtimeMode: "iterm-tmux",
+        tasks: [{ title: "Inspect workers", prompt: "Inspect current workers", writeScope: ["README.md"] }],
+      }),
+    ).rejects.toThrow(/status-only requests/i);
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers).toHaveLength(0);

@@ -19,6 +19,10 @@ describe("work runtime selection", () => {
     "current worker status",
     "do I have active tmux sessions?",
     "tail the active run log",
+    "open run output",
+    "tail run log",
+    "watch worker status",
+    "open logs",
   ])("treats status-only wording as inspection: %s", (request) => {
     expect(isStatusOnlyWorkRequest(request)).toBe(true);
     expect(selectRuntimeModeForWork({ request })).toBeUndefined();
@@ -29,6 +33,7 @@ describe("work runtime selection", () => {
     ["Run these independent shards in parallel and show me the workers", "iterm-tmux"],
     ["Open a terminal and run this task", "iterm-tmux"],
     ["Open current run output and fix the failure", "iterm-tmux"],
+    ["Open run output and fix the failure", "iterm-tmux"],
     ["Watch active workers run tests", "iterm-tmux"],
     ["Open all terminals and run this task", "iterm-tmux"],
     ["Open a terminal and run current task", "iterm-tmux"],
@@ -41,18 +46,27 @@ describe("work runtime selection", () => {
     expect(selectRuntimeModeForWork({ request })).toBe(expected);
   });
 
-  it("lets explicit runtime mode override natural-language inference", () => {
+  it("lets explicit runtime mode override natural-language runtime inference for execution requests", () => {
     expect(
       selectRuntimeModeForWork({
-        request: "show me current workers",
-        explicitRuntimeMode: "iterm-tmux",
+        request: "Fix the typo in README.md",
+        explicitRuntimeMode: "tmux",
       }),
-    ).toBe("iterm-tmux");
+    ).toBe("tmux");
     expect(
       selectRuntimeModeForWork({
         request: "Run this in parallel and show me the workers",
         explicitRuntimeMode: "headless",
       }),
     ).toBe("headless");
+  });
+
+  it("does not treat explicit runtime mode as execution intent for status-only wording", () => {
+    expect(
+      selectRuntimeModeForWork({
+        request: "show me current workers",
+        explicitRuntimeMode: "iterm-tmux",
+      }),
+    ).toBeUndefined();
   });
 });
