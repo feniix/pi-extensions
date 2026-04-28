@@ -1,7 +1,7 @@
 ---
 title: "Supervised tmux runtime with optional iTerm2 viewer"
 adr: ADR-0015
-status: Proposed
+status: Accepted
 date: 2026-04-27
 prd: "PRD-007-pi-conductor-supervised-visible-runtime"
 decision: "Use tmux as the supervised visible runtime backend and treat iTerm2 as an optional read-only viewer over tmux while conductor remains canonical state owner"
@@ -11,7 +11,7 @@ decision: "Use tmux as the supervised visible runtime backend and treat iTerm2 a
 
 ## Status
 
-Proposed
+Accepted
 
 ## Date
 

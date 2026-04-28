@@ -1,7 +1,7 @@
 ---
 title: "pi-conductor — supervised visible runtime"
 prd: PRD-007
-status: Draft
+status: Implemented
 owner: "feniix"
 issue: "https://github.com/feniix/pi-extensions/issues/63"
 date: 2026-04-27

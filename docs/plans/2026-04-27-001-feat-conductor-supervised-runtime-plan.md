@@ -1,7 +1,7 @@
 ---
 title: feat: Add supervised visible runtime for pi-conductor
 type: feat
-status: draft
+status: completed
 date: 2026-04-27
 origin: docs/prd/PRD-007-pi-conductor-supervised-visible-runtime.md
 issue: https://github.com/feniix/pi-extensions/issues/63
@@ -570,6 +570,19 @@ Runtime ownership boundaries:
 4. **PR D — natural-language visible ergonomics:** U6.
 5. **PR E — docs/smoke/phrase-matrix hardening:** U7 only; add real-tmux smoke, runtime-selection phrase matrix coverage, agent-visible output checks, and docs.
 6. **PR F — startup-failure cleanup hardening:** U8 only; close post-preflight runtime disappearance cases without broad runtime refactors.
+
+## Completion Summary
+
+Completed across PRs #64 through #70:
+
+* **PR A / U1+U2:** runtime metadata, validation, backend boundary, and headless-default preservation.
+* **PR B / U3+U4:** tmux runner contract, supervised tmux backend, cancellation, reconciliation, and scoped runner reporting.
+* **PR C / U5:** optional iTerm2 viewer layer, viewer/status metadata, and best-effort viewer failure handling.
+* **PR D / U6:** conservative natural-language runtime selection, status-only safety, and visible-runtime summaries.
+* **PR E / U7:** runtime-selection phrase matrix, smoke coverage, docs, and tmux shell-wrapper hardening.
+* **PR F / U8:** owned pending-work cleanup for post-preflight startup failures, including single, parallel, objective, and scheduler paths.
+
+Final validation included the root test suite, package-level conductor tests, typecheck, Biome, `npm run check`, `git diff --check`, and `specdocs_validate`.
 
 ## Test Plan
 
