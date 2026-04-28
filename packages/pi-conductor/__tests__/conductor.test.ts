@@ -39,6 +39,33 @@ function forceTmuxAvailable(): () => void {
   return withFakeTmux("printf 'tmux 3.4\\n'");
 }
 
+function forceTmuxAvailableThenUnavailable(): () => void {
+  const originalPath = process.env.PATH;
+  const fakeBin = mkdtempSync(join(tmpdir(), "pi-conductor-fake-bin-"));
+  const stateFile = join(fakeBin, "tmux-count");
+  const fakeTmux = join(fakeBin, "tmux");
+  writeFileSync(
+    fakeTmux,
+    `#!/bin/sh
+count=$(cat '${stateFile}' 2>/dev/null || printf 0)
+count=$((count + 1))
+printf %s "$count" > '${stateFile}'
+if [ "$count" -eq 1 ]; then
+  printf 'tmux 3.4\\n'
+  exit 0
+fi
+exit 127
+`,
+    "utf-8",
+  );
+  chmodSync(fakeTmux, 0o755);
+  process.env.PATH = `${fakeBin}:${originalPath ?? ""}`;
+  return () => {
+    process.env.PATH = originalPath;
+    rmSync(fakeBin, { recursive: true, force: true });
+  };
+}
+
 function withFakeTmux(scriptBody: string): () => void {
   const originalPath = process.env.PATH;
   const fakeBin = mkdtempSync(join(tmpdir(), "pi-conductor-fake-bin-"));
@@ -730,6 +757,120 @@ describe("conductor service", () => {
     }
 
     expect(seenRuntimeMode).toBe("iterm-tmux");
+  });
+
+  it("cancels owned single-work tasks when runtime startup fails before creating a run", async () => {
+    const unrelatedWorker = await createWorkerForRepo(repoDir, "unrelated-worker");
+    const unrelatedTask = createTaskForRepo(repoDir, { title: "Unrelated", prompt: "Keep assigned" });
+    assignTaskForRepo(repoDir, unrelatedTask.taskId, unrelatedWorker.workerId);
+    const restorePath = forceTmuxAvailable();
+
+    try {
+      await expect(
+        runWorkForRepo(
+          repoDir,
+          {
+            request: "Fix one focused issue visibly",
+            runtimeMode: "tmux",
+            tasks: [{ title: "Startup single", prompt: "Start visibly", writeScope: ["README.md"] }],
+          },
+          undefined,
+          async () => {
+            throw new Error("runtime disappeared before run start");
+          },
+        ),
+      ).rejects.toThrow(/runtime disappeared/i);
+    } finally {
+      restorePath();
+    }
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.runs).toHaveLength(0);
+    expect(run.tasks.find((task) => task.title === "Startup single")).toMatchObject({
+      state: "canceled",
+      activeRunId: null,
+    });
+    expect(run.tasks.find((task) => task.taskId === unrelatedTask.taskId)).toMatchObject({ state: "assigned" });
+    expect(run.workers.find((worker) => worker.workerId === unrelatedWorker.workerId)).toMatchObject({
+      lifecycle: "idle",
+      recoverable: false,
+    });
+  });
+
+  it("cancels owned parallel tasks when every runtime startup fails before creating runs", async () => {
+    const unrelatedWorker = await createWorkerForRepo(repoDir, "parallel-unrelated-worker");
+    const unrelatedTask = createTaskForRepo(repoDir, { title: "Parallel unrelated", prompt: "Keep assigned" });
+    assignTaskForRepo(repoDir, unrelatedTask.taskId, unrelatedWorker.workerId);
+    const restorePath = forceTmuxAvailable();
+
+    let result: Awaited<ReturnType<typeof runParallelWorkForRepo>> | null = null;
+    try {
+      result = await runParallelWorkForRepo(
+        repoDir,
+        {
+          workerPrefix: "startup-parallel",
+          runtimeMode: "tmux",
+          tasks: [
+            { title: "Startup shard one", prompt: "Start shard one" },
+            { title: "Startup shard two", prompt: "Start shard two" },
+          ],
+        },
+        undefined,
+        async () => {
+          throw new Error("runtime disappeared before run start");
+        },
+      );
+    } finally {
+      restorePath();
+    }
+    if (!result) throw new Error("expected parallel result");
+
+    expect(result.results.map((entry) => entry.status)).toEqual(["rejected", "rejected"]);
+    expect(result.canceledRuns).toEqual([]);
+    expect(result.canceledTasks).toHaveLength(2);
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.runs).toHaveLength(0);
+    expect(run.tasks.filter((task) => task.title.startsWith("Startup shard")).map((task) => task.state)).toEqual([
+      "canceled",
+      "canceled",
+    ]);
+    expect(run.tasks.find((task) => task.taskId === unrelatedTask.taskId)).toMatchObject({ state: "assigned" });
+  });
+
+  it("cancels owned objective tasks when visible startup fails after high-level preflight", async () => {
+    const unrelatedTask = createTaskForRepo(repoDir, { title: "Objective unrelated", prompt: "Keep draft" });
+    const restorePath = forceTmuxAvailableThenUnavailable();
+
+    try {
+      await expect(
+        runWorkForRepo(repoDir, {
+          request: "Implement the visible feature, then verify it in tmux",
+          runtimeMode: "tmux",
+          tasks: [
+            { title: "Objective implement", prompt: "Implement visibly", writeScope: ["extensions/"] },
+            {
+              title: "Objective verify",
+              prompt: "Verify visibly",
+              writeScope: ["__tests__/"],
+              dependsOn: ["Objective implement"],
+            },
+          ],
+        }),
+      ).rejects.toThrow(/Runtime mode tmux unavailable|runtime mode tmux unavailable/i);
+    } finally {
+      restorePath();
+    }
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.runs).toHaveLength(0);
+    expect(
+      run.tasks
+        .filter((task) => task.title === "Objective implement" || task.title === "Objective verify")
+        .map((task) => task.state),
+    ).toEqual(["canceled", "canceled"]);
+    expect(run.tasks.find((task) => task.taskId === unrelatedTask.taskId)).toMatchObject({
+      state: unrelatedTask.state,
+    });
   });
 
   it("routes independent scoped work items to parallel workers", async () => {

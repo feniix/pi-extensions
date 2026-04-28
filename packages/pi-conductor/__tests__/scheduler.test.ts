@@ -14,11 +14,14 @@ import { writeRun } from "../extensions/storage.js";
 
 const runtimeTracking = vi.hoisted(() => ({
   runWorkerPromptInputs: [] as Array<{ signal?: AbortSignal | undefined }>,
+  preflightError: null as string | null,
 }));
 
 vi.mock("../extensions/runtime.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../extensions/runtime.js")>();
-  const preflightWorkerRunRuntime = vi.fn(() => undefined);
+  const preflightWorkerRunRuntime = vi.fn(() => {
+    if (runtimeTracking.preflightError) throw new Error(runtimeTracking.preflightError);
+  });
   const runWorkerPromptRuntime = vi.fn(async (input) => {
     runtimeTracking.runWorkerPromptInputs.push(input);
     await input.onConductorComplete?.({
@@ -54,6 +57,7 @@ describe("conductor scheduler and async next action", () => {
     repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
     process.env.PI_CONDUCTOR_HOME = conductorHome;
     runtimeTracking.runWorkerPromptInputs.length = 0;
+    runtimeTracking.preflightError = null;
   });
 
   afterEach(() => {
@@ -237,6 +241,33 @@ describe("conductor scheduler and async next action", () => {
     expect(runtimeTracking.runWorkerPromptInputs[0]?.signal).not.toBe(controller.signal);
     expect(runtimeTracking.runWorkerPromptInputs[0]?.signal?.aborted).toBe(false);
     expect(task).toBeTruthy();
+  });
+
+  it("cancels assigned objective tasks when runtime preflight fails before run start", async () => {
+    const objective = createObjectiveForRepo(repoRoot, { title: "Objective", prompt: "Prompt" });
+    const task = createTaskForRepo(repoRoot, {
+      title: "Run me",
+      prompt: "Do work",
+      objectiveId: objective.objectiveId,
+    });
+    const unrelated = addUsableWorkerAndAssignedTask();
+    runtimeTracking.preflightError = "runtime disappeared before active run";
+
+    await expect(
+      scheduleObjectiveForRepo(repoRoot, {
+        objectiveId: objective.objectiveId,
+        maxConcurrency: 1,
+        executeRuns: true,
+      }),
+    ).rejects.toThrow(/runtime disappeared/i);
+
+    const run = getOrCreateRunForRepo(repoRoot);
+    expect(run.runs).toHaveLength(0);
+    expect(run.tasks.find((entry) => entry.taskId === task.taskId)).toMatchObject({
+      state: "canceled",
+      activeRunId: null,
+    });
+    expect(run.tasks.find((entry) => entry.taskId === unrelated.taskId)).toMatchObject({ state: "assigned" });
   });
 
   it("scheduler ticks skip model execution unless explicitly enabled", async () => {
