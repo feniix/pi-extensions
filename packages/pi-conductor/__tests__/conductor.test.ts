@@ -22,6 +22,7 @@ import {
 } from "../extensions/conductor.js";
 import { deriveProjectKey } from "../extensions/project-key.js";
 import { getRunFile, writeRun } from "../extensions/storage.js";
+import { summarizeRunWorkRuntime } from "../extensions/work-runtime-summary.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
   if (value == null) {
@@ -31,10 +32,18 @@ function requireValue<T>(value: T | null | undefined, message: string): T {
 }
 
 function forceTmuxUnavailable(): () => void {
+  return withFakeTmux("exit 127");
+}
+
+function forceTmuxAvailable(): () => void {
+  return withFakeTmux("printf 'tmux 3.4\\n'");
+}
+
+function withFakeTmux(scriptBody: string): () => void {
   const originalPath = process.env.PATH;
   const fakeBin = mkdtempSync(join(tmpdir(), "pi-conductor-fake-bin-"));
   const fakeTmux = join(fakeBin, "tmux");
-  writeFileSync(fakeTmux, "#!/bin/sh\nexit 127\n", "utf-8");
+  writeFileSync(fakeTmux, `#!/bin/sh\n${scriptBody}\n`, "utf-8");
   chmodSync(fakeTmux, 0o755);
   process.env.PATH = `${fakeBin}:${originalPath ?? ""}`;
   return () => {
@@ -402,38 +411,14 @@ describe("conductor service", () => {
     expect(run.tasks).toHaveLength(1);
   });
 
-  it("passes runtimeMode through parallel work runners", async () => {
-    const seenRuntimeModes: Array<string | undefined> = [];
-
-    await runParallelWorkForRepo(
-      repoDir,
-      {
-        workerPrefix: "parallel",
-        runtimeMode: "tmux",
-        tasks: [
-          { title: "First shard", prompt: "Do first shard" },
-          { title: "Second shard", prompt: "Do second shard" },
-        ],
-      },
-      undefined,
-      async (_root, taskId, _signal, options) => {
-        seenRuntimeModes.push(options?.runtimeMode);
-        return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
-      },
-    );
-
-    expect(seenRuntimeModes).toEqual(["tmux", "tmux"]);
-  });
-
-  it("passes runtimeMode through single natural-language work runners", async () => {
+  it("passes normalized headless runtimeMode through default natural-language work runners", async () => {
     let seenRuntimeMode: string | undefined;
 
-    await runWorkForRepo(
+    const result = await runWorkForRepo(
       repoDir,
       {
-        request: "Fix one focused issue",
-        runtimeMode: "iterm-tmux",
-        tasks: [{ title: "Fix one issue", prompt: "Fix it", writeScope: ["README.md"] }],
+        request: "Fix the typo in README.md",
+        tasks: [{ title: "Fix README typo", prompt: "Fix the typo in README.md", writeScope: ["README.md"] }],
       },
       undefined,
       async (_root, taskId, _signal, options) => {
@@ -441,6 +426,284 @@ describe("conductor service", () => {
         return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
       },
     );
+
+    expect(result.runtimeMode).toBe("headless");
+    expect(seenRuntimeMode).toBe("headless");
+  });
+
+  it("passes runtimeMode through parallel work runners", async () => {
+    const restorePath = forceTmuxAvailable();
+    const seenRuntimeModes: Array<string | undefined> = [];
+
+    try {
+      await runParallelWorkForRepo(
+        repoDir,
+        {
+          workerPrefix: "parallel",
+          runtimeMode: "tmux",
+          tasks: [
+            { title: "First shard", prompt: "Do first shard" },
+            { title: "Second shard", prompt: "Do second shard" },
+          ],
+        },
+        undefined,
+        async (_root, taskId, _signal, options) => {
+          seenRuntimeModes.push(options?.runtimeMode);
+          return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
+        },
+      );
+    } finally {
+      restorePath();
+    }
+
+    expect(seenRuntimeModes).toEqual(["tmux", "tmux"]);
+  });
+
+  it("fails direct visible parallel runtime preflight before creating workers or tasks", async () => {
+    const restorePath = forceTmuxUnavailable();
+    try {
+      await expect(
+        runParallelWorkForRepo(repoDir, {
+          workerPrefix: "parallel",
+          runtimeMode: "tmux",
+          tasks: [
+            { title: "First shard", prompt: "Do first shard" },
+            { title: "Second shard", prompt: "Do second shard" },
+          ],
+        }),
+      ).rejects.toThrow(/Runtime mode tmux unavailable/i);
+
+      const run = getOrCreateRunForRepo(repoDir);
+      expect(run.workers).toHaveLength(0);
+      expect(run.tasks).toHaveLength(0);
+      expect(run.runs).toHaveLength(0);
+    } finally {
+      restorePath();
+    }
+  });
+
+  it("infers visible runtime for natural-language visible parallel requests", async () => {
+    const restorePath = forceTmuxAvailable();
+    const seenRuntimeModes: Array<string | undefined> = [];
+
+    let result: Awaited<ReturnType<typeof runWorkForRepo>> | null = null;
+    try {
+      result = await runWorkForRepo(
+        repoDir,
+        {
+          request: "Run these independent shards in parallel and show me the workers",
+          tasks: [
+            { title: "Inspect README", prompt: "Inspect README.md", writeScope: ["README.md"] },
+            { title: "Inspect package", prompt: "Inspect package metadata", writeScope: ["package.json"] },
+          ],
+        },
+        undefined,
+        async (_root, taskId, _signal, options) => {
+          seenRuntimeModes.push(options?.runtimeMode);
+          return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
+        },
+      );
+    } finally {
+      restorePath();
+    }
+    if (!result) throw new Error("expected runWorkForRepo result");
+
+    expect(result.decision.mode).toBe("parallel");
+    expect(result.runtimeMode).toBe("iterm-tmux");
+    expect(seenRuntimeModes).toEqual(["iterm-tmux", "iterm-tmux"]);
+  });
+
+  it("rejects status-only work-router requests with candidate tasks before mutating conductor state", async () => {
+    await expect(
+      runWorkForRepo(
+        repoDir,
+        {
+          request: "show me current workers",
+          tasks: [{ title: "Inspect workers", prompt: "Inspect current workers", writeScope: ["README.md"] }],
+        },
+        undefined,
+        async (_root, taskId) => ({
+          workerName: taskId,
+          status: "success",
+          finalText: "done",
+          errorMessage: null,
+          sessionId: null,
+        }),
+      ),
+    ).rejects.toThrow(/status-only requests/i);
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers).toHaveLength(0);
+    expect(run.tasks).toHaveLength(0);
+    expect(run.runs).toHaveLength(0);
+  });
+
+  it("rejects status-only work-router requests before mutating conductor state", async () => {
+    await expect(runWorkForRepo(repoDir, { request: "show me current workers" })).rejects.toThrow(
+      /status-only requests/i,
+    );
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers).toHaveLength(0);
+    expect(run.tasks).toHaveLength(0);
+    expect(run.runs).toHaveLength(0);
+  });
+
+  it("rejects status-only planning requests before mutating conductor state", async () => {
+    await expect(runWorkForRepo(repoDir, { request: "show run status", execute: false })).rejects.toThrow(
+      /status-only requests/i,
+    );
+
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers).toHaveLength(0);
+    expect(run.tasks).toHaveLength(0);
+    expect(run.runs).toHaveLength(0);
+  });
+
+  it("fails inferred visible runtime preflight without creating active runs", async () => {
+    const restorePath = forceTmuxUnavailable();
+    try {
+      await expect(
+        runWorkForRepo(repoDir, {
+          request: "Run this focused task and show me the worker",
+          tasks: [{ title: "Visible focused task", prompt: "Do visible work", writeScope: ["README.md"] }],
+        }),
+      ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
+
+      const run = getOrCreateRunForRepo(repoDir);
+      expect(run.workers).toHaveLength(0);
+      expect(run.tasks).toHaveLength(0);
+      expect(run.runs).toHaveLength(0);
+    } finally {
+      restorePath();
+    }
+  });
+
+  it("fails inferred visible parallel preflight before creating workers or tasks", async () => {
+    const restorePath = forceTmuxUnavailable();
+    try {
+      await expect(
+        runWorkForRepo(repoDir, {
+          request: "Run these independent shards in parallel and show me the workers",
+          tasks: [
+            { title: "Visible shard one", prompt: "Do visible work one", writeScope: ["README.md"] },
+            { title: "Visible shard two", prompt: "Do visible work two", writeScope: ["package.json"] },
+          ],
+        }),
+      ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
+
+      const run = getOrCreateRunForRepo(repoDir);
+      expect(run.workers).toHaveLength(0);
+      expect(run.tasks).toHaveLength(0);
+      expect(run.runs).toHaveLength(0);
+    } finally {
+      restorePath();
+    }
+  });
+
+  it("returns structured runtime summaries for natural-language visible work", async () => {
+    const restorePath = forceTmuxAvailable();
+    let result: Awaited<ReturnType<typeof runWorkForRepo>> | null = null;
+    try {
+      result = await runWorkForRepo(
+        repoDir,
+        {
+          request: "Run this focused task and show me the worker",
+          tasks: [{ title: "Visible summary", prompt: "Do visible work", writeScope: ["README.md"] }],
+        },
+        undefined,
+        async (root, taskId, _signal, options) => {
+          const started = startTaskRunForRepo(root, { taskId, runtimeMode: options?.runtimeMode });
+          const latest = getOrCreateRunForRepo(root);
+          writeRun({
+            ...latest,
+            tasks: latest.tasks.map((task) =>
+              task.taskId === taskId ? { ...task, latestProgress: "opening viewer" } : task,
+            ),
+            runs: latest.runs.map((run) =>
+              run.runId === started.run.runId
+                ? {
+                    ...run,
+                    runtime: {
+                      ...run.runtime,
+                      mode: "iterm-tmux",
+                      status: "running",
+                      viewerStatus: "opened",
+                      viewerCommand: "tmux attach-session -r -t pi-cond-run",
+                      logPath: "/tmp/pi-conductor/runtime/run-1/runner.log",
+                      diagnostics: ["iTerm2 viewer opened"],
+                    },
+                  }
+                : run,
+            ),
+          });
+          return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
+        },
+      );
+    } finally {
+      restorePath();
+    }
+    if (!result) throw new Error("expected runWorkForRepo result");
+
+    expect(result.runtimeRuns).toHaveLength(1);
+    expect(result.runtimeRuns[0]).toMatchObject({
+      taskId: result.tasks[0]?.taskId,
+      runtimeMode: "iterm-tmux",
+      runtimeStatus: "running",
+      viewerStatus: "opened",
+      viewerCommand: "tmux attach-session -r -t pi-cond-run",
+      logPath: "/tmp/pi-conductor/runtime/run-1/runner.log",
+      diagnostic: "iTerm2 viewer opened",
+      latestProgress: "opening viewer",
+      cancelTool: { name: "conductor_cancel_task_run", params: { reason: "Parent requested cancellation" } },
+    });
+    expect(result.runtimeRuns[0]?.cancelCommand).toContain("Parent requested cancellation");
+  });
+
+  it("omits runtime cancellation details for terminal run summaries", async () => {
+    const delegated = await delegateTaskForRepo(repoDir, {
+      title: "Terminal summary",
+      prompt: "Summarize terminal runtime",
+      workerName: "terminal-summary",
+      startRun: false,
+    });
+    const started = startTaskRunForRepo(repoDir, {
+      taskId: delegated.task.taskId,
+      workerId: delegated.worker.workerId,
+    });
+    const latest = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...latest,
+      runs: latest.runs.map((run) =>
+        run.runId === started.run.runId ? { ...run, status: "succeeded", finishedAt: new Date().toISOString() } : run,
+      ),
+    });
+
+    const summary = summarizeRunWorkRuntime(repoDir, [delegated.task.taskId]);
+    expect(summary[0]).toMatchObject({ cancelCommand: null, cancelTool: null });
+  });
+
+  it("passes runtimeMode through single natural-language work runners", async () => {
+    const restorePath = forceTmuxAvailable();
+    let seenRuntimeMode: string | undefined;
+
+    try {
+      await runWorkForRepo(
+        repoDir,
+        {
+          request: "Fix one focused issue",
+          runtimeMode: "iterm-tmux",
+          tasks: [{ title: "Fix one issue", prompt: "Fix it", writeScope: ["README.md"] }],
+        },
+        undefined,
+        async (_root, taskId, _signal, options) => {
+          seenRuntimeMode = options?.runtimeMode;
+          return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
+        },
+      );
+    } finally {
+      restorePath();
+    }
 
     expect(seenRuntimeMode).toBe("iterm-tmux");
   });

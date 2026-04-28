@@ -46,7 +46,6 @@ import {
   retryTaskForRepo,
   startTaskRunForRepo,
 } from "./task-service.js";
-
 import type {
   ConductorEventType,
   ConductorNextAction,
@@ -63,6 +62,15 @@ import type {
   WorkerRecord,
   WorkerRunResult,
 } from "./types.js";
+import {
+  deriveWorkTitle,
+  planWorkRouting,
+  type RunWorkItemInput,
+  type WorkRoutingDecision,
+  type WorkRoutingMode,
+} from "./work-routing.js";
+import { isStatusOnlyWorkRequest, selectRuntimeModeForWork } from "./work-runtime-selection.js";
+import { type RunWorkRuntimeSummary, summarizeRunWorkRuntime } from "./work-runtime-summary.js";
 
 export { buildEvidenceBundleForRepo, checkReadinessForRepo } from "./evidence-service.js";
 export { createGateForRepo, resolveGateForRepo, resolveGateFromTrustedHumanForRepo } from "./gate-service.js";
@@ -88,6 +96,10 @@ export {
   startTaskRunForRepo,
   updateTaskForRepo,
 } from "./task-service.js";
+export type { RunWorkItemInput, WorkRoutingDecision, WorkRoutingMode } from "./work-routing.js";
+export { planWorkRouting } from "./work-routing.js";
+export { selectRuntimeModeForWork } from "./work-runtime-selection.js";
+export type { RunWorkRuntimeSummary } from "./work-runtime-summary.js";
 
 export type ParallelWorkItemInput = {
   title: string;
@@ -102,20 +114,14 @@ export type ParallelWorkRunner = (
   input?: { runtimeMode?: RunRuntimeMode },
 ) => Promise<WorkerRunResult>;
 
-export type WorkRoutingMode = "auto" | "single" | "parallel" | "objective";
-
-export type RunWorkItemInput = ParallelWorkItemInput & {
-  writeScope?: string[];
-  dependsOn?: string[];
-};
-
-export type WorkRoutingDecision = {
-  mode: Exclude<WorkRoutingMode, "auto">;
-  confidence: number;
-  reason: string;
-  tasks: RunWorkItemInput[];
-  riskFlags: string[];
-};
+function assertRuntimeModeAvailable(runtimeMode: RunRuntimeMode): void {
+  const runtimeStatus = getConductorRuntimeModeStatus(runtimeMode);
+  if (!runtimeStatus.available) {
+    throw new Error(
+      `Runtime mode ${runtimeMode} unavailable: ${runtimeStatus.diagnostic ?? "not available"}. Use conductor_backend_status to inspect available runtime modes; headless is available.`,
+    );
+  }
+}
 
 type LiveWorkAbortHandle = {
   runId?: string;
@@ -1095,6 +1101,8 @@ export async function runParallelWorkForRepo(
   }>;
   canceledRuns: string[];
   canceledTasks: string[];
+  runtimeMode: RunRuntimeMode;
+  runtimeRuns: RunWorkRuntimeSummary[];
 }> {
   if (input.tasks.length === 0) {
     throw new Error("At least one parallel work item is required");
@@ -1112,6 +1120,10 @@ export async function runParallelWorkForRepo(
       workerName: item.workerName?.trim() || `${workerPrefix}-${index + 1}`,
     };
   });
+  const runtimeMode = input.runtimeMode ?? "headless";
+  if (runtimeMode !== "headless") {
+    assertRuntimeModeAvailable(runtimeMode);
+  }
   const workerNames = new Set<string>();
   for (const item of items) {
     if (workerNames.has(item.workerName)) {
@@ -1212,11 +1224,11 @@ export async function runParallelWorkForRepo(
   try {
     if (signal?.aborted) {
       await Promise.allSettled(pendingCancellations);
-      return { workers, tasks, results: [], canceledRuns, canceledTasks };
+      return { workers, tasks, results: [], canceledRuns, canceledTasks, runtimeMode, runtimeRuns: [] };
     }
     const settled = await Promise.allSettled(
       tasks.map((task, index) =>
-        runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal, { runtimeMode: input.runtimeMode }),
+        runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal, { runtimeMode }),
       ),
     );
     if (signal?.aborted) await requestCancelOwnedWork();
@@ -1232,186 +1244,24 @@ export async function runParallelWorkForRepo(
             error: errorMessage(entry.reason),
           },
     );
-    return { workers, tasks, results, canceledRuns, canceledTasks };
+    return {
+      workers,
+      tasks,
+      results,
+      canceledRuns,
+      canceledTasks,
+      runtimeMode,
+      runtimeRuns: summarizeRunWorkRuntime(
+        repoRoot,
+        tasks.map((task) => task.taskId),
+      ),
+    };
   } finally {
     signal?.removeEventListener("abort", onAbort);
     for (const controller of liveControllers) {
       controller.dispose();
     }
   }
-}
-
-function hasParallelIntent(request: string): boolean {
-  return /\b(parallel|split|many|multiple|workers|fan[- ]?out|deep[- ]?dive|all)\b/i.test(request);
-}
-
-function hasSingleIntent(request: string): boolean {
-  return /\b(single|one worker|do not split|don't split|dont split|same worker|small|typo)\b/i.test(request);
-}
-
-function deriveWorkTitle(request: string): string {
-  const trimmed = request.trim().replace(/\s+/g, " ");
-  if (!trimmed) {
-    return "Conductor work";
-  }
-  return trimmed.length > 80 ? `${trimmed.slice(0, 77)}...` : trimmed;
-}
-
-function normalizeRunWorkItems(input: { request: string; tasks?: RunWorkItemInput[] }): RunWorkItemInput[] {
-  const candidates = input.tasks?.length
-    ? input.tasks
-    : [{ title: deriveWorkTitle(input.request), prompt: input.request }];
-  return candidates.map((task, index) => ({
-    ...task,
-    title: task.title.trim() || `Work item ${index + 1}`,
-    prompt: task.prompt.trim() || input.request.trim(),
-    workerName: task.workerName?.trim() || undefined,
-    writeScope: task.writeScope?.map((scope) => scope.trim()).filter(Boolean),
-    dependsOn: task.dependsOn?.map((dependency) => dependency.trim()).filter(Boolean),
-  }));
-}
-
-function normalizeWriteScope(scope: string): string {
-  return scope.trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
-}
-
-function writeScopesOverlap(left: string, right: string): boolean {
-  const normalizedLeft = normalizeWriteScope(left);
-  const normalizedRight = normalizeWriteScope(right);
-  if (!normalizedLeft || !normalizedRight) {
-    return false;
-  }
-  return (
-    normalizedLeft === normalizedRight ||
-    normalizedLeft.startsWith(`${normalizedRight}/`) ||
-    normalizedRight.startsWith(`${normalizedLeft}/`)
-  );
-}
-
-function findOverlappingWriteScopes(tasks: RunWorkItemInput[]): boolean {
-  const seen: string[] = [];
-  for (const task of tasks) {
-    for (const scope of task.writeScope ?? []) {
-      if (seen.some((knownScope) => writeScopesOverlap(knownScope, scope))) {
-        return true;
-      }
-      seen.push(scope);
-    }
-  }
-  return false;
-}
-
-function combineWorkItems(tasks: RunWorkItemInput[], request: string): RunWorkItemInput {
-  if (tasks.length === 1 && tasks[0]) {
-    return tasks[0];
-  }
-  return {
-    title: deriveWorkTitle(request),
-    prompt: [
-      request.trim(),
-      "",
-      "Run these work items coherently in one conductor worker because splitting is unsafe:",
-      ...tasks.map((task, index) => `${index + 1}. ${task.title}\n${task.prompt}`),
-    ].join("\n"),
-    writeScope: [...new Set(tasks.flatMap((task) => task.writeScope ?? []))],
-    dependsOn: [...new Set(tasks.flatMap((task) => task.dependsOn ?? []))],
-  };
-}
-
-function capParallelWorkItems(tasks: RunWorkItemInput[], maxWorkers: number): RunWorkItemInput[] {
-  if (tasks.length <= maxWorkers) {
-    return tasks;
-  }
-  const buckets = Array.from({ length: maxWorkers }, () => [] as RunWorkItemInput[]);
-  for (const [index, task] of tasks.entries()) {
-    buckets[index % maxWorkers]?.push(task);
-  }
-  return buckets.map((bucket, index) => ({
-    title: bucket.length === 1 ? (bucket[0]?.title ?? `Work shard ${index + 1}`) : `Work shard ${index + 1}`,
-    prompt:
-      bucket.length === 1
-        ? (bucket[0]?.prompt ?? "")
-        : bucket.map((task, taskIndex) => `${taskIndex + 1}. ${task.title}\n${task.prompt}`).join("\n\n"),
-    workerName: bucket.length === 1 ? bucket[0]?.workerName : undefined,
-    writeScope: [...new Set(bucket.flatMap((task) => task.writeScope ?? []))],
-  }));
-}
-
-export function planWorkRouting(input: {
-  request: string;
-  mode?: WorkRoutingMode;
-  tasks?: RunWorkItemInput[];
-  maxWorkers?: number;
-}): WorkRoutingDecision {
-  const request = input.request.trim();
-  if (!request) {
-    throw new Error("conductor_run_work requires a natural-language request");
-  }
-  const maxWorkers = Math.max(1, Math.floor(input.maxWorkers ?? 4));
-  const tasks = normalizeRunWorkItems({ request, tasks: input.tasks });
-  const riskFlags: string[] = [];
-  const hasDependencies = tasks.some((task) => (task.dependsOn?.length ?? 0) > 0);
-  const hasScopeOverlap = findOverlappingWriteScopes(tasks);
-  if (hasScopeOverlap) {
-    riskFlags.push("overlapping_write_scope");
-  }
-  if (tasks.length > maxWorkers) {
-    riskFlags.push("worker_cap_applied");
-  }
-
-  const requestedMode = input.mode ?? "auto";
-  if (requestedMode === "single") {
-    return {
-      mode: "single",
-      confidence: 1,
-      reason: "Single-worker mode was requested explicitly.",
-      tasks: [combineWorkItems(tasks, request)],
-      riskFlags,
-    };
-  }
-  if (requestedMode === "objective" || hasDependencies) {
-    return {
-      mode: "objective",
-      confidence: requestedMode === "objective" ? 1 : 0.9,
-      reason:
-        requestedMode === "objective"
-          ? "Objective mode was requested explicitly."
-          : "Dependent work requires objective scheduling instead of parallel fan-out.",
-      tasks,
-      riskFlags,
-    };
-  }
-
-  if (tasks.length <= 1 || hasSingleIntent(request) || hasScopeOverlap || maxWorkers === 1) {
-    return {
-      mode: "single",
-      confidence: tasks.length <= 1 ? 0.95 : 0.8,
-      reason:
-        tasks.length <= 1
-          ? "Single coherent work item; splitting would add coordination overhead."
-          : "Work should stay in one worker because parallel splitting is unsafe or was discouraged.",
-      tasks: [combineWorkItems(tasks, request)],
-      riskFlags,
-    };
-  }
-
-  if (requestedMode === "parallel" || hasParallelIntent(request)) {
-    return {
-      mode: "parallel",
-      confidence: requestedMode === "parallel" ? 1 : 0.85,
-      reason: "Independent work items can run in parallel under one foreground cancellation boundary.",
-      tasks: capParallelWorkItems(tasks, maxWorkers),
-      riskFlags,
-    };
-  }
-
-  return {
-    mode: "single",
-    confidence: 0.65,
-    reason: "No explicit parallel intent; defaulting to one coherent worker.",
-    tasks: [combineWorkItems(tasks, request)],
-    riskFlags,
-  };
 }
 
 export async function runWorkForRepo(
@@ -1438,17 +1288,32 @@ export async function runWorkForRepo(
     tasks: TaskRecord[];
     schedule: Awaited<ReturnType<typeof scheduleObjectiveForRepo>> | null;
   } | null;
+  runtimeMode: RunRuntimeMode;
+  runtimeRuns: RunWorkRuntimeSummary[];
 }> {
-  const decision = planWorkRouting(input);
-  const workerPrefix = input.workerPrefix?.trim() || "run-work";
   const execute = input.execute ?? true;
+  if (isStatusOnlyWorkRequest(input.request)) {
+    throw new Error(
+      "conductor_run_work is for planning or executing work; use conductor_get_project, conductor_list_workers, or conductor_list_runs for status-only requests",
+    );
+  }
+  const decision = planWorkRouting(input);
+  const selectedRuntimeMode = selectRuntimeModeForWork({
+    request: input.request,
+    explicitRuntimeMode: input.runtimeMode,
+  });
+  const runtimeMode = selectedRuntimeMode ?? "headless";
+  if (execute && runtimeMode !== "headless") {
+    assertRuntimeModeAvailable(runtimeMode);
+  }
+  const workerPrefix = input.workerPrefix?.trim() || "run-work";
 
   if (decision.mode === "parallel") {
     const parallel = await runParallelWorkForRepo(
       repoRoot,
       {
         workerPrefix,
-        runtimeMode: input.runtimeMode,
+        runtimeMode,
         tasks: decision.tasks.map((task) => ({
           title: task.title,
           prompt: task.prompt,
@@ -1458,7 +1323,16 @@ export async function runWorkForRepo(
       signal,
       runner,
     );
-    return { decision, workers: parallel.workers, tasks: parallel.tasks, single: null, parallel, objective: null };
+    return {
+      decision,
+      workers: parallel.workers,
+      tasks: parallel.tasks,
+      single: null,
+      parallel,
+      objective: null,
+      runtimeMode,
+      runtimeRuns: parallel.runtimeRuns,
+    };
   }
 
   if (decision.mode === "objective") {
@@ -1488,7 +1362,7 @@ export async function runWorkForRepo(
             objectiveId: objective.objectiveId,
             policy: "execute",
             maxConcurrency: input.maxWorkers,
-            runtimeMode: input.runtimeMode,
+            runtimeMode,
           },
           signal,
         )
@@ -1504,6 +1378,11 @@ export async function runWorkForRepo(
       single: null,
       parallel: null,
       objective: { ...planned, schedule },
+      runtimeMode,
+      runtimeRuns: summarizeRunWorkRuntime(
+        repoRoot,
+        planned.tasks.map((task) => task.taskId),
+      ),
     };
   }
 
@@ -1530,11 +1409,11 @@ export async function runWorkForRepo(
       single: { worker: delegated.worker, task: delegated.task, result: null },
       parallel: null,
       objective: null,
+      runtimeMode,
+      runtimeRuns: summarizeRunWorkRuntime(repoRoot, [delegated.task.taskId]),
     };
   }
-  const result = execute
-    ? await runner(repoRoot, delegated.task.taskId, signal, { runtimeMode: input.runtimeMode })
-    : null;
+  const result = execute ? await runner(repoRoot, delegated.task.taskId, signal, { runtimeMode }) : null;
   return {
     decision,
     workers: [delegated.worker],
@@ -1542,6 +1421,8 @@ export async function runWorkForRepo(
     single: { worker: delegated.worker, task: delegated.task, result },
     parallel: null,
     objective: null,
+    runtimeMode,
+    runtimeRuns: summarizeRunWorkRuntime(repoRoot, [delegated.task.taskId]),
   };
 }
 

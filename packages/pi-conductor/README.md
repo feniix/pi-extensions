@@ -192,6 +192,8 @@ conductor_run_work({
 
 The router is conservative. It splits only when work items are independent, have distinct scopes, and the request implies parallelism. It stays single-worker for small work, overlapping write scopes, or coherent refactors. It uses objective planning when candidate tasks declare dependencies.
 
+Runtime mode selection is also conservative. Explicit `runtimeMode` wins. If omitted, normal work defaults to `headless`, while unambiguous execution requests such as “run these shards in parallel and show/watch/open the workers” infer `iterm-tmux`. Status-only phrases such as “show me current workers” do not infer visible execution; use status/list tools for inspection. Inferred visible runs still fail closed when tmux is unavailable and return runtime summaries with viewer/log/cancel details when runs are created.
+
 `conductor_run_parallel_work` remains the lower-level primitive for callers that already made a parallel-safe decision:
 
 ```text
