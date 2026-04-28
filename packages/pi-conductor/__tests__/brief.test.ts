@@ -13,6 +13,7 @@ import {
   getOrCreateRunForRepo,
   startTaskRunForRepo,
 } from "../extensions/conductor.js";
+import { createRunRuntimeMetadata } from "../extensions/runtime-metadata.js";
 import { writeRun } from "../extensions/storage.js";
 
 describe("conductor project brief", () => {
@@ -66,6 +67,46 @@ describe("conductor project brief", () => {
     expect(brief.markdown).toContain("runtimeMode=headless runtimeStatus=running");
     expect(brief.nextActions.length).toBeGreaterThan(0);
     expect(brief.recentEvents.length).toBeLessThanOrEqual(5);
+  });
+
+  it("surfaces visible runtime supervision details in active project briefs", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Visible brief", prompt: "Summarize visible state" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, runtimeMode: "iterm-tmux" });
+    const run = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...run,
+      tasks: run.tasks.map((entry) =>
+        entry.taskId === task.taskId ? { ...entry, latestProgress: "opening viewer" } : entry,
+      ),
+      runs: run.runs.map((entry) =>
+        entry.runId === started.run.runId
+          ? {
+              ...entry,
+              runtime: {
+                ...createRunRuntimeMetadata({ mode: "iterm-tmux", status: "running" }),
+                viewerStatus: "opened" as const,
+                viewerCommand: "tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'",
+                logPath: "/tmp/pi-conductor/runtime/run-1/runner.log",
+                diagnostics: ["iTerm2 viewer opened"],
+              },
+            }
+          : entry,
+      ),
+    });
+
+    const brief = buildProjectBriefForRepo(repoDir, { maxActions: 3, recentEventLimit: 5 });
+
+    expect(brief.markdown).toContain("## Active Runs");
+    expect(brief.markdown).toContain(`- ${started.run.runId} task=${task.taskId}`);
+    expect(brief.markdown).toContain("runtimeMode=iterm-tmux runtimeStatus=running viewer=opened");
+    expect(brief.markdown).toContain("viewerCommand=\"tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'\"");
+    expect(brief.markdown).toContain("log=/tmp/pi-conductor/runtime/run-1/runner.log");
+    expect(brief.markdown).toContain("progress=opening viewer");
+    expect(brief.markdown).toContain(
+      `cancel=conductor_cancel_task_run({"runId":"${started.run.runId}","reason":"<reason>"})`,
+    );
   });
 
   it("does not surface terminal-status runs with missing finishedAt as active", async () => {

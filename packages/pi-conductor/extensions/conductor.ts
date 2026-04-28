@@ -19,7 +19,7 @@ import { createObjectiveForRepo, planObjectiveForRepo, refreshObjectiveStatusFor
 import { reconcileProjectForRepo } from "./project-reconcile.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
 import { mutateRepoRunWithLockRetry } from "./repo-run-retry.js";
-import { isTerminalRunStatus } from "./run-status.js";
+import { isTerminalRunStatus, isTmuxRuntimeMode } from "./run-status.js";
 import { createWorkerSessionRuntime, getWorkerRunRuntimeBackend, recoverWorkerSessionRuntime } from "./runtime.js";
 import { recordRuntimeMetadataForRun } from "./runtime-artifacts.js";
 import { cleanupCanceledTmuxRunForRepo } from "./runtime-cancel.js";
@@ -446,6 +446,7 @@ export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string 
     `State: ${task.state}`,
     objective ? `Objective: ${objective.title} [${objective.objectiveId}]` : "Objective: none",
     worker ? `Worker: ${worker.name} [${worker.workerId}] lifecycle=${worker.lifecycle}` : "Worker: unassigned",
+    `Latest progress: ${task.latestProgress ?? "none"}`,
     "",
     "## Prompt",
     task.prompt,
@@ -459,10 +460,12 @@ export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string 
     runs.length === 0
       ? "- none"
       : runs
-          .map(
-            (attempt) =>
-              `- ${attempt.runId} status=${attempt.status} taskRevision=${attempt.taskRevision} ${formatRunRuntimeSummary(attempt.runtime)}`,
-          )
+          .map((attempt) => {
+            const cancelCommand = isActiveRunAttempt(attempt)
+              ? ` cancel=conductor_cancel_task_run({"runId":"${attempt.runId}","reason":"<reason>"})`
+              : "";
+            return `- ${attempt.runId} status=${attempt.status} taskRevision=${attempt.taskRevision} ${formatRunRuntimeSummary(attempt.runtime)}${cancelCommand}`;
+          })
           .join("\n"),
     "",
     "## Dependencies",
@@ -527,10 +530,10 @@ export function buildProjectBriefForRepo(
     activeRuns.length === 0
       ? "- none"
       : activeRuns
-          .map(
-            (attempt) =>
-              `- ${attempt.runId} task=${attempt.taskId} worker=${attempt.workerId} status=${attempt.status} ${formatRunRuntimeSummary(attempt.runtime)} cancel=conductor_cancel_task_run({"runId":"${attempt.runId}","reason":"<reason>"})`,
-          )
+          .map((attempt) => {
+            const task = run.tasks.find((entry) => entry.taskId === attempt.taskId);
+            return `- ${attempt.runId} task=${attempt.taskId} worker=${attempt.workerId} status=${attempt.status} ${formatRunRuntimeSummary(attempt.runtime)} progress=${task?.latestProgress ?? "none"} cancel=conductor_cancel_task_run({"runId":"${attempt.runId}","reason":"<reason>"})`;
+          })
           .join("\n"),
     "",
     "## Recommended Next Actions",
@@ -1009,7 +1012,7 @@ export async function cancelTaskRunForRepoWithRuntimeCleanup(
 ): Promise<RunRecord> {
   let project = cancelTaskRunForRepo(repoRoot, input);
   const run = project.runs.find((entry) => entry.runId === input.runId);
-  if (run?.status === "aborted" && run.runtime.mode === "tmux") {
+  if (run?.status === "aborted" && isTmuxRuntimeMode(run.runtime.mode)) {
     project = await cleanupCanceledTmuxRunForRepo({ repoRoot, runId: input.runId, run });
   }
   return project;
@@ -1065,7 +1068,7 @@ export async function cancelActiveWorkForRepoWithRuntimeCleanup(
   let project = canceled.project;
   for (const runId of canceled.canceledRuns) {
     const run = project.runs.find((entry) => entry.runId === runId);
-    if (run?.status === "aborted" && run.runtime.mode === "tmux") {
+    if (run?.status === "aborted" && isTmuxRuntimeMode(run.runtime.mode)) {
       project = await cleanupCanceledTmuxRunForRepo({ repoRoot, runId, run });
     }
   }
@@ -2044,7 +2047,7 @@ export async function runTaskForRepo(
         errorMessage: runtimeResult.errorMessage,
       });
     });
-    if (createdFallbackCompletion && runtimeMode === "tmux") {
+    if (createdFallbackCompletion && isTmuxRuntimeMode(runtimeMode)) {
       releaseTerminalTmuxWorkerForRepo({
         repoRoot,
         runId: started.run.runId,
@@ -2080,7 +2083,7 @@ export async function runTaskForRepo(
         errorMessage: message,
       });
     });
-    if (runtimeMode === "tmux") {
+    if (isTmuxRuntimeMode(runtimeMode)) {
       const cleanupStatus = runtimeCleanupStatus(error);
       releaseTerminalTmuxWorkerForRepo({
         repoRoot,

@@ -115,6 +115,7 @@ export function formatRunRuntimeSummary(runtime: RunRuntimeMetadata): string {
     `runtimeMode=${runtime.mode}`,
     `runtimeStatus=${runtime.status}`,
     `viewer=${runtime.viewerStatus}`,
+    runtime.viewerCommand ? `viewerCommand=${JSON.stringify(runtime.viewerCommand)}` : null,
     `cleanup=${runtime.cleanupStatus}`,
     `log=${runtime.logPath ?? "none"}`,
     `heartbeat=${runtime.heartbeatAt ?? "none"}`,

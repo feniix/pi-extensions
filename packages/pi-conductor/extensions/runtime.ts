@@ -43,8 +43,8 @@ export function getWorkerRunRuntimeBackend(mode: RunRuntimeMode = "headless"): W
       run: runWorkerPromptRuntime,
     };
   }
-  if (mode === "tmux") {
-    return createTmuxWorkerRunRuntimeBackend();
+  if (mode === "tmux" || mode === "iterm-tmux") {
+    return createTmuxWorkerRunRuntimeBackend({ mode });
   }
   throw new Error(`${mode} runtime is not implemented yet`);
 }

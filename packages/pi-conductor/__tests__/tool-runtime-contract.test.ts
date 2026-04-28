@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -66,63 +66,74 @@ describe("conductor runtime-mode tool contracts", () => {
   });
 
   it("forwards runtimeMode through registered start, run, retry, and delegate tools", async () => {
+    const originalPath = process.env.PATH;
     const tools = collectTools();
     const worker = await createWorkerForRepo(repoDir, "backend");
     const task = createTaskForRepo(repoDir, { title: "Visible tool task", prompt: "Run visibly" });
     assignTaskForRepo(repoDir, task.taskId, worker.workerId);
 
-    await expect(
-      getTool(tools, "conductor_start_task_run").execute?.(
-        "tool-call-1",
-        { taskId: task.taskId, runtimeMode: "iterm-tmux" },
-        undefined,
-        undefined,
-        { cwd: repoDir },
-      ),
-    ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
-    expect(getOrCreateRunForRepo(repoDir).runs).toHaveLength(0);
+    const fakeBin = mkdtempSync(join(tmpdir(), "pi-conductor-fake-bin-"));
+    const fakeTmux = join(fakeBin, "tmux");
+    writeFileSync(fakeTmux, "#!/bin/sh\nexit 127\n", "utf-8");
+    chmodSync(fakeTmux, 0o755);
+    process.env.PATH = `${fakeBin}:${originalPath ?? ""}`;
+    try {
+      await expect(
+        getTool(tools, "conductor_start_task_run").execute?.(
+          "tool-call-1",
+          { taskId: task.taskId, runtimeMode: "iterm-tmux" },
+          undefined,
+          undefined,
+          { cwd: repoDir },
+        ),
+      ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
+      expect(getOrCreateRunForRepo(repoDir).runs).toHaveLength(0);
 
-    await expect(
-      getTool(tools, "conductor_run_task").execute?.(
-        "tool-call-2",
-        { taskId: task.taskId, runtimeMode: "iterm-tmux" },
-        undefined,
-        undefined,
-        { cwd: repoDir },
-      ),
-    ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
-    expect(getOrCreateRunForRepo(repoDir).runs).toHaveLength(0);
+      await expect(
+        getTool(tools, "conductor_run_task").execute?.(
+          "tool-call-2",
+          { taskId: task.taskId, runtimeMode: "iterm-tmux" },
+          undefined,
+          undefined,
+          { cwd: repoDir },
+        ),
+      ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
+      expect(getOrCreateRunForRepo(repoDir).runs).toHaveLength(0);
 
-    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
-    await cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "prepare retry" });
-    await expect(
-      getTool(tools, "conductor_retry_task").execute?.(
-        "tool-call-3",
-        { taskId: task.taskId, runtimeMode: "iterm-tmux" },
-        undefined,
-        undefined,
-        { cwd: repoDir },
-      ),
-    ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
-    expect(getOrCreateRunForRepo(repoDir).runs).toHaveLength(1);
+      const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
+      await cancelTaskRunForRepo(repoDir, { runId: started.run.runId, reason: "prepare retry" });
+      await expect(
+        getTool(tools, "conductor_retry_task").execute?.(
+          "tool-call-3",
+          { taskId: task.taskId, runtimeMode: "iterm-tmux" },
+          undefined,
+          undefined,
+          { cwd: repoDir },
+        ),
+      ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
+      expect(getOrCreateRunForRepo(repoDir).runs).toHaveLength(1);
 
-    await expect(
-      getTool(tools, "conductor_delegate_task").execute?.(
-        "tool-call-4",
-        {
-          title: "Visible delegate",
-          prompt: "Run visibly",
-          workerName: "delegate-visible",
-          startRun: true,
-          runtimeMode: "iterm-tmux",
-        },
-        undefined,
-        undefined,
-        { cwd: repoDir },
-      ),
-    ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
-    const run = getOrCreateRunForRepo(repoDir);
-    expect(run.tasks.at(-1)).toMatchObject({ title: "Visible delegate", state: "assigned", activeRunId: null });
+      await expect(
+        getTool(tools, "conductor_delegate_task").execute?.(
+          "tool-call-4",
+          {
+            title: "Visible delegate",
+            prompt: "Run visibly",
+            workerName: "delegate-visible",
+            startRun: true,
+            runtimeMode: "iterm-tmux",
+          },
+          undefined,
+          undefined,
+          { cwd: repoDir },
+        ),
+      ).rejects.toThrow(/Runtime mode iterm-tmux unavailable/i);
+      const run = getOrCreateRunForRepo(repoDir);
+      expect(run.tasks.at(-1)).toMatchObject({ title: "Visible delegate", state: "assigned", activeRunId: null });
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(fakeBin, { recursive: true, force: true });
+    }
   });
 
   it("surfaces runtime status through registered list-runs and backend-status tools", async () => {

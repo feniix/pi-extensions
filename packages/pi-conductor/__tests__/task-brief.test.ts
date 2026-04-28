@@ -9,8 +9,11 @@ import {
   createObjectiveForRepo,
   createTaskForRepo,
   createWorkerForRepo,
+  getOrCreateRunForRepo,
   startTaskRunForRepo,
 } from "../extensions/conductor.js";
+import { createRunRuntimeMetadata } from "../extensions/runtime-metadata.js";
+import { writeRun } from "../extensions/storage.js";
 
 describe("conductor task brief", () => {
   let repoDir: string;
@@ -54,5 +57,44 @@ describe("conductor task brief", () => {
     expect(brief.markdown).toContain(`- ${started.run.runId} status=running`);
     expect(brief.markdown).toContain("runtimeMode=headless runtimeStatus=running");
     expect(brief.suggestedNextTool).toBeNull();
+  });
+
+  it("surfaces visible runtime supervision details in task briefs", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Visible task brief", prompt: "Create visible context" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, runtimeMode: "iterm-tmux" });
+    const run = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...run,
+      tasks: run.tasks.map((entry) =>
+        entry.taskId === task.taskId ? { ...entry, latestProgress: "opening viewer" } : entry,
+      ),
+      runs: run.runs.map((entry) =>
+        entry.runId === started.run.runId
+          ? {
+              ...entry,
+              runtime: {
+                ...createRunRuntimeMetadata({ mode: "iterm-tmux", status: "running" }),
+                viewerStatus: "opened" as const,
+                viewerCommand: "tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'",
+                logPath: "/tmp/pi-conductor/runtime/run-1/runner.log",
+                diagnostics: ["iTerm2 viewer opened"],
+              },
+            }
+          : entry,
+      ),
+    });
+
+    const brief = buildTaskBriefForRepo(repoDir, { taskId: task.taskId });
+
+    expect(brief.markdown).toContain("Latest progress: opening viewer");
+    expect(brief.markdown).toContain(`- ${started.run.runId} status=running`);
+    expect(brief.markdown).toContain("runtimeMode=iterm-tmux runtimeStatus=running viewer=opened");
+    expect(brief.markdown).toContain("viewerCommand=\"tmux -S '/tmp/tmux.sock' attach-session -r -t 'pi-cond-run'\"");
+    expect(brief.markdown).toContain("log=/tmp/pi-conductor/runtime/run-1/runner.log");
+    expect(brief.markdown).toContain(
+      `cancel=conductor_cancel_task_run({"runId":"${started.run.runId}","reason":"<reason>"})`,
+    );
   });
 });

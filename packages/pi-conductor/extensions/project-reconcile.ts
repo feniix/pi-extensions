@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
-import { isTerminalRunStatus } from "./run-status.js";
+import { isTerminalRunStatus, isTmuxRuntimeMode } from "./run-status.js";
 import { reconcileRunLeases } from "./storage.js";
 import { applyTmuxReconciliationState, tmuxHeartbeatIsStale } from "./tmux-reconcile-policy.js";
 import type { RunAttemptRecord, RunRecord } from "./types.js";
@@ -30,7 +30,7 @@ export function reconcileTmuxRuntimeState(run: RunRecord, input: { now?: string 
   let current = run;
   const now = input.now ?? new Date().toISOString();
   for (const attempt of current.runs.filter(
-    (entry) => isActiveRunAttempt(entry) && entry.runtime.mode === "tmux" && entry.runtime.tmux?.socketPath,
+    (entry) => isActiveRunAttempt(entry) && isTmuxRuntimeMode(entry.runtime.mode) && entry.runtime.tmux?.socketPath,
   )) {
     if (
       attempt.runtime.status === "starting" &&
@@ -98,7 +98,7 @@ function cleanupPersistedStaleTmuxSessions(repoRoot: string, persisted: RunRecor
   for (const attempt of persisted.runs) {
     if (
       attempt.status !== "stale" ||
-      attempt.runtime.mode !== "tmux" ||
+      !isTmuxRuntimeMode(attempt.runtime.mode) ||
       !attempt.errorMessage?.includes("heartbeat") ||
       attempt.runtime.cleanupStatus === "succeeded" ||
       !attempt.runtime.tmux?.socketPath ||

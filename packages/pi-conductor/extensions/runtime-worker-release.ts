@@ -1,5 +1,5 @@
 import { mutateRepoRunSync } from "./repo-run.js";
-import { isTerminalRunStatus } from "./run-status.js";
+import { isTerminalRunStatus, isTmuxRuntimeMode } from "./run-status.js";
 import type { RunRecord, WorkerLifecycleState } from "./types.js";
 
 export function releaseTerminalTmuxWorkerForRepo(input: {
@@ -13,7 +13,11 @@ export function releaseTerminalTmuxWorkerForRepo(input: {
   const now = new Date().toISOString();
   return mutateRepoRunSync(input.repoRoot, (latest) => {
     const attempt = latest.runs.find((entry) => entry.runId === input.runId);
-    if (!attempt || attempt.runtime.mode !== "tmux" || (!attempt.finishedAt && !isTerminalRunStatus(attempt.status))) {
+    if (
+      !attempt ||
+      !isTmuxRuntimeMode(attempt.runtime.mode) ||
+      (!attempt.finishedAt && !isTerminalRunStatus(attempt.status))
+    ) {
       return latest;
     }
     const effectiveCleanupStatus = input.cleanupStatus ?? attempt.runtime.cleanupStatus;

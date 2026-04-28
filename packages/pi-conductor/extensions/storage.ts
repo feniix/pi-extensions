@@ -14,7 +14,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { deriveProjectKey } from "./project-key.js";
-import { isTerminalRunStatus } from "./run-status.js";
+import { isTerminalRunStatus, isTmuxRuntimeMode } from "./run-status.js";
 import { createRunRuntimeMetadata, mapRunStatusToRuntimeStatus } from "./runtime-metadata.js";
 import { markRunAttemptStale } from "./runtime-stale.js";
 import { defaultOperationForGate, normalizeProjectRecord } from "./storage-normalize.js";
@@ -1235,7 +1235,7 @@ export function completeTaskRun(
       entry.workerId === runAttempt.workerId
         ? {
             ...entry,
-            lifecycle: runAttempt.runtime.mode === "tmux" ? ("running" as const) : ("idle" as const),
+            lifecycle: isTmuxRuntimeMode(runAttempt.runtime.mode) ? ("running" as const) : ("idle" as const),
             updatedAt: now,
           }
         : entry,
