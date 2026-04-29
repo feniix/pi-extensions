@@ -514,6 +514,7 @@ describe("conductor service", () => {
       );
 
       expect(result.runtimeMode).toBe("tmux");
+      expect(result.results.map((entry) => entry.executionState)).toEqual(["launched", "launched"]);
       expect(seenOptions).toEqual([
         { runtimeMode: "tmux", waitForCompletion: false },
         { runtimeMode: "tmux", waitForCompletion: false },
@@ -542,6 +543,7 @@ describe("conductor service", () => {
       );
 
       expect(result.runtimeMode).toBe("headless");
+      expect(result.results.map((entry) => entry.executionState)).toEqual(["completed"]);
       expect(seenOptions).toEqual([{ runtimeMode: "headless", waitForCompletion: true }]);
     } finally {
       restorePath();

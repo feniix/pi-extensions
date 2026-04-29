@@ -1122,6 +1122,7 @@ export async function runParallelWorkForRepo(
   results: Array<{
     taskId: string;
     status: "fulfilled" | "rejected";
+    executionState: "completed" | "launched" | "failed_to_launch" | "interrupted";
     result: WorkerRunResult | null;
     error: string | null;
   }>;
@@ -1275,16 +1276,34 @@ export async function runParallelWorkForRepo(
     if (signal?.aborted) await requestCancelOwnedWork();
     await Promise.allSettled(pendingCancellations);
     collectOwnedCanceledWork();
-    const results = settled.map((entry, index) =>
-      entry.status === "fulfilled"
-        ? { taskId: tasks[index]?.taskId ?? "", status: "fulfilled" as const, result: entry.value, error: null }
-        : {
-            taskId: tasks[index]?.taskId ?? "",
-            status: "rejected" as const,
-            result: null,
-            error: errorMessage(entry.reason),
-          },
-    );
+    const results = settled.map((entry, index) => {
+      const taskId = tasks[index]?.taskId ?? "";
+      if (signal?.aborted) {
+        return {
+          taskId,
+          status: entry.status,
+          executionState: "interrupted" as const,
+          result: entry.status === "fulfilled" ? entry.value : null,
+          error: entry.status === "rejected" ? errorMessage(entry.reason) : null,
+        };
+      }
+      if (entry.status === "fulfilled") {
+        return {
+          taskId,
+          status: "fulfilled" as const,
+          executionState: runtimeMode === "headless" ? ("completed" as const) : ("launched" as const),
+          result: entry.value,
+          error: null,
+        };
+      }
+      return {
+        taskId,
+        status: "rejected" as const,
+        executionState: runtimeMode === "headless" ? ("completed" as const) : ("failed_to_launch" as const),
+        result: null,
+        error: errorMessage(entry.reason),
+      };
+    });
     return {
       workers,
       tasks,

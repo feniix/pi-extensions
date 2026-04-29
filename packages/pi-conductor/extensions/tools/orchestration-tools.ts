@@ -90,11 +90,13 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
         result.canceledTasks.length > 0 ? `; canceled ${result.canceledTasks.length} pre-run task(s)` : "";
       const finishedText = `${completed} succeeded, ${result.results.length - completed} need follow-up${canceledText}`;
       const launchedText = `${completed} launched, ${result.results.length - completed} failed to launch${canceledText}`;
+      const followUpText =
+        'inspect with conductor_project_brief or conductor_list_runs({ status: "running" }); cancel with conductor_cancel_active_work';
       const text = signal?.aborted
         ? `interrupted parallel conductor work with ${runtimeText}; canceled ${result.canceledRuns.length} active run(s) and ${result.canceledTasks.length} task(s)`
         : result.runtimeMode === "headless"
           ? `ran ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${finishedText}`
-          : `launched ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${launchedText}`;
+          : `launched ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${launchedText}; ${followUpText}`;
       return { content: [{ type: "text", text }], details: result };
     },
   });
