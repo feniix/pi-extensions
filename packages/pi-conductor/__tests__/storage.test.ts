@@ -712,6 +712,61 @@ describe("storage helpers", () => {
     expect(content.content).toBe('{\n  "metadata": {\n    "s');
   });
 
+  it("reports missing local note files as missing artifacts", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
+    const projectKey = deriveProjectKey(repoRoot);
+    let run = addTask(
+      createEmptyRun(projectKey, repoRoot),
+      createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" }),
+    );
+    run = addConductorArtifact(run, {
+      artifactId: "artifact-note-missing",
+      type: "note",
+      ref: "missing-note.txt",
+      resourceRefs: { taskId: "task-1" },
+      producer: { type: "system", id: "test" },
+      metadata: { summary: "metadata exists" },
+    });
+    writeRun(run);
+
+    expect(readArtifactContentForRepo(repoRoot, "artifact-note-missing")).toMatchObject({
+      artifactId: "artifact-note-missing",
+      ref: "missing-note.txt",
+      content: null,
+      truncated: false,
+      diagnostic: "Artifact file is missing",
+    });
+  });
+
+  it("degrades legacy artifacts without metadata to bounded diagnostics", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
+    const projectKey = deriveProjectKey(repoRoot);
+    const run = addTask(
+      createEmptyRun(projectKey, repoRoot),
+      createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" }),
+    );
+    writeRun({
+      ...run,
+      artifacts: [
+        {
+          artifactId: "artifact-note-no-metadata",
+          type: "note",
+          ref: "note://legacy-no-metadata",
+          resourceRefs: { projectKey, taskId: "task-1" },
+          producer: { type: "child_run", id: "run-legacy" },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as never,
+      ],
+    });
+
+    expect(readArtifactContentForRepo(repoRoot, "artifact-note-no-metadata", { maxBytes: 10 })).toMatchObject({
+      content: '{\n  "metad',
+      truncated: true,
+      diagnostic: "Metadata-only note artifact has no readable content file",
+    });
+  });
+
   it("creates a worker record with default lifecycle metadata", () => {
     const worker = createWorkerRecord({
       workerId: "worker-1",

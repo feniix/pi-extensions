@@ -169,6 +169,7 @@ describe("durable task run flows", () => {
     const artifact = persisted.artifacts.find((entry) => entry.type === "note");
     if (!artifact) throw new Error("expected note artifact");
     expect(persisted.tasks[0]?.artifactIds).toContain(artifact.artifactId);
+    expect(JSON.stringify(artifact.metadata)).not.toContain("primary source summary");
     expect(readArtifactContentForRepo(repoDir, artifact.artifactId)).toMatchObject({
       artifactId: artifact.artifactId,
       ref: "project-scan-summary",
@@ -204,6 +205,63 @@ describe("durable task run flows", () => {
       content: "final",
       truncated: true,
       diagnostic: null,
+    });
+  });
+
+  it("bounds child note artifacts by UTF-8 bytes", async () => {
+    const worker = await createWorkerForRepo(repoDir, "unicode-note-worker");
+    const task = createTaskForRepo(repoDir, { title: "Unicode note artifact", prompt: "Record unicode note" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async ({ taskContract, onConductorProgress }) => {
+      await onConductorProgress?.({
+        runId: taskContract.runId,
+        taskId: task.taskId,
+        progress: "éclair",
+        artifact: { type: "note", ref: "unicode-summary" },
+      });
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "unicode-note-session" };
+    });
+
+    await runTaskForRepo(repoDir, task.taskId);
+
+    const artifact = getOrCreateRunForRepo(repoDir).artifacts.find((entry) => entry.type === "note");
+    if (!artifact) throw new Error("expected note artifact");
+    expect(readArtifactContentForRepo(repoDir, artifact.artifactId, { maxBytes: 1 })).toMatchObject({
+      content: "",
+      truncated: true,
+      diagnostic: null,
+    });
+  });
+
+  it("reports missing captured child-note content files", async () => {
+    const worker = await createWorkerForRepo(repoDir, "missing-captured-note-worker");
+    const task = createTaskForRepo(repoDir, { title: "Missing captured note", prompt: "Record note" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async ({ taskContract, onConductorProgress }) => {
+      await onConductorProgress?.({
+        runId: taskContract.runId,
+        taskId: task.taskId,
+        progress: "stored note content",
+        artifact: { type: "note", ref: "missing-captured-note" },
+      });
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "missing-note-session" };
+    });
+
+    await runTaskForRepo(repoDir, task.taskId);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    const artifact = persisted.artifacts.find((entry) => entry.type === "note");
+    if (!artifact) throw new Error("expected note artifact");
+    const contentRef = artifact.metadata.conductorNoteContentRef;
+    if (typeof contentRef !== "string") throw new Error("expected captured note content ref");
+    rmSync(join(persisted.storageDir, contentRef), { force: true });
+
+    expect(readArtifactContentForRepo(repoDir, artifact.artifactId)).toMatchObject({
+      content: null,
+      truncated: false,
+      diagnostic: "Captured note content file is missing",
     });
   });
 
