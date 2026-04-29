@@ -325,6 +325,8 @@ describe("conductor service", () => {
 
     expect(startedCount).toBe(0);
     expect(result.canceledTasks).toHaveLength(2);
+    expect(result.cleanupRecommendations.map((entry) => entry.workerName)).toEqual(["parallel-1", "parallel-2"]);
+    expect(summarizeParallelWorkToolText(result, true)).toContain("Cleanup guidance");
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.tasks.map((task) => task.state)).toEqual(["canceled", "canceled"]);
     expect(run.runs).toHaveLength(0);
@@ -459,6 +461,20 @@ describe("conductor service", () => {
       taskState: "completed",
       completionSummary: `summary for ${result.tasks[1]?.taskId}`,
     });
+    expect(result.cleanupRecommendations).toEqual([
+      expect.objectContaining({
+        workerName: "parallel-1",
+        cleanupToolCall: { name: "conductor_cleanup_worker", params: { name: "parallel-1" } },
+        gateType: "destructive_cleanup",
+      }),
+      expect.objectContaining({
+        workerName: "parallel-2",
+        cleanupToolCall: { name: "conductor_cleanup_worker", params: { name: "parallel-2" } },
+        gateType: "destructive_cleanup",
+      }),
+    ]);
+    expect(summarizeParallelWorkToolText(result)).toContain("Cleanup guidance");
+    expect(summarizeParallelWorkToolText(result)).toContain('conductor_cleanup_worker({"name":"parallel-1"})');
   });
 
   it("bounds long parallel task result previews and truncation flags", async () => {
@@ -668,6 +684,12 @@ describe("conductor service", () => {
     });
     expect(result.tasks.map((task) => task.title)).toEqual(["Fix README typo"]);
     expect(result.parallel).toBeNull();
+    expect(result.cleanupRecommendations).toHaveLength(1);
+    expect(result.cleanupRecommendations[0]).toMatchObject({
+      workerName: "run-work-1",
+      cleanupToolCall: { name: "conductor_cleanup_worker", params: { name: "run-work-1" } },
+    });
+    expect(summarizeRunWorkToolText(result)).toContain("Cleanup guidance");
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers).toHaveLength(1);
     expect(run.tasks).toHaveLength(1);

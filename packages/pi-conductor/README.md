@@ -157,6 +157,8 @@ Compatibility note: older parallel-work callers that omitted `runtimeMode` and e
 
 Programmatic callers should inspect `details.taskResults` for per-task IDs and handoff context. Each entry includes task/worker/run identifiers, task state, run status, bounded latest-progress/completion/error previews, launch-error diagnostics, missing-task markers, and purpose-tagged `nextToolCalls` such as `conductor_task_brief`, `conductor_resource_timeline`, `conductor_retry_task`, or `conductor_cancel_task_run` so parent agents can report outcomes and choose follow-up actions without immediately listing tasks again.
 
+Conductor workers are durable by default, even for non-mutating or research-style prompts: each worker may keep a branch, worktree, and session file so task evidence remains inspectable after the tool returns. `conductor_run_work` and `conductor_run_parallel_work` include `cleanupRecommendations` plus model-visible cleanup guidance for idle workers they created or reused. For short-lived/read-only work, call `conductor_cleanup_worker({ name })` for the listed worker; cleanup is protected by a `destructive_cleanup` gate, so approve it through `/conductor human dashboard` when prompted, then rerun the cleanup tool.
+
 `conductor_run_parallel_work` result states distinguish launch from completion:
 
 | `executionState` | Meaning |

@@ -6,6 +6,7 @@ import {
   getConductorRuntimeModeStatus,
   inspectConductorBackends,
 } from "./backends.js";
+import { summarizeWorkerCleanupRecommendations, type WorkerCleanupRecommendation } from "./cleanup-guidance.js";
 import { createGateForRepo } from "./gate-service.js";
 import {
   commitAllChanges,
@@ -559,7 +560,6 @@ export function buildProjectBriefForRepo(
     recentEvents,
   };
 }
-
 async function executeConductorAction(
   repoRoot: string,
   action: ConductorNextAction,
@@ -640,7 +640,6 @@ async function executeConductorAction(
   }
   return { executed: false, reason: `unsupported action ${action.kind}`, action, result: null };
 }
-
 export async function runNextActionForRepo(
   repoRoot: string,
   input: { objectiveId?: string; executeRuns?: boolean; policy?: SchedulerPolicyName } = {},
@@ -654,7 +653,6 @@ export async function runNextActionForRepo(
     ? executeConductorAction(repoRoot, action, schedulerPolicy, signal)
     : { executed: false, reason: "no action", action, result: null };
 }
-
 export async function scheduleObjectiveForRepo(
   repoRoot: string,
   input: {
@@ -725,7 +723,6 @@ export async function scheduleObjectiveForRepo(
   }
   return { objectiveId: input.objectiveId ?? null, assigned, executed, skipped };
 }
-
 function recordSchedulerActionEvent(
   repoRoot: string,
   type: ConductorEventType,
@@ -841,7 +838,6 @@ export async function schedulerTickForRepo(
     throw error;
   }
 }
-
 export function getNextActionsForRepo(
   repoRoot: string,
   input: {
@@ -857,7 +853,6 @@ export function getNextActionsForRepo(
     (input.reconcile ?? true) ? reconcileProjectForRepo(repoRoot, { dryRun: true }) : getOrCreateRunForRepo(repoRoot);
   return computeNextActions(run, { ...input, reconciledPreview: input.reconcile ?? true });
 }
-
 export async function dispatchTaskRunForRepo(
   repoRoot: string,
   input: {
@@ -972,7 +967,6 @@ export async function dispatchTaskRunForRepo(
     dispatch: { backendRunId: result.backendRunId ?? null, diagnostic: result.diagnostic },
   };
 }
-
 export async function delegateTaskForRepo(
   repoRoot: string,
   input: {
@@ -995,7 +989,6 @@ export async function delegateTaskForRepo(
     (await createWorkerForRepo(repoRoot, input.workerName));
   const task = createTaskForRepo(repoRoot, { title: input.title, prompt: input.prompt });
   const assigned = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
-
   if (!input.startRun) {
     return { worker, task: assigned, run: null, taskContract: null };
   }
@@ -1023,7 +1016,6 @@ export function cancelTaskRunForRepo(repoRoot: string, input: { runId: string; r
   }
   return project;
 }
-
 export async function cancelTaskRunForRepoWithRuntimeCleanup(
   repoRoot: string,
   input: { runId: string; reason: string },
@@ -1117,6 +1109,7 @@ export async function runParallelWorkForRepo(
   runtimeMode: RunRuntimeMode;
   runtimeRuns: RunWorkRuntimeSummary[];
   taskResults: ParallelTaskResultSummary[];
+  cleanupRecommendations: WorkerCleanupRecommendation[];
 }> {
   if (input.tasks.length === 0) {
     throw new Error("At least one parallel work item is required");
@@ -1236,6 +1229,7 @@ export async function runParallelWorkForRepo(
   });
 
   const taskIds = tasks.map((task) => task.taskId);
+  const workerIds = workers.map((worker) => worker.workerId);
   try {
     if (signal?.aborted) {
       await Promise.allSettled(pendingCancellations);
@@ -1248,6 +1242,7 @@ export async function runParallelWorkForRepo(
         runtimeMode,
         runtimeRuns: [],
         taskResults: summarizeParallelTaskResults(repoRoot, taskIds),
+        cleanupRecommendations: summarizeWorkerCleanupRecommendations(repoRoot, workerIds),
       };
     }
     const settled = await Promise.allSettled(
@@ -1315,6 +1310,7 @@ export async function runParallelWorkForRepo(
       runtimeMode,
       runtimeRuns: summarizeRunWorkRuntime(repoRoot, taskIds),
       taskResults: summarizeParallelTaskResults(repoRoot, taskIds, launchErrors),
+      cleanupRecommendations: summarizeWorkerCleanupRecommendations(repoRoot, workerIds),
     };
   } finally {
     signal?.removeEventListener("abort", onAbort);
@@ -1350,6 +1346,7 @@ export async function runWorkForRepo(
   } | null;
   runtimeMode: RunRuntimeMode;
   runtimeRuns: RunWorkRuntimeSummary[];
+  cleanupRecommendations: WorkerCleanupRecommendation[];
 }> {
   const execute = input.execute ?? true;
   if (isStatusOnlyWorkRequest(input.request)) {
@@ -1379,6 +1376,7 @@ export async function runWorkForRepo(
         objective: null,
         runtimeMode,
         runtimeRuns: [],
+        cleanupRecommendations: [],
       };
     }
     const parallel = await runParallelWorkForRepo(
@@ -1404,6 +1402,7 @@ export async function runWorkForRepo(
       objective: null,
       runtimeMode,
       runtimeRuns: parallel.runtimeRuns,
+      cleanupRecommendations: parallel.cleanupRecommendations,
     };
   }
 
@@ -1449,12 +1448,14 @@ export async function runWorkForRepo(
       throw error;
     }
     const scheduledWorkerIds = new Set(schedule?.assigned.map((task) => task.assignedWorkerId).filter(Boolean));
+    const resultWorkers =
+      schedule && scheduledWorkerIds.size > 0
+        ? getOrCreateRunForRepo(repoRoot).workers.filter((worker) => scheduledWorkerIds.has(worker.workerId))
+        : workers;
+    const resultWorkerIds = resultWorkers.map((worker) => worker.workerId);
     return {
       decision,
-      workers:
-        schedule && scheduledWorkerIds.size > 0
-          ? getOrCreateRunForRepo(repoRoot).workers.filter((worker) => scheduledWorkerIds.has(worker.workerId))
-          : workers,
+      workers: resultWorkers,
       tasks: planned.tasks,
       single: null,
       parallel: null,
@@ -1464,6 +1465,7 @@ export async function runWorkForRepo(
         repoRoot,
         planned.tasks.map((task) => task.taskId),
       ),
+      cleanupRecommendations: summarizeWorkerCleanupRecommendations(repoRoot, resultWorkerIds),
     };
   }
 
@@ -1492,6 +1494,7 @@ export async function runWorkForRepo(
       objective: null,
       runtimeMode,
       runtimeRuns: summarizeRunWorkRuntime(repoRoot, [delegated.task.taskId]),
+      cleanupRecommendations: summarizeWorkerCleanupRecommendations(repoRoot, [delegated.worker.workerId]),
     };
   }
   let result: WorkerRunResult | null = null;
@@ -1516,9 +1519,9 @@ export async function runWorkForRepo(
     objective: null,
     runtimeMode,
     runtimeRuns: summarizeRunWorkRuntime(repoRoot, [delegated.task.taskId]),
+    cleanupRecommendations: summarizeWorkerCleanupRecommendations(repoRoot, [delegated.worker.workerId]),
   };
 }
-
 function cancelPendingStartupFailureForRepo(
   repoRoot: string,
   input: { reason: string; taskIds: string[]; workerIds?: string[] },

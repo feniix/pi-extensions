@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { formatActiveWorkerViewerSummary, summarizeActiveWorkerViewersForRepo } from "../active-worker-viewer.js";
+import { formatWorkerCleanupGuidance } from "../cleanup-guidance.js";
 import * as conductor from "../conductor.js";
 import { formatParallelTaskResultsTable } from "../parallel-work-results.js";
 
@@ -24,12 +25,13 @@ export function summarizeParallelWorkToolText(
   const followUpText =
     "inspect active viewers with conductor_view_active_workers({}); scope by taskId/workerId/runId; cancel with conductor_cancel_active_work";
   const resultTable = formatParallelTaskResultsTable(result.taskResults);
+  const cleanupText = formatWorkerCleanupGuidance(result.cleanupRecommendations);
   if (aborted) {
-    return `interrupted parallel conductor work with ${runtimeText}; canceled ${result.canceledRuns.length} active run(s) and ${result.canceledTasks.length} task(s)${resultTable}`;
+    return `interrupted parallel conductor work with ${runtimeText}; canceled ${result.canceledRuns.length} active run(s) and ${result.canceledTasks.length} task(s)${resultTable}${cleanupText}`;
   }
   return result.runtimeMode === "headless"
-    ? `ran ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${finishedText}${resultTable}`
-    : `launched ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${launchedText}; ${followUpText}${resultTable}`;
+    ? `ran ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${finishedText}${resultTable}${cleanupText}`
+    : `launched ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${launchedText}; ${followUpText}${resultTable}${cleanupText}`;
 }
 
 export function summarizeRunWorkToolText(result: Awaited<ReturnType<typeof conductor.runWorkForRepo>>): string {
@@ -42,7 +44,10 @@ export function summarizeRunWorkToolText(result: Awaited<ReturnType<typeof condu
       : result.decision.mode === "objective"
         ? `routed work to an objective with ${result.tasks.length} task(s) with ${runtimeText}: ${result.decision.reason}${viewerText}`
         : `routed work to one conductor worker with ${runtimeText}: ${result.decision.reason}${viewerText}`;
-  return result.parallel ? `${routeText}\n${summarizeParallelWorkToolText(result.parallel)}` : routeText;
+  const cleanupText = formatWorkerCleanupGuidance(result.cleanupRecommendations);
+  return result.parallel
+    ? `${routeText}\n${summarizeParallelWorkToolText(result.parallel)}`
+    : `${routeText}${cleanupText}`;
 }
 
 export function registerOrchestrationTools(pi: ExtensionAPI): void {
@@ -60,7 +65,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
     name: "conductor_run_work",
     label: "Conductor Run Work",
     description:
-      "Run natural-language pi-conductor work and let conductor decide whether to use one worker, parallel workers, or an objective DAG. Omit runtimeMode to keep single/objective work headless unless visible supervision is requested; parallel work prefers supervised tmux when available and falls back to headless. For parallel tmux/iterm-tmux runs, inspect details.parallel.results[].executionState to distinguish launched supervised work from completed headless work. Use conductor_get_project, conductor_list_workers, conductor_list_runs, or conductor_view_active_workers for status-only requests. Programmatic callers must not treat tool success as semantic completion; inspect executionState/taskResults. Runtime preflight errors can be investigated with conductor_backend_status, and active runtimeRuns include cancelTool details.",
+      "Run natural-language pi-conductor work and let conductor decide whether to use one worker, parallel workers, or an objective DAG. Omit runtimeMode to keep single/objective work headless unless visible supervision is requested; parallel work prefers supervised tmux when available and falls back to headless. For parallel tmux/iterm-tmux runs, inspect details.parallel.results[].executionState to distinguish launched supervised work from completed headless work. Use conductor_get_project, conductor_list_workers, conductor_list_runs, or conductor_view_active_workers for status-only requests. Programmatic callers must not treat tool success as semantic completion; inspect executionState/taskResults. Durable worker branches/worktrees may remain after read-only work; inspect cleanupRecommendations for gate-protected conductor_cleanup_worker follow-up. Runtime preflight errors can be investigated with conductor_backend_status, and active runtimeRuns include cancelTool details.",
     parameters: Type.Object({
       request: Type.String({ description: "The user's natural-language work request" }),
       mode: Type.Optional(
@@ -94,7 +99,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
     name: "conductor_run_parallel_work",
     label: "Conductor Run Parallel Work",
     description:
-      "Autonomously split a natural-language request into parallel conductor worker tasks. When no runtimeMode is provided, conductor prefers tmux so the tool can launch supervised workers and return control to the parent session for natural-language follow-up; it falls back to headless when tmux is unavailable. Use details.results[].executionState to distinguish completed headless work from launched supervised runs, failed launches, and interruptions. Owned runs/tasks are canceled if the user interrupts with Escape or a task fails before active run creation.",
+      "Autonomously split a natural-language request into parallel conductor worker tasks. When no runtimeMode is provided, conductor prefers tmux so the tool can launch supervised workers and return control to the parent session for natural-language follow-up; it falls back to headless when tmux is unavailable. Use details.results[].executionState to distinguish completed headless work from launched supervised runs, failed launches, and interruptions. Durable worker branches/worktrees may remain after read-only work; inspect cleanupRecommendations for gate-protected conductor_cleanup_worker follow-up. Owned runs/tasks are canceled if the user interrupts with Escape or a task fails before active run creation.",
     parameters: Type.Object({
       tasks: Type.Array(
         Type.Object({
