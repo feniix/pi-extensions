@@ -153,6 +153,7 @@ export interface ConductorTaskBrief {
   runs: RunAttemptRecord[];
   gates: GateRecord[];
   artifacts: ArtifactRecord[];
+  terminalRun: RunAttemptRecord | null;
   suggestedNextTool: null | { name: string; params: Record<string, unknown> };
   dependencies: Array<{ taskId: string; title: string; state: TaskState }>;
 }

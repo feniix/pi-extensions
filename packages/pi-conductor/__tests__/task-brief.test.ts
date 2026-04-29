@@ -13,7 +13,7 @@ import {
   startTaskRunForRepo,
 } from "../extensions/conductor.js";
 import { createRunRuntimeMetadata } from "../extensions/runtime-metadata.js";
-import { writeRun } from "../extensions/storage.js";
+import { completeTaskRun, writeRun } from "../extensions/storage.js";
 
 describe("conductor task brief", () => {
   let repoDir: string;
@@ -57,6 +57,109 @@ describe("conductor task brief", () => {
     expect(brief.markdown).toContain(`- ${started.run.runId} status=running`);
     expect(brief.markdown).toContain("runtimeMode=headless runtimeStatus=running");
     expect(brief.suggestedNextTool).toBeNull();
+  });
+
+  it("includes completed run completion summaries in task briefs", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Completed summary", prompt: "Summarize completion" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
+    writeRun(
+      completeTaskRun(getOrCreateRunForRepo(repoDir), {
+        runId: started.run.runId,
+        status: "succeeded",
+        completionSummary: "Implemented the feature and verified it with targeted tests.",
+      }),
+    );
+
+    const brief = buildTaskBriefForRepo(repoDir, { taskId: task.taskId });
+
+    expect(brief.markdown).toContain("## Terminal Summary");
+    expect(brief.markdown).toContain(`Run: ${started.run.runId} status=succeeded`);
+    expect(brief.markdown).toContain(
+      "Completion summary: Implemented the feature and verified it with targeted tests.",
+    );
+    expect(brief.terminalRun?.runId).toBe(started.run.runId);
+  });
+
+  it("includes failed run error messages in task briefs", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Failed summary", prompt: "Summarize failure" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
+    writeRun(
+      completeTaskRun(getOrCreateRunForRepo(repoDir), {
+        runId: started.run.runId,
+        status: "failed",
+        completionSummary: "Could not finish because validation failed.",
+        errorMessage: "Typecheck failed in storage.ts",
+      }),
+    );
+
+    const brief = buildTaskBriefForRepo(repoDir, { taskId: task.taskId });
+
+    expect(brief.markdown).toContain("## Terminal Summary");
+    expect(brief.markdown).toContain(`Run: ${started.run.runId} status=failed`);
+    expect(brief.markdown).toContain("Error: Typecheck failed in storage.ts");
+    expect(brief.markdown).toContain("Completion summary: Could not finish because validation failed.");
+  });
+
+  it("formats multiline terminal summaries as indented markdown blocks", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Multiline summary", prompt: "Summarize multiline output" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
+    writeRun(
+      completeTaskRun(getOrCreateRunForRepo(repoDir), {
+        runId: started.run.runId,
+        status: "succeeded",
+        completionSummary: "Line one\n## injected heading\n- injected list",
+      }),
+    );
+
+    const brief = buildTaskBriefForRepo(repoDir, { taskId: task.taskId });
+
+    expect(brief.markdown).toContain("Completion summary:\n    Line one\n    ## injected heading\n    - injected list");
+    expect(brief.markdown).not.toContain("\n## injected heading\n");
+  });
+
+  it("normalizes carriage-return terminal summaries before markdown formatting", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "CR summary", prompt: "Summarize CR output" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
+    writeRun(
+      completeTaskRun(getOrCreateRunForRepo(repoDir), {
+        runId: started.run.runId,
+        status: "succeeded",
+        completionSummary: "ok\r## injected heading",
+      }),
+    );
+
+    const brief = buildTaskBriefForRepo(repoDir, { taskId: task.taskId });
+
+    expect(brief.markdown).toContain("Completion summary:\n    ok\n    ## injected heading");
+    expect(brief.markdown).not.toContain("\r## injected heading");
+  });
+
+  it("truncates long terminal summaries in task briefs", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Long summary", prompt: "Summarize long output" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
+    writeRun(
+      completeTaskRun(getOrCreateRunForRepo(repoDir), {
+        runId: started.run.runId,
+        status: "succeeded",
+        completionSummary: "x".repeat(1300),
+      }),
+    );
+
+    const brief = buildTaskBriefForRepo(repoDir, { taskId: task.taskId });
+
+    expect(brief.markdown).toContain("Completion summary: ");
+    expect(brief.markdown).toContain("(truncated; inspect run details or artifacts for full output)");
+    expect(brief.markdown).not.toContain("x".repeat(1300));
   });
 
   it("surfaces visible runtime supervision details in task briefs", async () => {

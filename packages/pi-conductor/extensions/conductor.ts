@@ -36,6 +36,7 @@ import {
   removeWorker,
   setWorkerPrState,
 } from "./storage.js";
+import { terminalRunSummaryMarkdown } from "./task-brief-summary.js";
 import {
   assignTaskForRepo,
   cancelTaskRunForRepo as cancelTaskRunStateForRepo,
@@ -435,6 +436,8 @@ export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string 
     ? (run.workers.find((entry) => entry.workerId === task.assignedWorkerId) ?? null)
     : null;
   const runs = run.runs.filter((entry) => task.runIds.includes(entry.runId));
+  const terminalRun =
+    [...runs].reverse().find((entry) => isTerminalRunStatus(entry.status) || entry.finishedAt) ?? null;
   const gates = run.gates.filter((gate) => gate.resourceRefs.taskId === task.taskId);
   const artifacts = run.artifacts.filter((artifact) => artifact.resourceRefs.taskId === task.taskId);
   const dependencies = task.dependsOnTaskIds.map((taskId) => {
@@ -466,6 +469,9 @@ export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string 
     `Gates: ${gates.length}`,
     `Artifacts: ${artifacts.length}`,
     "",
+    "## Terminal Summary",
+    terminalRunSummaryMarkdown(terminalRun, run.events),
+    "",
     "## Runs",
     runs.length === 0
       ? "- none"
@@ -488,7 +494,7 @@ export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string 
     "## Suggested Next Tool",
     suggestedNextTool ? `${suggestedNextTool.name} ${JSON.stringify(suggestedNextTool.params)}` : "none",
   ].join("\n");
-  return { markdown, task, objective, worker, runs, gates, artifacts, suggestedNextTool, dependencies };
+  return { markdown, task, objective, worker, runs, gates, artifacts, terminalRun, suggestedNextTool, dependencies };
 }
 
 export function buildProjectBriefForRepo(
