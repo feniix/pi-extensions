@@ -16,6 +16,7 @@ import {
 } from "./git-pr.js";
 import { computeNextActions } from "./next-actions.js";
 import { createObjectiveForRepo, planObjectiveForRepo, refreshObjectiveStatusForRepo } from "./objective-service.js";
+import { type ParallelTaskResultSummary, summarizeParallelTaskResults } from "./parallel-work-results.js";
 import { reconcileProjectForRepo } from "./project-reconcile.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
 import { mutateRepoRunWithLockRetry } from "./repo-run-retry.js";
@@ -101,24 +102,20 @@ export type { RunWorkItemInput, WorkRoutingDecision, WorkRoutingMode } from "./w
 export { planWorkRouting } from "./work-routing.js";
 export { selectRuntimeModeForWork } from "./work-runtime-selection.js";
 export type { RunWorkRuntimeSummary } from "./work-runtime-summary.js";
-
 export type ParallelWorkItemInput = {
   title: string;
   prompt: string;
   workerName?: string;
 };
-
 export type ParallelWorkRunner = (
   repoRoot: string,
   taskId: string,
   signal?: AbortSignal,
   input?: { runtimeMode?: RunRuntimeMode; waitForCompletion?: boolean },
 ) => Promise<WorkerRunResult>;
-
 function defaultParallelRuntimeMode(): RunRuntimeMode {
   return getConductorRuntimeModeStatus("tmux").available ? "tmux" : "headless";
 }
-
 function assertRuntimeModeAvailable(runtimeMode: RunRuntimeMode): void {
   const runtimeStatus = getConductorRuntimeModeStatus(runtimeMode);
   if (!runtimeStatus.available) {
@@ -127,16 +124,13 @@ function assertRuntimeModeAvailable(runtimeMode: RunRuntimeMode): void {
     );
   }
 }
-
 type LiveWorkAbortHandle = {
   runId?: string;
   taskId: string;
   workerId?: string;
   controller: AbortController;
 };
-
 const liveWorkAbortHandles = new Set<LiveWorkAbortHandle>();
-
 function createLinkedAbortController(parentSignal?: AbortSignal): {
   controller: AbortController;
   signal: AbortSignal;
@@ -1136,6 +1130,7 @@ export async function runParallelWorkForRepo(
   canceledTasks: string[];
   runtimeMode: RunRuntimeMode;
   runtimeRuns: RunWorkRuntimeSummary[];
+  taskResults: ParallelTaskResultSummary[];
 }> {
   if (input.tasks.length === 0) {
     throw new Error("At least one parallel work item is required");
@@ -1254,10 +1249,20 @@ export async function runParallelWorkForRepo(
     };
   });
 
+  const taskIds = tasks.map((task) => task.taskId);
   try {
     if (signal?.aborted) {
       await Promise.allSettled(pendingCancellations);
-      return { workers, tasks, results: [], canceledRuns, canceledTasks, runtimeMode, runtimeRuns: [] };
+      return {
+        workers,
+        tasks,
+        results: [],
+        canceledRuns,
+        canceledTasks,
+        runtimeMode,
+        runtimeRuns: [],
+        taskResults: summarizeParallelTaskResults(repoRoot, taskIds),
+      };
     }
     const settled = await Promise.allSettled(
       tasks.map((task, index) =>
@@ -1282,15 +1287,18 @@ export async function runParallelWorkForRepo(
     if (signal?.aborted) await requestCancelOwnedWork();
     await Promise.allSettled(pendingCancellations);
     collectOwnedCanceledWork();
+    const launchErrors: Record<string, string | null> = {};
     const results = settled.map((entry, index) => {
       const taskId = tasks[index]?.taskId ?? "";
       if (signal?.aborted) {
+        const error = entry.status === "rejected" ? errorMessage(entry.reason) : null;
+        launchErrors[taskId] = error;
         return {
           taskId,
           status: entry.status,
           executionState: "interrupted" as const,
           result: entry.status === "fulfilled" ? entry.value : null,
-          error: entry.status === "rejected" ? errorMessage(entry.reason) : null,
+          error,
         };
       }
       if (entry.status === "fulfilled") {
@@ -1302,12 +1310,14 @@ export async function runParallelWorkForRepo(
           error: null,
         };
       }
+      const error = errorMessage(entry.reason);
+      launchErrors[taskId] = error;
       return {
         taskId,
         status: "rejected" as const,
         executionState: runtimeMode === "headless" ? ("completed" as const) : ("failed_to_launch" as const),
         result: null,
-        error: errorMessage(entry.reason),
+        error,
       };
     });
     return {
@@ -1317,10 +1327,8 @@ export async function runParallelWorkForRepo(
       canceledRuns,
       canceledTasks,
       runtimeMode,
-      runtimeRuns: summarizeRunWorkRuntime(
-        repoRoot,
-        tasks.map((task) => task.taskId),
-      ),
+      runtimeRuns: summarizeRunWorkRuntime(repoRoot, taskIds),
+      taskResults: summarizeParallelTaskResults(repoRoot, taskIds, launchErrors),
     };
   } finally {
     signal?.removeEventListener("abort", onAbort);

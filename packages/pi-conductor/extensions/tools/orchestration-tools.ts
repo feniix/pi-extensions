@@ -1,11 +1,34 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import * as conductor from "../conductor.js";
+import { formatParallelTaskResultsTable } from "../parallel-work-results.js";
 
 function runtimeModeSchema(description?: string) {
   return Type.Union([Type.Literal("headless"), Type.Literal("tmux"), Type.Literal("iterm-tmux")], {
     ...(description ? { description } : {}),
   });
+}
+
+export function summarizeParallelWorkToolText(
+  result: Awaited<ReturnType<typeof conductor.runParallelWorkForRepo>>,
+  aborted = false,
+): string {
+  const semanticCompleted = result.taskResults.filter((entry) => entry.taskState === "completed").length;
+  const launched = result.results.filter((entry) => entry.result?.status === "success").length;
+  const runtimeText = `runtime=${result.runtimeMode}${result.runtimeRuns.length > 0 ? ` runs=${result.runtimeRuns.length}` : ""}`;
+  const canceledText =
+    result.canceledTasks.length > 0 ? `; canceled ${result.canceledTasks.length} pre-run task(s)` : "";
+  const finishedText = `${semanticCompleted} completed, ${result.results.length - semanticCompleted} need follow-up${canceledText}`;
+  const launchedText = `${launched} launched, ${result.results.length - launched} failed to launch${canceledText}`;
+  const followUpText =
+    'inspect with conductor_project_brief or conductor_list_runs({ status: "running" }); cancel with conductor_cancel_active_work';
+  const resultTable = formatParallelTaskResultsTable(result.taskResults);
+  if (aborted) {
+    return `interrupted parallel conductor work with ${runtimeText}; canceled ${result.canceledRuns.length} active run(s) and ${result.canceledTasks.length} task(s)${resultTable}`;
+  }
+  return result.runtimeMode === "headless"
+    ? `ran ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${finishedText}${resultTable}`
+    : `launched ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${launchedText}; ${followUpText}${resultTable}`;
 }
 
 export function registerOrchestrationTools(pi: ExtensionAPI): void {
@@ -84,19 +107,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const result = await conductor.runParallelWorkForRepo(ctx.cwd, params, signal);
-      const completed = result.results.filter((entry) => entry.result?.status === "success").length;
-      const runtimeText = `runtime=${result.runtimeMode}${result.runtimeRuns.length > 0 ? ` runs=${result.runtimeRuns.length}` : ""}`;
-      const canceledText =
-        result.canceledTasks.length > 0 ? `; canceled ${result.canceledTasks.length} pre-run task(s)` : "";
-      const finishedText = `${completed} succeeded, ${result.results.length - completed} need follow-up${canceledText}`;
-      const launchedText = `${completed} launched, ${result.results.length - completed} failed to launch${canceledText}`;
-      const followUpText =
-        'inspect with conductor_project_brief or conductor_list_runs({ status: "running" }); cancel with conductor_cancel_active_work';
-      const text = signal?.aborted
-        ? `interrupted parallel conductor work with ${runtimeText}; canceled ${result.canceledRuns.length} active run(s) and ${result.canceledTasks.length} task(s)`
-        : result.runtimeMode === "headless"
-          ? `ran ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${finishedText}`
-          : `launched ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${launchedText}; ${followUpText}`;
+      const text = summarizeParallelWorkToolText(result, signal?.aborted ?? false);
       return { content: [{ type: "text", text }], details: result };
     },
   });
