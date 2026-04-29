@@ -22,9 +22,10 @@ import {
   startTaskRunForRepo,
   updateTaskForRepo,
 } from "../extensions/conductor.js";
-import { formatParallelTaskResultsTable } from "../extensions/parallel-work-results.js";
+import { formatParallelTaskResultsTable, summarizeParallelTaskResults } from "../extensions/parallel-work-results.js";
 import { deriveProjectKey } from "../extensions/project-key.js";
 import { getRunFile, writeRun } from "../extensions/storage.js";
+import { summarizeParallelWorkToolText } from "../extensions/tools/orchestration-tools.js";
 import { summarizeRunWorkRuntime } from "../extensions/work-runtime-summary.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
@@ -458,6 +459,119 @@ describe("conductor service", () => {
       taskState: "completed",
       completionSummary: `summary for ${result.tasks[1]?.taskId}`,
     });
+  });
+
+  it("bounds long parallel task result previews and truncation flags", async () => {
+    const longText = "x".repeat(320);
+    let callCount = 0;
+    const result = await runParallelWorkForRepo(
+      repoDir,
+      {
+        workerPrefix: "parallel",
+        runtimeMode: "headless",
+        tasks: [
+          { title: "Long completed shard", prompt: "Long" },
+          { title: "Long launch error shard", prompt: "Fail" },
+        ],
+      },
+      undefined,
+      async (root, taskId) => {
+        callCount += 1;
+        if (callCount === 2) throw new Error(longText);
+        const started = startTaskRunForRepo(root, { taskId });
+        recordTaskProgressForRepo(root, { taskId, runId: started.run.runId, progress: longText });
+        recordTaskCompletionForRepo(root, {
+          taskId,
+          runId: started.run.runId,
+          status: "succeeded",
+          completionSummary: longText,
+        });
+        return {
+          workerName: started.run.workerId,
+          status: "success",
+          finalText: "done",
+          errorMessage: null,
+          sessionId: "session",
+        };
+      },
+    );
+
+    expect(result.taskResults[0]).toMatchObject({
+      latestProgressTruncated: true,
+      completionSummaryTruncated: true,
+    });
+    expect(result.taskResults[0]?.latestProgress?.length).toBeLessThan(longText.length);
+    expect(result.taskResults[0]?.completionSummary?.length).toBeLessThan(longText.length);
+    expect(result.taskResults[1]).toMatchObject({ launchErrorTruncated: true });
+    expect(result.taskResults[1]?.launchError?.length).toBeLessThan(longText.length);
+  });
+
+  it("reports running task summaries with cancel follow-up and semantic follow-up text", async () => {
+    const result = await runParallelWorkForRepo(
+      repoDir,
+      { workerPrefix: "parallel", runtimeMode: "headless", tasks: [{ title: "Running shard", prompt: "Run" }] },
+      undefined,
+      async (root, taskId) => {
+        const started = startTaskRunForRepo(root, { taskId });
+        return {
+          workerName: started.run.workerId,
+          status: "success",
+          finalText: "backend done without child completion",
+          errorMessage: null,
+          sessionId: "session",
+        };
+      },
+    );
+
+    expect(result.taskResults[0]).toMatchObject({ taskState: "running", runStatus: "running" });
+    expect(result.taskResults[0]?.nextToolCalls).toContainEqual({
+      name: "conductor_cancel_task_run",
+      params: { runId: result.taskResults[0]?.runId, reason: "<reason>" },
+      purpose: "action",
+    });
+    expect(summarizeParallelWorkToolText(result)).toContain("0 completed, 1 need follow-up");
+  });
+
+  it("reports needs-review task summaries with diagnose follow-up", async () => {
+    const result = await runParallelWorkForRepo(
+      repoDir,
+      { workerPrefix: "parallel", runtimeMode: "headless", tasks: [{ title: "Review shard", prompt: "Review" }] },
+      undefined,
+      async (root, taskId) => {
+        const started = startTaskRunForRepo(root, { taskId });
+        recordTaskCompletionForRepo(root, {
+          taskId,
+          runId: started.run.runId,
+          status: "partial",
+          completionSummary: "needs human review",
+        });
+        return {
+          workerName: started.run.workerId,
+          status: "success",
+          finalText: "partial",
+          errorMessage: null,
+          sessionId: "session",
+        };
+      },
+    );
+
+    expect(result.taskResults[0]).toMatchObject({ taskState: "needs_review", runStatus: "partial" });
+    expect(result.taskResults[0]?.nextToolCalls).toContainEqual({
+      name: "conductor_diagnose_blockers",
+      params: { taskId: result.tasks[0]?.taskId },
+      purpose: "action",
+    });
+  });
+
+  it("reports missing task summaries explicitly", () => {
+    expect(summarizeParallelTaskResults(repoDir, ["missing-task"])).toEqual([
+      expect.objectContaining({
+        taskId: "missing-task",
+        taskTitle: "<missing task>",
+        taskState: null,
+        missingTask: true,
+      }),
+    ]);
   });
 
   it("reports failed parallel launch errors and state-aware retry calls", async () => {
