@@ -154,6 +154,8 @@ Default runtime selection depends on the entry point. `conductor_run_work` stays
 
 Compatibility note: older direct parallel-work callers that omitted `runtimeMode` and expected the tool call to return only after completion should now pass `runtimeMode: "headless"`. The omitted-runtime default is intentionally host-sensitive: machines with tmux get supervised launch-and-return behavior, while machines without tmux continue to run headless. Programmatic callers should inspect each result's `executionState` rather than treating `result.status: "success"` as semantic task completion.
 
+Programmatic callers should inspect `details.taskResults` for per-task IDs and handoff context. Each entry includes task/worker/run identifiers, task state, run status, bounded latest-progress/completion/error previews, launch-error diagnostics, missing-task markers, and purpose-tagged `nextToolCalls` such as `conductor_task_brief`, `conductor_resource_timeline`, `conductor_retry_task`, or `conductor_cancel_task_run` so parent agents can report outcomes and choose follow-up actions without immediately listing tasks again.
+
 `conductor_run_parallel_work` result states distinguish launch from completion:
 
 | `executionState` | Meaning |

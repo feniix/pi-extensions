@@ -22,6 +22,7 @@ import {
   startTaskRunForRepo,
   updateTaskForRepo,
 } from "../extensions/conductor.js";
+import { formatParallelTaskResultsTable } from "../extensions/parallel-work-results.js";
 import { deriveProjectKey } from "../extensions/project-key.js";
 import { getRunFile, writeRun } from "../extensions/storage.js";
 import { summarizeRunWorkRuntime } from "../extensions/work-runtime-summary.js";
@@ -443,12 +444,73 @@ describe("conductor service", () => {
     });
     expect(result.taskResults[0]?.runId).toBeTruthy();
     expect(result.taskResults[0]?.nextToolCalls).toEqual([
-      { name: "conductor_task_brief", params: { taskId: result.tasks[0]?.taskId } },
+      { name: "conductor_task_brief", params: { taskId: result.tasks[0]?.taskId }, purpose: "evidence" },
       {
         name: "conductor_resource_timeline",
         params: { taskId: result.tasks[0]?.taskId, runId: result.taskResults[0]?.runId },
+        purpose: "evidence",
       },
     ]);
+    expect(result.taskResults[1]).toMatchObject({
+      taskTitle: "Second shard",
+      workerName: "parallel-2",
+      runStatus: "succeeded",
+      taskState: "completed",
+      completionSummary: `summary for ${result.tasks[1]?.taskId}`,
+    });
+  });
+
+  it("reports failed parallel launch errors and state-aware retry calls", async () => {
+    const result = await runParallelWorkForRepo(
+      repoDir,
+      { workerPrefix: "parallel", runtimeMode: "headless", tasks: [{ title: "Failing shard", prompt: "Fail" }] },
+      undefined,
+      async () => {
+        throw new Error("could not start worker");
+      },
+    );
+
+    expect(result.taskResults[0]).toMatchObject({
+      taskTitle: "Failing shard",
+      runId: null,
+      runStatus: null,
+      taskState: "canceled",
+      launchError: "could not start worker",
+      launchErrorTruncated: false,
+    });
+    expect(result.taskResults[0]?.nextToolCalls).toContainEqual({
+      name: "conductor_retry_task",
+      params: { taskId: result.tasks[0]?.taskId },
+      purpose: "action",
+    });
+  });
+
+  it("escapes markdown-sensitive parallel result table cells", () => {
+    const table = formatParallelTaskResultsTable([
+      {
+        taskId: "task-1",
+        taskTitle: "Shard | one",
+        workerId: "worker-1",
+        workerName: "parallel | 1",
+        runId: "run-1",
+        taskState: "completed",
+        runStatus: "succeeded",
+        latestProgress: "line one\nline | two",
+        latestProgressTruncated: false,
+        completionSummary: "done | ok",
+        completionSummaryTruncated: false,
+        errorMessage: null,
+        errorMessageTruncated: false,
+        launchError: null,
+        launchErrorTruncated: false,
+        missingTask: false,
+        nextToolCalls: [{ name: "conductor_task_brief", params: { taskId: "task-1" }, purpose: "evidence" }],
+      },
+    ]);
+
+    expect(table).toContain("Shard \\| one");
+    expect(table).toContain("line one<br>line \\| two");
+    expect(table).toContain("done \\| ok");
   });
 
   it("rejects duplicate worker names for parallel work before dispatch", async () => {
