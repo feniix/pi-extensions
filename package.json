@@ -35,7 +35,8 @@
       "./packages/pi-ref-tools/extensions/index.ts",
       "./packages/pi-sequential-thinking/extensions/index.ts",
       "./packages/pi-specdocs/extensions/index.ts",
-      "./packages/pi-statusline/extensions/index.ts"
+      "./packages/pi-statusline/extensions/index.ts",
+      "./packages/pi-conductor/extensions/index.ts"
     ]
   },
   "devDependencies": {

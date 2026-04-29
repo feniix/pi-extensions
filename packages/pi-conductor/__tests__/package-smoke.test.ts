@@ -49,6 +49,20 @@ function parseFrontmatter(markdown: string): Record<string, string> {
 }
 
 describe("pi-conductor package smoke", () => {
+  it("keeps root pi -e . extension configuration aligned with workspace extensions", () => {
+    const repoRoot = join(packageRoot, "../..");
+    const rootPackageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf-8"));
+    const packagesRoot = join(repoRoot, "packages");
+    const expectedExtensionPaths = readdirSync(packagesRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => `./packages/${entry.name}/extensions/index.ts`)
+      .filter((extensionPath) => existsSync(join(repoRoot, extensionPath)))
+      .sort();
+
+    expect(rootPackageJson.pi.extensions).toEqual(expect.arrayContaining(expectedExtensionPaths));
+    expect(rootPackageJson.pi.extensions).toContain("./packages/pi-conductor/extensions/index.ts");
+  });
+
   it("publishes and registers packaged skills", () => {
     const packageJson = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf-8"));
     const skillsRoot = join(packageRoot, "skills");
