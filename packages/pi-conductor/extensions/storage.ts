@@ -936,6 +936,10 @@ function capturedNoteContentRef(artifactId: string): string {
   return `artifacts/${artifactId}.txt`;
 }
 
+function isMetadataOnlyChildNote(artifact: ArtifactRecord, noteContentRef: unknown): boolean {
+  return artifact.type === "note" && artifact.producer.type === "child_run" && typeof noteContentRef !== "string";
+}
+
 function writeCapturedNoteContent(run: RunRecord, artifactId: string, content: string): string {
   const ref = capturedNoteContentRef(artifactId);
   const path = resolve(run.storageDir, ref);
@@ -1010,7 +1014,14 @@ export function readArtifactContentForRepo(
   repoRoot: string,
   artifactId: string,
   input: { maxBytes?: number } = {},
-): { artifactId: string; ref: string; content: string | null; truncated: boolean; diagnostic: string | null } {
+): {
+  artifactId: string;
+  ref: string;
+  content: string | null;
+  truncated: boolean;
+  diagnostic: string | null;
+  contentSource: "artifact_file" | "captured_note" | "metadata_fallback" | "none";
+} {
   const normalizedRoot = resolve(repoRoot);
   const run = readRun(deriveProjectKey(normalizedRoot));
   if (!run) {
@@ -1022,17 +1033,20 @@ export function readArtifactContentForRepo(
   }
   const maxBytes = Math.max(1, Math.min(input.maxBytes ?? 8192, 1024 * 1024));
   const metadata = artifact.metadata ?? {};
-  const capturedNoteContentRef = metadata[NOTE_CONTENT_REF_METADATA_KEY];
+  const noteContentRefMetadata = metadata[NOTE_CONTENT_REF_METADATA_KEY];
   if (
     artifact.type === "note" &&
     artifact.producer.type === "child_run" &&
-    typeof capturedNoteContentRef === "string"
+    typeof noteContentRefMetadata === "string"
   ) {
-    assertSafeArtifactRef(capturedNoteContentRef);
-    const noteContentPath = resolve(run.storageDir, capturedNoteContentRef);
-    const storageRoot = resolve(run.storageDir);
-    if (!noteContentPath.startsWith(`${storageRoot}/`)) {
-      throw new Error(`Unsafe captured note ref '${capturedNoteContentRef}'`);
+    const expectedRef = capturedNoteContentRef(artifactId);
+    if (noteContentRefMetadata !== expectedRef) {
+      throw new Error(`Artifact ${artifact.artifactId} declares an untrusted captured note content ref`);
+    }
+    const storageRoot = realpathSync(run.storageDir);
+    const noteContentPath = resolve(run.storageDir, noteContentRefMetadata);
+    if (!noteContentPath.startsWith(`${resolve(run.storageDir)}/`)) {
+      throw new Error(`Unsafe captured note ref '${noteContentRefMetadata}'`);
     }
     if (!existsSync(noteContentPath)) {
       return {
@@ -1041,22 +1055,33 @@ export function readArtifactContentForRepo(
         content: null,
         truncated: false,
         diagnostic: "Captured note content file is missing",
+        contentSource: "none",
       };
     }
-    const content = readBoundedTextFile(noteContentPath, maxBytes);
-    return { artifactId, ref: artifact.ref, ...content, diagnostic: null };
+    if (!lstatSync(noteContentPath).isFile()) {
+      throw new Error(`Unsafe captured note ref '${noteContentRefMetadata}'`);
+    }
+    const realNoteContentPath = realpathSync(noteContentPath);
+    if (!realNoteContentPath.startsWith(`${storageRoot}/`)) {
+      throw new Error(`Unsafe captured note ref '${noteContentRefMetadata}'`);
+    }
+    const content = readBoundedTextFile(realNoteContentPath, maxBytes);
+    return { artifactId, ref: artifact.ref, ...content, diagnostic: null, contentSource: "captured_note" };
   }
   if (artifact.type === "note") {
     assertSafeArtifactRef(artifact.ref);
     const metadataContent = JSON.stringify({ metadata }, null, 2);
-    if (/^[a-z][a-z0-9+.-]*:/i.test(artifact.ref)) {
-      return boundedArtifactContent(
-        artifactId,
-        artifact.ref,
-        metadataContent,
-        maxBytes,
-        "Metadata-only note artifact has no readable content file",
-      );
+    if (isMetadataOnlyChildNote(artifact, noteContentRefMetadata)) {
+      return {
+        ...boundedArtifactContent(
+          artifactId,
+          artifact.ref,
+          metadataContent,
+          maxBytes,
+          "Metadata-only note artifact has no readable content file",
+        ),
+        contentSource: "metadata_fallback",
+      };
     }
   }
   if (/^[a-z][a-z0-9+.-]*:/i.test(artifact.ref)) {
@@ -1066,6 +1091,7 @@ export function readArtifactContentForRepo(
       content: null,
       truncated: false,
       diagnostic: "Artifact ref is external or virtual",
+      contentSource: "none",
     };
   }
   assertSafeArtifactRef(artifact.ref);
@@ -1090,7 +1116,14 @@ export function readArtifactContentForRepo(
     throw new Error(`Unsafe artifact ref '${artifact.ref}'`);
   }
   if (!existsSync(artifactPath)) {
-    return { artifactId, ref: artifact.ref, content: null, truncated: false, diagnostic: "Artifact file is missing" };
+    return {
+      artifactId,
+      ref: artifact.ref,
+      content: null,
+      truncated: false,
+      diagnostic: "Artifact file is missing",
+      contentSource: "none",
+    };
   }
   const realRoot = realpathSync(readRoot);
   const realArtifactPath = realpathSync(artifactPath);
@@ -1098,7 +1131,14 @@ export function readArtifactContentForRepo(
     throw new Error(`Unsafe artifact ref '${artifact.ref}'`);
   }
   if (!lstatSync(realArtifactPath).isFile()) {
-    return { artifactId, ref: artifact.ref, content: null, truncated: false, diagnostic: "Artifact ref is not a file" };
+    return {
+      artifactId,
+      ref: artifact.ref,
+      content: null,
+      truncated: false,
+      diagnostic: "Artifact ref is not a file",
+      contentSource: "none",
+    };
   }
   if (fileHasBinaryPrefix(realArtifactPath)) {
     return {
@@ -1107,10 +1147,11 @@ export function readArtifactContentForRepo(
       content: null,
       truncated: false,
       diagnostic: "Artifact file appears to be binary",
+      contentSource: "none",
     };
   }
   const content = readBoundedTextFile(realArtifactPath, maxBytes);
-  return { artifactId, ref: artifact.ref, ...content, diagnostic: null };
+  return { artifactId, ref: artifact.ref, ...content, diagnostic: null, contentSource: "artifact_file" };
 }
 
 export function addConductorArtifact(
@@ -1236,6 +1277,7 @@ export function recordTaskProgress(
     });
   }
   const runAttempt = getActiveRunForTask(normalized, input);
+  if (input.artifact) assertSafeArtifactRef(input.artifact.ref);
   const artifactId = input.artifact ? createArtifactId(input.runId) : null;
   const capturedNoteRef =
     input.artifact?.type === "note" && artifactId
@@ -1327,6 +1369,7 @@ export function recordTaskCompletion(
     });
   }
   const runAttempt = getActiveRunForTask(normalized, input);
+  if (input.artifact) assertSafeArtifactRef(input.artifact.ref);
   const artifactId = input.artifact ? createArtifactId(input.runId) : null;
   const capturedNoteRef =
     input.artifact?.type === "note" && artifactId

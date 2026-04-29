@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -470,6 +470,171 @@ describe("storage helpers", () => {
     expect(duplicateCompletion.runs[0]).toMatchObject({ status: "succeeded", completionSummary: "done" });
   });
 
+  it("deduplicates child progress artifacts by idempotency key", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
+    let run = addWorker(
+      createEmptyRun(deriveProjectKey(repoRoot), repoRoot),
+      createWorkerRecord({
+        workerId: "worker-1",
+        name: "backend",
+        branch: "conductor/backend",
+        worktreePath: repoRoot,
+        sessionFile: null,
+      }),
+    );
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+
+    const progressed = recordTaskProgress(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      progress: "halfway",
+      idempotencyKey: "progress-note-1",
+      artifact: { type: "note", ref: "progress-note" },
+    });
+    const duplicateProgress = recordTaskProgress(progressed, {
+      runId: "run-1",
+      taskId: "task-1",
+      progress: "halfway replay",
+      idempotencyKey: "progress-note-1",
+      artifact: { type: "note", ref: "progress-note-replay" },
+    });
+
+    expect(duplicateProgress.artifacts).toHaveLength(progressed.artifacts.length);
+    expect(duplicateProgress.tasks[0]?.artifactIds).toEqual(progressed.tasks[0]?.artifactIds);
+    expect(duplicateProgress.runs[0]?.artifactIds).toEqual(progressed.runs[0]?.artifactIds);
+  });
+
+  it("deduplicates child completion artifacts by idempotency key", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
+    let run = addWorker(
+      createEmptyRun(deriveProjectKey(repoRoot), repoRoot),
+      createWorkerRecord({
+        workerId: "worker-1",
+        name: "backend",
+        branch: "conductor/backend",
+        worktreePath: repoRoot,
+        sessionFile: null,
+      }),
+    );
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+
+    const completed = recordTaskCompletion(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      status: "succeeded",
+      completionSummary: "done",
+      idempotencyKey: "completion-note-1",
+      artifact: { type: "note", ref: "completion-note" },
+    });
+    const duplicateCompletion = recordTaskCompletion(completed, {
+      runId: "run-1",
+      taskId: "task-1",
+      status: "failed",
+      completionSummary: "late replay",
+      idempotencyKey: "completion-note-1",
+      artifact: { type: "note", ref: "completion-note-replay" },
+    });
+
+    expect(duplicateCompletion.artifacts).toHaveLength(completed.artifacts.length);
+    expect(duplicateCompletion.tasks[0]?.artifactIds).toEqual(completed.tasks[0]?.artifactIds);
+    expect(duplicateCompletion.runs[0]?.artifactIds).toEqual(completed.runs[0]?.artifactIds);
+  });
+
+  it("validates child note refs before writing captured content", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
+    let run = addWorker(
+      createEmptyRun(deriveProjectKey(repoRoot), repoRoot),
+      createWorkerRecord({
+        workerId: "worker-1",
+        name: "backend",
+        branch: "conductor/backend",
+        worktreePath: repoRoot,
+        sessionFile: null,
+      }),
+    );
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+
+    expect(() =>
+      recordTaskProgress(run, {
+        runId: "run-1",
+        taskId: "task-1",
+        progress: "orphan me",
+        artifact: { type: "note", ref: "../unsafe-note" },
+      }),
+    ).toThrow("Unsafe artifact ref");
+    expect(existsSync(join(run.storageDir, "artifacts"))).toBe(false);
+  });
+
+  it("validates child completion note refs before writing captured content", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
+    let run = addWorker(
+      createEmptyRun(deriveProjectKey(repoRoot), repoRoot),
+      createWorkerRecord({
+        workerId: "worker-1",
+        name: "backend",
+        branch: "conductor/backend",
+        worktreePath: repoRoot,
+        sessionFile: null,
+      }),
+    );
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+
+    expect(() =>
+      recordTaskCompletion(run, {
+        runId: "run-1",
+        taskId: "task-1",
+        status: "succeeded",
+        completionSummary: "orphan me",
+        artifact: { type: "note", ref: "../unsafe-note" },
+      }),
+    ).toThrow("Unsafe artifact ref");
+    expect(existsSync(join(run.storageDir, "artifacts"))).toBe(false);
+  });
+
   it("audits duplicate completion after terminal runs without changing task state", () => {
     let run = addWorker(
       createEmptyRun("abc", "/repo"),
@@ -710,6 +875,100 @@ describe("storage helpers", () => {
       diagnostic: "Metadata-only note artifact has no readable content file",
     });
     expect(content.content).toBe('{\n  "metadata": {\n    "s');
+  });
+
+  it("reads legacy child note artifacts with relative refs as metadata-only diagnostics", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
+    const projectKey = deriveProjectKey(repoRoot);
+    let run = addTask(
+      createEmptyRun(projectKey, repoRoot),
+      createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" }),
+    );
+    run = addConductorArtifact(run, {
+      artifactId: "artifact-note-relative-legacy",
+      type: "note",
+      ref: "relative-legacy-note",
+      resourceRefs: { taskId: "task-1" },
+      producer: { type: "child_run", id: "run-legacy" },
+      metadata: { summary: "legacy relative note" },
+    });
+    writeRun(run);
+
+    expect(readArtifactContentForRepo(repoRoot, "artifact-note-relative-legacy")).toMatchObject({
+      content: expect.stringContaining("legacy relative note"),
+      diagnostic: "Metadata-only note artifact has no readable content file",
+      contentSource: "metadata_fallback",
+    });
+  });
+
+  it("rejects untrusted captured note content refs in persisted metadata", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
+    const projectKey = deriveProjectKey(repoRoot);
+    let run = addTask(
+      createEmptyRun(projectKey, repoRoot),
+      createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" }),
+    );
+    run = addConductorArtifact(run, {
+      artifactId: "artifact-note-untrusted-ref",
+      type: "note",
+      ref: "note-ref",
+      resourceRefs: { taskId: "task-1" },
+      producer: { type: "child_run", id: "run-legacy" },
+      metadata: { conductorNoteContentRef: "run.json" },
+    });
+    writeRun(run);
+
+    expect(() => readArtifactContentForRepo(repoRoot, "artifact-note-untrusted-ref")).toThrow(
+      "untrusted captured note content ref",
+    );
+  });
+
+  it("rejects symlinked captured note content refs", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
+    const projectKey = deriveProjectKey(repoRoot);
+    let run = addTask(
+      createEmptyRun(projectKey, repoRoot),
+      createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" }),
+    );
+    run = addConductorArtifact(run, {
+      artifactId: "artifact-note-symlink-ref",
+      type: "note",
+      ref: "note-ref",
+      resourceRefs: { taskId: "task-1" },
+      producer: { type: "child_run", id: "run-legacy" },
+      metadata: { conductorNoteContentRef: "artifacts/artifact-note-symlink-ref.txt" },
+    });
+    writeRun(run);
+    mkdirSync(join(run.storageDir, "artifacts"), { recursive: true });
+    const target = join(tmpdir(), "pi-conductor-symlink-target.txt");
+    writeFileSync(target, "outside storage", "utf-8");
+    symlinkSync(target, join(run.storageDir, "artifacts", "artifact-note-symlink-ref.txt"));
+
+    expect(() => readArtifactContentForRepo(repoRoot, "artifact-note-symlink-ref")).toThrow("Unsafe captured note ref");
+  });
+
+  it("keeps system external note refs external instead of metadata fallbacks", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
+    const projectKey = deriveProjectKey(repoRoot);
+    let run = addTask(
+      createEmptyRun(projectKey, repoRoot),
+      createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" }),
+    );
+    run = addConductorArtifact(run, {
+      artifactId: "artifact-note-external-system",
+      type: "note",
+      ref: "https://example.com/note",
+      resourceRefs: { taskId: "task-1" },
+      producer: { type: "system", id: "test" },
+      metadata: { summary: "external note" },
+    });
+    writeRun(run);
+
+    expect(readArtifactContentForRepo(repoRoot, "artifact-note-external-system")).toMatchObject({
+      content: null,
+      diagnostic: "Artifact ref is external or virtual",
+      contentSource: "none",
+    });
   });
 
   it("reports missing local note files as missing artifacts", () => {
