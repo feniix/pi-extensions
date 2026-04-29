@@ -23,8 +23,12 @@ export function registerEvidenceTools(pi: ExtensionAPI): void {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const result = storage.readArtifactContentForRepo(ctx.cwd, params.artifactId, { maxBytes: params.maxBytes });
+      const text =
+        result.diagnostic && result.content
+          ? `${result.content}\n\nDiagnostic: ${result.diagnostic}`
+          : (result.content ?? result.diagnostic ?? "no content");
       return {
-        content: [{ type: "text", text: result.content ?? result.diagnostic ?? "no content" }],
+        content: [{ type: "text", text }],
         details: result,
       };
     },

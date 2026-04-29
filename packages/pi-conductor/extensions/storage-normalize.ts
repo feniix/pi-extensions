@@ -1,5 +1,6 @@
 import { normalizeRunRuntimeMetadata } from "./runtime-metadata.js";
 import type {
+  ArtifactRecord,
   GateOperation,
   GateRecord,
   PersistedRunAttemptRecord,
@@ -11,6 +12,7 @@ import type {
 } from "./types.js";
 
 export function normalizeProjectRecord(run: RunRecord | PersistedRunRecord): RunRecord {
+  const artifacts = run.artifacts;
   return {
     ...run,
     schemaVersion: run.schemaVersion,
@@ -18,10 +20,10 @@ export function normalizeProjectRecord(run: RunRecord | PersistedRunRecord): Run
     workers: run.workers.map(normalizeWorkerRecord),
     archivedWorkers: run.archivedWorkers.map(normalizeWorkerRecord),
     objectives: run.objectives,
-    tasks: run.tasks.map(normalizeTaskRecord),
+    tasks: run.tasks.map((task) => normalizeTaskRecord(task, artifacts)),
     runs: run.runs.map(normalizeRunAttemptRecord),
     gates: run.gates.map(normalizeGateRecord),
-    artifacts: run.artifacts,
+    artifacts,
     events: run.events,
   };
 }
@@ -51,11 +53,19 @@ function normalizeGateRecord(gate: GateRecord): GateRecord {
   };
 }
 
-function normalizeTaskRecord(task: TaskRecord): TaskRecord {
+function normalizeTaskRecord(task: TaskRecord, artifacts: ArtifactRecord[]): TaskRecord {
   return {
     ...task,
     objectiveId: task.objectiveId,
     dependsOnTaskIds: task.dependsOnTaskIds,
+    artifactIds: [
+      ...new Set([
+        ...task.artifactIds,
+        ...artifacts
+          .filter((artifact) => artifact.resourceRefs.taskId === task.taskId)
+          .map((artifact) => artifact.artifactId),
+      ]),
+    ],
   };
 }
 

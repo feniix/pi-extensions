@@ -58,17 +58,7 @@ export function recordRuntimeMetadataForRun(input: {
     producer: { type: "system", id: "runtime" },
     metadata: { runtimeMode: input.runtimeMode, path: input.metadata.logPath, ...(logRoot ? { root: logRoot } : {}) },
   });
-  const artifact = withArtifact.artifacts.at(-1);
-  return artifact
-    ? {
-        ...withArtifact,
-        runs: withArtifact.runs.map((entry) =>
-          entry.runId === input.runId
-            ? { ...entry, artifactIds: [...entry.artifactIds, artifact.artifactId], updatedAt: now }
-            : entry,
-        ),
-      }
-    : withArtifact;
+  return withArtifact;
 }
 
 function runtimeLogArtifactRef(storageDir: string, logPath: string): string {

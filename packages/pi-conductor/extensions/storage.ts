@@ -5,6 +5,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -922,20 +923,166 @@ function createArtifactId(runId: string): string {
   return `artifact-${runId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+const NOTE_CONTENT_REF_METADATA_KEY = "conductorNoteContentRef";
+const CHILD_ARTIFACT_RESERVED_METADATA_KEYS = new Set([NOTE_CONTENT_REF_METADATA_KEY]);
+
 function sanitizeChildArtifactMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
-  return { ...(metadata ?? {}) };
+  return Object.fromEntries(
+    Object.entries(metadata ?? {}).filter(([key]) => !CHILD_ARTIFACT_RESERVED_METADATA_KEYS.has(key)),
+  );
+}
+
+function capturedNoteContentRef(artifactId: string): string {
+  return `artifacts/${artifactId}.txt`;
+}
+
+function isMetadataOnlyChildNote(artifact: ArtifactRecord, noteContentRef: unknown): boolean {
+  return artifact.type === "note" && artifact.producer.type === "child_run" && typeof noteContentRef !== "string";
+}
+
+function writeCapturedNoteContent(run: RunRecord, artifactId: string, content: string): string {
+  const ref = capturedNoteContentRef(artifactId);
+  const path = resolve(run.storageDir, ref);
+  if (!path.startsWith(`${resolve(run.storageDir)}/`)) {
+    throw new Error(`Unsafe captured note ref '${ref}'`);
+  }
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, content, "utf-8");
+  return ref;
+}
+
+function childNoteMetadata(
+  artifact: { type: ArtifactType; metadata?: Record<string, unknown> } | undefined,
+  noteContentRef: string | null,
+): Record<string, unknown> | undefined {
+  if (!artifact) return undefined;
+  const metadata = sanitizeChildArtifactMetadata(artifact.metadata);
+  if (artifact.type !== "note" || !noteContentRef) return metadata;
+  return { ...metadata, [NOTE_CONTENT_REF_METADATA_KEY]: noteContentRef };
+}
+
+function truncateUtf8(content: string, maxBytes: number): { content: string; truncated: boolean } {
+  let bytes = 0;
+  let output = "";
+  for (const char of content) {
+    const charBytes = Buffer.byteLength(char, "utf-8");
+    if (bytes + charBytes > maxBytes) {
+      return { content: output, truncated: true };
+    }
+    output += char;
+    bytes += charBytes;
+  }
+  return { content: output, truncated: false };
+}
+
+function boundedArtifactContent(
+  artifactId: string,
+  ref: string,
+  content: string,
+  maxBytes: number,
+  diagnostic: string | null = null,
+): { artifactId: string; ref: string; content: string; truncated: boolean; diagnostic: string | null } {
+  return { artifactId, ref, ...truncateUtf8(content, maxBytes), diagnostic };
+}
+
+function readBoundedTextFile(path: string, maxBytes: number): { content: string; truncated: boolean } {
+  const size = statSync(path).size;
+  const fd = openSync(path, "r");
+  try {
+    const buffer = Buffer.alloc(Math.min(size, maxBytes + 4));
+    const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
+    const bounded = truncateUtf8(buffer.subarray(0, bytesRead).toString("utf-8"), maxBytes);
+    return { content: bounded.content, truncated: bounded.truncated || size > maxBytes };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function fileHasBinaryPrefix(path: string): boolean {
+  const size = statSync(path).size;
+  const fd = openSync(path, "r");
+  try {
+    const buffer = Buffer.alloc(Math.min(size, 1024));
+    const bytesRead = readSync(fd, buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).includes(0);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 export function readArtifactContentForRepo(
   repoRoot: string,
   artifactId: string,
   input: { maxBytes?: number } = {},
-): { artifactId: string; ref: string; content: string | null; truncated: boolean; diagnostic: string | null } {
+): {
+  artifactId: string;
+  ref: string;
+  content: string | null;
+  truncated: boolean;
+  diagnostic: string | null;
+  contentSource: "artifact_file" | "captured_note" | "metadata_fallback" | "none";
+} {
   const normalizedRoot = resolve(repoRoot);
   const run = readRun(deriveProjectKey(normalizedRoot));
-  const artifact = run?.artifacts.find((entry) => entry.artifactId === artifactId);
+  if (!run) {
+    throw new Error(`Artifact ${artifactId} not found`);
+  }
+  const artifact = run.artifacts.find((entry) => entry.artifactId === artifactId);
   if (!artifact) {
     throw new Error(`Artifact ${artifactId} not found`);
+  }
+  const maxBytes = Math.max(1, Math.min(input.maxBytes ?? 8192, 1024 * 1024));
+  const metadata = artifact.metadata ?? {};
+  const noteContentRefMetadata = metadata[NOTE_CONTENT_REF_METADATA_KEY];
+  if (
+    artifact.type === "note" &&
+    artifact.producer.type === "child_run" &&
+    typeof noteContentRefMetadata === "string"
+  ) {
+    const expectedRef = capturedNoteContentRef(artifactId);
+    if (noteContentRefMetadata !== expectedRef) {
+      throw new Error(`Artifact ${artifact.artifactId} declares an untrusted captured note content ref`);
+    }
+    const storageRoot = realpathSync(run.storageDir);
+    const noteContentPath = resolve(run.storageDir, noteContentRefMetadata);
+    if (!noteContentPath.startsWith(`${resolve(run.storageDir)}/`)) {
+      throw new Error(`Unsafe captured note ref '${noteContentRefMetadata}'`);
+    }
+    if (!existsSync(noteContentPath)) {
+      return {
+        artifactId,
+        ref: artifact.ref,
+        content: null,
+        truncated: false,
+        diagnostic: "Captured note content file is missing",
+        contentSource: "none",
+      };
+    }
+    if (!lstatSync(noteContentPath).isFile()) {
+      throw new Error(`Unsafe captured note ref '${noteContentRefMetadata}'`);
+    }
+    const realNoteContentPath = realpathSync(noteContentPath);
+    if (!realNoteContentPath.startsWith(`${storageRoot}/`)) {
+      throw new Error(`Unsafe captured note ref '${noteContentRefMetadata}'`);
+    }
+    const content = readBoundedTextFile(realNoteContentPath, maxBytes);
+    return { artifactId, ref: artifact.ref, ...content, diagnostic: null, contentSource: "captured_note" };
+  }
+  if (artifact.type === "note") {
+    assertSafeArtifactRef(artifact.ref);
+    const metadataContent = JSON.stringify({ metadata }, null, 2);
+    if (isMetadataOnlyChildNote(artifact, noteContentRefMetadata)) {
+      return {
+        ...boundedArtifactContent(
+          artifactId,
+          artifact.ref,
+          metadataContent,
+          maxBytes,
+          "Metadata-only note artifact has no readable content file",
+        ),
+        contentSource: "metadata_fallback",
+      };
+    }
   }
   if (/^[a-z][a-z0-9+.-]*:/i.test(artifact.ref)) {
     return {
@@ -944,18 +1091,19 @@ export function readArtifactContentForRepo(
       content: null,
       truncated: false,
       diagnostic: "Artifact ref is external or virtual",
+      contentSource: "none",
     };
   }
   assertSafeArtifactRef(artifact.ref);
   const trustsMetadataRoots = artifact.producer.type !== "child_run";
-  const metadataRoot = trustsMetadataRoots ? artifact.metadata.worktreeRoot : undefined;
+  const metadataRoot = trustsMetadataRoots ? metadata.worktreeRoot : undefined;
   const worker = artifact.resourceRefs.workerId
     ? [...(run?.workers ?? []), ...(run?.archivedWorkers ?? [])].find(
         (entry) => entry.workerId === artifact.resourceRefs.workerId,
       )
     : null;
   const readRoot =
-    trustsMetadataRoots && artifact.metadata.root === "storage"
+    trustsMetadataRoots && metadata.root === "storage"
       ? (run?.storageDir ?? getConductorProjectDir(deriveProjectKey(normalizedRoot)))
       : typeof metadataRoot === "string"
         ? resolve(metadataRoot)
@@ -968,7 +1116,14 @@ export function readArtifactContentForRepo(
     throw new Error(`Unsafe artifact ref '${artifact.ref}'`);
   }
   if (!existsSync(artifactPath)) {
-    return { artifactId, ref: artifact.ref, content: null, truncated: false, diagnostic: "Artifact file is missing" };
+    return {
+      artifactId,
+      ref: artifact.ref,
+      content: null,
+      truncated: false,
+      diagnostic: "Artifact file is missing",
+      contentSource: "none",
+    };
   }
   const realRoot = realpathSync(readRoot);
   const realArtifactPath = realpathSync(artifactPath);
@@ -976,22 +1131,27 @@ export function readArtifactContentForRepo(
     throw new Error(`Unsafe artifact ref '${artifact.ref}'`);
   }
   if (!lstatSync(realArtifactPath).isFile()) {
-    return { artifactId, ref: artifact.ref, content: null, truncated: false, diagnostic: "Artifact ref is not a file" };
+    return {
+      artifactId,
+      ref: artifact.ref,
+      content: null,
+      truncated: false,
+      diagnostic: "Artifact ref is not a file",
+      contentSource: "none",
+    };
   }
-  const maxBytes = Math.max(1, Math.min(input.maxBytes ?? 8192, 1024 * 1024));
-  const size = statSync(realArtifactPath).size;
-  const buffer = readFileSync(realArtifactPath);
-  if (buffer.subarray(0, Math.min(buffer.length, 1024)).includes(0)) {
+  if (fileHasBinaryPrefix(realArtifactPath)) {
     return {
       artifactId,
       ref: artifact.ref,
       content: null,
       truncated: false,
       diagnostic: "Artifact file appears to be binary",
+      contentSource: "none",
     };
   }
-  const content = buffer.toString("utf-8").slice(0, maxBytes);
-  return { artifactId, ref: artifact.ref, content, truncated: size > maxBytes, diagnostic: null };
+  const content = readBoundedTextFile(realArtifactPath, maxBytes);
+  return { artifactId, ref: artifact.ref, ...content, diagnostic: null, contentSource: "artifact_file" };
 }
 
 export function addConductorArtifact(
@@ -1017,6 +1177,28 @@ export function addConductorArtifact(
   });
   const updated = {
     ...normalized,
+    tasks: artifact.resourceRefs.taskId
+      ? normalized.tasks.map((task) =>
+          task.taskId === artifact.resourceRefs.taskId
+            ? {
+                ...task,
+                artifactIds: [...new Set([...task.artifactIds, artifact.artifactId])],
+                updatedAt: artifact.updatedAt,
+              }
+            : task,
+        )
+      : normalized.tasks,
+    runs: artifact.resourceRefs.runId
+      ? normalized.runs.map((attempt) =>
+          attempt.runId === artifact.resourceRefs.runId
+            ? {
+                ...attempt,
+                artifactIds: [...new Set([...attempt.artifactIds, artifact.artifactId])],
+                updatedAt: artifact.updatedAt,
+              }
+            : attempt,
+        )
+      : normalized.runs,
     artifacts: [...normalized.artifacts, artifact],
     updatedAt: artifact.updatedAt,
   };
@@ -1095,26 +1277,40 @@ export function recordTaskProgress(
     });
   }
   const runAttempt = getActiveRunForTask(normalized, input);
-  const artifact = input.artifact
-    ? createArtifactRecord({
-        artifactId: createArtifactId(input.runId),
-        type: input.artifact.type,
-        ref: input.artifact.ref,
-        resourceRefs: {
-          projectKey: normalized.projectKey,
-          taskId: input.taskId,
-          workerId: runAttempt.workerId,
-          runId: input.runId,
-        },
-        producer: { type: "child_run", id: input.runId },
-        metadata: sanitizeChildArtifactMetadata(input.artifact.metadata),
-      })
-    : null;
+  if (input.artifact) assertSafeArtifactRef(input.artifact.ref);
+  const artifactId = input.artifact ? createArtifactId(input.runId) : null;
+  const capturedNoteRef =
+    input.artifact?.type === "note" && artifactId
+      ? writeCapturedNoteContent(normalized, artifactId, input.progress)
+      : null;
+  const artifact =
+    input.artifact && artifactId
+      ? createArtifactRecord({
+          artifactId,
+          type: input.artifact.type,
+          ref: input.artifact.ref,
+          resourceRefs: {
+            projectKey: normalized.projectKey,
+            taskId: input.taskId,
+            workerId: runAttempt.workerId,
+            runId: input.runId,
+          },
+          producer: { type: "child_run", id: input.runId },
+          metadata: childNoteMetadata(input.artifact, capturedNoteRef),
+        })
+      : null;
   const artifactIds = artifact ? [artifact.artifactId] : [];
   const updated = {
     ...normalized,
     tasks: normalized.tasks.map((entry) =>
-      entry.taskId === input.taskId ? { ...entry, latestProgress: input.progress, updatedAt: now } : entry,
+      entry.taskId === input.taskId
+        ? {
+            ...entry,
+            latestProgress: input.progress,
+            artifactIds: [...entry.artifactIds, ...artifactIds],
+            updatedAt: now,
+          }
+        : entry,
     ),
     runs: normalized.runs.map((entry) =>
       entry.runId === input.runId
@@ -1173,24 +1369,36 @@ export function recordTaskCompletion(
     });
   }
   const runAttempt = getActiveRunForTask(normalized, input);
-  const artifact = input.artifact
-    ? createArtifactRecord({
-        artifactId: createArtifactId(input.runId),
-        type: input.artifact.type,
-        ref: input.artifact.ref,
-        resourceRefs: {
-          projectKey: normalized.projectKey,
-          taskId: input.taskId,
-          workerId: runAttempt.workerId,
-          runId: input.runId,
-        },
-        producer: { type: "child_run", id: input.runId },
-        metadata: sanitizeChildArtifactMetadata(input.artifact.metadata),
-      })
-    : null;
+  if (input.artifact) assertSafeArtifactRef(input.artifact.ref);
+  const artifactId = input.artifact ? createArtifactId(input.runId) : null;
+  const capturedNoteRef =
+    input.artifact?.type === "note" && artifactId
+      ? writeCapturedNoteContent(normalized, artifactId, input.completionSummary)
+      : null;
+  const artifact =
+    input.artifact && artifactId
+      ? createArtifactRecord({
+          artifactId,
+          type: input.artifact.type,
+          ref: input.artifact.ref,
+          resourceRefs: {
+            projectKey: normalized.projectKey,
+            taskId: input.taskId,
+            workerId: runAttempt.workerId,
+            runId: input.runId,
+          },
+          producer: { type: "child_run", id: input.runId },
+          metadata: childNoteMetadata(input.artifact, capturedNoteRef),
+        })
+      : null;
   const withArtifact = artifact
     ? {
         ...normalized,
+        tasks: normalized.tasks.map((entry) =>
+          entry.taskId === input.taskId
+            ? { ...entry, artifactIds: [...entry.artifactIds, artifact.artifactId] }
+            : entry,
+        ),
         runs: normalized.runs.map((entry) =>
           entry.runId === input.runId ? { ...entry, artifactIds: [...entry.artifactIds, artifact.artifactId] } : entry,
         ),
