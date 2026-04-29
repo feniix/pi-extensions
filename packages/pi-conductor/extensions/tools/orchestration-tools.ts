@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
+import { formatActiveWorkerViewerSummary, summarizeActiveWorkerViewersForRepo } from "../active-worker-viewer.js";
 import * as conductor from "../conductor.js";
 import { formatParallelTaskResultsTable } from "../parallel-work-results.js";
 
@@ -109,6 +110,26 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
       const result = await conductor.runParallelWorkForRepo(ctx.cwd, params, signal);
       const text = summarizeParallelWorkToolText(result, signal?.aborted ?? false);
       return { content: [{ type: "text", text }], details: result };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_view_active_workers",
+    label: "Conductor View Active Workers",
+    description:
+      "List active supervised tmux/iTerm conductor workers with run IDs, worker names, task titles, runtime/viewer status, attach/log commands, and cancel tool calls. Scope by taskId, workerId, or runId when inspecting one active worker.",
+    parameters: Type.Object({
+      taskId: Type.Optional(Type.String({ description: "Optional task ID to inspect" })),
+      workerId: Type.Optional(Type.String({ description: "Optional worker ID to inspect" })),
+      runId: Type.Optional(Type.String({ description: "Optional run ID to inspect" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const summary = summarizeActiveWorkerViewersForRepo(ctx.cwd, {
+        taskId: params.taskId as string | undefined,
+        workerId: params.workerId as string | undefined,
+        runId: params.runId as string | undefined,
+      });
+      return { content: [{ type: "text", text: formatActiveWorkerViewerSummary(summary) }], details: summary };
     },
   });
 
