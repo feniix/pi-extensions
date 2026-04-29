@@ -1376,7 +1376,7 @@ export async function runWorkForRepo(
     request: input.request,
     explicitRuntimeMode: input.runtimeMode,
   });
-  const runtimeMode = selectedRuntimeMode ?? "headless";
+  const runtimeMode = selectedRuntimeMode ?? (decision.mode === "parallel" ? defaultParallelRuntimeMode() : "headless");
   if (execute && runtimeMode !== "headless") {
     assertRuntimeModeAvailable(runtimeMode);
   }

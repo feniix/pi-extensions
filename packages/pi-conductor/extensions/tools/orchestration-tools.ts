@@ -47,7 +47,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
     name: "conductor_run_work",
     label: "Conductor Run Work",
     description:
-      "Run natural-language pi-conductor work and let conductor decide whether to use one worker, parallel workers, or an objective DAG. Omit runtimeMode for conservative visible-runtime inference; use conductor_get_project, conductor_list_workers, or conductor_list_runs for status-only requests. Runtime preflight errors can be investigated with conductor_backend_status, and active runtimeRuns include cancelTool details.",
+      "Run natural-language pi-conductor work and let conductor decide whether to use one worker, parallel workers, or an objective DAG. Omit runtimeMode to keep single/objective work headless unless visible supervision is requested; parallel work prefers supervised tmux when available and falls back to headless. Use conductor_get_project, conductor_list_workers, conductor_list_runs, or conductor_view_active_workers for status-only requests. Runtime preflight errors can be investigated with conductor_backend_status, and active runtimeRuns include cancelTool details.",
     parameters: Type.Object({
       request: Type.String({ description: "The user's natural-language work request" }),
       mode: Type.Optional(
@@ -66,7 +66,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
       execute: Type.Optional(Type.Boolean({ description: "Whether to execute after planning; defaults to true" })),
       runtimeMode: Type.Optional(
         runtimeModeSchema(
-          "Explicit runtime mode. Omit to allow conservative visible-runtime inference from the request.",
+          "Explicit runtime mode. Pass headless for blocking execution, tmux/iterm-tmux for supervised launch-and-return execution; omit to let parallel work prefer tmux and other work use conservative inference.",
         ),
       ),
     }),
