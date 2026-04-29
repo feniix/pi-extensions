@@ -302,7 +302,7 @@ For non-UI automation, inspect gates and evidence without approving as a human:
 conductor_list_gates({ status: "open" })
 conductor_prepare_human_review({ taskId })
 conductor_check_readiness({ taskId, purpose: "pr_readiness" })
-conductor_build_evidence_bundle({ taskId, includeEvents: true })
+conductor_build_evidence_bundle({ taskId, purpose: "task_review", includeEvents: true })
 conductor_resource_timeline({ taskId, includeArtifacts: true })
 ```
 

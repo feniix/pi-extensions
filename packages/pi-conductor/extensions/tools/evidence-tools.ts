@@ -1,7 +1,21 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import * as conductor from "../conductor.js";
+import {
+  acceptedPurposeValues,
+  evidenceBundlePurposeSchema as buildEvidenceBundlePurposeSchema,
+  readinessPurposeSchema as buildReadinessPurposeSchema,
+  EVIDENCE_BUNDLE_PURPOSES,
+  isEvidenceBundlePurpose,
+  isReadinessPurpose,
+  READINESS_PURPOSES,
+} from "../purpose-values.js";
 import * as storage from "../storage.js";
+
+const evidenceBundlePurposeDescription = `Purpose of the evidence bundle. Valid values: ${acceptedPurposeValues(EVIDENCE_BUNDLE_PURPOSES)}. Use task_review for task review evidence, pr_readiness for PR publication readiness, or handoff for general handoff/human review. Default: task_review. If invalid, retry with one of these values.`;
+const readinessPurposeDescription = `Purpose of the readiness check. Valid values: ${acceptedPurposeValues(READINESS_PURPOSES)}. Use task_review for task review readiness or pr_readiness for PR publication readiness. If invalid, retry with one of these values.`;
+const evidenceBundlePurposeSchema = buildEvidenceBundlePurposeSchema(evidenceBundlePurposeDescription);
+const readinessPurposeSchema = buildReadinessPurposeSchema(readinessPurposeDescription);
 
 const artifactTypeSchema = Type.Union([
   Type.Literal("note"),
@@ -85,20 +99,23 @@ export function registerEvidenceTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "conductor_build_evidence_bundle",
     label: "Conductor Build Evidence Bundle",
-    description: "Build a task/worker-scoped evidence bundle for review or PR readiness",
+    description: `Build a task/worker-scoped evidence bundle for review or PR readiness. purpose values: ${acceptedPurposeValues(EVIDENCE_BUNDLE_PURPOSES)}. Default: task_review. If invalid, retry with one of these values.`,
     parameters: Type.Object({
       workerId: Type.Optional(Type.String()),
       workerName: Type.Optional(Type.String()),
       objectiveId: Type.Optional(Type.String()),
       taskId: Type.Optional(Type.String()),
       runId: Type.Optional(Type.String()),
-      purpose: Type.Optional(
-        Type.Union([Type.Literal("task_review"), Type.Literal("pr_readiness"), Type.Literal("handoff")]),
-      ),
+      purpose: Type.Optional(evidenceBundlePurposeSchema),
       includeEvents: Type.Optional(Type.Boolean()),
       persistArtifact: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (params.purpose !== undefined && !isEvidenceBundlePurpose(params.purpose)) {
+        throw new Error(
+          `Invalid purpose. Accepted values: ${acceptedPurposeValues(EVIDENCE_BUNDLE_PURPOSES)}. Default: task_review.`,
+        );
+      }
       const bundle = conductor.buildEvidenceBundleForRepo(ctx.cwd, params);
       return {
         content: [
@@ -115,12 +132,12 @@ export function registerEvidenceTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "conductor_check_readiness",
     label: "Conductor Check Readiness",
-    description: "Evaluate whether a task or worker is ready for review or PR publication",
+    description: `Evaluate whether a task or worker is ready for review or PR publication. purpose values: ${acceptedPurposeValues(READINESS_PURPOSES)}. If invalid, retry with one of these values.`,
     parameters: Type.Object({
       workerId: Type.Optional(Type.String()),
       workerName: Type.Optional(Type.String()),
       taskId: Type.Optional(Type.String()),
-      purpose: Type.Union([Type.Literal("task_review"), Type.Literal("pr_readiness")]),
+      purpose: readinessPurposeSchema,
       requireCompletionReport: Type.Optional(Type.Boolean()),
       requireTestEvidence: Type.Optional(Type.Boolean()),
       requireNoOpenGates: Type.Optional(Type.Boolean()),
@@ -129,6 +146,9 @@ export function registerEvidenceTools(pi: ExtensionAPI): void {
       requireApprovedReadyForPrGate: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (!isReadinessPurpose(params.purpose)) {
+        throw new Error(`Invalid purpose. Accepted values: ${acceptedPurposeValues(READINESS_PURPOSES)}.`);
+      }
       const readiness = conductor.checkReadinessForRepo(ctx.cwd, params);
       return {
         content: [
