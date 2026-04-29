@@ -1,19 +1,21 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import * as conductor from "../conductor.js";
+import {
+  acceptedPurposeValues,
+  evidenceBundlePurposeSchema as buildEvidenceBundlePurposeSchema,
+  readinessPurposeSchema as buildReadinessPurposeSchema,
+  EVIDENCE_BUNDLE_PURPOSES,
+  isEvidenceBundlePurpose,
+  isReadinessPurpose,
+  READINESS_PURPOSES,
+} from "../purpose-values.js";
 import * as storage from "../storage.js";
 
-const evidenceBundlePurposeDescription =
-  "Purpose of the evidence bundle. Valid values: task_review (default, for task review), pr_readiness (for PR readiness), handoff (for general handoff/human review).";
-const readinessPurposeDescription =
-  "Purpose of the readiness check. Valid values: task_review (task review readiness) or pr_readiness (PR publication readiness).";
-const evidenceBundlePurposeSchema = Type.Union(
-  [Type.Literal("task_review"), Type.Literal("pr_readiness"), Type.Literal("handoff")],
-  { description: evidenceBundlePurposeDescription },
-);
-const readinessPurposeSchema = Type.Union([Type.Literal("task_review"), Type.Literal("pr_readiness")], {
-  description: readinessPurposeDescription,
-});
+const evidenceBundlePurposeDescription = `Purpose of the evidence bundle. Valid values: ${acceptedPurposeValues(EVIDENCE_BUNDLE_PURPOSES)}. Use task_review for task review evidence, pr_readiness for PR publication readiness, or handoff for general handoff/human review. Default: task_review. If invalid, retry with one of these values.`;
+const readinessPurposeDescription = `Purpose of the readiness check. Valid values: ${acceptedPurposeValues(READINESS_PURPOSES)}. Use task_review for task review readiness or pr_readiness for PR publication readiness. If invalid, retry with one of these values.`;
+const evidenceBundlePurposeSchema = buildEvidenceBundlePurposeSchema(evidenceBundlePurposeDescription);
+const readinessPurposeSchema = buildReadinessPurposeSchema(readinessPurposeDescription);
 
 const artifactTypeSchema = Type.Union([
   Type.Literal("note"),
@@ -97,8 +99,7 @@ export function registerEvidenceTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "conductor_build_evidence_bundle",
     label: "Conductor Build Evidence Bundle",
-    description:
-      "Build a task/worker-scoped evidence bundle for review or PR readiness. purpose values: task_review (default), pr_readiness, handoff.",
+    description: `Build a task/worker-scoped evidence bundle for review or PR readiness. purpose values: ${acceptedPurposeValues(EVIDENCE_BUNDLE_PURPOSES)}. Default: task_review. If invalid, retry with one of these values.`,
     parameters: Type.Object({
       workerId: Type.Optional(Type.String()),
       workerName: Type.Optional(Type.String()),
@@ -110,8 +111,10 @@ export function registerEvidenceTools(pi: ExtensionAPI): void {
       persistArtifact: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (params.purpose && !["task_review", "pr_readiness", "handoff"].includes(params.purpose)) {
-        throw new Error("Invalid purpose. Accepted values: task_review, pr_readiness, handoff. Default: task_review.");
+      if (params.purpose !== undefined && !isEvidenceBundlePurpose(params.purpose)) {
+        throw new Error(
+          `Invalid purpose. Accepted values: ${acceptedPurposeValues(EVIDENCE_BUNDLE_PURPOSES)}. Default: task_review.`,
+        );
       }
       const bundle = conductor.buildEvidenceBundleForRepo(ctx.cwd, params);
       return {
@@ -129,8 +132,7 @@ export function registerEvidenceTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "conductor_check_readiness",
     label: "Conductor Check Readiness",
-    description:
-      "Evaluate whether a task or worker is ready for review or PR publication. purpose values: task_review, pr_readiness.",
+    description: `Evaluate whether a task or worker is ready for review or PR publication. purpose values: ${acceptedPurposeValues(READINESS_PURPOSES)}. If invalid, retry with one of these values.`,
     parameters: Type.Object({
       workerId: Type.Optional(Type.String()),
       workerName: Type.Optional(Type.String()),
@@ -144,8 +146,8 @@ export function registerEvidenceTools(pi: ExtensionAPI): void {
       requireApprovedReadyForPrGate: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (!["task_review", "pr_readiness"].includes(params.purpose)) {
-        throw new Error("Invalid purpose. Accepted values: task_review, pr_readiness.");
+      if (!isReadinessPurpose(params.purpose)) {
+        throw new Error(`Invalid purpose. Accepted values: ${acceptedPurposeValues(READINESS_PURPOSES)}.`);
       }
       const readiness = conductor.checkReadinessForRepo(ctx.cwd, params);
       return {

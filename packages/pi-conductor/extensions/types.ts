@@ -1,3 +1,5 @@
+import type { EvidenceBundlePurpose, ReadinessPurpose } from "./purpose-values.js";
+
 export const CONDUCTOR_SCHEMA_VERSION = 1;
 
 export type WorkerLifecycleState = "idle" | "running" | "broken" | "archived";
@@ -91,8 +93,7 @@ export interface ConductorNextAction {
   confidence: "high" | "medium" | "low";
 }
 
-export type EvidenceBundlePurpose = "task_review" | "pr_readiness" | "handoff";
-export type ReadinessPurpose = "task_review" | "pr_readiness";
+export type { EvidenceBundlePurpose, ReadinessPurpose } from "./purpose-values.js";
 export type ReadinessStatus = "ready" | "blocked" | "needs_review" | "not_ready";
 
 export interface EvidenceBundle {

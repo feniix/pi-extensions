@@ -92,17 +92,30 @@ describe("conductor tool contracts", () => {
     const evidenceSchema = JSON.stringify(evidenceTool.parameters);
     const readinessSchema = JSON.stringify(readinessTool.parameters);
 
-    expect(evidenceTool.description).toContain("task_review (default), pr_readiness, handoff");
+    expect(evidenceTool.description).toContain("task_review, pr_readiness, handoff");
+    expect(evidenceTool.description).toContain("Default: task_review");
     expect(evidenceSchema).toContain("Valid values: task_review");
     expect(evidenceSchema).toContain("pr_readiness");
     expect(evidenceSchema).toContain("handoff");
     expect(readinessTool.description).toContain("task_review, pr_readiness");
+    expect(readinessTool.description).toContain("If invalid, retry");
     expect(readinessSchema).toContain("Valid values: task_review");
+    expect(readinessSchema).toContain("pr_readiness");
     await expect(
       evidenceTool.execute?.("tool-call-purpose", { taskId: "task-1", purpose: "review" }, undefined, undefined, {
         cwd: repoDir,
       }),
     ).rejects.toThrow(/Accepted values: task_review, pr_readiness, handoff/);
+    await expect(
+      evidenceTool.execute?.("tool-call-purpose", { taskId: "task-1", purpose: "" }, undefined, undefined, {
+        cwd: repoDir,
+      }),
+    ).rejects.toThrow(/Accepted values: task_review, pr_readiness, handoff/);
+    await expect(
+      readinessTool.execute?.("tool-call-readiness", { taskId: "task-1", purpose: "review" }, undefined, undefined, {
+        cwd: repoDir,
+      }),
+    ).rejects.toThrow(/Accepted values: task_review, pr_readiness/);
   });
 
   it("forwards runtimeMode through registered start, run, retry, and delegate tools", async () => {

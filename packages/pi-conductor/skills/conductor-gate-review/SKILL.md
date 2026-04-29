@@ -24,7 +24,9 @@ Use this workflow to inspect conductor gates without weakening the trusted-human
 2. Build context for the relevant gate/task/objective:
    - `conductor_prepare_human_review({ taskId })` or `conductor_prepare_human_review({ objectiveId })`
    - `conductor_check_readiness({ taskId, purpose: "task_review" })` or `conductor_check_readiness({ taskId, purpose: "pr_readiness" })`
-   - `conductor_build_evidence_bundle({ taskId, includeEvents: true })`
+   - `conductor_build_evidence_bundle({ taskId, purpose: "task_review", includeEvents: true })` for task review evidence
+   - `conductor_build_evidence_bundle({ taskId, purpose: "pr_readiness", includeEvents: true })` for `ready_for_pr` / PR publication gates
+   - `conductor_build_evidence_bundle({ taskId, purpose: "handoff", includeEvents: true })` for general handoff or human review packets
    - `conductor_resource_timeline({ taskId, gateId, includeArtifacts: true })`
 3. Summarize what is being decided:
    - gate type and requested decision
