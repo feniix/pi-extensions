@@ -104,6 +104,44 @@ describe("conductor task brief", () => {
     expect(brief.markdown).toContain("Completion summary: Could not finish because validation failed.");
   });
 
+  it("formats multiline terminal summaries as indented markdown blocks", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "Multiline summary", prompt: "Summarize multiline output" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
+    writeRun(
+      completeTaskRun(getOrCreateRunForRepo(repoDir), {
+        runId: started.run.runId,
+        status: "succeeded",
+        completionSummary: "Line one\n## injected heading\n- injected list",
+      }),
+    );
+
+    const brief = buildTaskBriefForRepo(repoDir, { taskId: task.taskId });
+
+    expect(brief.markdown).toContain("Completion summary:\n    Line one\n    ## injected heading\n    - injected list");
+    expect(brief.markdown).not.toContain("\n## injected heading\n");
+  });
+
+  it("normalizes carriage-return terminal summaries before markdown formatting", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const task = createTaskForRepo(repoDir, { title: "CR summary", prompt: "Summarize CR output" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId });
+    writeRun(
+      completeTaskRun(getOrCreateRunForRepo(repoDir), {
+        runId: started.run.runId,
+        status: "succeeded",
+        completionSummary: "ok\r## injected heading",
+      }),
+    );
+
+    const brief = buildTaskBriefForRepo(repoDir, { taskId: task.taskId });
+
+    expect(brief.markdown).toContain("Completion summary:\n    ok\n    ## injected heading");
+    expect(brief.markdown).not.toContain("\r## injected heading");
+  });
+
   it("truncates long terminal summaries in task briefs", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const task = createTaskForRepo(repoDir, { title: "Long summary", prompt: "Summarize long output" });
