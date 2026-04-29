@@ -1989,14 +1989,17 @@ export async function runTaskForRepo(
       },
     });
 
-    if (!waitForCompletion && isTmuxRuntimeMode(runtimeMode)) {
-      return {
-        workerName: worker.name,
-        status: runtimeResult.status,
-        finalText: runtimeResult.finalText,
-        errorMessage: runtimeResult.errorMessage,
-        sessionId: runtimeResult.sessionId,
-      };
+    if (!waitForCompletion && isTmuxRuntimeMode(runtimeMode) && runtimeResult.status === "success") {
+      const latestAttempt = getOrCreateRunForRepo(repoRoot).runs.find((entry) => entry.runId === started.run.runId);
+      if (latestAttempt && !latestAttempt.finishedAt && !isTerminalRunStatus(latestAttempt.status)) {
+        return {
+          workerName: worker.name,
+          status: runtimeResult.status,
+          finalText: runtimeResult.finalText,
+          errorMessage: runtimeResult.errorMessage,
+          sessionId: runtimeResult.sessionId,
+        };
+      }
     }
 
     let createdFallbackCompletion = false;

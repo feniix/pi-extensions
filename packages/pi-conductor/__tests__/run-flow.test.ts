@@ -235,6 +235,29 @@ describe("durable task run flows", () => {
     expect(persisted.workers[0]).toMatchObject({ lifecycle: "running", recoverable: false });
   });
 
+  it("does not leave non-blocking tmux runs active when launch aborts", async () => {
+    const worker = await createWorkerForRepo(repoDir, "tmux-detached-abort");
+    const task = createTaskForRepo(repoDir, { title: "Tmux detached abort", prompt: "Abort launch" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    runtimeMocks.runWorkerPromptRuntime.mockResolvedValueOnce({
+      status: "aborted",
+      finalText: null,
+      errorMessage: null,
+      sessionId: null,
+    });
+
+    const result = await runTaskForRepo(repoDir, task.taskId, undefined, {
+      runtimeMode: "tmux",
+      waitForCompletion: false,
+    });
+
+    expect(result.status).toBe("aborted");
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.runs[0]).toMatchObject({ status: "aborted", finishedAt: expect.any(String) });
+    expect(persisted.tasks[0]).toMatchObject({ state: "canceled", activeRunId: null });
+    expect(persisted.workers[0]).toMatchObject({ lifecycle: "idle", recoverable: false });
+  });
+
   it("releases tmux workers when the runtime returns an aborted result", async () => {
     const worker = await createWorkerForRepo(repoDir, "tmux-abort");
     const task = createTaskForRepo(repoDir, { title: "Tmux abort", prompt: "Abort visibly" });
