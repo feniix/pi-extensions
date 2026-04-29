@@ -27,6 +27,7 @@ export type ActiveWorkerViewerEntry = {
   latestProgress: string | null;
   diagnostic: string | null;
   cancelTool: { name: "conductor_cancel_task_run"; params: { runId: string; reason: string } };
+  nextToolCalls: Array<{ name: string; params: Record<string, unknown>; purpose: "refresh" | "timeline" | "cancel" }>;
 };
 
 export type ActiveWorkerViewerSummary = {
@@ -102,6 +103,19 @@ export function summarizeActiveWorkerViewersForRepo(
           name: "conductor_cancel_task_run" as const,
           params: { runId: run.runId, reason: "Parent requested cancellation" },
         },
+        nextToolCalls: [
+          { name: "conductor_view_active_workers", params: { runId: run.runId }, purpose: "refresh" as const },
+          {
+            name: "conductor_resource_timeline",
+            params: { runId: run.runId, includeArtifacts: true },
+            purpose: "timeline" as const,
+          },
+          {
+            name: "conductor_cancel_task_run",
+            params: { runId: run.runId, reason: "<reason>" },
+            purpose: "cancel" as const,
+          },
+        ],
       };
     });
   return { entries, filters: input };
@@ -117,11 +131,11 @@ export function formatActiveWorkerViewerSummary(summary: ActiveWorkerViewerSumma
   }
   const rows = summary.entries.map(
     (entry) =>
-      `| ${cell(entry.workerName)} | ${cell(entry.workerId)} | ${cell(entry.taskTitle)} | ${cell(entry.taskId)} | ${cell(entry.runId)} | ${cell(entry.runStatus)} | ${cell(entry.runtimeMode)} | ${cell(entry.runtimeStatus)} | ${cell(entry.viewerStatus)} | ${cell(entry.attachCommand)} | ${cell(entry.logTailCommand)} | ${cell(entry.latestProgress)} | ${cell(entry.diagnostic)} | ${cell(`${entry.cancelTool.name}(${JSON.stringify(entry.cancelTool.params)})`)} |`,
+      `| ${cell(entry.workerName)} | ${cell(entry.workerId)} | ${cell(entry.taskTitle)} | ${cell(entry.taskId)} | ${cell(entry.runId)} | ${cell(entry.runStatus)} | ${cell(entry.runtimeMode)} | ${cell(entry.runtimeStatus)} | ${cell(entry.viewerStatus)} | ${cell(entry.attachCommand)} | ${cell(entry.logTailCommand)} | ${cell(entry.latestProgress)} | ${cell(entry.diagnostic)} | ${cell(entry.nextToolCalls.map((call) => `${call.name}(${JSON.stringify(call.params)})`).join("; "))} |`,
   );
   return [
     `active supervised conductor workers: ${summary.entries.length}`,
-    "| Worker | workerId | Task | taskId | runId | Run status | Runtime | Runtime status | Viewer | Attach command | Log tail | Latest progress | Diagnostic | Cancel |",
+    "| Worker | workerId | Task | taskId | runId | Run status | Runtime | Runtime status | Viewer | Attach command | Log tail | Latest progress | Diagnostic | Next tools |",
     "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ...rows,
   ].join("\n");

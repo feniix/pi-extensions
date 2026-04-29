@@ -108,6 +108,19 @@ describe("active worker viewer summaries", () => {
       name: "conductor_cancel_task_run",
       params: { runId: started.run.runId, reason: "Parent requested cancellation" },
     });
+    expect(summary.entries[0]?.nextToolCalls).toEqual([
+      { name: "conductor_view_active_workers", params: { runId: started.run.runId }, purpose: "refresh" },
+      {
+        name: "conductor_resource_timeline",
+        params: { runId: started.run.runId, includeArtifacts: true },
+        purpose: "timeline",
+      },
+      {
+        name: "conductor_cancel_task_run",
+        params: { runId: started.run.runId, reason: "<reason>" },
+        purpose: "cancel",
+      },
+    ]);
 
     const markdown = formatActiveWorkerViewerSummary(summary);
     expect(markdown).toContain("active supervised conductor workers: 1");
@@ -200,6 +213,25 @@ describe("active worker viewer summaries", () => {
     ).toEqual([]);
   });
 
+  it("renders next-action tool calls in model-visible text", async () => {
+    const worker = await createWorkerForRepo(repoDir, "next-action-worker");
+    const task = createTaskForRepo(repoDir, { title: "Next action task", prompt: "Watch me" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, runtimeMode: "tmux" });
+
+    const tool = collectTools().find((entry) => entry.name === "conductor_next_actions");
+    const result = (await tool?.execute?.(
+      "tool-call-1",
+      { includeLowPriority: true, reconcile: false },
+      undefined,
+      undefined,
+      { cwd: repoDir },
+    )) as { content: Array<{ text: string }> };
+
+    expect(result.content[0]?.text).toContain("conductor_view_active_workers");
+    expect(result.content[0]?.text).toContain(started.run.runId);
+  });
+
   it("returns an empty active-viewer response without creating conductor state", () => {
     const runFile = getRunFile(deriveProjectKey(resolve(repoDir)));
 
@@ -232,5 +264,23 @@ describe("active worker viewer summaries", () => {
     expect(formatActiveWorkerViewerSummary(summary)).toBe(
       "no active supervised conductor workers matched the requested scope",
     );
+  });
+
+  it("omits active-looking supervised runs with terminal runtime status", async () => {
+    const worker = await createWorkerForRepo(repoDir, "stale-worker");
+    const task = createTaskForRepo(repoDir, { title: "Stale task", prompt: "Run" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, runtimeMode: "tmux" });
+    const run = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...run,
+      runs: run.runs.map((entry) =>
+        entry.runId === started.run.runId
+          ? { ...entry, runtime: { ...entry.runtime, status: "exited_error" as const } }
+          : entry,
+      ),
+    });
+
+    expect(summarizeActiveWorkerViewersForRepo(repoDir).entries).toEqual([]);
   });
 });

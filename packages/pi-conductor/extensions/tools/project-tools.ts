@@ -4,6 +4,15 @@ import * as backends from "../backends.js";
 import * as conductor from "../conductor.js";
 
 const schedulerPolicySchema = Type.Union([Type.Literal("safe"), Type.Literal("execute")]);
+
+function formatNextActionText(
+  action: { priority: string; title: string; toolCall: null | { name: string; params: Record<string, unknown> } },
+  index: number,
+): string {
+  const toolText = action.toolCall ? ` — call ${action.toolCall.name}(${JSON.stringify(action.toolCall.params)})` : "";
+  return `${index + 1}. [${action.priority}] ${action.title}${toolText}`;
+}
+
 export function registerProjectTools(pi: ExtensionAPI, findRepoRoot: (cwd: string) => string | null): void {
   pi.registerTool({
     name: "conductor_get_project",
@@ -143,9 +152,7 @@ export function registerProjectTools(pi: ExtensionAPI, findRepoRoot: (cwd: strin
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const recommendations = conductor.getNextActionsForRepo(ctx.cwd, params);
       const text = recommendations.actions.length
-        ? recommendations.actions
-            .map((action, index) => `${index + 1}. [${action.priority}] ${action.title}`)
-            .join("\n")
+        ? recommendations.actions.map(formatNextActionText).join("\n")
         : `No conductor actions recommended: ${recommendations.summary.headline}`;
       return { content: [{ type: "text", text }], details: recommendations };
     },
