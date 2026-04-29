@@ -752,6 +752,38 @@ describe("conductor service", () => {
     expect(run.tasks).toHaveLength(1);
   });
 
+  it("does not recommend cleanup for a reused single worker", async () => {
+    await createWorkerForRepo(repoDir, "stable-worker");
+
+    const result = await runWorkForRepo(
+      repoDir,
+      {
+        request: "Inspect README.md",
+        tasks: [{ title: "Inspect README", prompt: "Inspect README.md", workerName: "stable-worker" }],
+      },
+      undefined,
+      async (root, taskId) => {
+        const started = startTaskRunForRepo(root, { taskId });
+        recordTaskCompletionForRepo(root, {
+          taskId,
+          runId: started.run.runId,
+          status: "succeeded",
+          completionSummary: "inspection done",
+        });
+        return {
+          workerName: "stable-worker",
+          status: "success",
+          finalText: "done",
+          errorMessage: null,
+          sessionId: null,
+        };
+      },
+    );
+
+    expect(result.cleanupRecommendations).toEqual([]);
+    expect(summarizeRunWorkToolText(result)).not.toContain("Cleanup guidance");
+  });
+
   it("passes normalized headless runtimeMode through default natural-language work runners", async () => {
     let seenRuntimeMode: string | undefined;
 

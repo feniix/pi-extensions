@@ -1138,13 +1138,13 @@ export async function runParallelWorkForRepo(
     const current = getOrCreateRunForRepo(repoRoot);
     const existingWorker = current.workers.find((entry) => entry.name === item.workerName);
     if (existingWorker) {
-      if (
-        existingWorker.lifecycle !== "idle" ||
-        existingWorker.recoverable ||
-        !existingWorker.worktreePath ||
-        !existingWorker.sessionFile
-      ) {
+      try {
+        assertWorkerCleanupReady(current, existingWorker.workerId, existingWorker.name);
+      } catch {
         throw new Error(`Parallel worker '${item.workerName}' is not idle and ready for dispatch`);
+      }
+      if (!existingWorker.worktreePath || !existingWorker.sessionFile) {
+        throw new Error(`Parallel worker '${item.workerName}' is missing durable worker resources`);
       }
     }
     const worker = existingWorker ?? (await createWorkerForRepo(repoRoot, item.workerName));
@@ -1465,10 +1465,12 @@ export async function runWorkForRepo(
   if (!taskInput) {
     throw new Error("conductor_run_work could not derive a work item");
   }
+  const workerName = taskInput.workerName ?? `${workerPrefix}-1`;
+  const reusedWorker = getOrCreateRunForRepo(repoRoot).workers.some((entry) => entry.name === workerName);
   const delegated = await delegateTaskForRepo(repoRoot, {
     title: taskInput.title,
     prompt: taskInput.prompt,
-    workerName: taskInput.workerName ?? `${workerPrefix}-1`,
+    workerName,
     startRun: false,
   });
   if (signal?.aborted) {
@@ -1486,7 +1488,8 @@ export async function runWorkForRepo(
       objective: null,
       runtimeMode,
       runtimeRuns: summarizeRunWorkRuntime(repoRoot, [delegated.task.taskId]),
-      cleanupRecommendations: summarizeWorkerCleanupRecommendations(repoRoot, [delegated.worker.workerId]),
+      cleanupRecommendations:
+        execute && !reusedWorker ? summarizeWorkerCleanupRecommendations(repoRoot, [delegated.worker.workerId]) : [],
     };
   }
   let result: WorkerRunResult | null = null;
@@ -1511,7 +1514,8 @@ export async function runWorkForRepo(
     objective: null,
     runtimeMode,
     runtimeRuns: summarizeRunWorkRuntime(repoRoot, [delegated.task.taskId]),
-    cleanupRecommendations: summarizeWorkerCleanupRecommendations(repoRoot, [delegated.worker.workerId]),
+    cleanupRecommendations:
+      execute && !reusedWorker ? summarizeWorkerCleanupRecommendations(repoRoot, [delegated.worker.workerId]) : [],
   };
 }
 function cancelPendingStartupFailureForRepo(
@@ -1643,40 +1647,44 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
       });
     }
     throw new Error(
-      `Worker ${worker.name} requires an approved destructive_cleanup gate before cleanup. Approve via /conductor human dashboard, then rerun conductor_cleanup_worker({"name":"${worker.name}"}).`,
+      `Worker ${worker.name} requires an approved destructive_cleanup gate before cleanup. Approve via /conductor human dashboard, then rerun conductor_cleanup_worker(${JSON.stringify({ name: worker.name })}).`,
     );
   }
-  assertWorkerCleanupReady(getOrCreateRunForRepo(repoRoot), worker.workerId, worker.name);
-  if (worker.worktreePath && existsSync(worker.worktreePath)) {
-    removeManagedWorktree(run.repoRoot, worker.worktreePath);
-  }
-  if (worker.sessionFile && existsSync(worker.sessionFile)) {
-    rmSync(worker.sessionFile, { force: true });
-  }
-  if (worker.branch) {
-    removeManagedBranch(run.repoRoot, worker.branch);
-  }
-  const updatedRun = mutateRepoRunSync(repoRoot, (latest) => {
+  const reservedRun = mutateRepoRunSync(repoRoot, (latest) => {
     const latestGate = latest.gates.find((gate) => gate.gateId === cleanupGate.gateId);
     if (!latestGate || latestGate.status !== "approved" || latestGate.usedAt !== null) {
       throw new Error(`Worker ${worker.name} requires a fresh destructive_cleanup gate before cleanup finalization`);
     }
     assertWorkerCleanupReady(latest, worker.workerId, worker.name);
-    return appendExternalOperationEvent(
-      removeWorker(markConductorGateUsed(latest, cleanupGate.gateId), worker.workerId),
-      {
-        status: "succeeded",
-        resourceRefs: { workerId: worker.workerId, gateId: cleanupGate.gateId },
-        payload: {
-          operation: "cleanup_worker",
-          name: worker.name,
-          worktreePath: worker.worktreePath,
-          branch: worker.branch,
-        },
-      },
-    );
+    return removeWorker(markConductorGateUsed(latest, cleanupGate.gateId), worker.workerId);
   });
-  return updatedRun.archivedWorkers.find((entry) => entry.workerId === worker.workerId) ?? worker;
+  const archived = reservedRun.archivedWorkers.find((entry) => entry.workerId === worker.workerId) ?? worker;
+  try {
+    if (archived.worktreePath && existsSync(archived.worktreePath))
+      removeManagedWorktree(run.repoRoot, archived.worktreePath);
+    if (archived.sessionFile && existsSync(archived.sessionFile)) rmSync(archived.sessionFile, { force: true });
+    if (archived.branch) removeManagedBranch(run.repoRoot, archived.branch);
+  } catch (error) {
+    recordExternalOperationEvent(repoRoot, {
+      status: "failed",
+      resourceRefs: { workerId: worker.workerId, gateId: cleanupGate.gateId },
+      payload: { operation: "cleanup_worker", name: worker.name, errorMessage: errorMessage(error) },
+    });
+    throw error;
+  }
+  mutateRepoRunSync(repoRoot, (latest) =>
+    appendExternalOperationEvent(latest, {
+      status: "succeeded",
+      resourceRefs: { workerId: worker.workerId, gateId: cleanupGate.gateId },
+      payload: {
+        operation: "cleanup_worker",
+        name: worker.name,
+        worktreePath: archived.worktreePath,
+        branch: archived.branch,
+      },
+    }),
+  );
+  return archived;
 }
 export function commitWorkerForRepo(repoRoot: string, workerName: string, message: string): WorkerRecord {
   const run = getOrCreateRunForRepo(repoRoot);
