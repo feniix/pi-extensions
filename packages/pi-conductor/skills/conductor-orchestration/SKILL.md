@@ -32,7 +32,7 @@ Use this workflow when `pi-conductor` should coordinate work as a durable local 
    - `conductor_scheduler_tick({ objectiveId, policy: "safe", maxActions: 3 })`
 6. Execute intentionally when ready:
    - Prefer `conductor_run_work({ request, tasks, mode: "auto" })` for natural-language work. Let conductor decide whether to use one worker, parallel workers, or an objective DAG.
-   - Use `conductor_run_parallel_work({ tasks })` only as a lower-level primitive when the work has already been proven parallel-safe. When `runtimeMode` is omitted, it prefers supervised non-blocking `tmux` if available and returns after launch so follow-up natural-language status/cancel requests can continue in the parent session; pass `runtimeMode: "headless"` when you intentionally need to wait for completion.
+   - Use `conductor_run_parallel_work({ tasks })` only as a lower-level primitive when the work has already been proven parallel-safe. When `runtimeMode` is omitted, it prefers supervised non-blocking `tmux` if available and returns after launch so follow-up natural-language status/cancel requests can continue in the parent session; pass `runtimeMode: "headless"` when you intentionally need to wait for completion. Interpret `details.results[].executionState` as the result discriminator: `completed` means headless work reached a terminal worker result, `launched` means a supervised run is still represented by durable conductor state, `failed_to_launch` means no active supervised run was established for that shard, and `interrupted` means parent cancellation ran.
    - `conductor_scheduler_tick({ objectiveId, policy: "execute", maxRuns: 1 })`
    - or `conductor_run_next_action({ objectiveId, policy: "execute" })`
 7. Monitor evidence and blockers:

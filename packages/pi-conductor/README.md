@@ -152,6 +152,17 @@ Run tools accept `runtimeMode: "headless" | "tmux" | "iterm-tmux"`. `headless` r
 
 Default runtime selection depends on the entry point. `conductor_run_work` stays conservative and defaults ordinary work to `headless` unless the request clearly asks to show/watch/open workers or an explicit `runtimeMode` is provided. Direct `conductor_run_parallel_work` is a lower-level parallel-safe primitive; when its `runtimeMode` is omitted, it prefers non-blocking `tmux` if tmux is available so the parent session can keep accepting natural-language inspection/cancel requests after launch, and falls back to blocking `headless` when tmux is unavailable. Pass `runtimeMode: "headless"` to `conductor_run_parallel_work` when the caller needs the old wait-for-completion behavior.
 
+Compatibility note: older direct parallel-work callers that omitted `runtimeMode` and expected the tool call to return only after completion should now pass `runtimeMode: "headless"`. The omitted-runtime default is intentionally host-sensitive: machines with tmux get supervised launch-and-return behavior, while machines without tmux continue to run headless. Programmatic callers should inspect each result's `executionState` rather than treating `result.status: "success"` as semantic task completion.
+
+`conductor_run_parallel_work` result states distinguish launch from completion:
+
+| `executionState` | Meaning |
+| ---------------- | ------- |
+| `completed` | Headless execution finished and `result.status` describes the terminal worker outcome. |
+| `launched` | A supervised tmux/iTerm-backed run launched successfully and remains represented by durable conductor run state. Inspect `runtimeRuns`, `conductor_project_brief`, or `conductor_list_runs` for current status. |
+| `failed_to_launch` | A supervised non-headless shard failed before conductor could establish an active run. |
+| `interrupted` | Parent orchestration was interrupted and conductor attempted to cancel owned runs/tasks. |
+
 Use conductor status tools rather than typing into worker panes to supervise work. Active visible runs include:
 
 - `viewer=<opened|warning|unavailable|pending>` and `viewerCommand="tmux ... attach-session -r ..."`
