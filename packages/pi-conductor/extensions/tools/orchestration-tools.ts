@@ -63,7 +63,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
     name: "conductor_run_parallel_work",
     label: "Conductor Run Parallel Work",
     description:
-      "Autonomously split a natural-language request into parallel conductor worker tasks. When no runtimeMode is provided, conductor prefers tmux so the tool can launch supervised workers and return control to the parent session for natural-language follow-up; it falls back to headless when tmux is unavailable. Owned runs/tasks are canceled if the user interrupts with Escape or a task fails before active run creation.",
+      "Autonomously split a natural-language request into parallel conductor worker tasks. When no runtimeMode is provided, conductor prefers tmux so the tool can launch supervised workers and return control to the parent session for natural-language follow-up; it falls back to headless when tmux is unavailable. Use details.results[].executionState to distinguish completed headless work from launched supervised runs, failed launches, and interruptions. Owned runs/tasks are canceled if the user interrupts with Escape or a task fails before active run creation.",
     parameters: Type.Object({
       tasks: Type.Array(
         Type.Object({
