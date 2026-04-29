@@ -16,6 +16,7 @@ import {
 } from "./git-pr.js";
 import { computeNextActions } from "./next-actions.js";
 import { createObjectiveForRepo, planObjectiveForRepo, refreshObjectiveStatusForRepo } from "./objective-service.js";
+import { type ParallelTaskResultSummary, summarizeParallelTaskResults } from "./parallel-work-results.js";
 import { reconcileProjectForRepo } from "./project-reconcile.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
 import { mutateRepoRunWithLockRetry } from "./repo-run-retry.js";
@@ -1136,6 +1137,7 @@ export async function runParallelWorkForRepo(
   canceledTasks: string[];
   runtimeMode: RunRuntimeMode;
   runtimeRuns: RunWorkRuntimeSummary[];
+  taskResults: ParallelTaskResultSummary[];
 }> {
   if (input.tasks.length === 0) {
     throw new Error("At least one parallel work item is required");
@@ -1254,10 +1256,20 @@ export async function runParallelWorkForRepo(
     };
   });
 
+  const taskIds = tasks.map((task) => task.taskId);
   try {
     if (signal?.aborted) {
       await Promise.allSettled(pendingCancellations);
-      return { workers, tasks, results: [], canceledRuns, canceledTasks, runtimeMode, runtimeRuns: [] };
+      return {
+        workers,
+        tasks,
+        results: [],
+        canceledRuns,
+        canceledTasks,
+        runtimeMode,
+        runtimeRuns: [],
+        taskResults: summarizeParallelTaskResults(repoRoot, taskIds),
+      };
     }
     const settled = await Promise.allSettled(
       tasks.map((task, index) =>
@@ -1317,10 +1329,8 @@ export async function runParallelWorkForRepo(
       canceledRuns,
       canceledTasks,
       runtimeMode,
-      runtimeRuns: summarizeRunWorkRuntime(
-        repoRoot,
-        tasks.map((task) => task.taskId),
-      ),
+      runtimeRuns: summarizeRunWorkRuntime(repoRoot, taskIds),
+      taskResults: summarizeParallelTaskResults(repoRoot, taskIds),
     };
   } finally {
     signal?.removeEventListener("abort", onAbort);

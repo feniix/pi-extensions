@@ -92,11 +92,24 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
       const launchedText = `${completed} launched, ${result.results.length - completed} failed to launch${canceledText}`;
       const followUpText =
         'inspect with conductor_project_brief or conductor_list_runs({ status: "running" }); cancel with conductor_cancel_active_work';
+      const resultRows = result.taskResults.map((entry) => {
+        const summary = entry.completionSummary
+          ? `${entry.completionSummary}${entry.completionSummaryTruncated ? "…" : ""}`
+          : "none";
+        const next = entry.nextToolCalls.map((call) => `${call.name}(${JSON.stringify(call.params)})`).join("; ");
+        return `| ${entry.taskTitle} | ${entry.taskId} | ${entry.workerName ?? "none"} | ${entry.workerId ?? "none"} | ${entry.runId ?? "none"} | ${entry.taskState} | ${entry.runStatus ?? "none"} | ${entry.latestProgress ?? "none"} | ${summary} | ${next} |`;
+      });
+      const resultTable = [
+        "",
+        "| Task | taskId | Worker | workerId | runId | Task state | Run status | Latest progress | Completion summary | Next tools |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+        ...resultRows,
+      ].join("\n");
       const text = signal?.aborted
-        ? `interrupted parallel conductor work with ${runtimeText}; canceled ${result.canceledRuns.length} active run(s) and ${result.canceledTasks.length} task(s)`
+        ? `interrupted parallel conductor work with ${runtimeText}; canceled ${result.canceledRuns.length} active run(s) and ${result.canceledTasks.length} task(s)${resultTable}`
         : result.runtimeMode === "headless"
-          ? `ran ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${finishedText}`
-          : `launched ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${launchedText}; ${followUpText}`;
+          ? `ran ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${finishedText}${resultTable}`
+          : `launched ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${launchedText}; ${followUpText}${resultTable}`;
       return { content: [{ type: "text", text }], details: result };
     },
   });
