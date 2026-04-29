@@ -60,7 +60,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
     name: "conductor_run_work",
     label: "Conductor Run Work",
     description:
-      "Run natural-language pi-conductor work and let conductor decide whether to use one worker, parallel workers, or an objective DAG. Omit runtimeMode to keep single/objective work headless unless visible supervision is requested; parallel work prefers supervised tmux when available and falls back to headless. Use conductor_get_project, conductor_list_workers, conductor_list_runs, or conductor_view_active_workers for status-only requests. Runtime preflight errors can be investigated with conductor_backend_status, and active runtimeRuns include cancelTool details.",
+      "Run natural-language pi-conductor work and let conductor decide whether to use one worker, parallel workers, or an objective DAG. Omit runtimeMode to keep single/objective work headless unless visible supervision is requested; parallel work prefers supervised tmux when available and falls back to headless. For parallel tmux/iterm-tmux runs, inspect details.parallel.results[].executionState to distinguish launched supervised work from completed headless work. Use conductor_get_project, conductor_list_workers, conductor_list_runs, or conductor_view_active_workers for status-only requests. Programmatic callers must not treat tool success as semantic completion; inspect executionState/taskResults. Runtime preflight errors can be investigated with conductor_backend_status, and active runtimeRuns include cancelTool details.",
     parameters: Type.Object({
       request: Type.String({ description: "The user's natural-language work request" }),
       mode: Type.Optional(

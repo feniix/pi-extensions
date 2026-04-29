@@ -1035,7 +1035,7 @@ describe("conductor service", () => {
     "are any workers active?",
     "current worker status",
   ])("rejects status-only work-router requests before mutating conductor state: %s", async (request) => {
-    await expect(runWorkForRepo(repoDir, { request })).rejects.toThrow(/status-only requests/i);
+    await expect(runWorkForRepo(repoDir, { request })).rejects.toThrow(/conductor_view_active_workers/);
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers).toHaveLength(0);
@@ -1512,25 +1512,33 @@ describe("conductor service", () => {
     expect(result.tasks).toHaveLength(1);
   });
 
-  it("plans dependent work as an objective instead of parallel fan-out", async () => {
-    const result = await runWorkForRepo(repoDir, {
-      request: "Implement the feature, then verify it",
-      execute: false,
-      tasks: [
-        { title: "Implement feature", prompt: "Implement the feature in the package", writeScope: ["extensions/"] },
-        {
-          title: "Verify feature",
-          prompt: "Verify the feature after implementation",
-          writeScope: ["__tests__/"],
-          dependsOn: ["Implement feature"],
-        },
-      ],
-    });
+  it("plans dependent work as a headless objective instead of parallel fan-out", async () => {
+    const restorePath = forceTmuxAvailable();
+    let result: Awaited<ReturnType<typeof runWorkForRepo>> | null = null;
+    try {
+      result = await runWorkForRepo(repoDir, {
+        request: "Implement the feature, then verify it",
+        execute: false,
+        tasks: [
+          { title: "Implement feature", prompt: "Implement the feature in the package", writeScope: ["extensions/"] },
+          {
+            title: "Verify feature",
+            prompt: "Verify the feature after implementation",
+            writeScope: ["__tests__/"],
+            dependsOn: ["Implement feature"],
+          },
+        ],
+      });
+    } finally {
+      restorePath();
+    }
+    if (!result) throw new Error("expected runWorkForRepo result");
 
     expect(result.decision).toMatchObject({
       mode: "objective",
       reason: expect.stringMatching(/depend/i),
     });
+    expect(result.runtimeMode).toBe("headless");
     expect(result.objective?.tasks.map((task) => task.title)).toEqual(["Implement feature", "Verify feature"]);
     expect(result.parallel).toBeNull();
     const run = getOrCreateRunForRepo(repoDir);

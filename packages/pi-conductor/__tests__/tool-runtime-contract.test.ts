@@ -79,6 +79,8 @@ describe("conductor runtime-mode tool contracts", () => {
     expect(tool?.description).toContain("parallel work prefers supervised tmux");
     expect(tool?.description).toContain("falls back to headless");
     expect(tool?.description).toContain("conductor_view_active_workers");
+    expect(tool?.description).toContain("details.parallel.results[].executionState");
+    expect(tool?.description).toContain("must not treat tool success as semantic completion");
     expect(schema).toContain("Pass headless for blocking execution");
     expect(schema).toContain("parallel work prefer tmux");
   });
