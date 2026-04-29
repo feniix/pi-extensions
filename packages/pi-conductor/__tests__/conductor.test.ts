@@ -13,6 +13,8 @@ import {
   delegateTaskForRepo,
   getOrCreateRunForRepo,
   reconcileProjectForRepo,
+  recordTaskCompletionForRepo,
+  recordTaskProgressForRepo,
   retryTaskForRepo,
   runParallelWorkForRepo,
   runTaskForRepo,
@@ -390,6 +392,63 @@ describe("conductor service", () => {
 
     expect(result.canceledTasks).toHaveLength(1);
     expect(runnerSignal?.aborted).toBe(true);
+  });
+
+  it("returns per-task summaries from completed parallel work", async () => {
+    const result = await runParallelWorkForRepo(
+      repoDir,
+      {
+        workerPrefix: "parallel",
+        runtimeMode: "headless",
+        tasks: [
+          { title: "First shard", prompt: "Do first shard" },
+          { title: "Second shard", prompt: "Do second shard" },
+        ],
+      },
+      undefined,
+      async (root, taskId) => {
+        const started = startTaskRunForRepo(root, { taskId });
+        recordTaskProgressForRepo(root, {
+          taskId,
+          runId: started.run.runId,
+          progress: `progress for ${taskId}`,
+        });
+        recordTaskCompletionForRepo(root, {
+          taskId,
+          runId: started.run.runId,
+          status: "succeeded",
+          completionSummary: `summary for ${taskId}`,
+        });
+        return {
+          workerName: started.run.workerId,
+          status: "success",
+          finalText: "done",
+          errorMessage: null,
+          sessionId: "session",
+        };
+      },
+    );
+
+    expect(result.taskResults).toHaveLength(2);
+    expect(result.taskResults[0]).toMatchObject({
+      taskTitle: "First shard",
+      taskId: result.tasks[0]?.taskId,
+      workerName: "parallel-1",
+      workerId: result.workers[0]?.workerId,
+      runStatus: "succeeded",
+      taskState: "completed",
+      latestProgress: `progress for ${result.tasks[0]?.taskId}`,
+      completionSummary: `summary for ${result.tasks[0]?.taskId}`,
+      completionSummaryTruncated: false,
+    });
+    expect(result.taskResults[0]?.runId).toBeTruthy();
+    expect(result.taskResults[0]?.nextToolCalls).toEqual([
+      { name: "conductor_task_brief", params: { taskId: result.tasks[0]?.taskId } },
+      {
+        name: "conductor_resource_timeline",
+        params: { taskId: result.tasks[0]?.taskId, runId: result.taskResults[0]?.runId },
+      },
+    ]);
   });
 
   it("rejects duplicate worker names for parallel work before dispatch", async () => {
