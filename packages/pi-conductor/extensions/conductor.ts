@@ -6,7 +6,8 @@ import {
   getConductorRuntimeModeStatus,
   inspectConductorBackends,
 } from "./backends.js";
-import { summarizeWorkerCleanupRecommendations, type WorkerCleanupRecommendation } from "./cleanup-guidance.js";
+import type { WorkerCleanupRecommendation } from "./cleanup-guidance.js";
+import { assertWorkerCleanupReady, summarizeWorkerCleanupRecommendations } from "./cleanup-guidance.js";
 import { createGateForRepo } from "./gate-service.js";
 import {
   commitAllChanges,
@@ -992,7 +993,6 @@ export async function delegateTaskForRepo(
   if (!input.startRun) {
     return { worker, task: assigned, run: null, taskContract: null };
   }
-
   const started = startTaskRunForRepo(repoRoot, {
     taskId: assigned.taskId,
     workerId: worker.workerId,
@@ -1007,7 +1007,6 @@ export async function delegateTaskForRepo(
     taskContract: started.taskContract,
   };
 }
-
 export function cancelTaskRunForRepo(repoRoot: string, input: { runId: string; reason: string }): RunRecord {
   const project = cancelTaskRunStateForRepo(repoRoot, input);
   const run = project.runs.find((entry) => entry.runId === input.runId);
@@ -1027,7 +1026,6 @@ export async function cancelTaskRunForRepoWithRuntimeCleanup(
   }
   return project;
 }
-
 export function cancelActiveWorkForRepo(
   repoRoot: string,
   input: {
@@ -1056,20 +1054,16 @@ export function cancelActiveWorkForRepo(
     taskIds: liveTaskIds,
     workerIds: liveWorkerIds,
   });
-
   for (const run of activeRuns) {
     project = cancelTaskRunForRepo(repoRoot, { runId: run.runId, reason });
     canceledRuns.push(run.runId);
     canceledTasks.add(run.taskId);
   }
-
   const pending = cancelPendingWorkForRepo(repoRoot, { reason, taskIds, workerIds });
   project = pending.project;
   for (const taskId of pending.canceledTasks) canceledTasks.add(taskId);
-
   return { canceledRuns, canceledTasks: [...canceledTasks], project };
 }
-
 export async function cancelActiveWorkForRepoWithRuntimeCleanup(
   repoRoot: string,
   input: { reason?: string; taskIds?: string[]; workerIds?: string[] } = {},
@@ -1084,7 +1078,6 @@ export async function cancelActiveWorkForRepoWithRuntimeCleanup(
   }
   return { ...canceled, project };
 }
-
 export async function runParallelWorkForRepo(
   repoRoot: string,
   input: {
@@ -1139,8 +1132,8 @@ export async function runParallelWorkForRepo(
     workerNames.add(item.workerName);
   }
   const workers: WorkerRecord[] = [];
+  const createdWorkerIds: string[] = [];
   const tasks: TaskRecord[] = [];
-
   for (const item of items) {
     const current = getOrCreateRunForRepo(repoRoot);
     const existingWorker = current.workers.find((entry) => entry.name === item.workerName);
@@ -1155,12 +1148,12 @@ export async function runParallelWorkForRepo(
       }
     }
     const worker = existingWorker ?? (await createWorkerForRepo(repoRoot, item.workerName));
+    if (!existingWorker) createdWorkerIds.push(worker.workerId);
     const task = createTaskForRepo(repoRoot, { title: item.title, prompt: item.prompt });
     const assigned = assignTaskForRepo(repoRoot, task.taskId, worker.workerId);
     workers.push(worker);
     tasks.push(assigned);
   }
-
   const cancelReason = "Parent conductor parallel work was interrupted";
   const cancelOwnedWork = async () =>
     cancelActiveWorkForRepoWithRuntimeCleanup(repoRoot, {
@@ -1168,7 +1161,6 @@ export async function runParallelWorkForRepo(
       taskIds: tasks.map((task) => task.taskId),
       workerIds: workers.map((worker) => worker.workerId),
     });
-
   let canceledRuns: string[] = [];
   let canceledTasks: string[] = [];
   const collectOwnedCanceledWork = () => {
@@ -1211,7 +1203,6 @@ export async function runParallelWorkForRepo(
   };
   signal?.addEventListener("abort", onAbort);
   if (signal?.aborted) await requestCancelOwnedWork();
-
   const liveControllers = tasks.map((task, index) => {
     const linked = createLinkedAbortController(signal);
     const unregister = registerLiveWorkAbortHandle({
@@ -1227,16 +1218,21 @@ export async function runParallelWorkForRepo(
       },
     };
   });
-
   const taskIds = tasks.map((task) => task.taskId);
-  const workerIds = workers.map((worker) => worker.workerId);
+  const workerIds = createdWorkerIds;
   try {
     if (signal?.aborted) {
       await Promise.allSettled(pendingCancellations);
       return {
         workers,
         tasks,
-        results: [],
+        results: tasks.map((task) => ({
+          taskId: task.taskId,
+          status: "rejected" as const,
+          executionState: "interrupted" as const,
+          result: null,
+          error: cancelReason,
+        })),
         canceledRuns,
         canceledTasks,
         runtimeMode,
@@ -1319,7 +1315,6 @@ export async function runParallelWorkForRepo(
     }
   }
 }
-
 export async function runWorkForRepo(
   repoRoot: string,
   input: {
@@ -1364,7 +1359,6 @@ export async function runWorkForRepo(
     assertRuntimeModeAvailable(runtimeMode);
   }
   const workerPrefix = input.workerPrefix?.trim() || "run-work";
-
   if (decision.mode === "parallel") {
     if (!execute) {
       return {
@@ -1405,7 +1399,6 @@ export async function runWorkForRepo(
       cleanupRecommendations: parallel.cleanupRecommendations,
     };
   }
-
   if (decision.mode === "objective") {
     const objective = createObjectiveForRepo(repoRoot, {
       title: deriveWorkTitle(input.request),
@@ -1468,7 +1461,6 @@ export async function runWorkForRepo(
       cleanupRecommendations: summarizeWorkerCleanupRecommendations(repoRoot, resultWorkerIds),
     };
   }
-
   const taskInput = decision.tasks[0];
   if (!taskInput) {
     throw new Error("conductor_run_work could not derive a work item");
@@ -1535,7 +1527,6 @@ function cancelPendingStartupFailureForRepo(
     }).canceledTasks,
   };
 }
-
 function cancelPendingWorkForRepo(
   repoRoot: string,
   input: {
@@ -1580,15 +1571,12 @@ function cancelPendingWorkForRepo(
     }
     return updated;
   });
-
   for (const objectiveId of affectedObjectiveIds) {
     refreshObjectiveStatusForRepo(repoRoot, objectiveId);
     project = getOrCreateRunForRepo(repoRoot);
   }
-
   return { canceledTasks, project };
 }
-
 export async function createWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
   const run = getOrCreateRunForRepo(repoRoot);
   const workerId = createWorkerId();
@@ -1621,7 +1609,6 @@ export async function createWorkerForRepo(repoRoot: string, workerName: string):
   }
   return worker;
 }
-
 export function removeWorkerForRepo(repoRoot: string, workerName: string): WorkerRecord {
   const run = getOrCreateRunForRepo(repoRoot);
   const worker = run.workers.find((entry) => entry.name === workerName);
@@ -1655,8 +1642,11 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
         requestedDecision: `Approve deleting worker ${worker.name}, its worktree, session link, and managed branch`,
       });
     }
-    throw new Error(`Worker ${worker.name} requires an approved destructive_cleanup gate before cleanup`);
+    throw new Error(
+      `Worker ${worker.name} requires an approved destructive_cleanup gate before cleanup. Approve via /conductor human dashboard, then rerun conductor_cleanup_worker({"name":"${worker.name}"}).`,
+    );
   }
+  assertWorkerCleanupReady(getOrCreateRunForRepo(repoRoot), worker.workerId, worker.name);
   if (worker.worktreePath && existsSync(worker.worktreePath)) {
     removeManagedWorktree(run.repoRoot, worker.worktreePath);
   }
@@ -1671,6 +1661,7 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
     if (!latestGate || latestGate.status !== "approved" || latestGate.usedAt !== null) {
       throw new Error(`Worker ${worker.name} requires a fresh destructive_cleanup gate before cleanup finalization`);
     }
+    assertWorkerCleanupReady(latest, worker.workerId, worker.name);
     return appendExternalOperationEvent(
       removeWorker(markConductorGateUsed(latest, cleanupGate.gateId), worker.workerId),
       {
@@ -1687,7 +1678,6 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
   });
   return updatedRun.archivedWorkers.find((entry) => entry.workerId === worker.workerId) ?? worker;
 }
-
 export function commitWorkerForRepo(repoRoot: string, workerName: string, message: string): WorkerRecord {
   const run = getOrCreateRunForRepo(repoRoot);
   const worker = run.workers.find((entry) => entry.name === workerName);
@@ -1738,7 +1728,6 @@ export function commitWorkerForRepo(repoRoot: string, workerName: string, messag
   );
   return updatedRun.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
 }
-
 export function pushWorkerForRepo(repoRoot: string, workerName: string): WorkerRecord {
   const run = getOrCreateRunForRepo(repoRoot);
   const worker = run.workers.find((entry) => entry.name === workerName);
@@ -1786,7 +1775,6 @@ export function pushWorkerForRepo(repoRoot: string, workerName: string): WorkerR
   );
   return updatedRun.workers.find((entry) => entry.workerId === worker.workerId) ?? worker;
 }
-
 export function createWorkerPrForRepo(
   repoRoot: string,
   workerName: string,
@@ -1929,11 +1917,9 @@ export function createWorkerPrForRepo(
     throw error;
   }
 }
-
 function isActiveRunAttempt(attempt: RunAttemptRecord): boolean {
   return !attempt.finishedAt && !isTerminalRunStatus(attempt.status);
 }
-
 function mapWorkerRunStatusToRunStatus(status: WorkerRunResult["status"]): "succeeded" | "failed" | "aborted" {
   switch (status) {
     case "success":
@@ -1944,7 +1930,6 @@ function mapWorkerRunStatusToRunStatus(status: WorkerRunResult["status"]): "succ
       return "failed";
   }
 }
-
 export async function runTaskForRepo(
   repoRoot: string,
   taskId: string,
@@ -1974,7 +1959,6 @@ export async function runTaskForRepo(
     throw new Error(`Worker ${worker.name} is missing its worktree; recover the worker first`);
   }
   await runtimeBackend.preflight({ worktreePath: worker.worktreePath, sessionFile: worker.sessionFile });
-
   const started = startTaskRunForRepo(repoRoot, { taskId, workerId: worker.workerId, runtimeMode });
   const linkedSignal = createLinkedAbortController(signal);
   const unregisterLiveRun = registerLiveWorkAbortHandle({
@@ -1983,7 +1967,6 @@ export async function runTaskForRepo(
     workerId: worker.workerId,
     controller: linkedSignal.controller,
   });
-
   try {
     const runtimeResult = await runtimeBackend.run({
       repoRoot,
@@ -2022,7 +2005,6 @@ export async function runTaskForRepo(
         createFollowUpTaskForRepo(repoRoot, followUp);
       },
     });
-
     if (!waitForCompletion && isTmuxRuntimeMode(runtimeMode) && runtimeResult.status === "success") {
       const latestAttempt = getOrCreateRunForRepo(repoRoot).runs.find((entry) => entry.runId === started.run.runId);
       if (latestAttempt && !latestAttempt.finishedAt && !isTerminalRunStatus(latestAttempt.status)) {
@@ -2035,7 +2017,6 @@ export async function runTaskForRepo(
         };
       }
     }
-
     let createdFallbackCompletion = false;
     await mutateRepoRunWithLockRetry(repoRoot, (latest) => {
       const runAttempt = latest.runs.find((entry) => entry.runId === started.run.runId);
@@ -2066,7 +2047,6 @@ export async function runTaskForRepo(
         requestedDecision: `Review task ${taskId}: native worker exited without explicit conductor_child_complete`,
       });
     }
-
     return {
       workerName: worker.name,
       status: runtimeResult.status,
@@ -2105,14 +2085,12 @@ export async function runTaskForRepo(
     linkedSignal.dispose();
   }
 }
-
 export async function recoverWorkerForRepo(repoRoot: string, workerName: string): Promise<WorkerRecord> {
   const run = getOrCreateRunForRepo(repoRoot);
   const worker = run.workers.find((entry) => entry.name === workerName);
   if (!worker) {
     throw new Error(`Worker named ${workerName} not found`);
   }
-
   let worktreePath = worker.worktreePath;
   let runtime = null;
   try {
@@ -2125,7 +2103,6 @@ export async function recoverWorkerForRepo(repoRoot: string, workerName: string)
         branch: worker.branch,
       }).worktreePath;
     }
-
     if (!worker.sessionFile || !existsSync(worker.sessionFile)) {
       runtime = await recoverWorkerSessionRuntime(worktreePath);
     }
@@ -2145,7 +2122,6 @@ export async function recoverWorkerForRepo(repoRoot: string, workerName: string)
     });
     throw error;
   }
-
   const updatedRun = mutateRepoRunSync(repoRoot, (latest) => {
     const workers = latest.workers.map((entry) =>
       entry.workerId === worker.workerId

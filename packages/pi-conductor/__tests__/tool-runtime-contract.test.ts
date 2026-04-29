@@ -74,6 +74,14 @@ describe("conductor tool contracts", () => {
     expect(tool?.description).toContain("conductor_cleanup_worker");
   });
 
+  it("documents gate-protected cleanup worker flow", () => {
+    const tool = collectTools().find((entry) => entry.name === "conductor_cleanup_worker");
+
+    expect(tool?.description).toContain("destructive_cleanup gate");
+    expect(tool?.description).toContain("/conductor human dashboard");
+    expect(tool?.description).toContain("rerun conductor_cleanup_worker");
+  });
+
   it("documents high-level parallel runtime defaults and blocking override", () => {
     const tool = collectTools().find((entry) => entry.name === "conductor_run_work");
     const schema = JSON.stringify(tool?.parameters);

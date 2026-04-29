@@ -59,7 +59,8 @@ export function registerWorkerTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "conductor_cleanup_worker",
     label: "Conductor Cleanup Worker",
-    description: "Gate-protected cleanup for a named worker, its worktree, session link, and branch",
+    description:
+      "Gate-protected cleanup for a named idle worker, its worktree, session link, and branch. First call may create a destructive_cleanup gate; approve it through /conductor human dashboard, then rerun conductor_cleanup_worker({ name }).",
     parameters: Type.Object({
       name: Type.String({ description: "Worker name" }),
     }),

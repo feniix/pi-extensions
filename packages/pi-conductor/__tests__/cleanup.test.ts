@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  assignTaskForRepo,
   createGateForRepo,
+  createTaskForRepo,
   createWorkerForRepo,
   getOrCreateRunForRepo,
   removeWorkerForRepo,
@@ -74,6 +76,17 @@ describe("cleanup flows", () => {
     });
 
     expect(() => removeWorkerForRepo(repoDir, "backend")).toThrow(/destructive_cleanup/i);
+  });
+
+  it("refuses cleanup when a worker still has assigned work", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    const worktreePath = requireValue(worker.worktreePath, "worker worktree missing");
+    const task = createTaskForRepo(repoDir, { title: "Pending", prompt: "Do pending work" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    approveCleanupGate(worker.workerId);
+
+    expect(() => removeWorkerForRepo(repoDir, "backend")).toThrow(/not idle and ready/);
+    expect(existsSync(worktreePath)).toBe(true);
   });
 
   it("removes a worker record and its worktree", async () => {
