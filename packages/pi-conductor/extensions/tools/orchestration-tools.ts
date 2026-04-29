@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
+import { formatActiveWorkerViewerSummary, summarizeActiveWorkerViewersForRepo } from "../active-worker-viewer.js";
 import * as conductor from "../conductor.js";
 import { formatParallelTaskResultsTable } from "../parallel-work-results.js";
 
@@ -21,7 +22,7 @@ export function summarizeParallelWorkToolText(
   const finishedText = `${semanticCompleted} completed, ${result.results.length - semanticCompleted} need follow-up${canceledText}`;
   const launchedText = `${launched} launched, ${result.results.length - launched} failed to launch${canceledText}`;
   const followUpText =
-    'inspect with conductor_project_brief or conductor_list_runs({ status: "running" }); cancel with conductor_cancel_active_work';
+    "inspect active viewers with conductor_view_active_workers({}); scope by taskId/workerId/runId; cancel with conductor_cancel_active_work";
   const resultTable = formatParallelTaskResultsTable(result.taskResults);
   if (aborted) {
     return `interrupted parallel conductor work with ${runtimeText}; canceled ${result.canceledRuns.length} active run(s) and ${result.canceledTasks.length} task(s)${resultTable}`;
@@ -72,12 +73,14 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const result = await conductor.runWorkForRepo(ctx.cwd, params, signal);
       const runtimeText = `runtime=${result.runtimeMode}${result.runtimeRuns.length > 0 ? ` runs=${result.runtimeRuns.length}` : ""}`;
+      const viewerText =
+        result.runtimeRuns.length > 0 ? "; inspect active viewers with conductor_view_active_workers({})" : "";
       const text =
         result.decision.mode === "parallel"
-          ? `routed work to ${result.tasks.length} parallel conductor worker(s) with ${runtimeText}: ${result.decision.reason}`
+          ? `routed work to ${result.tasks.length} parallel conductor worker(s) with ${runtimeText}: ${result.decision.reason}${viewerText}`
           : result.decision.mode === "objective"
-            ? `routed work to an objective with ${result.tasks.length} task(s) with ${runtimeText}: ${result.decision.reason}`
-            : `routed work to one conductor worker with ${runtimeText}: ${result.decision.reason}`;
+            ? `routed work to an objective with ${result.tasks.length} task(s) with ${runtimeText}: ${result.decision.reason}${viewerText}`
+            : `routed work to one conductor worker with ${runtimeText}: ${result.decision.reason}${viewerText}`;
       return { content: [{ type: "text", text }], details: result };
     },
   });
@@ -109,6 +112,26 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
       const result = await conductor.runParallelWorkForRepo(ctx.cwd, params, signal);
       const text = summarizeParallelWorkToolText(result, signal?.aborted ?? false);
       return { content: [{ type: "text", text }], details: result };
+    },
+  });
+
+  pi.registerTool({
+    name: "conductor_view_active_workers",
+    label: "Conductor View Active Workers",
+    description:
+      "List active supervised tmux/iTerm conductor workers with run IDs, worker names, task titles, runtime/viewer status, attach/log commands, and cancel tool calls. Scope by taskId, workerId, or runId when inspecting one active worker.",
+    parameters: Type.Object({
+      taskId: Type.Optional(Type.String({ description: "Optional task ID to inspect" })),
+      workerId: Type.Optional(Type.String({ description: "Optional worker ID to inspect" })),
+      runId: Type.Optional(Type.String({ description: "Optional run ID to inspect" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const summary = summarizeActiveWorkerViewersForRepo(ctx.cwd, {
+        taskId: params.taskId as string | undefined,
+        workerId: params.workerId as string | undefined,
+        runId: params.runId as string | undefined,
+      });
+      return { content: [{ type: "text", text: formatActiveWorkerViewerSummary(summary) }], details: summary };
     },
   });
 

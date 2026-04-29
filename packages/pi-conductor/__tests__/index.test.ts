@@ -33,6 +33,7 @@ describe("pi-conductor extension", () => {
       "conductor_run_next_action",
       "conductor_run_work",
       "conductor_run_parallel_work",
+      "conductor_view_active_workers",
       "conductor_cancel_active_work",
       "conductor_schedule_objective",
       "conductor_scheduler_tick",

@@ -110,6 +110,51 @@ describe("computeNextActions", () => {
     });
   });
 
+  it("recommends active worker viewing for low-priority supervised run inspection", () => {
+    let run = addWorker(createEmptyRun("abc", "/repo"), usableWorker());
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      runtimeMode: "tmux",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+
+    const result = computeNextActions(run, { includeLowPriority: true, now: "2026-04-24T00:00:00.000Z" });
+
+    expect(result.actions.find((action) => action.kind === "wait_for_run")).toMatchObject({
+      toolCall: { name: "conductor_view_active_workers", params: { runId: "run-1" } },
+    });
+  });
+
+  it("keeps event-list fallback for low-priority headless run inspection", () => {
+    let run = addWorker(createEmptyRun("abc", "/repo"), usableWorker());
+    run = assignTaskToWorker(
+      addTask(run, createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" })),
+      "task-1",
+      "worker-1",
+    );
+    run = startTaskRun(run, {
+      runId: "run-1",
+      taskId: "task-1",
+      workerId: "worker-1",
+      backend: "native",
+      leaseExpiresAt: "2026-04-24T01:00:00.000Z",
+    });
+
+    const result = computeNextActions(run, { includeLowPriority: true, now: "2026-04-24T00:00:00.000Z" });
+
+    expect(result.actions.find((action) => action.kind === "wait_for_run")).toMatchObject({
+      toolCall: { name: "conductor_list_events", params: { runId: "run-1", limit: 20 } },
+    });
+  });
+
   it("does not recommend intervention for an unexpired active run by default", () => {
     let run = addWorker(createEmptyRun("abc", "/repo"), usableWorker());
     run = assignTaskToWorker(

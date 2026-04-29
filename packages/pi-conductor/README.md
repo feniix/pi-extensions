@@ -74,6 +74,7 @@ Resource/control-plane tools:
 - `conductor_resource_timeline`
 - `conductor_run_work`
 - `conductor_run_parallel_work`
+- `conductor_view_active_workers`
 - `conductor_cancel_active_work`
 - `conductor_run_next_action`
 - `conductor_assess_task`
@@ -161,11 +162,13 @@ Programmatic callers should inspect `details.taskResults` for per-task IDs and h
 | `executionState` | Meaning |
 | ---------------- | ------- |
 | `completed` | Headless execution finished and `result.status` describes the terminal worker outcome. |
-| `launched` | A supervised tmux/iTerm-backed run launched successfully and remains represented by durable conductor run state. Inspect `runtimeRuns`, `conductor_project_brief`, or `conductor_list_runs` for current status. |
+| `launched` | A supervised tmux/iTerm-backed run launched successfully and remains represented by durable conductor run state. Inspect `runtimeRuns`, `conductor_view_active_workers`, `conductor_project_brief`, or `conductor_list_runs` for current status. |
 | `failed_to_launch` | A supervised non-headless shard failed before conductor could establish an active run. |
 | `interrupted` | Parent orchestration was interrupted and conductor attempted to cancel owned runs/tasks. |
 
-Use conductor status tools rather than typing into worker panes to supervise work. Active visible runs include:
+Use conductor status tools rather than typing into worker panes to supervise work. Active visible runs can be inspected with `conductor_view_active_workers`, optionally scoped by `taskId`, `workerId`, or `runId`. The response includes worker names, task titles, run IDs, runtime/viewer status, attach commands, log-tail commands, latest progress, diagnostics, and cancel tool calls.
+
+Active visible runs include:
 
 - `viewer=<opened|warning|unavailable|pending>` and `viewerCommand="tmux ... attach-session -r ..."`
 - `log=<path-or-ref>` and the latest runtime diagnostic/heartbeat
@@ -221,7 +224,7 @@ conductor_run_parallel_work({
   ]
 })
 conductor_project_brief({ maxActions: 10, recentEventLimit: 20 })
-conductor_list_runs({ status: "running" })
+conductor_view_active_workers({})
 ```
 
 For blocking completion semantics, request headless explicitly:
