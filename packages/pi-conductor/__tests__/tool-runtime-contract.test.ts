@@ -44,7 +44,7 @@ function getTool(tools: RegisteredTool[], name: string): RegisteredTool {
   return tool;
 }
 
-describe("conductor runtime-mode tool contracts", () => {
+describe("conductor tool contracts", () => {
   let repoDir: string;
   let conductorHome: string;
 
@@ -83,6 +83,26 @@ describe("conductor runtime-mode tool contracts", () => {
     expect(tool?.description).toContain("must not treat tool success as semantic completion");
     expect(schema).toContain("Pass headless for blocking execution");
     expect(schema).toContain("parallel work prefer tmux");
+  });
+
+  it("documents evidence bundle purpose values and invalid-purpose diagnostics", async () => {
+    const tools = collectTools();
+    const evidenceTool = getTool(tools, "conductor_build_evidence_bundle");
+    const readinessTool = getTool(tools, "conductor_check_readiness");
+    const evidenceSchema = JSON.stringify(evidenceTool.parameters);
+    const readinessSchema = JSON.stringify(readinessTool.parameters);
+
+    expect(evidenceTool.description).toContain("task_review (default), pr_readiness, handoff");
+    expect(evidenceSchema).toContain("Valid values: task_review");
+    expect(evidenceSchema).toContain("pr_readiness");
+    expect(evidenceSchema).toContain("handoff");
+    expect(readinessTool.description).toContain("task_review, pr_readiness");
+    expect(readinessSchema).toContain("Valid values: task_review");
+    await expect(
+      evidenceTool.execute?.("tool-call-purpose", { taskId: "task-1", purpose: "review" }, undefined, undefined, {
+        cwd: repoDir,
+      }),
+    ).rejects.toThrow(/Accepted values: task_review, pr_readiness, handoff/);
   });
 
   it("forwards runtimeMode through registered start, run, retry, and delegate tools", async () => {

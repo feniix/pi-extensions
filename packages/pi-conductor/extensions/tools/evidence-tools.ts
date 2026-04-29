@@ -3,6 +3,18 @@ import { Type } from "typebox";
 import * as conductor from "../conductor.js";
 import * as storage from "../storage.js";
 
+const evidenceBundlePurposeDescription =
+  "Purpose of the evidence bundle. Valid values: task_review (default, for task review), pr_readiness (for PR readiness), handoff (for general handoff/human review).";
+const readinessPurposeDescription =
+  "Purpose of the readiness check. Valid values: task_review (task review readiness) or pr_readiness (PR publication readiness).";
+const evidenceBundlePurposeSchema = Type.Union(
+  [Type.Literal("task_review"), Type.Literal("pr_readiness"), Type.Literal("handoff")],
+  { description: evidenceBundlePurposeDescription },
+);
+const readinessPurposeSchema = Type.Union([Type.Literal("task_review"), Type.Literal("pr_readiness")], {
+  description: readinessPurposeDescription,
+});
+
 const artifactTypeSchema = Type.Union([
   Type.Literal("note"),
   Type.Literal("test_result"),
@@ -85,20 +97,22 @@ export function registerEvidenceTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "conductor_build_evidence_bundle",
     label: "Conductor Build Evidence Bundle",
-    description: "Build a task/worker-scoped evidence bundle for review or PR readiness",
+    description:
+      "Build a task/worker-scoped evidence bundle for review or PR readiness. purpose values: task_review (default), pr_readiness, handoff.",
     parameters: Type.Object({
       workerId: Type.Optional(Type.String()),
       workerName: Type.Optional(Type.String()),
       objectiveId: Type.Optional(Type.String()),
       taskId: Type.Optional(Type.String()),
       runId: Type.Optional(Type.String()),
-      purpose: Type.Optional(
-        Type.Union([Type.Literal("task_review"), Type.Literal("pr_readiness"), Type.Literal("handoff")]),
-      ),
+      purpose: Type.Optional(evidenceBundlePurposeSchema),
       includeEvents: Type.Optional(Type.Boolean()),
       persistArtifact: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (params.purpose && !["task_review", "pr_readiness", "handoff"].includes(params.purpose)) {
+        throw new Error("Invalid purpose. Accepted values: task_review, pr_readiness, handoff. Default: task_review.");
+      }
       const bundle = conductor.buildEvidenceBundleForRepo(ctx.cwd, params);
       return {
         content: [
@@ -115,12 +129,13 @@ export function registerEvidenceTools(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "conductor_check_readiness",
     label: "Conductor Check Readiness",
-    description: "Evaluate whether a task or worker is ready for review or PR publication",
+    description:
+      "Evaluate whether a task or worker is ready for review or PR publication. purpose values: task_review, pr_readiness.",
     parameters: Type.Object({
       workerId: Type.Optional(Type.String()),
       workerName: Type.Optional(Type.String()),
       taskId: Type.Optional(Type.String()),
-      purpose: Type.Union([Type.Literal("task_review"), Type.Literal("pr_readiness")]),
+      purpose: readinessPurposeSchema,
       requireCompletionReport: Type.Optional(Type.Boolean()),
       requireTestEvidence: Type.Optional(Type.Boolean()),
       requireNoOpenGates: Type.Optional(Type.Boolean()),
@@ -129,6 +144,9 @@ export function registerEvidenceTools(pi: ExtensionAPI): void {
       requireApprovedReadyForPrGate: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (!["task_review", "pr_readiness"].includes(params.purpose)) {
+        throw new Error("Invalid purpose. Accepted values: task_review, pr_readiness.");
+      }
       const readiness = conductor.checkReadinessForRepo(ctx.cwd, params);
       return {
         content: [
