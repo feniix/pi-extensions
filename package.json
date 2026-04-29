@@ -29,6 +29,7 @@
   "pi": {
     "extensions": [
       "./packages/pi-code-reasoning/extensions/index.ts",
+      "./packages/pi-conductor/extensions/index.ts",
       "./packages/pi-devtools/extensions/index.ts",
       "./packages/pi-exa/extensions/index.ts",
       "./packages/pi-notion/extensions/index.ts",
