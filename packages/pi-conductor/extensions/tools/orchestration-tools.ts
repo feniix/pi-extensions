@@ -32,6 +32,19 @@ export function summarizeParallelWorkToolText(
     : `launched ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${launchedText}; ${followUpText}${resultTable}`;
 }
 
+export function summarizeRunWorkToolText(result: Awaited<ReturnType<typeof conductor.runWorkForRepo>>): string {
+  const runtimeText = `runtime=${result.runtimeMode}${result.runtimeRuns.length > 0 ? ` runs=${result.runtimeRuns.length}` : ""}`;
+  const viewerText =
+    result.runtimeRuns.length > 0 ? "; inspect active viewers with conductor_view_active_workers({})" : "";
+  const routeText =
+    result.decision.mode === "parallel"
+      ? `routed work to ${result.tasks.length} parallel conductor worker(s) with ${runtimeText}: ${result.decision.reason}${viewerText}`
+      : result.decision.mode === "objective"
+        ? `routed work to an objective with ${result.tasks.length} task(s) with ${runtimeText}: ${result.decision.reason}${viewerText}`
+        : `routed work to one conductor worker with ${runtimeText}: ${result.decision.reason}${viewerText}`;
+  return result.parallel ? `${routeText}\n${summarizeParallelWorkToolText(result.parallel)}` : routeText;
+}
+
 export function registerOrchestrationTools(pi: ExtensionAPI): void {
   const workItemSchema = Type.Object({
     title: Type.String({ description: "Short title for this work item" }),
@@ -72,15 +85,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const result = await conductor.runWorkForRepo(ctx.cwd, params, signal);
-      const runtimeText = `runtime=${result.runtimeMode}${result.runtimeRuns.length > 0 ? ` runs=${result.runtimeRuns.length}` : ""}`;
-      const viewerText =
-        result.runtimeRuns.length > 0 ? "; inspect active viewers with conductor_view_active_workers({})" : "";
-      const text =
-        result.decision.mode === "parallel"
-          ? `routed work to ${result.tasks.length} parallel conductor worker(s) with ${runtimeText}: ${result.decision.reason}${viewerText}`
-          : result.decision.mode === "objective"
-            ? `routed work to an objective with ${result.tasks.length} task(s) with ${runtimeText}: ${result.decision.reason}${viewerText}`
-            : `routed work to one conductor worker with ${runtimeText}: ${result.decision.reason}${viewerText}`;
+      const text = summarizeRunWorkToolText(result);
       return { content: [{ type: "text", text }], details: result };
     },
   });

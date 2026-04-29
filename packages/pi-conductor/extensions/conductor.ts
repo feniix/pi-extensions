@@ -151,14 +151,12 @@ function createLinkedAbortController(parentSignal?: AbortSignal): {
     dispose: () => parentSignal.removeEventListener("abort", onAbort),
   };
 }
-
 function registerLiveWorkAbortHandle(handle: LiveWorkAbortHandle): () => void {
   liveWorkAbortHandles.add(handle);
   return () => {
     liveWorkAbortHandles.delete(handle);
   };
 }
-
 function liveHandleMatchesFilter(
   handle: LiveWorkAbortHandle,
   filter: { runIds?: Set<string>; taskIds?: Set<string>; workerIds?: Set<string> },
@@ -168,7 +166,6 @@ function liveHandleMatchesFilter(
   const workerMatches = !filter.workerIds || (handle.workerId !== undefined && filter.workerIds.has(handle.workerId));
   return runMatches && taskMatches && workerMatches;
 }
-
 function abortLiveWorkForFilter(filter: {
   runIds?: Set<string>;
   taskIds?: Set<string>;
@@ -180,7 +177,6 @@ function abortLiveWorkForFilter(filter: {
     }
   }
 }
-
 function resolveSchedulerPolicy(input: { policy?: SchedulerPolicyName; executeRuns?: boolean }): {
   policy: SchedulerPolicyName;
   executeRuns: boolean;
@@ -190,17 +186,14 @@ function resolveSchedulerPolicy(input: { policy?: SchedulerPolicyName; executeRu
   }
   return { policy: input.executeRuns ? "execute" : "safe", executeRuns: input.executeRuns ?? false };
 }
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-
 function runtimeCleanupStatus(error: unknown): "succeeded" | "failed" | undefined {
   if (!error || typeof error !== "object" || !("cleanupStatus" in error)) return undefined;
   const status = (error as { cleanupStatus?: unknown }).cleanupStatus;
   return status === "succeeded" || status === "failed" ? status : undefined;
 }
-
 function eventTypeForOperation(status: "succeeded" | "failed", operation: unknown): ConductorEventType {
   const suffix = status === "succeeded" ? "succeeded" : "failed";
   switch (operation) {
@@ -224,7 +217,6 @@ function eventTypeForOperation(status: "succeeded" | "failed", operation: unknow
       return status === "succeeded" ? "external_operation.succeeded" : "external_operation.failed";
   }
 }
-
 function appendExternalOperationEvent(
   run: RunRecord,
   input: { status: "succeeded" | "failed"; resourceRefs?: ConductorResourceRefs; payload: Record<string, unknown> },
@@ -236,7 +228,6 @@ function appendExternalOperationEvent(
     payload: input.payload,
   });
 }
-
 function recordExternalOperationEvent(
   repoRoot: string,
   input: { status: "succeeded" | "failed"; resourceRefs?: ConductorResourceRefs; payload: Record<string, unknown> },
@@ -257,7 +248,6 @@ function refsMatchFilter(refs: ConductorResourceRefs, filter: ConductorResourceR
     (key) => filter[key] !== undefined && refs[key] === filter[key],
   );
 }
-
 export function buildResourceTimelineForRepo(
   repoRoot: string,
   input: ConductorResourceRefs & { limit?: number; includeArtifacts?: boolean },
@@ -317,7 +307,6 @@ export function buildResourceTimelineForRepo(
     runs: matchingRuns,
   };
 }
-
 export function buildObjectiveDagForRepo(
   repoRoot: string,
   objectiveId: string,
@@ -372,7 +361,6 @@ export function buildObjectiveDagForRepo(
     .map((task) => task.taskId);
   return { objectiveId, batches, parallelizableBatches: batches, runnableNow, externalDependencies };
 }
-
 export function assessTaskForRepo(
   repoRoot: string,
   input: { taskId: string; requireTestEvidence?: boolean; requirePrEvidence?: boolean },
@@ -416,7 +404,6 @@ export function assessTaskForRepo(
         : "not_ready";
   return { taskId: input.taskId, verdict, findings };
 }
-
 export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string }): ConductorTaskBrief {
   const run = getOrCreateRunForRepo(repoRoot);
   const task = run.tasks.find((entry) => entry.taskId === input.taskId);
@@ -490,7 +477,6 @@ export function buildTaskBriefForRepo(repoRoot: string, input: { taskId: string 
   ].join("\n");
   return { markdown, task, objective, worker, runs, gates, artifacts, terminalRun, suggestedNextTool, dependencies };
 }
-
 export function buildProjectBriefForRepo(
   repoRoot: string,
   input: { maxActions?: number; recentEventLimit?: number } = {},
@@ -1368,7 +1354,7 @@ export async function runWorkForRepo(
   const execute = input.execute ?? true;
   if (isStatusOnlyWorkRequest(input.request)) {
     throw new Error(
-      "conductor_run_work is for planning or executing work; use conductor_get_project, conductor_list_workers, or conductor_list_runs for status-only requests",
+      "conductor_run_work is for planning or executing work; use conductor_view_active_workers, conductor_get_project, conductor_list_workers, or conductor_list_runs for status-only requests",
     );
   }
   const decision = planWorkRouting(input);
@@ -1383,6 +1369,18 @@ export async function runWorkForRepo(
   const workerPrefix = input.workerPrefix?.trim() || "run-work";
 
   if (decision.mode === "parallel") {
+    if (!execute) {
+      return {
+        decision,
+        workers: [],
+        tasks: [],
+        single: null,
+        parallel: null,
+        objective: null,
+        runtimeMode,
+        runtimeRuns: [],
+      };
+    }
     const parallel = await runParallelWorkForRepo(
       repoRoot,
       {
