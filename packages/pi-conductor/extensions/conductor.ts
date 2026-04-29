@@ -1650,41 +1650,33 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
       `Worker ${worker.name} requires an approved destructive_cleanup gate before cleanup. Approve via /conductor human dashboard, then rerun conductor_cleanup_worker(${JSON.stringify({ name: worker.name })}).`,
     );
   }
-  const reservedRun = mutateRepoRunSync(repoRoot, (latest) => {
+  const updatedRun = mutateRepoRunSync(repoRoot, (latest) => {
     const latestGate = latest.gates.find((gate) => gate.gateId === cleanupGate.gateId);
     if (!latestGate || latestGate.status !== "approved" || latestGate.usedAt !== null) {
       throw new Error(`Worker ${worker.name} requires a fresh destructive_cleanup gate before cleanup finalization`);
     }
-    assertWorkerCleanupReady(latest, worker.workerId, worker.name);
-    return removeWorker(markConductorGateUsed(latest, cleanupGate.gateId), worker.workerId);
-  });
-  const archived = reservedRun.archivedWorkers.find((entry) => entry.workerId === worker.workerId) ?? worker;
-  try {
-    if (archived.worktreePath && existsSync(archived.worktreePath))
-      removeManagedWorktree(run.repoRoot, archived.worktreePath);
-    if (archived.sessionFile && existsSync(archived.sessionFile)) rmSync(archived.sessionFile, { force: true });
-    if (archived.branch) removeManagedBranch(run.repoRoot, archived.branch);
-  } catch (error) {
-    recordExternalOperationEvent(repoRoot, {
-      status: "failed",
-      resourceRefs: { workerId: worker.workerId, gateId: cleanupGate.gateId },
-      payload: { operation: "cleanup_worker", name: worker.name, errorMessage: errorMessage(error) },
-    });
-    throw error;
-  }
-  mutateRepoRunSync(repoRoot, (latest) =>
-    appendExternalOperationEvent(latest, {
-      status: "succeeded",
-      resourceRefs: { workerId: worker.workerId, gateId: cleanupGate.gateId },
-      payload: {
-        operation: "cleanup_worker",
-        name: worker.name,
-        worktreePath: archived.worktreePath,
-        branch: archived.branch,
+    const latestWorker = assertWorkerCleanupReady(latest, worker.workerId, worker.name);
+    if (latestWorker.worktreePath && existsSync(latestWorker.worktreePath)) {
+      removeManagedWorktree(latest.repoRoot, latestWorker.worktreePath);
+    }
+    if (latestWorker.sessionFile && existsSync(latestWorker.sessionFile))
+      rmSync(latestWorker.sessionFile, { force: true });
+    if (latestWorker.branch) removeManagedBranch(latest.repoRoot, latestWorker.branch);
+    return appendExternalOperationEvent(
+      removeWorker(markConductorGateUsed(latest, cleanupGate.gateId), worker.workerId),
+      {
+        status: "succeeded",
+        resourceRefs: { workerId: worker.workerId, gateId: cleanupGate.gateId },
+        payload: {
+          operation: "cleanup_worker",
+          name: worker.name,
+          worktreePath: latestWorker.worktreePath,
+          branch: latestWorker.branch,
+        },
       },
-    }),
-  );
-  return archived;
+    );
+  });
+  return updatedRun.archivedWorkers.find((entry) => entry.workerId === worker.workerId) ?? worker;
 }
 export function commitWorkerForRepo(repoRoot: string, workerName: string, message: string): WorkerRecord {
   const run = getOrCreateRunForRepo(repoRoot);
