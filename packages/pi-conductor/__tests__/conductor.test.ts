@@ -486,6 +486,68 @@ describe("conductor service", () => {
     expect(seenRuntimeModes).toEqual(["tmux", "tmux"]);
   });
 
+  it("defaults direct parallel work to non-blocking tmux when tmux is available", async () => {
+    const restorePath = forceTmuxAvailable();
+    const seenOptions: Array<{ runtimeMode?: string; waitForCompletion?: boolean }> = [];
+
+    try {
+      const result = await runParallelWorkForRepo(
+        repoDir,
+        {
+          workerPrefix: "parallel",
+          tasks: [
+            { title: "First shard", prompt: "Do first shard" },
+            { title: "Second shard", prompt: "Do second shard" },
+          ],
+        },
+        undefined,
+        async (_root, taskId, _signal, options) => {
+          seenOptions.push(options ?? {});
+          return {
+            workerName: taskId,
+            status: "success",
+            finalText: "launched",
+            errorMessage: null,
+            sessionId: taskId,
+          };
+        },
+      );
+
+      expect(result.runtimeMode).toBe("tmux");
+      expect(seenOptions).toEqual([
+        { runtimeMode: "tmux", waitForCompletion: false },
+        { runtimeMode: "tmux", waitForCompletion: false },
+      ]);
+    } finally {
+      restorePath();
+    }
+  });
+
+  it("falls back direct parallel work to headless when tmux is unavailable", async () => {
+    const restorePath = forceTmuxUnavailable();
+    const seenOptions: Array<{ runtimeMode?: string; waitForCompletion?: boolean }> = [];
+
+    try {
+      const result = await runParallelWorkForRepo(
+        repoDir,
+        {
+          workerPrefix: "parallel",
+          tasks: [{ title: "Only shard", prompt: "Do only shard" }],
+        },
+        undefined,
+        async (_root, taskId, _signal, options) => {
+          seenOptions.push(options ?? {});
+          return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
+        },
+      );
+
+      expect(result.runtimeMode).toBe("headless");
+      expect(seenOptions).toEqual([{ runtimeMode: "headless", waitForCompletion: true }]);
+    } finally {
+      restorePath();
+    }
+  });
+
   it("fails direct visible parallel runtime preflight before creating workers or tasks", async () => {
     const restorePath = forceTmuxUnavailable();
     try {

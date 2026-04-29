@@ -35,7 +35,10 @@ export interface WorkerRunRuntimeBackend {
   run(input: RuntimeRunContext): Promise<RuntimeRunResult>;
 }
 
-export function getWorkerRunRuntimeBackend(mode: RunRuntimeMode = "headless"): WorkerRunRuntimeBackend {
+export function getWorkerRunRuntimeBackend(
+  mode: RunRuntimeMode = "headless",
+  options: { waitForCompletion?: boolean } = {},
+): WorkerRunRuntimeBackend {
   if (mode === "headless") {
     return {
       mode,
@@ -44,7 +47,7 @@ export function getWorkerRunRuntimeBackend(mode: RunRuntimeMode = "headless"): W
     };
   }
   if (mode === "tmux" || mode === "iterm-tmux") {
-    return createTmuxWorkerRunRuntimeBackend({ mode });
+    return createTmuxWorkerRunRuntimeBackend({ mode, waitForCompletion: options.waitForCompletion });
   }
   throw new Error(`${mode} runtime is not implemented yet`);
 }

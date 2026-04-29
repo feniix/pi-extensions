@@ -212,6 +212,29 @@ describe("durable task run flows", () => {
     expect(content.diagnostic).toBe("Artifact file is missing");
   });
 
+  it("leaves tmux runs active when launched without waiting for completion", async () => {
+    const worker = await createWorkerForRepo(repoDir, "tmux-detached");
+    const task = createTaskForRepo(repoDir, { title: "Tmux detached", prompt: "Launch visibly" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    runtimeMocks.runWorkerPromptRuntime.mockResolvedValueOnce({
+      status: "success",
+      finalText: "tmux runtime launched",
+      errorMessage: null,
+      sessionId: "tmux-session-1",
+    });
+
+    const result = await runTaskForRepo(repoDir, task.taskId, undefined, {
+      runtimeMode: "tmux",
+      waitForCompletion: false,
+    });
+
+    expect(result.status).toBe("success");
+    const persisted = getOrCreateRunForRepo(repoDir);
+    expect(persisted.runs[0]).toMatchObject({ status: "running", finishedAt: null, runtime: { mode: "tmux" } });
+    expect(persisted.tasks[0]).toMatchObject({ state: "running", activeRunId: persisted.runs[0]?.runId });
+    expect(persisted.workers[0]).toMatchObject({ lifecycle: "running", recoverable: false });
+  });
+
   it("releases tmux workers when the runtime returns an aborted result", async () => {
     const worker = await createWorkerForRepo(repoDir, "tmux-abort");
     const task = createTaskForRepo(repoDir, { title: "Tmux abort", prompt: "Abort visibly" });

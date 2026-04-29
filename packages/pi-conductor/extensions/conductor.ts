@@ -111,8 +111,12 @@ export type ParallelWorkRunner = (
   repoRoot: string,
   taskId: string,
   signal?: AbortSignal,
-  input?: { runtimeMode?: RunRuntimeMode },
+  input?: { runtimeMode?: RunRuntimeMode; waitForCompletion?: boolean },
 ) => Promise<WorkerRunResult>;
+
+function defaultParallelRuntimeMode(): RunRuntimeMode {
+  return getConductorRuntimeModeStatus("tmux").available ? "tmux" : "headless";
+}
 
 function assertRuntimeModeAvailable(runtimeMode: RunRuntimeMode): void {
   const runtimeStatus = getConductorRuntimeModeStatus(runtimeMode);
@@ -1142,7 +1146,7 @@ export async function runParallelWorkForRepo(
       workerName: item.workerName?.trim() || `${workerPrefix}-${index + 1}`,
     };
   });
-  const runtimeMode = input.runtimeMode ?? "headless";
+  const runtimeMode = input.runtimeMode ?? defaultParallelRuntimeMode();
   if (runtimeMode !== "headless") {
     assertRuntimeModeAvailable(runtimeMode);
   }
@@ -1251,7 +1255,12 @@ export async function runParallelWorkForRepo(
     const settled = await Promise.allSettled(
       tasks.map((task, index) =>
         Promise.resolve()
-          .then(() => runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal, { runtimeMode }))
+          .then(() =>
+            runner(repoRoot, task.taskId, liveControllers[index]?.signal ?? signal, {
+              runtimeMode,
+              waitForCompletion: runtimeMode === "headless",
+            }),
+          )
           .catch((error) => {
             applyCanceledWork(
               cancelPendingStartupFailureForRepo(repoRoot, {
@@ -1906,16 +1915,17 @@ export async function runTaskForRepo(
   repoRoot: string,
   taskId: string,
   signal?: AbortSignal,
-  input: { runtimeMode?: RunRuntimeMode } = {},
+  input: { runtimeMode?: RunRuntimeMode; waitForCompletion?: boolean } = {},
 ): Promise<WorkerRunResult> {
   const runtimeMode = input.runtimeMode ?? "headless";
+  const waitForCompletion = input.waitForCompletion ?? true;
   const runtimeStatus = getConductorRuntimeModeStatus(runtimeMode);
   if (!runtimeStatus.available) {
     throw new Error(
       `Runtime mode ${runtimeMode} unavailable: ${runtimeStatus.diagnostic ?? "not available"}. Use conductor_backend_status to inspect available runtime modes; headless is available.`,
     );
   }
-  const runtimeBackend = getWorkerRunRuntimeBackend(runtimeMode);
+  const runtimeBackend = getWorkerRunRuntimeBackend(runtimeMode, { waitForCompletion });
   const currentRun = getOrCreateRunForRepo(repoRoot);
   const task = currentRun.tasks.find((entry) => entry.taskId === taskId);
   const workerId = task?.assignedWorkerId;
@@ -1978,6 +1988,16 @@ export async function runTaskForRepo(
         createFollowUpTaskForRepo(repoRoot, followUp);
       },
     });
+
+    if (!waitForCompletion && isTmuxRuntimeMode(runtimeMode)) {
+      return {
+        workerName: worker.name,
+        status: runtimeResult.status,
+        finalText: runtimeResult.finalText,
+        errorMessage: runtimeResult.errorMessage,
+        sessionId: runtimeResult.sessionId,
+      };
+    }
 
     let createdFallbackCompletion = false;
     await mutateRepoRunWithLockRetry(repoRoot, (latest) => {
