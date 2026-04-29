@@ -154,7 +154,10 @@ export function computeNextActions(
             workerId: attempt.workerId,
             runId: attempt.runId,
           },
-          toolCall: { name: "conductor_list_events", params: { runId: attempt.runId, limit: 20 } },
+          toolCall:
+            attempt.runtime.mode === "tmux" || attempt.runtime.mode === "iterm-tmux"
+              ? { name: "conductor_view_active_workers", params: { runId: attempt.runId } }
+              : { name: "conductor_list_events", params: { runId: attempt.runId, limit: 20 } },
           requiresHuman: false,
           destructive: false,
           blockedBy: [],

@@ -162,7 +162,7 @@ Programmatic callers should inspect `details.taskResults` for per-task IDs and h
 | `executionState` | Meaning |
 | ---------------- | ------- |
 | `completed` | Headless execution finished and `result.status` describes the terminal worker outcome. |
-| `launched` | A supervised tmux/iTerm-backed run launched successfully and remains represented by durable conductor run state. Inspect `runtimeRuns`, `conductor_project_brief`, or `conductor_list_runs` for current status. |
+| `launched` | A supervised tmux/iTerm-backed run launched successfully and remains represented by durable conductor run state. Inspect `runtimeRuns`, `conductor_view_active_workers`, `conductor_project_brief`, or `conductor_list_runs` for current status. |
 | `failed_to_launch` | A supervised non-headless shard failed before conductor could establish an active run. |
 | `interrupted` | Parent orchestration was interrupted and conductor attempted to cancel owned runs/tasks. |
 
@@ -224,7 +224,7 @@ conductor_run_parallel_work({
   ]
 })
 conductor_project_brief({ maxActions: 10, recentEventLimit: 20 })
-conductor_list_runs({ status: "running" })
+conductor_view_active_workers({})
 ```
 
 For blocking completion semantics, request headless explicitly:

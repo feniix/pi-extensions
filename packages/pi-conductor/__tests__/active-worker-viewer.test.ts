@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   formatActiveWorkerViewerSummary,
@@ -15,11 +15,13 @@ import {
   startTaskRunForRepo,
 } from "../extensions/conductor.js";
 import conductorExtension from "../extensions/index.js";
+import { deriveProjectKey } from "../extensions/project-key.js";
 import { createRunRuntimeMetadata } from "../extensions/runtime-metadata.js";
-import { writeRun } from "../extensions/storage.js";
+import { completeTaskRun, getRunFile, writeRun } from "../extensions/storage.js";
 
 type RegisteredTool = {
   name: string;
+  parameters?: unknown;
   execute?: (
     toolCallId: string,
     params: Record<string, unknown>,
@@ -130,8 +132,8 @@ describe("active worker viewer summaries", () => {
                 ...createRunRuntimeMetadata({ mode: "tmux", status: "running" }),
                 viewerStatus: "unavailable" as const,
                 tmux: {
-                  socketPath: "/tmp/with space/tmux.sock",
-                  sessionName: "pi cond run",
+                  socketPath: "/tmp/with space/it's/tmux.sock",
+                  sessionName: "pi cond run 'quoted'",
                   windowId: null,
                   paneId: null,
                 },
@@ -148,7 +150,7 @@ describe("active worker viewer summaries", () => {
     expect(summary.entries).toHaveLength(1);
     expect(summary.entries[0]?.viewerStatus).toBe("unavailable");
     expect(summary.entries[0]?.attachCommand).toBe(
-      "tmux -S '/tmp/with space/tmux.sock' attach-session -r -t 'pi cond run'",
+      "tmux -S '/tmp/with space/it'\"'\"'s/tmux.sock' attach-session -r -t 'pi cond run '\"'\"'quoted'\"'\"''",
     );
   });
 
@@ -166,13 +168,63 @@ describe("active worker viewer summaries", () => {
     expect(result.content[0]?.text).toContain("active supervised conductor workers: 1");
     expect(result.content[0]?.text).toContain("tool-worker");
     expect(result.details.entries).toHaveLength(1);
+    const schema = JSON.stringify(tool?.parameters);
+    expect(schema).toContain("taskId");
+    expect(schema).toContain("workerId");
+    expect(schema).toContain("runId");
   });
 
-  it("returns an empty active-viewer response for headless or terminal runs", async () => {
-    const worker = await createWorkerForRepo(repoDir, "headless-worker");
-    const task = createTaskForRepo(repoDir, { title: "Headless task", prompt: "Run" });
-    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
-    startTaskRunForRepo(repoDir, { taskId: task.taskId, runtimeMode: "headless" });
+  it("filters active supervised workers by task, worker, and run", async () => {
+    const firstWorker = await createWorkerForRepo(repoDir, "first-worker");
+    const secondWorker = await createWorkerForRepo(repoDir, "second-worker");
+    const firstTask = createTaskForRepo(repoDir, { title: "First task", prompt: "Run" });
+    const secondTask = createTaskForRepo(repoDir, { title: "Second task", prompt: "Run" });
+    assignTaskForRepo(repoDir, firstTask.taskId, firstWorker.workerId);
+    assignTaskForRepo(repoDir, secondTask.taskId, secondWorker.workerId);
+    const firstRun = startTaskRunForRepo(repoDir, { taskId: firstTask.taskId, runtimeMode: "tmux" });
+    const secondRun = startTaskRunForRepo(repoDir, { taskId: secondTask.taskId, runtimeMode: "iterm-tmux" });
+
+    expect(summarizeActiveWorkerViewersForRepo(repoDir).entries).toHaveLength(2);
+    expect(summarizeActiveWorkerViewersForRepo(repoDir, { taskId: firstTask.taskId }).entries).toMatchObject([
+      { taskId: firstTask.taskId, runId: firstRun.run.runId },
+    ]);
+    expect(summarizeActiveWorkerViewersForRepo(repoDir, { workerId: secondWorker.workerId }).entries).toMatchObject([
+      { workerId: secondWorker.workerId, runId: secondRun.run.runId },
+    ]);
+    expect(summarizeActiveWorkerViewersForRepo(repoDir, { runId: secondRun.run.runId }).entries).toMatchObject([
+      { taskId: secondTask.taskId, runId: secondRun.run.runId },
+    ]);
+    expect(
+      summarizeActiveWorkerViewersForRepo(repoDir, { taskId: firstTask.taskId, workerId: secondWorker.workerId })
+        .entries,
+    ).toEqual([]);
+  });
+
+  it("returns an empty active-viewer response without creating conductor state", () => {
+    const runFile = getRunFile(deriveProjectKey(resolve(repoDir)));
+
+    const summary = summarizeActiveWorkerViewersForRepo(repoDir);
+
+    expect(summary.entries).toEqual([]);
+    expect(existsSync(runFile)).toBe(false);
+  });
+
+  it("returns an empty active-viewer response for headless or terminal supervised runs", async () => {
+    const headlessWorker = await createWorkerForRepo(repoDir, "headless-worker");
+    const headlessTask = createTaskForRepo(repoDir, { title: "Headless task", prompt: "Run" });
+    assignTaskForRepo(repoDir, headlessTask.taskId, headlessWorker.workerId);
+    startTaskRunForRepo(repoDir, { taskId: headlessTask.taskId, runtimeMode: "headless" });
+    const tmuxWorker = await createWorkerForRepo(repoDir, "terminal-worker");
+    const tmuxTask = createTaskForRepo(repoDir, { title: "Terminal task", prompt: "Run" });
+    assignTaskForRepo(repoDir, tmuxTask.taskId, tmuxWorker.workerId);
+    const terminalRun = startTaskRunForRepo(repoDir, { taskId: tmuxTask.taskId, runtimeMode: "tmux" });
+    writeRun(
+      completeTaskRun(getOrCreateRunForRepo(repoDir), {
+        runId: terminalRun.run.runId,
+        status: "succeeded",
+        completionSummary: "done",
+      }),
+    );
 
     const summary = summarizeActiveWorkerViewersForRepo(repoDir);
 

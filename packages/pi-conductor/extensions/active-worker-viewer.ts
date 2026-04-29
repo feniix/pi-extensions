@@ -1,5 +1,7 @@
-import { getOrCreateRunForRepo } from "./repo-run.js";
+import { resolve } from "node:path";
+import { deriveProjectKey } from "./project-key.js";
 import { isTerminalRunStatus } from "./run-status.js";
+import { readRun } from "./storage.js";
 import type { RunAttemptRecord, RunRuntimeMetadata, RunRuntimeMode, TaskRecord, WorkerRecord } from "./types.js";
 
 export type ActiveWorkerViewerInput = {
@@ -41,7 +43,11 @@ function isSupervisedRuntime(mode: RunRuntimeMode): boolean {
 }
 
 function isActiveRun(run: RunAttemptRecord): boolean {
-  return !run.finishedAt && !isTerminalRunStatus(run.status);
+  return (
+    !run.finishedAt &&
+    !isTerminalRunStatus(run.status) &&
+    !["unavailable", "exited_success", "exited_error", "aborted"].includes(run.runtime.status)
+  );
 }
 
 function fallbackAttachCommand(runtime: RunRuntimeMetadata): string | null {
@@ -67,7 +73,8 @@ export function summarizeActiveWorkerViewersForRepo(
   repoRoot: string,
   input: ActiveWorkerViewerInput = {},
 ): ActiveWorkerViewerSummary {
-  const project = getOrCreateRunForRepo(repoRoot);
+  const project = readRun(deriveProjectKey(resolve(repoRoot)));
+  if (!project) return { entries: [], filters: input };
   const tasksById = new Map(project.tasks.map((task) => [task.taskId, task] as const));
   const workersById = new Map(project.workers.map((worker) => [worker.workerId, worker] as const));
   const entries = project.runs
