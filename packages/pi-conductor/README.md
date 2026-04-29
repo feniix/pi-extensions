@@ -272,7 +272,7 @@ conductor_prepare_human_review({ objectiveId })
 
 ### Read bounded local artifact evidence safely
 
-Use artifact IDs/refs from evidence bundles or timelines; conductor rejects unsafe traversal, symlink escapes, binary reads, and unsupported refs. Artifact metadata keys `root` and `worktreeRoot` are trusted only for conductor-owned system artifacts; child-run progress/completion artifacts may round-trip those metadata keys, but artifact reads ignore them as trusted roots.
+Use artifact IDs/refs from evidence bundles or timelines; conductor rejects unsafe traversal, symlink escapes, binary reads, and unsupported refs. Task evidence is aggregate evidence: child-run progress/completion artifacts are linked to both the task and the run, and task-scoped APIs (`conductor_list_artifacts({ taskId })`, task briefs, timelines, evidence bundles, and raw task `artifactIds`) should agree on the same artifact IDs. Artifact metadata keys `root` and `worktreeRoot` are trusted only for conductor-owned system artifacts; child-run progress/completion artifacts may round-trip those metadata keys, but artifact reads ignore them as trusted roots. Child-run `note` artifacts are readable through captured progress/completion text; legacy metadata-only notes return their metadata with a diagnostic instead of an ambiguous missing-file error.
 
 ```text
 conductor_list_artifacts({ taskId })

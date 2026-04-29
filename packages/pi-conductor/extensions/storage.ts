@@ -926,6 +926,15 @@ function sanitizeChildArtifactMetadata(metadata: Record<string, unknown> | undef
   return { ...(metadata ?? {}) };
 }
 
+function childNoteMetadata(
+  artifact: { type: ArtifactType; metadata?: Record<string, unknown> } | undefined,
+  content: string,
+): Record<string, unknown> | undefined {
+  if (!artifact) return undefined;
+  if (artifact.type !== "note") return sanitizeChildArtifactMetadata(artifact.metadata);
+  return { ...sanitizeChildArtifactMetadata(artifact.metadata), content };
+}
+
 export function readArtifactContentForRepo(
   repoRoot: string,
   artifactId: string,
@@ -936,6 +945,17 @@ export function readArtifactContentForRepo(
   const artifact = run?.artifacts.find((entry) => entry.artifactId === artifactId);
   if (!artifact) {
     throw new Error(`Artifact ${artifactId} not found`);
+  }
+  if (artifact.type === "note" && typeof artifact.metadata.content === "string") {
+    const maxBytes = Math.max(1, Math.min(input.maxBytes ?? 8192, 1024 * 1024));
+    const content = artifact.metadata.content.slice(0, maxBytes);
+    return {
+      artifactId,
+      ref: artifact.ref,
+      content,
+      truncated: artifact.metadata.content.length > maxBytes,
+      diagnostic: null,
+    };
   }
   if (/^[a-z][a-z0-9+.-]*:/i.test(artifact.ref)) {
     return {
@@ -968,6 +988,15 @@ export function readArtifactContentForRepo(
     throw new Error(`Unsafe artifact ref '${artifact.ref}'`);
   }
   if (!existsSync(artifactPath)) {
+    if (artifact.type === "note") {
+      return {
+        artifactId,
+        ref: artifact.ref,
+        content: JSON.stringify({ metadata: artifact.metadata }, null, 2),
+        truncated: false,
+        diagnostic: "Metadata-only note artifact has no readable content file",
+      };
+    }
     return { artifactId, ref: artifact.ref, content: null, truncated: false, diagnostic: "Artifact file is missing" };
   }
   const realRoot = realpathSync(readRoot);
@@ -1107,14 +1136,21 @@ export function recordTaskProgress(
           runId: input.runId,
         },
         producer: { type: "child_run", id: input.runId },
-        metadata: sanitizeChildArtifactMetadata(input.artifact.metadata),
+        metadata: childNoteMetadata(input.artifact, input.progress),
       })
     : null;
   const artifactIds = artifact ? [artifact.artifactId] : [];
   const updated = {
     ...normalized,
     tasks: normalized.tasks.map((entry) =>
-      entry.taskId === input.taskId ? { ...entry, latestProgress: input.progress, updatedAt: now } : entry,
+      entry.taskId === input.taskId
+        ? {
+            ...entry,
+            latestProgress: input.progress,
+            artifactIds: [...entry.artifactIds, ...artifactIds],
+            updatedAt: now,
+          }
+        : entry,
     ),
     runs: normalized.runs.map((entry) =>
       entry.runId === input.runId
@@ -1185,12 +1221,17 @@ export function recordTaskCompletion(
           runId: input.runId,
         },
         producer: { type: "child_run", id: input.runId },
-        metadata: sanitizeChildArtifactMetadata(input.artifact.metadata),
+        metadata: childNoteMetadata(input.artifact, input.completionSummary),
       })
     : null;
   const withArtifact = artifact
     ? {
         ...normalized,
+        tasks: normalized.tasks.map((entry) =>
+          entry.taskId === input.taskId
+            ? { ...entry, artifactIds: [...entry.artifactIds, artifact.artifactId] }
+            : entry,
+        ),
         runs: normalized.runs.map((entry) =>
           entry.runId === input.runId ? { ...entry, artifactIds: [...entry.artifactIds, artifact.artifactId] } : entry,
         ),

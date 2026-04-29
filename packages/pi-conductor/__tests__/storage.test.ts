@@ -633,6 +633,9 @@ describe("storage helpers", () => {
     expect(withProgress.tasks.find((entry) => entry.taskId === "task-1")?.latestProgress).toBe("tests passing");
     expect(withProgress.artifacts).toHaveLength(1);
     expect(withProgress.artifacts[0]?.resourceRefs).toMatchObject({ taskId: "task-1", runId: "run-1" });
+    expect(withProgress.tasks.find((entry) => entry.taskId === "task-1")?.artifactIds).toContain(
+      withProgress.artifacts[0]?.artifactId,
+    );
     expect(withProgress.runs.find((entry) => entry.runId === "run-1")?.artifactIds).toContain(
       withProgress.artifacts[0]?.artifactId,
     );
@@ -649,6 +652,9 @@ describe("storage helpers", () => {
     expect(completed.tasks.find((entry) => entry.taskId === "task-1")?.state).toBe("completed");
     expect(completed.artifacts).toHaveLength(2);
     expect(completed.artifacts[1]?.type).toBe("completion_report");
+    expect(completed.tasks.find((entry) => entry.taskId === "task-1")?.artifactIds).toEqual(
+      completed.artifacts.map((artifact) => artifact.artifactId),
+    );
     expect(completed.runs.find((entry) => entry.runId === "run-1")?.completionSummary).toBe("implemented and verified");
   });
 

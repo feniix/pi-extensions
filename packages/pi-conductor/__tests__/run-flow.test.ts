@@ -39,6 +39,7 @@ import {
 } from "../extensions/conductor.js";
 import { deriveProjectKey } from "../extensions/project-key.js";
 import { getRunLockFile, readArtifactContentForRepo } from "../extensions/storage.js";
+import { queryConductorArtifacts } from "../extensions/storage-query.js";
 import { createTmuxRuntimePaths } from "../extensions/tmux-runtime.js";
 
 function forceTmuxUnavailable(): () => void {
@@ -121,6 +122,10 @@ describe("durable task run flows", () => {
     expect(persisted.tasks[0]).toMatchObject({ state: "completed", latestProgress: "halfway", activeRunId: null });
     expect(persisted.runs[0]).toMatchObject({ status: "succeeded", completionSummary: "done with evidence" });
     expect(persisted.artifacts.map((artifact) => artifact.type)).toEqual(["log", "completion_report"]);
+    expect(persisted.tasks[0]?.artifactIds).toEqual(persisted.artifacts.map((artifact) => artifact.artifactId));
+    expect(
+      queryConductorArtifacts(persisted, { taskId: task.taskId }).artifacts.map((artifact) => artifact.artifactId),
+    ).toEqual(persisted.tasks[0]?.artifactIds);
     expect(persisted.events.map((event) => event.type)).toContain("run.progress_reported");
     expect(persisted.events.map((event) => event.type)).toContain("run.completed");
   });
@@ -141,6 +146,35 @@ describe("durable task run flows", () => {
     await runTaskForRepo(repoDir, task.taskId);
 
     expect(getOrCreateRunForRepo(repoDir).runs[0]?.runtime.diagnostics).toContain("metadata after retry");
+  });
+
+  it("reads child note artifacts from captured progress content", async () => {
+    const worker = await createWorkerForRepo(repoDir, "note-worker");
+    const task = createTaskForRepo(repoDir, { title: "Note artifact", prompt: "Record note" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async ({ taskContract, onConductorProgress }) => {
+      await onConductorProgress?.({
+        runId: taskContract.runId,
+        taskId: task.taskId,
+        progress: "primary source summary",
+        artifact: { type: "note", ref: "project-scan-summary", metadata: { source: "worker" } },
+      });
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "note-session" };
+    });
+
+    await runTaskForRepo(repoDir, task.taskId);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    const artifact = persisted.artifacts.find((entry) => entry.type === "note");
+    if (!artifact) throw new Error("expected note artifact");
+    expect(persisted.tasks[0]?.artifactIds).toContain(artifact.artifactId);
+    expect(readArtifactContentForRepo(repoDir, artifact.artifactId)).toMatchObject({
+      artifactId: artifact.artifactId,
+      ref: "project-scan-summary",
+      content: "primary source summary",
+      diagnostic: null,
+    });
   });
 
   it("does not let child artifacts opt into conductor storage reads", async () => {
