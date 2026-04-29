@@ -177,6 +177,36 @@ describe("durable task run flows", () => {
     });
   });
 
+  it("reads child note artifacts from captured completion summaries", async () => {
+    const worker = await createWorkerForRepo(repoDir, "completion-note-worker");
+    const task = createTaskForRepo(repoDir, { title: "Completion note artifact", prompt: "Record completion note" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+
+    runtimeMocks.runWorkerPromptRuntime.mockImplementationOnce(async ({ taskContract, onConductorComplete }) => {
+      await onConductorComplete?.({
+        runId: taskContract.runId,
+        taskId: task.taskId,
+        status: "succeeded",
+        completionSummary: "final source summary",
+        artifact: { type: "note", ref: "completion-summary", metadata: { content: "caller metadata" } },
+      });
+      return { status: "success", finalText: "done", errorMessage: null, sessionId: "completion-note-session" };
+    });
+
+    await runTaskForRepo(repoDir, task.taskId);
+
+    const persisted = getOrCreateRunForRepo(repoDir);
+    const artifact = persisted.artifacts.find((entry) => entry.type === "note");
+    if (!artifact) throw new Error("expected note artifact");
+    expect(persisted.tasks[0]?.artifactIds).toContain(artifact.artifactId);
+    expect(persisted.runs[0]?.artifactIds).toContain(artifact.artifactId);
+    expect(readArtifactContentForRepo(repoDir, artifact.artifactId, { maxBytes: 5 })).toMatchObject({
+      content: "final",
+      truncated: true,
+      diagnostic: null,
+    });
+  });
+
   it("does not let child artifacts opt into conductor storage reads", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
     const task = createTaskForRepo(repoDir, { title: "Artifact escape", prompt: "Try to read storage" });

@@ -926,13 +926,31 @@ function sanitizeChildArtifactMetadata(metadata: Record<string, unknown> | undef
   return { ...(metadata ?? {}) };
 }
 
+const NOTE_CONTENT_METADATA_KEY = "conductorNoteContent";
+
 function childNoteMetadata(
   artifact: { type: ArtifactType; metadata?: Record<string, unknown> } | undefined,
   content: string,
 ): Record<string, unknown> | undefined {
   if (!artifact) return undefined;
   if (artifact.type !== "note") return sanitizeChildArtifactMetadata(artifact.metadata);
-  return { ...sanitizeChildArtifactMetadata(artifact.metadata), content };
+  return { ...sanitizeChildArtifactMetadata(artifact.metadata), [NOTE_CONTENT_METADATA_KEY]: content };
+}
+
+function boundedArtifactContent(
+  artifactId: string,
+  ref: string,
+  content: string,
+  maxBytes: number,
+  diagnostic: string | null = null,
+): { artifactId: string; ref: string; content: string; truncated: boolean; diagnostic: string | null } {
+  return {
+    artifactId,
+    ref,
+    content: content.slice(0, maxBytes),
+    truncated: content.length > maxBytes,
+    diagnostic,
+  };
 }
 
 export function readArtifactContentForRepo(
@@ -946,16 +964,24 @@ export function readArtifactContentForRepo(
   if (!artifact) {
     throw new Error(`Artifact ${artifactId} not found`);
   }
-  if (artifact.type === "note" && typeof artifact.metadata.content === "string") {
-    const maxBytes = Math.max(1, Math.min(input.maxBytes ?? 8192, 1024 * 1024));
-    const content = artifact.metadata.content.slice(0, maxBytes);
-    return {
-      artifactId,
-      ref: artifact.ref,
-      content,
-      truncated: artifact.metadata.content.length > maxBytes,
-      diagnostic: null,
-    };
+  const maxBytes = Math.max(1, Math.min(input.maxBytes ?? 8192, 1024 * 1024));
+  const capturedNoteContent = artifact.metadata[NOTE_CONTENT_METADATA_KEY];
+  if (artifact.type === "note" && artifact.producer.type === "child_run" && typeof capturedNoteContent === "string") {
+    assertSafeArtifactRef(artifact.ref);
+    return boundedArtifactContent(artifactId, artifact.ref, capturedNoteContent, maxBytes);
+  }
+  if (artifact.type === "note") {
+    assertSafeArtifactRef(artifact.ref);
+    const metadataContent = JSON.stringify({ metadata: artifact.metadata }, null, 2);
+    if (/^[a-z][a-z0-9+.-]*:/i.test(artifact.ref)) {
+      return boundedArtifactContent(
+        artifactId,
+        artifact.ref,
+        metadataContent,
+        maxBytes,
+        "Metadata-only note artifact has no readable content file",
+      );
+    }
   }
   if (/^[a-z][a-z0-9+.-]*:/i.test(artifact.ref)) {
     return {
@@ -989,13 +1015,13 @@ export function readArtifactContentForRepo(
   }
   if (!existsSync(artifactPath)) {
     if (artifact.type === "note") {
-      return {
+      return boundedArtifactContent(
         artifactId,
-        ref: artifact.ref,
-        content: JSON.stringify({ metadata: artifact.metadata }, null, 2),
-        truncated: false,
-        diagnostic: "Metadata-only note artifact has no readable content file",
-      };
+        artifact.ref,
+        JSON.stringify({ metadata: artifact.metadata }, null, 2),
+        maxBytes,
+        "Metadata-only note artifact has no readable content file",
+      );
     }
     return { artifactId, ref: artifact.ref, content: null, truncated: false, diagnostic: "Artifact file is missing" };
   }
@@ -1007,7 +1033,6 @@ export function readArtifactContentForRepo(
   if (!lstatSync(realArtifactPath).isFile()) {
     return { artifactId, ref: artifact.ref, content: null, truncated: false, diagnostic: "Artifact ref is not a file" };
   }
-  const maxBytes = Math.max(1, Math.min(input.maxBytes ?? 8192, 1024 * 1024));
   const size = statSync(realArtifactPath).size;
   const buffer = readFileSync(realArtifactPath);
   if (buffer.subarray(0, Math.min(buffer.length, 1024)).includes(0)) {
@@ -1046,6 +1071,28 @@ export function addConductorArtifact(
   });
   const updated = {
     ...normalized,
+    tasks: artifact.resourceRefs.taskId
+      ? normalized.tasks.map((task) =>
+          task.taskId === artifact.resourceRefs.taskId
+            ? {
+                ...task,
+                artifactIds: [...new Set([...task.artifactIds, artifact.artifactId])],
+                updatedAt: artifact.updatedAt,
+              }
+            : task,
+        )
+      : normalized.tasks,
+    runs: artifact.resourceRefs.runId
+      ? normalized.runs.map((attempt) =>
+          attempt.runId === artifact.resourceRefs.runId
+            ? {
+                ...attempt,
+                artifactIds: [...new Set([...attempt.artifactIds, artifact.artifactId])],
+                updatedAt: artifact.updatedAt,
+              }
+            : attempt,
+        )
+      : normalized.runs,
     artifacts: [...normalized.artifacts, artifact],
     updatedAt: artifact.updatedAt,
   };

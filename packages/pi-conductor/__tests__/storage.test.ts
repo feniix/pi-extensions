@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { deriveProjectKey } from "../extensions/project-key.js";
 import {
   addConductorArtifact,
   addTask,
@@ -18,6 +19,7 @@ import {
   mutateRun,
   queryConductorArtifacts,
   queryConductorEvents,
+  readArtifactContentForRepo,
   readRun,
   reconcileRunLeases,
   recordRunHeartbeat,
@@ -30,6 +32,7 @@ import {
   validateRunRecord,
   writeRun,
 } from "../extensions/storage.js";
+import { normalizeProjectRecord } from "../extensions/storage-normalize.js";
 
 describe("storage helpers", () => {
   let conductorHome: string;
@@ -656,6 +659,57 @@ describe("storage helpers", () => {
       completed.artifacts.map((artifact) => artifact.artifactId),
     );
     expect(completed.runs.find((entry) => entry.runId === "run-1")?.completionSummary).toBe("implemented and verified");
+  });
+
+  it("normalizes legacy task artifact ids from task-scoped artifact refs", () => {
+    let run = addTask(
+      createEmptyRun("abc", "/repo"),
+      createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" }),
+    );
+    run = addConductorArtifact(run, {
+      artifactId: "artifact-legacy-note",
+      type: "note",
+      ref: "note://legacy",
+      resourceRefs: { taskId: "task-1", runId: "run-legacy" },
+      producer: { type: "child_run", id: "run-legacy" },
+      metadata: { summary: "legacy" },
+    });
+    const legacyRun = {
+      ...run,
+      tasks: run.tasks.map((task) => (task.taskId === "task-1" ? { ...task, artifactIds: [] } : task)),
+    };
+
+    const normalized = normalizeProjectRecord(legacyRun);
+
+    expect(normalized.tasks.find((task) => task.taskId === "task-1")?.artifactIds).toEqual(["artifact-legacy-note"]);
+  });
+
+  it("reads metadata-only note artifacts with bounded diagnostics", () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), "pi-conductor-repo-"));
+    const projectKey = deriveProjectKey(repoRoot);
+    let run = addTask(
+      createEmptyRun(projectKey, repoRoot),
+      createTaskRecord({ taskId: "task-1", title: "Build", prompt: "Do it" }),
+    );
+    run = addConductorArtifact(run, {
+      artifactId: "artifact-note-legacy",
+      type: "note",
+      ref: "note://legacy-summary",
+      resourceRefs: { taskId: "task-1" },
+      producer: { type: "child_run", id: "run-legacy" },
+      metadata: { summary: "legacy summary", details: "more details" },
+    });
+    writeRun(run);
+
+    const content = readArtifactContentForRepo(repoRoot, "artifact-note-legacy", { maxBytes: 24 });
+
+    expect(content).toMatchObject({
+      artifactId: "artifact-note-legacy",
+      ref: "note://legacy-summary",
+      truncated: true,
+      diagnostic: "Metadata-only note artifact has no readable content file",
+    });
+    expect(content.content).toBe('{\n  "metadata": {\n    "s');
   });
 
   it("creates a worker record with default lifecycle metadata", () => {
