@@ -72,6 +72,19 @@ describe("conductor runtime-mode tool contracts", () => {
     expect(tool?.description).toContain("fails before active run creation");
   });
 
+  it("documents high-level parallel runtime defaults and blocking override", () => {
+    const tool = collectTools().find((entry) => entry.name === "conductor_run_work");
+    const schema = JSON.stringify(tool?.parameters);
+
+    expect(tool?.description).toContain("parallel work prefers supervised tmux");
+    expect(tool?.description).toContain("falls back to headless");
+    expect(tool?.description).toContain("conductor_view_active_workers");
+    expect(tool?.description).toContain("details.parallel.results[].executionState");
+    expect(tool?.description).toContain("must not treat tool success as semantic completion");
+    expect(schema).toContain("Pass headless for blocking execution");
+    expect(schema).toContain("parallel work prefer tmux");
+  });
+
   it("forwards runtimeMode through registered start, run, retry, and delegate tools", async () => {
     const originalPath = process.env.PATH;
     const tools = collectTools();

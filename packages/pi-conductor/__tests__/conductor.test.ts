@@ -25,7 +25,7 @@ import {
 import { formatParallelTaskResultsTable, summarizeParallelTaskResults } from "../extensions/parallel-work-results.js";
 import { deriveProjectKey } from "../extensions/project-key.js";
 import { getRunFile, writeRun } from "../extensions/storage.js";
-import { summarizeParallelWorkToolText } from "../extensions/tools/orchestration-tools.js";
+import { summarizeParallelWorkToolText, summarizeRunWorkToolText } from "../extensions/tools/orchestration-tools.js";
 import { summarizeRunWorkRuntime } from "../extensions/work-runtime-summary.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
@@ -808,6 +808,165 @@ describe("conductor service", () => {
     }
   });
 
+  it("defaults high-level parallel work to non-blocking tmux when tmux is available", async () => {
+    const restorePath = forceTmuxAvailable();
+    const seenOptions: Array<{ runtimeMode?: string; waitForCompletion?: boolean }> = [];
+
+    let result: Awaited<ReturnType<typeof runWorkForRepo>> | null = null;
+    try {
+      result = await runWorkForRepo(
+        repoDir,
+        {
+          request: "Run these independent shards in parallel",
+          tasks: [
+            { title: "Inspect README", prompt: "Inspect README.md", writeScope: ["README.md"] },
+            { title: "Inspect package", prompt: "Inspect package metadata", writeScope: ["package.json"] },
+          ],
+        },
+        undefined,
+        async (_root, taskId, _signal, options) => {
+          seenOptions.push(options ?? {});
+          return {
+            workerName: taskId,
+            status: "success",
+            finalText: "launched",
+            errorMessage: null,
+            sessionId: taskId,
+          };
+        },
+      );
+    } finally {
+      restorePath();
+    }
+    if (!result) throw new Error("expected runWorkForRepo result");
+
+    expect(result.decision.mode).toBe("parallel");
+    expect(result.runtimeMode).toBe("tmux");
+    expect(result.parallel?.results.map((entry) => entry.executionState)).toEqual(["launched", "launched"]);
+    expect(summarizeRunWorkToolText(result)).toContain("launched 2 parallel conductor task(s)");
+    expect(summarizeRunWorkToolText(result)).toContain("conductor_view_active_workers({})");
+    expect(seenOptions).toEqual([
+      { runtimeMode: "tmux", waitForCompletion: false },
+      { runtimeMode: "tmux", waitForCompletion: false },
+    ]);
+  });
+
+  it("does not execute high-level parallel work when execute is false", async () => {
+    const restorePath = forceTmuxAvailable();
+    let runnerCalled = false;
+
+    let result: Awaited<ReturnType<typeof runWorkForRepo>> | null = null;
+    try {
+      result = await runWorkForRepo(
+        repoDir,
+        {
+          request: "Run these independent shards in parallel",
+          execute: false,
+          tasks: [
+            { title: "Inspect README", prompt: "Inspect README.md", writeScope: ["README.md"] },
+            { title: "Inspect package", prompt: "Inspect package metadata", writeScope: ["package.json"] },
+          ],
+        },
+        undefined,
+        async () => {
+          runnerCalled = true;
+          return {
+            workerName: "unexpected",
+            status: "success",
+            finalText: "done",
+            errorMessage: null,
+            sessionId: null,
+          };
+        },
+      );
+    } finally {
+      restorePath();
+    }
+    if (!result) throw new Error("expected runWorkForRepo result");
+
+    expect(result.decision.mode).toBe("parallel");
+    expect(result.runtimeMode).toBe("tmux");
+    expect(result.parallel).toBeNull();
+    expect(result.workers).toEqual([]);
+    expect(result.tasks).toEqual([]);
+    expect(result.runtimeRuns).toEqual([]);
+    expect(runnerCalled).toBe(false);
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.workers).toHaveLength(0);
+    expect(run.tasks).toHaveLength(0);
+    expect(run.runs).toHaveLength(0);
+  });
+
+  it("honors explicit headless runtime for high-level parallel work", async () => {
+    const restorePath = forceTmuxAvailable();
+    const seenOptions: Array<{ runtimeMode?: string; waitForCompletion?: boolean }> = [];
+
+    let result: Awaited<ReturnType<typeof runWorkForRepo>> | null = null;
+    try {
+      result = await runWorkForRepo(
+        repoDir,
+        {
+          request: "Run these independent shards in parallel",
+          runtimeMode: "headless",
+          tasks: [
+            { title: "Inspect README", prompt: "Inspect README.md", writeScope: ["README.md"] },
+            { title: "Inspect package", prompt: "Inspect package metadata", writeScope: ["package.json"] },
+          ],
+        },
+        undefined,
+        async (_root, taskId, _signal, options) => {
+          seenOptions.push(options ?? {});
+          return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
+        },
+      );
+    } finally {
+      restorePath();
+    }
+    if (!result) throw new Error("expected runWorkForRepo result");
+
+    expect(result.decision.mode).toBe("parallel");
+    expect(result.runtimeMode).toBe("headless");
+    expect(result.parallel?.results.map((entry) => entry.executionState)).toEqual(["completed", "completed"]);
+    expect(seenOptions).toEqual([
+      { runtimeMode: "headless", waitForCompletion: true },
+      { runtimeMode: "headless", waitForCompletion: true },
+    ]);
+  });
+
+  it("falls back high-level parallel work to headless when tmux is unavailable", async () => {
+    const restorePath = forceTmuxUnavailable();
+    const seenOptions: Array<{ runtimeMode?: string; waitForCompletion?: boolean }> = [];
+
+    let result: Awaited<ReturnType<typeof runWorkForRepo>> | null = null;
+    try {
+      result = await runWorkForRepo(
+        repoDir,
+        {
+          request: "Run these independent shards in parallel",
+          tasks: [
+            { title: "Inspect README", prompt: "Inspect README.md", writeScope: ["README.md"] },
+            { title: "Inspect package", prompt: "Inspect package metadata", writeScope: ["package.json"] },
+          ],
+        },
+        undefined,
+        async (_root, taskId, _signal, options) => {
+          seenOptions.push(options ?? {});
+          return { workerName: taskId, status: "success", finalText: "done", errorMessage: null, sessionId: null };
+        },
+      );
+    } finally {
+      restorePath();
+    }
+    if (!result) throw new Error("expected runWorkForRepo result");
+
+    expect(result.runtimeMode).toBe("headless");
+    expect(result.parallel?.results.map((entry) => entry.executionState)).toEqual(["completed", "completed"]);
+    expect(seenOptions).toEqual([
+      { runtimeMode: "headless", waitForCompletion: true },
+      { runtimeMode: "headless", waitForCompletion: true },
+    ]);
+  });
+
   it("infers visible runtime for natural-language visible parallel requests", async () => {
     const restorePath = forceTmuxAvailable();
     const seenRuntimeModes: Array<string | undefined> = [];
@@ -876,7 +1035,7 @@ describe("conductor service", () => {
     "are any workers active?",
     "current worker status",
   ])("rejects status-only work-router requests before mutating conductor state: %s", async (request) => {
-    await expect(runWorkForRepo(repoDir, { request })).rejects.toThrow(/status-only requests/i);
+    await expect(runWorkForRepo(repoDir, { request })).rejects.toThrow(/conductor_view_active_workers/);
 
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers).toHaveLength(0);
@@ -1353,25 +1512,33 @@ describe("conductor service", () => {
     expect(result.tasks).toHaveLength(1);
   });
 
-  it("plans dependent work as an objective instead of parallel fan-out", async () => {
-    const result = await runWorkForRepo(repoDir, {
-      request: "Implement the feature, then verify it",
-      execute: false,
-      tasks: [
-        { title: "Implement feature", prompt: "Implement the feature in the package", writeScope: ["extensions/"] },
-        {
-          title: "Verify feature",
-          prompt: "Verify the feature after implementation",
-          writeScope: ["__tests__/"],
-          dependsOn: ["Implement feature"],
-        },
-      ],
-    });
+  it("plans dependent work as a headless objective instead of parallel fan-out", async () => {
+    const restorePath = forceTmuxAvailable();
+    let result: Awaited<ReturnType<typeof runWorkForRepo>> | null = null;
+    try {
+      result = await runWorkForRepo(repoDir, {
+        request: "Implement the feature, then verify it",
+        execute: false,
+        tasks: [
+          { title: "Implement feature", prompt: "Implement the feature in the package", writeScope: ["extensions/"] },
+          {
+            title: "Verify feature",
+            prompt: "Verify the feature after implementation",
+            writeScope: ["__tests__/"],
+            dependsOn: ["Implement feature"],
+          },
+        ],
+      });
+    } finally {
+      restorePath();
+    }
+    if (!result) throw new Error("expected runWorkForRepo result");
 
     expect(result.decision).toMatchObject({
       mode: "objective",
       reason: expect.stringMatching(/depend/i),
     });
+    expect(result.runtimeMode).toBe("headless");
     expect(result.objective?.tasks.map((task) => task.title)).toEqual(["Implement feature", "Verify feature"]);
     expect(result.parallel).toBeNull();
     const run = getOrCreateRunForRepo(repoDir);
