@@ -27,6 +27,7 @@ class FakeTmuxAdapter implements TmuxCommandAdapter {
   failHasSession = false;
   failKill = false;
   failPs = false;
+  failPaneMetadata = false;
   replacedPaneCommand = false;
   paneCurrentCommand = "node";
 
@@ -42,6 +43,9 @@ class FakeTmuxAdapter implements TmuxCommandAdapter {
       return { stdout: this.replacedPaneCommand ? "vim\n" : `${this.paneCurrentCommand}\n`, stderr: "" };
     }
     if (args.includes("display-message")) {
+      if (this.failPaneMetadata) {
+        throw new Error("pane metadata unavailable");
+      }
       return { stdout: "@42 %7 4242\n", stderr: "" };
     }
     if (command === "ps") {
@@ -172,6 +176,43 @@ describe("tmux conductor runtime", () => {
     expect(contractContent).not.toContain("abc123def4567890abc123def4567890");
     expect(existsSync(persisted?.runtime.logPath ?? "")).toBe(true);
     expect(statSync(persisted?.runtime.logPath ?? "").mode & 0o777).toBe(0o600);
+  });
+
+  it("fails non-blocking tmux launch when pane metadata cannot be verified", async () => {
+    const { worker, started } = await createStartedTask();
+    const adapter = new FakeTmuxAdapter();
+    adapter.failPaneMetadata = true;
+    const backend = createTmuxWorkerRunRuntimeBackend({
+      commandAdapter: adapter,
+      runnerCommand: ["node", "/tmp/pi-conductor-runner", "run"],
+      waitForCompletion: false,
+      randomHex: () => "abc123def4567890abc123def4567890",
+      now: () => "2026-04-27T00:00:00.000Z",
+    });
+
+    const result = await backend.run({
+      repoRoot: repoDir,
+      worktreePath: worker.worktreePath ?? repoDir,
+      sessionFile: worker.sessionFile ?? join(repoDir, "session.jsonl"),
+      task: "Run in tmux",
+      taskContract: started.taskContract,
+      onRuntimeMetadata: async (metadata) => {
+        const latest = getOrCreateRunForRepo(repoDir);
+        const { writeRun } = await import("../extensions/storage.js");
+        writeRun({
+          ...latest,
+          runs: latest.runs.map((entry) =>
+            entry.runId === started.run.runId ? { ...entry, runtime: { ...entry.runtime, ...metadata } } : entry,
+          ),
+        });
+      },
+    });
+
+    expect(result).toMatchObject({ status: "error", errorMessage: expect.stringContaining("pane metadata") });
+    expect(adapter.calls.some((call) => call.args.includes("kill-session"))).toBe(true);
+    const persisted = getOrCreateRunForRepo(repoDir).runs[0];
+    expect(persisted?.runtime).toMatchObject({ status: "aborted", cleanupStatus: "succeeded" });
+    expect(persisted?.runtime.diagnostics.join("\n")).toContain("pane metadata unavailable");
   });
 
   it("opens iTerm2 as a viewer over an iterm-tmux run", async () => {

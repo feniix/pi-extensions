@@ -703,6 +703,24 @@ export function createTmuxWorkerRunRuntimeBackend(options: TmuxRuntimeOptions = 
           return mapTerminalRunToRuntimeResult(durableRun);
         }
         const paneMetadata = await inspectTmuxPaneMetadata({ adapter, socketPath: paths.socketPath, sessionName });
+        if (!waitForCompletion && paneMetadata.diagnostic) {
+          const cleanup = await cancelTmuxRuntime({ adapter, runtime: buildCancellationRuntime() });
+          await input.onRuntimeMetadata?.({
+            status: "aborted",
+            cleanupStatus: cleanup.cleanupStatus,
+            finishedAt: now(),
+            diagnostics: [
+              paneMetadata.diagnostic,
+              cleanup.diagnostic ?? `tmux session ${sessionName} cleanup after metadata failure`,
+            ],
+          });
+          return {
+            status: "error",
+            finalText: null,
+            errorMessage: paneMetadata.diagnostic,
+            sessionId: null,
+          };
+        }
         const runningDiagnostics = [
           `tmux session ${sessionName} launched`,
           ...(paneMetadata.diagnostic ? [paneMetadata.diagnostic] : []),

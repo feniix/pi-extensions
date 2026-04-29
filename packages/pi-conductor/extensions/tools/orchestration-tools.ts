@@ -63,7 +63,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
     name: "conductor_run_parallel_work",
     label: "Conductor Run Parallel Work",
     description:
-      "Autonomously split a natural-language request into parallel conductor worker tasks, run them under one foreground orchestration boundary, and cancel owned runs/tasks if the user interrupts with Escape or a task fails before active run creation",
+      "Autonomously split a natural-language request into parallel conductor worker tasks. When no runtimeMode is provided, conductor prefers tmux so the tool can launch supervised workers and return control to the parent session for natural-language follow-up; it falls back to headless when tmux is unavailable. Owned runs/tasks are canceled if the user interrupts with Escape or a task fails before active run creation.",
     parameters: Type.Object({
       tasks: Type.Array(
         Type.Object({
@@ -78,7 +78,7 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
       ),
       runtimeMode: Type.Optional(
         runtimeModeSchema(
-          "Explicit runtime mode for every parallel worker; use iterm-tmux for tmux plus best-effort iTerm2 viewer.",
+          "Explicit runtime mode for every parallel worker; omit to prefer tmux when available so control returns after launch, or set headless to wait for completion in-process.",
         ),
       ),
     }),
@@ -88,9 +88,15 @@ export function registerOrchestrationTools(pi: ExtensionAPI): void {
       const runtimeText = `runtime=${result.runtimeMode}${result.runtimeRuns.length > 0 ? ` runs=${result.runtimeRuns.length}` : ""}`;
       const canceledText =
         result.canceledTasks.length > 0 ? `; canceled ${result.canceledTasks.length} pre-run task(s)` : "";
+      const finishedText = `${completed} succeeded, ${result.results.length - completed} need follow-up${canceledText}`;
+      const launchedText = `${completed} launched, ${result.results.length - completed} failed to launch${canceledText}`;
+      const followUpText =
+        'inspect with conductor_project_brief or conductor_list_runs({ status: "running" }); cancel with conductor_cancel_active_work';
       const text = signal?.aborted
         ? `interrupted parallel conductor work with ${runtimeText}; canceled ${result.canceledRuns.length} active run(s) and ${result.canceledTasks.length} task(s)`
-        : `ran ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${completed} succeeded, ${result.results.length - completed} need follow-up${canceledText}`;
+        : result.runtimeMode === "headless"
+          ? `ran ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${finishedText}`
+          : `launched ${result.tasks.length} parallel conductor task(s) with ${runtimeText}; ${launchedText}; ${followUpText}`;
       return { content: [{ type: "text", text }], details: result };
     },
   });

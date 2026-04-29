@@ -148,7 +148,9 @@ Optional backend adapters such as `pi-subagents` may be used later, but they do 
 
 ### Supervised visible runtime
 
-Run tools accept `runtimeMode: "headless" | "tmux" | "iterm-tmux"`. `headless` remains the default. `tmux` launches the conductor runner in a private tmux session and records the attach command, runtime log path, heartbeat, diagnostics, and cleanup state on the durable run. `iterm-tmux` uses the same tmux control plane and best-effort opens iTerm2 as a viewer on macOS; if iTerm2 is unavailable or launch fails, the tmux run remains active and status output shows a warning plus the manual read-only attach command.
+Run tools accept `runtimeMode: "headless" | "tmux" | "iterm-tmux"`. `headless` runs in-process and waits for completion. `tmux` launches the conductor runner in a private tmux session and records the attach command, runtime log path, heartbeat, diagnostics, and cleanup state on the durable run. `iterm-tmux` uses the same tmux control plane and best-effort opens iTerm2 as a viewer on macOS; if iTerm2 is unavailable or launch fails, the tmux run remains active and status output shows a warning plus the manual read-only attach command.
+
+Default runtime selection depends on the entry point. `conductor_run_work` stays conservative and defaults ordinary work to `headless` unless the request clearly asks to show/watch/open workers or an explicit `runtimeMode` is provided. Direct `conductor_run_parallel_work` is a lower-level parallel-safe primitive; when its `runtimeMode` is omitted, it prefers non-blocking `tmux` if tmux is available so the parent session can keep accepting natural-language inspection/cancel requests after launch, and falls back to blocking `headless` when tmux is unavailable. Pass `runtimeMode: "headless"` to `conductor_run_parallel_work` when the caller needs the old wait-for-completion behavior.
 
 Use conductor status tools rather than typing into worker panes to supervise work. Active visible runs include:
 
@@ -196,10 +198,24 @@ The router is conservative. It splits only when work items are independent, have
 
 Runtime mode selection is also conservative. Explicit `runtimeMode` wins. If omitted, normal work defaults to `headless`, while unambiguous execution requests such as “run these shards in parallel and show/watch/open the workers” infer `iterm-tmux`. Status-only phrases such as “show me current workers” do not infer visible execution; use status/list tools for inspection. Inferred visible runs still fail closed when tmux is unavailable and return runtime summaries with viewer/log/cancel details when runs are created.
 
-`conductor_run_parallel_work` remains the lower-level primitive for callers that already made a parallel-safe decision:
+`conductor_run_parallel_work` remains the lower-level primitive for callers that already made a parallel-safe decision. Omitting `runtimeMode` launches supervised tmux workers when available and returns after launch; the durable runs continue in conductor state and can be inspected or canceled by follow-up natural-language requests:
 
 ```text
 conductor_run_parallel_work({
+  tasks: [
+    { title: "Backend shard", prompt: "Implement and verify the backend changes" },
+    { title: "Tests shard", prompt: "Add focused regression tests and report evidence" }
+  ]
+})
+conductor_project_brief({ maxActions: 10, recentEventLimit: 20 })
+conductor_list_runs({ status: "running" })
+```
+
+For blocking completion semantics, request headless explicitly:
+
+```text
+conductor_run_parallel_work({
+  runtimeMode: "headless",
   tasks: [
     { title: "Backend shard", prompt: "Implement and verify the backend changes" },
     { title: "Tests shard", prompt: "Add focused regression tests and report evidence" }
