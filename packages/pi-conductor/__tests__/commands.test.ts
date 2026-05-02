@@ -194,11 +194,15 @@ describe("runConductorCommand", () => {
     expect(getOrCreateRunForRepo(repoDir).gates).toHaveLength(0);
 
     const worker = getOrCreateRunForRepo(repoDir).workers[0];
+    const current = getOrCreateRunForRepo(repoDir);
     const gate = worker
       ? createGateForRepo(repoDir, {
           type: "destructive_cleanup",
           resourceRefs: { workerId: worker.workerId },
           requestedDecision: "Approve cleanup",
+          targetRevision:
+            current.tasks.filter((entry) => entry.assignedWorkerId === worker.workerId).length +
+            current.runs.filter((entry) => entry.workerId === worker.workerId).length,
         })
       : null;
     if (!worker || !gate) {

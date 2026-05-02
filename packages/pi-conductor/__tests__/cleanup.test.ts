@@ -9,9 +9,12 @@ import {
   createTaskForRepo,
   createWorkerForRepo,
   getOrCreateRunForRepo,
+  recordTaskCompletionForRepo,
   removeWorkerForRepo,
   resolveGateForRepo,
+  startTaskRunForRepo,
 } from "../extensions/conductor.js";
+import { writeRun } from "../extensions/storage.js";
 
 function requireValue<T>(value: T | null | undefined, message: string): T {
   if (value == null) {
@@ -24,11 +27,20 @@ describe("cleanup flows", () => {
   let repoDir: string;
   let conductorHome: string;
 
+  function cleanupGeneration(workerId: string): number {
+    const run = getOrCreateRunForRepo(repoDir);
+    return (
+      run.tasks.filter((task) => task.assignedWorkerId === workerId).length +
+      run.runs.filter((entry) => entry.workerId === workerId).length
+    );
+  }
+
   function approveCleanupGate(workerId: string): void {
     const gate = createGateForRepo(repoDir, {
       type: "destructive_cleanup",
       resourceRefs: { workerId },
       requestedDecision: "Approve worker cleanup",
+      targetRevision: cleanupGeneration(workerId),
     });
     resolveGateForRepo(repoDir, {
       gateId: gate.gateId,
@@ -87,6 +99,51 @@ describe("cleanup flows", () => {
 
     expect(() => removeWorkerForRepo(repoDir, "backend")).toThrow(/not idle and ready/);
     expect(existsSync(worktreePath)).toBe(true);
+  });
+
+  it("requires a fresh cleanup gate after worker activity changes", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+
+    expect(() => removeWorkerForRepo(repoDir, "backend")).toThrow(/approved destructive_cleanup gate/i);
+    const createdGate = requireValue(
+      getOrCreateRunForRepo(repoDir).gates.find((entry) => entry.resourceRefs.workerId === worker.workerId),
+      "cleanup gate missing",
+    );
+    resolveGateForRepo(repoDir, {
+      gateId: createdGate.gateId,
+      status: "approved",
+      actor: { type: "human", id: "reviewer" },
+      resolutionReason: "cleanup approved",
+    });
+
+    const task = createTaskForRepo(repoDir, { title: "Later work", prompt: "Do later work" });
+    assignTaskForRepo(repoDir, task.taskId, worker.workerId);
+    const started = startTaskRunForRepo(repoDir, { taskId: task.taskId, workerId: worker.workerId });
+    recordTaskCompletionForRepo(repoDir, {
+      taskId: task.taskId,
+      runId: started.run.runId,
+      status: "succeeded",
+      completionSummary: "later work done",
+    });
+
+    expect(() => removeWorkerForRepo(repoDir, "backend")).toThrow(/fresh destructive_cleanup gate/i);
+    expect(getOrCreateRunForRepo(repoDir).workers.map((entry) => entry.workerId)).toContain(worker.workerId);
+  });
+
+  it("keeps cleanup retryable when managed branch deletion fails", async () => {
+    const worker = await createWorkerForRepo(repoDir, "backend");
+    approveCleanupGate(worker.workerId);
+    const run = getOrCreateRunForRepo(repoDir);
+    writeRun({
+      ...run,
+      workers: run.workers.map((entry) => (entry.workerId === worker.workerId ? { ...entry, branch: "main" } : entry)),
+    });
+
+    expect(() => removeWorkerForRepo(repoDir, "backend")).toThrow();
+    const after = getOrCreateRunForRepo(repoDir);
+    expect(after.workers.map((entry) => entry.workerId)).toContain(worker.workerId);
+    expect(after.archivedWorkers.map((entry) => entry.workerId)).not.toContain(worker.workerId);
+    expect(after.gates.find((entry) => entry.resourceRefs.workerId === worker.workerId)?.usedAt).toBeNull();
   });
 
   it("removes a worker record and its worktree", async () => {

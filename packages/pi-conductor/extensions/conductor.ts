@@ -1615,6 +1615,13 @@ export async function createWorkerForRepo(repoRoot: string, workerName: string):
   }
   return worker;
 }
+function workerCleanupGeneration(run: RunRecord, workerId: string): number {
+  return (
+    run.tasks.filter((task) => task.assignedWorkerId === workerId).length +
+    run.runs.filter((entry) => entry.workerId === workerId).length
+  );
+}
+
 export function removeWorkerForRepo(repoRoot: string, workerName: string): WorkerRecord {
   const run = getOrCreateRunForRepo(repoRoot);
   const worker = run.workers.find((entry) => entry.name === workerName);
@@ -1646,6 +1653,7 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
         type: "destructive_cleanup",
         resourceRefs: { workerId: worker.workerId },
         requestedDecision: `Approve deleting worker ${worker.name}, its worktree, session link, and managed branch`,
+        targetRevision: workerCleanupGeneration(run, worker.workerId),
       });
     }
     throw new Error(
@@ -1658,6 +1666,9 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
       throw new Error(`Worker ${worker.name} requires a fresh destructive_cleanup gate before cleanup finalization`);
     }
     const latestWorker = assertWorkerCleanupReady(latest, worker.workerId, worker.name);
+    if (latestGate.targetRevision !== workerCleanupGeneration(latest, worker.workerId)) {
+      throw new Error(`Worker ${worker.name} requires a fresh destructive_cleanup gate after worker activity changed`);
+    }
     if (latestWorker.worktreePath && existsSync(latestWorker.worktreePath)) {
       removeManagedWorktree(latest.repoRoot, latestWorker.worktreePath);
     }

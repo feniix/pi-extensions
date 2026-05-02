@@ -57,10 +57,14 @@ describe("conductor archived cleanup and trusted human gate path", () => {
       completionSummary: "done",
     });
     writeRun(run);
+    const latest = getOrCreateRunForRepo(repoDir);
     const gate = createGateForRepo(repoDir, {
       type: "destructive_cleanup",
       resourceRefs: { workerId: worker.workerId },
       requestedDecision: "Approve cleanup",
+      targetRevision:
+        latest.tasks.filter((entry) => entry.assignedWorkerId === worker.workerId).length +
+        latest.runs.filter((entry) => entry.workerId === worker.workerId).length,
     });
     resolveGateFromTrustedHumanForRepo(repoDir, {
       gateId: gate.gateId,
