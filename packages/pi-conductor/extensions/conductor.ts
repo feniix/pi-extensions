@@ -1410,13 +1410,16 @@ export async function runWorkForRepo(
       rationale: decision.reason,
     });
     let workers: WorkerRecord[] = [];
+    const createdObjectiveWorkerIds: string[] = [];
     if (execute) {
       const current = getOrCreateRunForRepo(repoRoot);
       workers = current.workers.filter(
         (worker) => worker.lifecycle === "idle" && !worker.recoverable && worker.worktreePath && worker.sessionFile,
       );
       if (workers.length === 0) {
-        workers = [await createWorkerForRepo(repoRoot, `${workerPrefix}-objective-1`)];
+        const worker = await createWorkerForRepo(repoRoot, `${workerPrefix}-objective-1`);
+        workers = [worker];
+        createdObjectiveWorkerIds.push(worker.workerId);
       }
     }
     let schedule: Awaited<ReturnType<typeof scheduleObjectiveForRepo>> | null = null;
@@ -1445,7 +1448,6 @@ export async function runWorkForRepo(
       schedule && scheduledWorkerIds.size > 0
         ? getOrCreateRunForRepo(repoRoot).workers.filter((worker) => scheduledWorkerIds.has(worker.workerId))
         : workers;
-    const resultWorkerIds = resultWorkers.map((worker) => worker.workerId);
     return {
       decision,
       workers: resultWorkers,
@@ -1458,7 +1460,7 @@ export async function runWorkForRepo(
         repoRoot,
         planned.tasks.map((task) => task.taskId),
       ),
-      cleanupRecommendations: summarizeWorkerCleanupRecommendations(repoRoot, resultWorkerIds),
+      cleanupRecommendations: summarizeWorkerCleanupRecommendations(repoRoot, createdObjectiveWorkerIds),
     };
   }
   const taskInput = decision.tasks[0];
