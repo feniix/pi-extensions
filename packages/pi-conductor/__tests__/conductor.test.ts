@@ -326,6 +326,22 @@ describe("conductor service", () => {
 
     expect(startedCount).toBe(0);
     expect(result.canceledTasks).toHaveLength(2);
+    expect(result.results).toEqual([
+      {
+        taskId: result.tasks[0]?.taskId,
+        status: "rejected",
+        executionState: "interrupted",
+        result: null,
+        error: "Parent conductor parallel work was interrupted",
+      },
+      {
+        taskId: result.tasks[1]?.taskId,
+        status: "rejected",
+        executionState: "interrupted",
+        result: null,
+        error: "Parent conductor parallel work was interrupted",
+      },
+    ]);
     expect(result.cleanupRecommendations.map((entry) => entry.workerName)).toEqual(["parallel-1", "parallel-2"]);
     expect(summarizeParallelWorkToolText(result, true)).toContain("Cleanup guidance");
     const run = getOrCreateRunForRepo(repoDir);
