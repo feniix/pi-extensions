@@ -1636,13 +1636,15 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
   if (!worker) {
     throw new Error(`Worker named ${workerName} not found`);
   }
+  const currentCleanupGeneration = workerCleanupGeneration(run, worker.workerId);
   const cleanupGate = run.gates.find(
     (gate) =>
       gate.type === "destructive_cleanup" &&
       gate.resourceRefs.workerId === worker.workerId &&
       gate.operation === "destructive_cleanup" &&
       gate.status !== "canceled" &&
-      gate.usedAt === null,
+      gate.usedAt === null &&
+      gate.targetRevision === currentCleanupGeneration,
   );
   const wrongOperationGate = run.gates.find(
     (gate) =>
@@ -1661,7 +1663,7 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
         type: "destructive_cleanup",
         resourceRefs: { workerId: worker.workerId },
         requestedDecision: `Approve deleting worker ${worker.name}, its worktree, session link, and managed branch`,
-        targetRevision: workerCleanupGeneration(run, worker.workerId),
+        targetRevision: currentCleanupGeneration,
       });
     }
     throw new Error(

@@ -101,7 +101,7 @@ describe("cleanup flows", () => {
     expect(existsSync(worktreePath)).toBe(true);
   });
 
-  it("requires a fresh cleanup gate after worker activity changes", async () => {
+  it("creates a fresh cleanup gate after worker activity changes", async () => {
     const worker = await createWorkerForRepo(repoDir, "backend");
 
     expect(() => removeWorkerForRepo(repoDir, "backend")).toThrow(/approved destructive_cleanup gate/i);
@@ -126,8 +126,30 @@ describe("cleanup flows", () => {
       completionSummary: "later work done",
     });
 
-    expect(() => removeWorkerForRepo(repoDir, "backend")).toThrow(/fresh destructive_cleanup gate/i);
-    expect(getOrCreateRunForRepo(repoDir).workers.map((entry) => entry.workerId)).toContain(worker.workerId);
+    expect(() => removeWorkerForRepo(repoDir, "backend")).toThrow(/approved destructive_cleanup gate/i);
+    const afterStaleRetry = getOrCreateRunForRepo(repoDir);
+    const freshGate = requireValue(
+      afterStaleRetry.gates.find(
+        (entry) =>
+          entry.resourceRefs.workerId === worker.workerId &&
+          entry.gateId !== createdGate.gateId &&
+          entry.status === "open",
+      ),
+      "fresh cleanup gate missing",
+    );
+    expect(freshGate.targetRevision).toBe(cleanupGeneration(worker.workerId));
+
+    resolveGateForRepo(repoDir, {
+      gateId: freshGate.gateId,
+      status: "approved",
+      actor: { type: "human", id: "reviewer" },
+      resolutionReason: "fresh cleanup approved",
+    });
+    removeWorkerForRepo(repoDir, "backend");
+
+    const afterCleanup = getOrCreateRunForRepo(repoDir);
+    expect(afterCleanup.workers.map((entry) => entry.workerId)).not.toContain(worker.workerId);
+    expect(afterCleanup.archivedWorkers.map((entry) => entry.workerId)).toContain(worker.workerId);
   });
 
   it("keeps cleanup retryable when managed branch deletion fails", async () => {
