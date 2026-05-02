@@ -66,10 +66,20 @@ describe("conductor tool contracts", () => {
     if (existsSync(conductorHome)) rmSync(conductorHome, { recursive: true, force: true });
   });
 
-  it("documents parallel pre-run startup cancellation semantics", () => {
+  it("documents parallel pre-run startup cancellation and cleanup guidance semantics", () => {
     const tool = collectTools().find((entry) => entry.name === "conductor_run_parallel_work");
 
     expect(tool?.description).toContain("fails before active run creation");
+    expect(tool?.description).toContain("cleanupRecommendations");
+    expect(tool?.description).toContain("conductor_cleanup_worker");
+  });
+
+  it("documents gate-protected cleanup worker flow", () => {
+    const tool = collectTools().find((entry) => entry.name === "conductor_cleanup_worker");
+
+    expect(tool?.description).toContain("destructive_cleanup gate");
+    expect(tool?.description).toContain("/conductor human dashboard");
+    expect(tool?.description).toContain("rerun conductor_cleanup_worker");
   });
 
   it("documents high-level parallel runtime defaults and blocking override", () => {
@@ -81,6 +91,7 @@ describe("conductor tool contracts", () => {
     expect(tool?.description).toContain("conductor_view_active_workers");
     expect(tool?.description).toContain("details.parallel.results[].executionState");
     expect(tool?.description).toContain("must not treat tool success as semantic completion");
+    expect(tool?.description).toContain("cleanupRecommendations");
     expect(schema).toContain("Pass headless for blocking execution");
     expect(schema).toContain("parallel work prefer tmux");
   });

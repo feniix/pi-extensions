@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import {
   createWorktree,
   defaultWorktreeRoot,
@@ -66,16 +67,22 @@ export function removeManagedWorktree(repoRoot: string, worktreePath: string): v
   pruneWorktrees(repoRoot);
   try {
     removeWorktree({ cwd: repoRoot, path: worktreePath, force: true, validateOnForce: true });
-  } catch {
+  } catch (error) {
     pruneWorktrees(repoRoot);
+    if (existsSync(worktreePath)) {
+      throw error;
+    }
   }
 }
 
 export function removeManagedBranch(repoRoot: string, branch: string): void {
   try {
     execGit(repoRoot, `git branch -D ${shellQuote(branch)}`);
-  } catch {
-    // Ignore missing or already-removed branches during cleanup.
+  } catch (error) {
+    const branches = execGit(repoRoot, `git branch --list ${shellQuote(branch)}`);
+    if (branches.trim()) {
+      throw error;
+    }
   }
 }
 

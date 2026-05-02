@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { formatWorkerCleanupGuidance } from "../extensions/cleanup-guidance.js";
 import {
   assignTaskForRepo,
   cancelActiveWorkForRepo,
@@ -325,6 +326,24 @@ describe("conductor service", () => {
 
     expect(startedCount).toBe(0);
     expect(result.canceledTasks).toHaveLength(2);
+    expect(result.results).toEqual([
+      {
+        taskId: result.tasks[0]?.taskId,
+        status: "rejected",
+        executionState: "interrupted",
+        result: null,
+        error: "Parent conductor parallel work was interrupted",
+      },
+      {
+        taskId: result.tasks[1]?.taskId,
+        status: "rejected",
+        executionState: "interrupted",
+        result: null,
+        error: "Parent conductor parallel work was interrupted",
+      },
+    ]);
+    expect(result.cleanupRecommendations.map((entry) => entry.workerName)).toEqual(["parallel-1", "parallel-2"]);
+    expect(summarizeParallelWorkToolText(result, true)).toContain("Cleanup guidance");
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.tasks.map((task) => task.state)).toEqual(["canceled", "canceled"]);
     expect(run.runs).toHaveLength(0);
@@ -396,6 +415,52 @@ describe("conductor service", () => {
     expect(runnerSignal?.aborted).toBe(true);
   });
 
+  it("escapes and bounds cleanup guidance markdown", () => {
+    const text = formatWorkerCleanupGuidance([
+      {
+        workerId: "worker|1",
+        workerName: "worker|name\nnext",
+        branch: "branch|name",
+        worktreePath: "/tmp/path|with\nnewline",
+        cleanupToolCall: { name: "conductor_cleanup_worker", params: { name: "worker|name\nnext" } },
+        gateType: "destructive_cleanup",
+        note: "cleanup",
+      },
+    ]);
+
+    expect(text).toContain("worker\\|name<br>next");
+    expect(text).toContain("branch\\|name");
+    expect(text).toContain("/tmp/path\\|with<br>newline");
+    expect(text).toContain("/conductor human dashboard");
+  });
+
+  it("does not recommend cleanup for reused parallel workers", async () => {
+    await createWorkerForRepo(repoDir, "parallel-1");
+
+    const result = await runParallelWorkForRepo(
+      repoDir,
+      {
+        workerPrefix: "parallel",
+        runtimeMode: "headless",
+        tasks: [{ title: "Reuse shard", prompt: "Do reuse shard", workerName: "parallel-1" }],
+      },
+      undefined,
+      async (root, taskId) => {
+        const started = startTaskRunForRepo(root, { taskId });
+        recordTaskCompletionForRepo(root, {
+          taskId,
+          runId: started.run.runId,
+          status: "succeeded",
+          completionSummary: "reused done",
+        });
+        return { workerName: "parallel-1", status: "success", finalText: "done", errorMessage: null, sessionId: null };
+      },
+    );
+
+    expect(result.cleanupRecommendations).toEqual([]);
+    expect(summarizeParallelWorkToolText(result)).not.toContain("Cleanup guidance");
+  });
+
   it("returns per-task summaries from completed parallel work", async () => {
     const result = await runParallelWorkForRepo(
       repoDir,
@@ -459,6 +524,20 @@ describe("conductor service", () => {
       taskState: "completed",
       completionSummary: `summary for ${result.tasks[1]?.taskId}`,
     });
+    expect(result.cleanupRecommendations).toEqual([
+      expect.objectContaining({
+        workerName: "parallel-1",
+        cleanupToolCall: { name: "conductor_cleanup_worker", params: { name: "parallel-1" } },
+        gateType: "destructive_cleanup",
+      }),
+      expect.objectContaining({
+        workerName: "parallel-2",
+        cleanupToolCall: { name: "conductor_cleanup_worker", params: { name: "parallel-2" } },
+        gateType: "destructive_cleanup",
+      }),
+    ]);
+    expect(summarizeParallelWorkToolText(result)).toContain("Cleanup guidance");
+    expect(summarizeParallelWorkToolText(result)).toContain('conductor_cleanup_worker({"name":"parallel-1"})');
   });
 
   it("bounds long parallel task result previews and truncation flags", async () => {
@@ -659,7 +738,16 @@ describe("conductor service", () => {
         tasks: [{ title: "Fix README typo", prompt: "Fix the typo in README.md", writeScope: ["README.md"] }],
       },
       undefined,
-      async () => ({ workerName: "single", status: "success", finalText: "done", errorMessage: null, sessionId: null }),
+      async (root, taskId) => {
+        const started = startTaskRunForRepo(root, { taskId });
+        recordTaskCompletionForRepo(root, {
+          taskId,
+          runId: started.run.runId,
+          status: "succeeded",
+          completionSummary: "single done",
+        });
+        return { workerName: "single", status: "success", finalText: "done", errorMessage: null, sessionId: null };
+      },
     );
 
     expect(result.decision).toMatchObject({
@@ -668,9 +756,48 @@ describe("conductor service", () => {
     });
     expect(result.tasks.map((task) => task.title)).toEqual(["Fix README typo"]);
     expect(result.parallel).toBeNull();
+    expect(result.cleanupRecommendations).toHaveLength(1);
+    expect(result.cleanupRecommendations[0]).toMatchObject({
+      workerName: "run-work-1",
+      cleanupToolCall: { name: "conductor_cleanup_worker", params: { name: "run-work-1" } },
+    });
+    expect(result.cleanupRecommendations[0]).not.toHaveProperty("sessionFile");
+    expect(summarizeRunWorkToolText(result)).toContain("Cleanup guidance");
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers).toHaveLength(1);
     expect(run.tasks).toHaveLength(1);
+  });
+
+  it("does not recommend cleanup for a reused single worker", async () => {
+    await createWorkerForRepo(repoDir, "stable-worker");
+
+    const result = await runWorkForRepo(
+      repoDir,
+      {
+        request: "Inspect README.md",
+        tasks: [{ title: "Inspect README", prompt: "Inspect README.md", workerName: "stable-worker" }],
+      },
+      undefined,
+      async (root, taskId) => {
+        const started = startTaskRunForRepo(root, { taskId });
+        recordTaskCompletionForRepo(root, {
+          taskId,
+          runId: started.run.runId,
+          status: "succeeded",
+          completionSummary: "inspection done",
+        });
+        return {
+          workerName: "stable-worker",
+          status: "success",
+          finalText: "done",
+          errorMessage: null,
+          sessionId: null,
+        };
+      },
+    );
+
+    expect(result.cleanupRecommendations).toEqual([]);
+    expect(summarizeRunWorkToolText(result)).not.toContain("Cleanup guidance");
   });
 
   it("passes normalized headless runtimeMode through default natural-language work runners", async () => {
@@ -1510,6 +1637,28 @@ describe("conductor service", () => {
       riskFlags: expect.arrayContaining(["overlapping_write_scope"]),
     });
     expect(result.tasks).toHaveLength(1);
+  });
+
+  it("does not recommend cleanup for planned objective work before dependent tasks run", async () => {
+    const result = await runWorkForRepo(repoDir, {
+      request: "Implement the feature, then verify it",
+      execute: false,
+      tasks: [
+        { title: "Implement feature", prompt: "Implement the feature in the package", writeScope: ["extensions/"] },
+        {
+          title: "Verify feature",
+          prompt: "Verify the feature after implementation",
+          writeScope: ["__tests__/"],
+          dependsOn: ["Implement feature"],
+        },
+      ],
+    });
+
+    expect(result.decision.mode).toBe("objective");
+    expect(result.cleanupRecommendations).toEqual([]);
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.tasks.map((task) => task.state)).toEqual(["ready", "ready"]);
+    expect(run.workers).toHaveLength(0);
   });
 
   it("plans dependent work as a headless objective instead of parallel fan-out", async () => {

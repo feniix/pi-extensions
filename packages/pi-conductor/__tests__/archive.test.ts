@@ -14,7 +14,7 @@ import {
   resolveGateFromTrustedHumanForRepo,
   startTaskRunForRepo,
 } from "../extensions/conductor.js";
-import { addConductorArtifact, writeRun } from "../extensions/storage.js";
+import { addConductorArtifact, completeTaskRun, writeRun } from "../extensions/storage.js";
 
 describe("conductor archived cleanup and trusted human gate path", () => {
   let repoDir: string;
@@ -51,11 +51,20 @@ describe("conductor archived cleanup and trusted human gate path", () => {
       resourceRefs: { workerId: worker.workerId, taskId: task.taskId, runId: started.run.runId },
       producer: { type: "test", id: "test" },
     });
+    run = completeTaskRun(run, {
+      runId: started.run.runId,
+      status: "succeeded",
+      completionSummary: "done",
+    });
     writeRun(run);
+    const latest = getOrCreateRunForRepo(repoDir);
     const gate = createGateForRepo(repoDir, {
       type: "destructive_cleanup",
       resourceRefs: { workerId: worker.workerId },
       requestedDecision: "Approve cleanup",
+      targetRevision:
+        latest.tasks.filter((entry) => entry.assignedWorkerId === worker.workerId).length +
+        latest.runs.filter((entry) => entry.workerId === worker.workerId).length,
     });
     resolveGateFromTrustedHumanForRepo(repoDir, {
       gateId: gate.gateId,
