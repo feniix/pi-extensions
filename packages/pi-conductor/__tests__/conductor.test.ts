@@ -1639,6 +1639,41 @@ describe("conductor service", () => {
     expect(result.tasks).toHaveLength(1);
   });
 
+  it("does not recommend cleanup for created objective workers while dependent tasks remain", async () => {
+    const result = await runWorkForRepo(
+      repoDir,
+      {
+        request: "Implement the feature, then verify it",
+        tasks: [
+          { title: "Implement feature", prompt: "Implement the feature in the package", writeScope: ["extensions/"] },
+          {
+            title: "Verify feature",
+            prompt: "Verify the feature after implementation",
+            writeScope: ["__tests__/"],
+            dependsOn: ["Implement feature"],
+          },
+        ],
+      },
+      undefined,
+      async (root, taskId) => {
+        const started = startTaskRunForRepo(root, { taskId });
+        recordTaskCompletionForRepo(root, {
+          taskId,
+          runId: started.run.runId,
+          status: "succeeded",
+          completionSummary: "first objective task done",
+        });
+        return { workerName: "objective", status: "success", finalText: "done", errorMessage: null, sessionId: null };
+      },
+    );
+
+    expect(result.decision.mode).toBe("objective");
+    expect(result.cleanupRecommendations).toEqual([]);
+    const run = getOrCreateRunForRepo(repoDir);
+    expect(run.tasks.map((task) => task.state)).toContain("ready");
+    expect(run.workers).toHaveLength(1);
+  });
+
   it("plans dependent work as a headless objective instead of parallel fan-out", async () => {
     const restorePath = forceTmuxAvailable();
     let result: Awaited<ReturnType<typeof runWorkForRepo>> | null = null;

@@ -1444,10 +1444,15 @@ export async function runWorkForRepo(
       throw error;
     }
     const scheduledWorkerIds = new Set(schedule?.assigned.map((task) => task.assignedWorkerId).filter(Boolean));
+    const latestAfterSchedule = getOrCreateRunForRepo(repoRoot);
     const resultWorkers =
       schedule && scheduledWorkerIds.size > 0
-        ? getOrCreateRunForRepo(repoRoot).workers.filter((worker) => scheduledWorkerIds.has(worker.workerId))
+        ? latestAfterSchedule.workers.filter((worker) => scheduledWorkerIds.has(worker.workerId))
         : workers;
+    const terminalTaskStates = new Set(["completed", "failed", "canceled"]);
+    const objectiveFinished = planned.tasks.every((task) =>
+      terminalTaskStates.has(latestAfterSchedule.tasks.find((entry) => entry.taskId === task.taskId)?.state ?? "draft"),
+    );
     return {
       decision,
       workers: resultWorkers,
@@ -1460,7 +1465,10 @@ export async function runWorkForRepo(
         repoRoot,
         planned.tasks.map((task) => task.taskId),
       ),
-      cleanupRecommendations: summarizeWorkerCleanupRecommendations(repoRoot, createdObjectiveWorkerIds),
+      cleanupRecommendations: summarizeWorkerCleanupRecommendations(
+        repoRoot,
+        objectiveFinished ? createdObjectiveWorkerIds : [],
+      ),
     };
   }
   const taskInput = decision.tasks[0];
