@@ -74,6 +74,7 @@ import {
 } from "./work-routing.js";
 import { isStatusOnlyWorkRequest, selectRuntimeModeForWork } from "./work-runtime-selection.js";
 import { type RunWorkRuntimeSummary, summarizeRunWorkRuntime } from "./work-runtime-summary.js";
+import { hasActiveWorkerCleanupReservation } from "./worker-cleanup.js";
 
 export { buildEvidenceBundleForRepo, checkReadinessForRepo } from "./evidence-service.js";
 export { createGateForRepo, resolveGateForRepo, resolveGateFromTrustedHumanForRepo } from "./gate-service.js";
@@ -2036,6 +2037,9 @@ export async function recoverWorkerForRepo(repoRoot: string, workerName: string)
   if (!worker) {
     throw new Error(`Worker named ${workerName} not found`);
   }
+  if (hasActiveWorkerCleanupReservation(run, worker.workerId)) {
+    throw new Error(`Worker ${worker.name} is reserved for destructive cleanup and cannot be recovered`);
+  }
   let worktreePath = worker.worktreePath;
   let runtime = null;
   try {
@@ -2068,6 +2072,9 @@ export async function recoverWorkerForRepo(repoRoot: string, workerName: string)
     throw error;
   }
   const updatedRun = mutateRepoRunSync(repoRoot, (latest) => {
+    if (hasActiveWorkerCleanupReservation(latest, worker.workerId)) {
+      throw new Error(`Worker ${worker.name} is reserved for destructive cleanup and cannot be recovered`);
+    }
     const workers = latest.workers.map((entry) =>
       entry.workerId === worker.workerId
         ? {

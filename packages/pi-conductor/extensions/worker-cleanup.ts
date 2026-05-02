@@ -3,7 +3,7 @@ import { assertWorkerCleanupReady } from "./cleanup-guidance.js";
 import { createGateForRepo } from "./gate-service.js";
 import { getOrCreateRunForRepo, mutateRepoRunSync } from "./repo-run.js";
 import { appendConductorEvent, markConductorGateUsed, removeWorker } from "./storage.js";
-import type { RunRecord, WorkerRecord } from "./types.js";
+import type { GateRecord, RunRecord, WorkerRecord } from "./types.js";
 import { removeManagedBranch, removeManagedWorktree } from "./worktrees.js";
 
 function errorMessage(error: unknown): string {
@@ -15,6 +15,39 @@ function workerCleanupGeneration(run: RunRecord, workerId: string): number {
     run.tasks.filter((task) => task.assignedWorkerId === workerId).length +
     run.runs.filter((entry) => entry.workerId === workerId).length
   );
+}
+
+function isApprovedUnusedCleanupGate(run: RunRecord, gate: GateRecord, workerId: string): boolean {
+  return (
+    gate.type === "destructive_cleanup" &&
+    gate.resourceRefs.workerId === workerId &&
+    gate.operation === "destructive_cleanup" &&
+    gate.status === "approved" &&
+    gate.usedAt === null &&
+    gate.targetRevision === workerCleanupGeneration(run, workerId)
+  );
+}
+
+function isWorkerCleanupReserved(run: RunRecord, worker: WorkerRecord, gate: GateRecord): boolean {
+  return worker.lifecycle === "broken" && worker.recoverable && isApprovedUnusedCleanupGate(run, gate, worker.workerId);
+}
+
+export function hasActiveWorkerCleanupReservation(run: RunRecord, workerId: string): boolean {
+  const worker = run.workers.find((entry) => entry.workerId === workerId);
+  if (!worker) return false;
+  return run.gates.some((gate) => isWorkerCleanupReserved(run, worker, gate));
+}
+
+function assertWorkerCleanupReadyOrReserved(
+  run: RunRecord,
+  workerId: string,
+  workerName: string,
+  gate: GateRecord,
+): WorkerRecord {
+  const worker = run.workers.find((entry) => entry.workerId === workerId);
+  if (!worker) throw new Error(`Worker named ${workerName} not found`);
+  if (isWorkerCleanupReserved(run, worker, gate)) return worker;
+  return assertWorkerCleanupReady(run, workerId, workerName);
 }
 
 function appendCleanupEvent(
@@ -75,9 +108,12 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
     if (!latestGate || latestGate.status !== "approved" || latestGate.usedAt !== null) {
       throw new Error(`Worker ${worker.name} requires a fresh destructive_cleanup gate before cleanup finalization`);
     }
-    const latestWorker = assertWorkerCleanupReady(latest, worker.workerId, worker.name);
     if (latestGate.targetRevision !== workerCleanupGeneration(latest, worker.workerId)) {
       throw new Error(`Worker ${worker.name} requires a fresh destructive_cleanup gate after worker activity changed`);
+    }
+    const latestWorker = assertWorkerCleanupReadyOrReserved(latest, worker.workerId, worker.name, latestGate);
+    if (isWorkerCleanupReserved(latest, latestWorker, latestGate)) {
+      return latest;
     }
     return {
       ...latest,
@@ -106,8 +142,8 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
             entry.workerId === worker.workerId
               ? {
                   ...entry,
-                  lifecycle: worker.lifecycle,
-                  recoverable: worker.recoverable,
+                  lifecycle: "broken" as const,
+                  recoverable: true,
                   updatedAt: new Date().toISOString(),
                 }
               : entry,
@@ -140,6 +176,9 @@ export function removeWorkerForRepo(repoRoot: string, workerName: string): Worke
     }
     const latestWorker = latest.workers.find((entry) => entry.workerId === worker.workerId);
     if (!latestWorker) throw new Error(`Worker named ${worker.name} not found`);
+    if (!isWorkerCleanupReserved(latest, latestWorker, latestGate)) {
+      throw new Error(`Worker ${worker.name} cleanup reservation changed before cleanup finalization`);
+    }
     return appendCleanupEvent(removeWorker(markConductorGateUsed(latest, cleanupGate.gateId), worker.workerId), {
       status: "succeeded",
       workerId: worker.workerId,
