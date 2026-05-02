@@ -422,7 +422,6 @@ describe("conductor service", () => {
         workerName: "worker|name\nnext",
         branch: "branch|name",
         worktreePath: "/tmp/path|with\nnewline",
-        sessionFile: "/tmp/session",
         cleanupToolCall: { name: "conductor_cleanup_worker", params: { name: "worker|name\nnext" } },
         gateType: "destructive_cleanup",
         note: "cleanup",
@@ -762,6 +761,7 @@ describe("conductor service", () => {
       workerName: "run-work-1",
       cleanupToolCall: { name: "conductor_cleanup_worker", params: { name: "run-work-1" } },
     });
+    expect(result.cleanupRecommendations[0]).not.toHaveProperty("sessionFile");
     expect(summarizeRunWorkToolText(result)).toContain("Cleanup guidance");
     const run = getOrCreateRunForRepo(repoDir);
     expect(run.workers).toHaveLength(1);

@@ -11,7 +11,6 @@ export type WorkerCleanupRecommendation = {
   workerName: string;
   branch: string | null;
   worktreePath: string | null;
-  sessionFile: string | null;
   cleanupToolCall: { name: "conductor_cleanup_worker"; params: { name: string } };
   gateType: "destructive_cleanup";
   note: string;
@@ -58,7 +57,6 @@ export function summarizeWorkerCleanupRecommendations(
       workerName: worker.name,
       branch: worker.branch,
       worktreePath: worker.worktreePath,
-      sessionFile: worker.sessionFile,
       cleanupToolCall: { name: "conductor_cleanup_worker", params: { name: worker.name } },
       gateType: "destructive_cleanup",
       note: CLEANUP_NOTE,
