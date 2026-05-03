@@ -29,7 +29,7 @@ Do not force an explicit deep-research request through a long planning loop. If 
 
 Build the workflow only from tools actually available in the current session.
 
-Local planning tools, enabled by default and safe to use without an Exa API key:
+Local planning tools, enabled by default when no explicit `enabledTools` allowlist is configured and safe to use without an Exa API key:
 
 - `exa_research_step` — record one planning step with criteria, sources, gaps, assumptions, and next action.
 - `exa_research_status` — inspect current planning state without mutating it.

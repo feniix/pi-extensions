@@ -177,6 +177,19 @@ describe("pi-exa extension", () => {
 
     expect(statusResult?.content[0].text).toContain("local planner");
     expect(statusResult?.details.tool).toBe("exa_research_status");
+
+    const summaryTool = getRegisteredTool(mockPi, "exa_research_summary");
+    const summaryResult = await summaryTool?.execute(
+      "call-summary",
+      { mode: "execution_plan" },
+      { aborted: false } as AbortSignal,
+      undefined,
+      undefined as never,
+    );
+
+    expect(summaryResult?.content[0].text).toContain("# Research Execution Plan");
+    expect(summaryResult?.details.tool).toBe("exa_research_summary");
+    expect(mockExaConstructor).not.toHaveBeenCalled();
   });
 
   it("honors enabledTools allowlists for research planning tools", () => {

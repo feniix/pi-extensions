@@ -118,9 +118,7 @@ function normalizeCriterion(input: ResearchCriterionInput, existing?: ResearchCr
 }
 
 function findSource(input: ResearchSourceInput): ResearchSource | undefined {
-  return state.sources.find(
-    (source) => source.id === input.id || (input.url && source.url === input.url) || source.title === input.title,
-  );
+  return state.sources.find((source) => source.id === input.id || (input.url && source.url === input.url));
 }
 
 function normalizeSource(input: ResearchSourceInput, existing?: ResearchSource): ResearchSource {
@@ -154,7 +152,7 @@ function normalizeGap(input: ResearchGapInput, existing?: ResearchGap): Research
 }
 
 function isExplicitToolEvidence(ref: string): boolean {
-  return /^tool[:#-]/i.test(ref) || /^web_[a-z_]+_exa[:#\s]/i.test(ref);
+  return /^tool:(web_[a-z_]+_exa|exa_research_[a-z_]+)[:#\s]+\S+/i.test(ref) || /^web_[a-z_]+_exa[:#\s]+\S+/i.test(ref);
 }
 
 function validateEvidence(): void {
@@ -234,6 +232,21 @@ function validateStepReferences(input: ResearchStepInput): string[] {
     );
   }
 
+  if (input.is_revision && input.revises_step === undefined) {
+    warnings.push("Revision steps require revises_step.");
+  }
+  if (!input.is_revision && input.revises_step !== undefined) {
+    warnings.push("revises_step requires is_revision true.");
+  }
+  if (input.is_revision && (input.branch_from_step !== undefined || input.branch_id !== undefined)) {
+    warnings.push("Revision steps cannot also define branch metadata.");
+  }
+  if (input.branch_from_step !== undefined && input.branch_id === undefined) {
+    warnings.push("branch_from_step requires branch_id.");
+  }
+  if (input.branch_id !== undefined && input.branch_from_step === undefined) {
+    warnings.push("branch_id requires branch_from_step.");
+  }
   if (input.is_revision && input.revises_step !== undefined && !knownSteps.has(input.revises_step)) {
     warnings.push(`Revision references unknown step ${input.revises_step}.`);
   }
@@ -327,9 +340,16 @@ export function recordResearchStep(input: ResearchStepInput): ResearchStepResult
   const warnings = validateStepReferences(input);
   const isTopicMismatch = Boolean(state.topic && state.topic !== input.topic);
   const isInvalidReference = warnings.some(
-    (warning) => warning.startsWith("Revision references unknown") || warning.startsWith("Branch references unknown"),
+    (warning) =>
+      warning.startsWith("Revision references unknown") ||
+      warning.startsWith("Branch references unknown") ||
+      warning === "Revision steps require revises_step." ||
+      warning === "revises_step requires is_revision true." ||
+      warning === "Revision steps cannot also define branch metadata." ||
+      warning === "branch_from_step requires branch_id." ||
+      warning === "branch_id requires branch_from_step.",
   );
-  const isInvalidSequence = warnings.some((warning) => warning.includes("step was not recorded"));
+  const isInvalidSequence = warnings.some((warning) => warning.toLowerCase().includes("step was not recorded"));
 
   if (isTopicMismatch) {
     warnings.push(
@@ -384,8 +404,6 @@ function snapshotSources(): ResearchSource[] {
 }
 
 export function getResearchStatus(): ResearchStatus {
-  validateEvidence();
-  validateSources();
   const openGaps = state.gaps.filter((gap) => gap.resolution !== "exclude");
   return {
     topic: state.topic,
@@ -393,9 +411,11 @@ export function getResearchStatus(): ResearchStatus {
     activeStage: state.steps.at(-1)?.stage,
     progress: currentProgress(),
     branches: [...state.branches.keys()],
-    revisions: state.steps
-      .filter((step) => step.is_revision && step.revises_step !== undefined)
-      .map((step) => ({ step: step.thought_number, revisesStep: step.revises_step as number })),
+    revisions: state.steps.flatMap((step) =>
+      step.is_revision && step.revises_step !== undefined
+        ? [{ step: step.thought_number, revisesStep: step.revises_step }]
+        : [],
+    ),
     criteriaCoverage: coverageSummary(),
     sourcePackSummary: sourceSummary(),
     criteria: snapshotCriteria(),

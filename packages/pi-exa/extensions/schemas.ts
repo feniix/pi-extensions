@@ -3,6 +3,18 @@
  */
 
 import { Type } from "typebox";
+import {
+  CRITERION_CATEGORIES,
+  CRITERION_STATUSES,
+  GAP_RESOLUTIONS,
+  GAP_SEVERITIES,
+  PRIORITIES,
+  RESEARCH_NEXT_ACTIONS,
+  RESEARCH_STAGES,
+  RETRIEVAL_STATUSES,
+  SOURCE_TYPES,
+  SUMMARY_MODES,
+} from "./research-planner-types.js";
 
 const outputSchemaType = Type.Union([Type.Literal("object"), Type.Literal("text")]);
 
@@ -23,82 +35,78 @@ const advancedSearchType = Type.Union([
 ]);
 
 const researchStage = Type.Union([
-  Type.Literal("framing"),
-  Type.Literal("criteria_discovery"),
-  Type.Literal("cheap_discovery"),
-  Type.Literal("source_retrieval"),
-  Type.Literal("coverage_analysis"),
-  Type.Literal("deep_research_plan"),
-  Type.Literal("synthesis_plan"),
-  Type.Literal("conclusion"),
+  Type.Literal(RESEARCH_STAGES[0]),
+  Type.Literal(RESEARCH_STAGES[1]),
+  Type.Literal(RESEARCH_STAGES[2]),
+  Type.Literal(RESEARCH_STAGES[3]),
+  Type.Literal(RESEARCH_STAGES[4]),
+  Type.Literal(RESEARCH_STAGES[5]),
+  Type.Literal(RESEARCH_STAGES[6]),
+  Type.Literal(RESEARCH_STAGES[7]),
 ]);
-
 const researchNextAction = Type.Union([
-  Type.Literal("ask_user"),
-  Type.Literal("web_search_exa"),
-  Type.Literal("web_search_advanced_exa"),
-  Type.Literal("web_fetch_exa"),
-  Type.Literal("web_find_similar_exa"),
-  Type.Literal("web_answer_exa"),
-  Type.Literal("web_research_exa"),
-  Type.Literal("draft_plan"),
-  Type.Literal("finalize"),
+  Type.Literal(RESEARCH_NEXT_ACTIONS[0]),
+  Type.Literal(RESEARCH_NEXT_ACTIONS[1]),
+  Type.Literal(RESEARCH_NEXT_ACTIONS[2]),
+  Type.Literal(RESEARCH_NEXT_ACTIONS[3]),
+  Type.Literal(RESEARCH_NEXT_ACTIONS[4]),
+  Type.Literal(RESEARCH_NEXT_ACTIONS[5]),
+  Type.Literal(RESEARCH_NEXT_ACTIONS[6]),
+  Type.Literal(RESEARCH_NEXT_ACTIONS[7]),
+  Type.Literal(RESEARCH_NEXT_ACTIONS[8]),
 ]);
-
 const criterionCategory = Type.Union([
-  Type.Literal("method"),
-  Type.Literal("metric"),
-  Type.Literal("source_class"),
-  Type.Literal("population"),
-  Type.Literal("market"),
-  Type.Literal("risk"),
-  Type.Literal("contrarian"),
-  Type.Literal("timeframe"),
-  Type.Literal("geography"),
-  Type.Literal("use_case"),
-  Type.Literal("other"),
+  Type.Literal(CRITERION_CATEGORIES[0]),
+  Type.Literal(CRITERION_CATEGORIES[1]),
+  Type.Literal(CRITERION_CATEGORIES[2]),
+  Type.Literal(CRITERION_CATEGORIES[3]),
+  Type.Literal(CRITERION_CATEGORIES[4]),
+  Type.Literal(CRITERION_CATEGORIES[5]),
+  Type.Literal(CRITERION_CATEGORIES[6]),
+  Type.Literal(CRITERION_CATEGORIES[7]),
+  Type.Literal(CRITERION_CATEGORIES[8]),
+  Type.Literal(CRITERION_CATEGORIES[9]),
+  Type.Literal(CRITERION_CATEGORIES[10]),
 ]);
-
-const priority = Type.Union([Type.Literal("high"), Type.Literal("medium"), Type.Literal("low")]);
-
+const priority = Type.Union([Type.Literal(PRIORITIES[0]), Type.Literal(PRIORITIES[1]), Type.Literal(PRIORITIES[2])]);
 const criterionStatus = Type.Union([
-  Type.Literal("proposed"),
-  Type.Literal("searched"),
-  Type.Literal("supported"),
-  Type.Literal("conflicting"),
-  Type.Literal("missing"),
-  Type.Literal("excluded"),
+  Type.Literal(CRITERION_STATUSES[0]),
+  Type.Literal(CRITERION_STATUSES[1]),
+  Type.Literal(CRITERION_STATUSES[2]),
+  Type.Literal(CRITERION_STATUSES[3]),
+  Type.Literal(CRITERION_STATUSES[4]),
+  Type.Literal(CRITERION_STATUSES[5]),
 ]);
-
 const sourceType = Type.Union([
-  Type.Literal("paper"),
-  Type.Literal("white_paper"),
-  Type.Literal("pdf"),
-  Type.Literal("official_doc"),
-  Type.Literal("filing"),
-  Type.Literal("news"),
-  Type.Literal("blog"),
-  Type.Literal("github"),
-  Type.Literal("forum"),
-  Type.Literal("analyst_report"),
-  Type.Literal("other"),
+  Type.Literal(SOURCE_TYPES[0]),
+  Type.Literal(SOURCE_TYPES[1]),
+  Type.Literal(SOURCE_TYPES[2]),
+  Type.Literal(SOURCE_TYPES[3]),
+  Type.Literal(SOURCE_TYPES[4]),
+  Type.Literal(SOURCE_TYPES[5]),
+  Type.Literal(SOURCE_TYPES[6]),
+  Type.Literal(SOURCE_TYPES[7]),
+  Type.Literal(SOURCE_TYPES[8]),
+  Type.Literal(SOURCE_TYPES[9]),
+  Type.Literal(SOURCE_TYPES[10]),
 ]);
-
 const retrievalStatus = Type.Union([
-  Type.Literal("discovered_only"),
-  Type.Literal("fetched"),
-  Type.Literal("fetch_failed"),
-  Type.Literal("unavailable"),
+  Type.Literal(RETRIEVAL_STATUSES[0]),
+  Type.Literal(RETRIEVAL_STATUSES[1]),
+  Type.Literal(RETRIEVAL_STATUSES[2]),
+  Type.Literal(RETRIEVAL_STATUSES[3]),
 ]);
-
-const gapSeverity = Type.Union([Type.Literal("blocking"), Type.Literal("important"), Type.Literal("minor")]);
-
+const gapSeverity = Type.Union([
+  Type.Literal(GAP_SEVERITIES[0]),
+  Type.Literal(GAP_SEVERITIES[1]),
+  Type.Literal(GAP_SEVERITIES[2]),
+]);
 const gapResolution = Type.Union([
-  Type.Literal("ask_user"),
-  Type.Literal("search_more"),
-  Type.Literal("fetch_source"),
-  Type.Literal("carry_assumption"),
-  Type.Literal("exclude"),
+  Type.Literal(GAP_RESOLUTIONS[0]),
+  Type.Literal(GAP_RESOLUTIONS[1]),
+  Type.Literal(GAP_RESOLUTIONS[2]),
+  Type.Literal(GAP_RESOLUTIONS[3]),
+  Type.Literal(GAP_RESOLUTIONS[4]),
 ]);
 
 const researchCriterion = Type.Object(
@@ -275,10 +283,10 @@ export const exaResearchSummaryParams = Type.Object(
   {
     mode: Type.Optional(
       Type.Union([
-        Type.Literal("brief"),
-        Type.Literal("execution_plan"),
-        Type.Literal("source_pack"),
-        Type.Literal("payload"),
+        Type.Literal(SUMMARY_MODES[0]),
+        Type.Literal(SUMMARY_MODES[1]),
+        Type.Literal(SUMMARY_MODES[2]),
+        Type.Literal(SUMMARY_MODES[3]),
       ]),
     ),
   },

@@ -28,6 +28,8 @@ pi -e npm:@feniix/pi-exa
 
 You need an Exa API key from [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) for retrieval tools. The local `exa_research_*` planning tools work without an API key because they do not call Exa network APIs.
 
+If you configure `enabledTools`, it acts as a strict allowlist. Include the `exa_research_*` names if you want the planner tools available with an explicit allowlist.
+
 ### Recommended: environment variable
 
 ```bash
@@ -177,6 +179,6 @@ PI_EXA_LIVE=1 EXA_API_KEY=your-key npx vitest run packages/pi-exa/__tests__/inte
 
 ## Notes
 
-- `exa_research_*` planning tools are enabled by default, local-only, and do not require an Exa API key.
+- `exa_research_*` planning tools are enabled by default when no explicit `enabledTools` allowlist is configured, local-only, and do not require an Exa API key.
 - `web_search_advanced_exa` and `web_research_exa` are opt-in and disabled by default.
 - Research/tool output may include both `text` and `details.parsedOutput` depending on `outputSchema.type`.
