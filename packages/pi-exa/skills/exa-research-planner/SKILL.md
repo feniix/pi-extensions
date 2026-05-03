@@ -1,308 +1,291 @@
 ---
 name: exa-research-planner
-description: Plan and refine Exa research workflows before expensive execution. Use whenever the user wants to scope or sharpen a research task, compare options, explore a market or technical landscape, gather sources cheaply before deep synthesis, iterate on search criteria, or decide whether deep research is even necessary. Make sure to use this skill when the user is asking for staged, cost-aware research planning rather than an immediate final answer, even if they do not mention Exa or specific Exa tools explicitly.
+description: Plan, draft, and execute Exa deep-research workflows. Use when the user wants staged research planning, cost-aware discovery before deep synthesis, or an explicit deep-research report. Also use when the user asks to refine a research question, compare options, explore a market or technical landscape, gather sources cheaply before synthesis, or decide whether deep research is necessary.
 context: fork
 ---
 
 # Exa Research Planner
 
-Use this skill when the user wants to **design a strong research workflow before running expensive deep research**.
+Use this skill to turn a vague or broad research request into a high-quality Exa research workflow, then optionally execute `web_research_exa` when the user clearly wants deep synthesis.
 
-This skill is for a **plan-first, optionally-discover, execute-last** workflow.
+This skill has two jobs:
 
-The goal is not merely to run Exa tools. The goal is to help the user arrive at a better research brief, better sources, and better escalation decisions with less cost and less wasted deep-search work.
+1. **Research planning** — sharpen the question, decide whether cheap discovery is useful, and draft a strong deep-research payload.
+2. **Explicit deep-research execution** — when the user directly asks for deep research or approves a draft, run `web_research_exa` and return a source-grounded synthesis.
 
-## Core Rules
+## Operating Modes
 
-Start by checking which Exa tools are actually available in the current session. Build the workflow only from tools that exist.
+Choose the mode from the user's request.
 
-The point of this skill is to reduce wasted work. Prefer the lightest step that is likely to improve the brief or answer a key uncertainty.
+| Mode | Use When | Behavior |
+|---|---|---|
+| **Plan-only** | User asks to design/refine a research prompt, scope a landscape, or reduce cost | Clarify, optionally do cheap discovery, draft a payload, and ask before execution. |
+| **Recon-first** | Topic is broad, terminology is unclear, or trusted sources are unknown | Run cheap discovery with available search/fetch tools, then refine the deep-research spec. |
+| **Explicit deep-research execution** | User says “do deep research,” “run deep research,” “deeply research,” or equivalent | Clarify only missing essentials, then run `web_research_exa` if available. A direct user request to run deep research counts as approval. |
 
-Treat tool availability in two groups:
-- **Common default tools**: `web_search_exa`, `web_fetch_exa`, `web_answer_exa`, and `web_find_similar_exa` are usually available by default, unless the session uses an explicit `enabledTools` allowlist
-- **Opt-in tools**: `web_search_advanced_exa` and `web_research_exa` are commonly unavailable unless explicitly enabled
+Do not force an explicit deep-research request through a long planning loop. If the user has already asked to run deep research and the brief is usable, execute the deep research rather than asking for another confirmation.
 
-Warn clearly when a relevant tool is unavailable:
-- if `web_research_exa` is unavailable, say that deep synthesis cannot be executed in this session and fall back to planning plus cheaper discovery
-- if `web_search_advanced_exa` is unavailable, say that advanced filtering by category, domain, or date is unavailable and fall back to `web_search_exa` plus more selective query wording and fetches
-- if one of the common default tools is missing, mention it as an unusual constraint and adapt gracefully without overemphasizing it
-- only offer `web_find_similar_exa` or `web_answer_exa` when they are both available and clearly useful
+## Tool Availability Rules
 
-Do **not** call `web_research_exa` immediately unless the user clearly asks to skip planning and run it now.
+Build the workflow only from tools actually available in the current session.
 
-Prefer a staged workflow:
-1. clarify the research goal
-2. identify scope, evaluation criteria, and source preferences
-3. decide whether to do cheap discovery first
-4. if useful, run one or more rounds of cheap discovery with the available tools
-5. optionally offer `web_find_similar_exa` or `web_answer_exa` only when they clearly fit the current stage and are available
-6. summarize what was learned and refine the research brief
-7. draft a proposed `web_research_exa` payload only if deep synthesis is still needed and the tool is available, or draft it for later use if unavailable
-8. ask for confirmation before any expensive deep-research execution
+Common default tools:
 
-Cheap discovery can happen in **multiple rounds**. Use iterative low-cost searches to improve terminology, source selection, filters, and query shape before escalating.
+- `web_search_exa`
+- `web_fetch_exa`
+- `web_answer_exa`
+- `web_find_similar_exa`
 
-The important idea is that each round should teach you something: better search language, better domains, better criteria, or evidence that deep research is unnecessary.
+Opt-in tools:
 
-Only run `web_research_exa` after the user explicitly confirms they want to execute the polished draft, unless they have already made that preference unambiguous.
+- `web_search_advanced_exa`
+- `web_research_exa`
 
-## When to Use This Skill
+Warn clearly when an important tool is unavailable:
 
-Use it when the user asks for help with:
-- drafting a research query
-- refining a comparison or evaluation prompt
-- planning a market scan or landscape review
-- doing low-cost reconnaissance before deep research
-- defining source preferences or exclusions
-- setting time bounds for fast-moving topics
-- choosing between prose vs structured output
-- iterating on search criteria before running research
+- If `web_research_exa` is unavailable, say deep synthesis cannot be executed in this session. Fall back to cheap discovery and a polished draft payload for later use.
+- If `web_search_advanced_exa` is unavailable, say advanced filters are unavailable and fall back to `web_search_exa` with better query wording.
+- If a common default tool is missing, mention it briefly and adapt without dwelling on it.
 
-## Workflow
+Never suggest unavailable tools as if they can be used.
 
-### Phase 1: Clarify the goal
+## Fast Path: Explicit Deep Research
 
-Ask enough questions to produce a high-quality search brief.
+When the user explicitly asks for deep research:
 
-Useful dimensions to clarify:
-- **topic**: what is being researched?
-- **decision**: what decision should the research support?
-- **task type**: comparison, recommendation, scan, due diligence, summary, evaluation
-- **criteria**: what factors matter most?
-- **source preference**: official docs, maintainers, GitHub, academic sources, news, practitioner blogs
-- **time horizon**: current snapshot, last 12 months, historical context
-- **filters**: include or exclude domains
-- **output shape**: narrative report or structured object
-- **depth vs speed**: prefer `deep-reasoning`, `deep`, or `deep-lite`
-- **cost sensitivity**: should we minimize cost and do reconnaissance first?
+1. Check that `web_research_exa` is available.
+2. If the request is usable, draft the payload internally and run it.
+3. Ask at most one clarifying question only if a missing constraint would materially change the result, such as:
+   - the target decision,
+   - source type preference,
+   - timeframe,
+   - comparison criteria,
+   - output format.
+4. Use `deep-reasoning` by default for careful synthesis; use `deep-lite` for exploratory or cost-sensitive requests; use `deep` when speed matters more than maximum reasoning depth.
+5. Return a concise report with sources, uncertainty, and practical next steps.
 
-If the user already gave enough detail, do not over-question. Move quickly to drafting a plan.
+A direct user request to run deep research counts as approval. Do not ask “should I run it?” again unless the request is dangerously ambiguous or the tool may incur unexpected scope/cost.
 
-A good default is to ask only the smallest set of questions that will meaningfully improve the plan. Avoid turning the interaction into an intake form when the user already gave a usable brief.
+## Cost-Aware Planning Workflow
 
-### Phase 2: Choose a cost-aware plan
+Use this staged flow when the user has not clearly asked to run deep research yet, or when the topic would benefit from reconnaissance.
 
-Decide between:
-- **draft-only**: refine the brief without running tools yet
-- **cheap discovery**: use lower-cost search/fetch tools to learn before drafting deep research
-- **deep synthesis**: draft `web_research_exa` only after enough reconnaissance or when the user clearly wants it
+### Phase 1: Clarify the Goal
+
+Ask the smallest number of questions that will meaningfully improve the research. Useful dimensions:
+
+- **Topic:** what is being researched?
+- **Decision:** what decision should the research support?
+- **Task type:** comparison, recommendation, scan, diligence, summary, evaluation.
+- **Criteria:** what factors matter most?
+- **Sources:** official docs, filings, GitHub, academic papers, news, practitioner blogs, company pages.
+- **Time horizon:** current snapshot, last 12 months, historical context.
+- **Filters:** domains to include or exclude.
+- **Output shape:** narrative report or structured object.
+- **Depth/speed/cost:** `deep-reasoning`, `deep`, or `deep-lite`.
+
+If the user already gave enough detail, move directly to a plan or execution.
+
+### Phase 2: Choose the Cheapest Useful Next Step
+
+Choose one:
+
+- **Draft-only:** refine the brief and proposed `web_research_exa` payload without running tools.
+- **Cheap discovery:** use search/fetch tools to learn terminology, candidate sources, and filters.
+- **Deep synthesis:** run or prepare `web_research_exa` when cheaper steps are unnecessary or already done.
 
 Prefer cheap discovery first when:
-- the topic is broad or ambiguous
-- the best terminology is unclear
-- trusted domains are not yet known
-- the user wants to reduce cost
-- you need candidate sources before committing to deep synthesis
 
-Adapt the plan to the available tools.
-For example:
-- without `web_search_advanced_exa`, prefer extra rounds of `web_search_exa` and better query wording instead of filtered search
-- without `web_research_exa`, stop at planning, cheap discovery, and draft preparation rather than pretending execution is possible
-- if a normally available default tool is missing, mention it briefly and choose the nearest workable fallback
+- the topic is broad or ambiguous,
+- trusted domains are unknown,
+- terminology is unclear,
+- the user wants to minimize cost,
+- you need candidate sources before committing to synthesis.
 
-When proposing a plan, explain *why this next step is the cheapest useful move*. That explanation helps the user trust the workflow and makes it easier to decide whether to continue iterating.
+Explain why the proposed next step is the cheapest useful move.
 
-### Phase 3: Run cheap discovery in one or more rounds when useful
+### Phase 3: Run Cheap Discovery When It Earns Its Keep
 
-Cheap discovery may use the available tools:
-- `web_search_exa` for broad discovery and terminology gathering
-- `web_search_advanced_exa` for category, domain, or date-constrained discovery when available
-- `web_fetch_exa` for inspecting a small number of promising URLs when available
-- `web_find_similar_exa` only when a clearly high-quality seed URL has already been identified and the tool is available
-- `web_answer_exa` only when a quick grounded answer might resolve the question cheaply or test whether deep research is even needed, and the tool is available
+Use available tools selectively:
 
-If `web_search_advanced_exa` is unavailable, say so and continue with `web_search_exa`-driven discovery rather than presenting advanced filtering as an option.
+| Goal | Preferred Tool | Notes |
+|---|---|---|
+| Broad discovery and vocabulary | `web_search_exa` | Best first pass for reconnaissance. |
+| Domain/category/date constrained discovery | `web_search_advanced_exa` | Use when available and constraints are known. |
+| Inspect a few strong URLs | `web_fetch_exa` | Fetch 1-3 high-signal pages. |
+| Expand from one strong seed URL | `web_find_similar_exa` | Use only with a clearly representative source. |
+| Resolve a narrow sub-question cheaply | `web_answer_exa` | Use when it may avoid deeper research. |
 
-Multiple rounds are allowed and encouraged when they improve the final brief, but each round should have a purpose. Do not keep searching just because searching is possible.
+Each discovery round must have a purpose. After each round, summarize what changed:
 
-Examples of iterative cheap discovery:
-- round 1: broad search to find key vocabulary, vendors, or frameworks
-- round 2: narrowed search using the vocabulary from round 1
-- round 3: advanced search with filters for trusted domains, categories, or dates
-- selective fetches: inspect 1-3 strong sources to validate assumptions and refine criteria
-- similar-source expansion: use `web_find_similar_exa` from a strong seed page when adjacent sources are likely to be useful
-- cheap answer check: use `web_answer_exa` when a concise grounded answer may settle a sub-question without deep synthesis
+- better terminology,
+- stronger candidate sources,
+- trusted domains to include,
+- low-signal domains to exclude,
+- whether deep research still appears necessary.
 
-After each round, summarize what changed:
-- better terminology
-- clearer evaluation criteria
-- trusted domains to include
-- low-signal domains to exclude
-- whether deep research still appears necessary
+## Iterative Discovery and Clarification Loop
 
-Before starting another round, explain why it is useful.
-Before escalating to `web_research_exa`, summarize what the cheap rounds already established.
+Run multiple cheap discovery rounds when each round changes the plan. The planner should behave like an active research lead: discover criteria, search for evidence, revise the coverage map, and only then draft or execute deep synthesis.
 
-### Phase 4: Draft the deep research spec only if needed
+Use this loop for broad, ambiguous, or high-stakes research:
 
-Produce a proposed `web_research_exa` call with these fields when relevant:
+1. **Seed criteria:** infer initial search dimensions from the user's topic.
+2. **Round 1 broad discovery:** identify vocabulary, source classes, named entities, and candidate criteria the user did not mention.
+3. **Revise criteria:** add, remove, or reprioritize search criteria based on what the first round revealed.
+4. **Round 2 targeted discovery:** search the strongest criteria, domains, papers, vendors, methods, or contrarian evidence.
+5. **Fetch representative sources:** use `web_fetch_exa` for the strongest URLs when source contents matter.
+6. **Gap check:** identify missing evidence, conflicting evidence, or decisions that require user input.
+7. **Clarify or continue:** Ask the user one focused clarification question if the gap changes the research objective, scope, or evaluation criteria. Otherwise run another cheap discovery round or draft the deep-research payload.
+8. **Stop condition:** stop iterating when a new round is unlikely to change query wording, source filters, criteria, or the final synthesis.
+
+Ask the user one focused clarification question when discovery reveals a materially different interpretation of the request. Good clarification triggers include:
+
+- the topic has multiple domains with different source strategies,
+- discovery finds several incompatible evaluation frames,
+- the answer depends on a timeframe or geography the user did not specify,
+- source classes conflict, such as vendor white papers versus peer-reviewed papers,
+- the research could optimize for different outcomes, such as accuracy, deployability, cost, safety, or market adoption.
+
+Do not ask for clarification just because more detail would be nice. If the missing detail can be handled as an assumption, state the assumption and continue.
+
+## White Papers and Source Retrieval
+
+When white papers, academic papers, technical reports, standards documents, filings, or PDFs are important source classes, the research plan must include source retrieval, not just synthesis.
+
+Requirements:
+
+- Use discovery to find the paper landing pages or PDF URLs.
+- Use `web_fetch_exa` on the strongest paper URLs when available, especially before relying on claims from abstracts, snippets, or secondary summaries.
+- In the final report, return the actual paper URLs alongside the synthesized findings.
+- Distinguish paper types: vendor white paper, academic paper, standards document, government report, analyst report, or marketing collateral.
+- Call out when the full paper could not be fetched and the synthesis relies only on metadata, snippets, abstracts, or secondary discussion.
+
+For paper-heavy research, include a **Source Pack** section in the output:
+
+| Source | Type | URL | Used For | Retrieval Status |
+|---|---|---|---|---|
+| Paper title | academic paper / white paper / PDF | direct URL | evidence area | fetched / discovered only / unavailable |
+
+If the user asks for white papers as sources, treat the actual papers as deliverables. Do not only cite them indirectly through the deep synthesis.
+
+### Paper Content Synthesis Rule
+
+Do not rely only on `web_research_exa` synthesis when paper sources are part of the evidence base. Use fetched paper contents as first-class evidence in the final answer.
+
+Required workflow for paper-heavy research:
+
+1. Run discovery/deep research to identify candidate papers and reports.
+2. Select the strongest papers that materially support or challenge the answer.
+3. Fetch the paper contents with `web_fetch_exa` when available.
+4. Read the fetched contents for methods, claims, data, limitations, and conclusions.
+5. Synthesize across both:
+   - the `web_research_exa` synthesized output, and
+   - the fetched paper contents you directly inspected.
+6. If fetched paper contents disagree with the deep-research synthesis, prefer the directly inspected paper text and call out the discrepancy.
+7. If a paper cannot be fetched, mark it as `discovered only` and do not treat it as equally strong evidence.
+
+In the final report, explicitly identify which findings came from directly fetched paper contents versus broader Exa synthesis. This is especially important for vendor white papers and analyst reports, where summaries may inherit marketing framing.
+
+### Phase 4: Draft the Deep Research Plan
+
+Show the user the research plan in human-consumable form first. Do not lead with raw JSON.
+
+#### Human-Readable Drafts First
+
+When presenting a draft to the user, lead with a readable research plan that explains what will be studied, why those criteria matter, which sources will be prioritized, and what the output will contain. Raw tool payloads are implementation details; include them only after the human-readable plan, in a collapsed/optional section, or when the user specifically asks for the exact JSON.
+
+A user-facing draft should include:
+
+- **Research objective:** one sentence describing the decision or question.
+- **Coverage areas:** the criteria the research will cover.
+- **Discovery rounds:** what cheap searches or fetches will happen before deep synthesis.
+- **Source strategy:** source classes, trusted domains, source retrieval requirements, and exclusions.
+- **Paper/source pack plan:** when papers, white papers, reports, PDFs, or standards are deliverables.
+- **Expected output:** report shape, comparison table, recommendation, source pack, or structured data.
+- **Assumptions:** what the planner will assume unless the user corrects it.
+- **Open clarification:** at most one focused question if needed.
+
+The internal `web_research_exa` payload still matters, but it should be derived from the readable plan. If shown, label it as **Implementation payload** after the readable plan.
+
+Produce a proposed `web_research_exa` call when useful. Include relevant fields:
+
 - `query`
 - `type`
 - `systemPrompt`
 - `additionalQueries`
 - `numResults`
+- `textMaxCharacters`
 - `includeDomains`
 - `excludeDomains`
 - `startPublishedDate`
 - `endPublishedDate`
 - `outputSchema`
 
-Always make the `query` a **clear research objective**, not just keywords.
-Use what was learned from cheap discovery to sharpen the draft.
-
-### Phase 5: Review the draft with the user
-
-Present:
-1. a short plain-English summary of the research plan
-2. what the cheap discovery rounds found, if any
-3. the proposed JSON payload
-4. a small set of suggested refinements
-
-Then ask for confirmation, for example:
-- `Want me to run this as-is?`
-- `Should I do one more cheap discovery pass first?`
-- `Should I narrow the source set or timeframe first?`
-- `Do you want text output or a structured result?`
-
-If the user appears unsure, give a recommendation rather than only asking open-ended questions. For example: `I think one more cheap pass on official docs and pricing pages will improve the final deep-research prompt. Want me to do that first?`
-
-If `web_research_exa` is unavailable, replace the execution question with a planning-oriented one such as: `I can prepare this as a polished draft and keep exploring cheaply, but I can't run deep synthesis in this session. Want me to refine the draft further or continue discovery?`
-
-### Phase 6: Execute only after approval
-
-Only once the user explicitly confirms, call `web_research_exa` with the approved draft.
-
-## Cost-Aware Tool Strategy
-
-Use the cheapest available tool that can move the work forward.
-
-| Goal | Preferred Tool | Notes |
-|---|---|---|
-| Broad discovery, vocabulary, candidate sources | `web_search_exa` | Best first pass for cheap reconnaissance; normally available by default |
-| Filter by domain, category, or dates | `web_search_advanced_exa` | Use after a broad pass or when constraints are already known; warn and fall back if unavailable |
-| Inspect a few known URLs | `web_fetch_exa` | Use selectively on 1-3 promising results; normally available by default |
-| Expand from a strong seed URL | `web_find_similar_exa` | Offer only when a clearly high-signal source has already been found and the tool is available; normally available by default |
-| Cheap grounded answer or sub-question check | `web_answer_exa` | Offer only when a concise cited answer may avoid deeper research and the tool is available; normally available by default |
-| Deep synthesis and recommendations | `web_research_exa` | Use only when cheaper rounds are not enough; warn and stop at draft preparation if unavailable |
-
-When the user wants to minimize cost, prefer multiple rounds of `web_search_exa` / `web_search_advanced_exa` before escalating.
-Do not suggest `web_find_similar_exa` or `web_answer_exa` by default; offer them only when they clearly fit the current stage of the workflow.
-Focus warnings primarily on opt-in tools that are commonly missing, especially `web_search_advanced_exa` and `web_research_exa`.
-Do not suggest unavailable tools as if they can be used.
-
-## Drafting Guidance
-
-### Query writing
-
-Write the query as a research objective with evaluation dimensions.
+Make `query` a clear research objective, not keywords.
 
 Good:
-- `Compare TypeScript runtime validation libraries for backend APIs, focusing on ergonomics, performance, ecosystem adoption, and schema reuse.`
-- `Evaluate MCP tooling options for local agent development, including extensibility, documentation quality, stability, and production readiness.`
-- `Assess current open-source vector databases suitable for small production deployments, emphasizing operational simplicity, maturity, and cost.`
+
+```json
+{
+  "query": "Compare TypeScript runtime validation libraries for backend APIs, focusing on ergonomics, performance, ecosystem adoption, and schema reuse."
+}
+```
 
 Avoid:
-- `typescript validation libraries`
-- `mcp tools`
-- `vector dbs`
-
-### Choosing search type
-
-Default guidance:
-- `deep-reasoning`: best for comparisons, recommendations, and careful trade-off analysis
-- `deep`: best when faster turnaround is more important than maximum reasoning depth
-- `deep-lite`: best for lighter exploratory passes or early iteration
-
-When unsure, draft with:
 
 ```json
 {
-  "type": "deep-reasoning"
+  "query": "typescript validation libraries"
 }
 ```
 
-### System prompt guidance
+### Phase 5: Execute or Hand Back the Draft
+
+- In **Plan-only** and **Recon-first** modes, ask for confirmation before execution.
+- In **Explicit deep-research execution** mode, execute once the brief is usable because the user already approved deep research by asking for it.
+- If `web_research_exa` is unavailable, present the payload as a polished draft for later execution and offer cheap discovery instead.
+
+## Deep Research Defaults
+
+### Search Type
+
+- `deep-reasoning`: default for comparisons, recommendations, careful trade-off analysis, market scans, and due diligence.
+- `deep`: use when faster turnaround matters more than maximum reasoning depth.
+- `deep-lite`: use for exploratory passes, lower-cost iteration, or when the user asks for a lighter scan.
+
+### System Prompt
 
 Use `systemPrompt` to specify:
-- source quality preferences
-- evaluation lens
-- how to handle disagreement or uncertainty
-- what kinds of evidence to prioritize
 
-Good patterns:
-- `Prefer official docs, maintainer-authored sources, and reputable engineering writeups.`
-- `Focus on trade-offs, maturity, operational complexity, and production suitability.`
-- `Call out uncertainty, conflicting evidence, and missing data.`
-- `Prefer recent sources for fast-moving topics.`
+- source quality preferences,
+- evidence standards,
+- evaluation criteria,
+- how to handle disagreement,
+- recency requirements,
+- what to avoid.
 
-### Additional queries
-
-Use `additionalQueries` when alternate phrasing will improve coverage.
-
-Good uses:
-- synonyms
-- competitor names
-- alternate terminology
-- explicit comparison variants
-
-Keep `additionalQueries` short and high-signal. The current `web_research_exa` schema allows **at most 5 items**, so prefer the best alternate phrasings rather than exhaustive coverage.
-
-Do not exceed 5 entries in `additionalQueries`. If you have more candidates, keep the strongest 3–5 and fold the rest into the main `query` or `systemPrompt`.
-
-Example:
+Good pattern:
 
 ```json
 {
-  "additionalQueries": [
-    "TypeScript runtime schema validation comparison",
-    "Zod vs Valibot vs TypeBox backend API",
-    "best validation library for Node.js APIs"
-  ]
+  "systemPrompt": "Prefer official docs, maintainer-authored sources, reputable technical writeups, and recent primary sources. Focus on trade-offs, quality of evidence, and practical recommendations. Call out uncertainty and conflicting evidence."
 }
 ```
 
-### Domain filters
+### Additional Queries
 
-Use filters to improve signal.
+Use `additionalQueries` for alternate terminology, competitor names, synonyms, and comparison variants.
 
-- `includeDomains` for official or trusted sources
-- `excludeDomains` for low-signal content
+Rules:
 
-Examples:
+- Maximum 5 entries.
+- Prefer the strongest 3-5, not exhaustive lists.
+- Fold extra variants into `query` or `systemPrompt`.
 
-```json
-{
-  "includeDomains": ["github.com", "npmjs.com", "zod.dev"]
-}
-```
+### Output Schema
 
-```json
-{
-  "excludeDomains": ["medium.com"]
-}
-```
-
-### Date filters
-
-Use `startPublishedDate` / `endPublishedDate` for time-sensitive topics:
-- AI tooling
-- framework changes
-- product or vendor comparisons
-- recent market developments
-
-Example:
-
-```json
-{
-  "startPublishedDate": "2025-01-01"
-}
-```
-
-### Output shape
-
-Default to text unless the user clearly wants structured output.
-
-Use:
+Default to text:
 
 ```json
 {
@@ -310,25 +293,15 @@ Use:
 }
 ```
 
-Prefer text output unless the user clearly benefits from structured downstream consumption, because structured schemas are easier to make invalid and require more careful drafting.
+Use structured output only when downstream processing or comparison clearly benefits. Keep schemas shallow.
 
-Use structured output only when it will clearly help comparison or downstream use.
-Keep schemas simple and shallow.
-Do not manually add citation or confidence fields.
-
-If `outputSchema` contains array fields, each array must include an explicit `items` definition. For simple lists, use `"items": { "type": "string" }`.
-
-Example:
+If `outputSchema` contains arrays, every array must include `items`:
 
 ```json
 {
   "outputSchema": {
     "type": "object",
     "properties": {
-      "options": {
-        "type": "array",
-        "items": { "type": "string" }
-      },
       "recommendation": { "type": "string" },
       "risks": {
         "type": "array",
@@ -339,124 +312,83 @@ Example:
 }
 ```
 
-### Tool schema pitfalls
+Do not manually add citation or confidence fields unless the user specifically needs them; Exa grounding already provides citation context.
 
-When drafting `web_research_exa` payloads:
-- `additionalQueries` may contain **at most 5 entries**
-- any array in `outputSchema` must define `items`
-- if you do not need structured output, prefer `{ "type": "text" }` to reduce schema errors
-
-## Default Draft Template
-
-Use this as a starting point when the user asks for help building a deep research query:
+## Default Payload Template
 
 ```json
 {
-  "query": "<clear research objective>",
+  "query": "<clear research objective with evaluation criteria>",
   "type": "deep-reasoning",
-  "systemPrompt": "Prefer official docs, maintainers, and reputable sources. Focus on trade-offs, quality of evidence, and practical recommendations.",
+  "systemPrompt": "Prefer primary sources, official docs, reputable reporting, and expert writeups. Focus on trade-offs, quality of evidence, practical recommendations, uncertainty, and conflicting evidence.",
   "additionalQueries": [],
   "numResults": 10,
   "outputSchema": { "type": "text" }
 }
 ```
 
-## Response Pattern
+## Report Format After Running Deep Research
 
-When using this skill, structure your response like this:
+Return:
 
-### 1. Research plan
-A short explanation of what the overall workflow is trying to answer.
+1. **Executive summary** — 3-6 bullets.
+2. **Findings** — grouped by the user's criteria.
+3. **Evidence and sources** — cite URLs inline or under each finding.
+4. **Uncertainty / conflicts** — what the sources do not settle.
+5. **Recommendation or next steps** — if the request implies a decision.
 
-### 2. Proposed next step
-Show the cheapest useful next step using only available tools:
-- a draft-only refinement
-- a cheap discovery query
-- a filtered advanced search when `web_search_advanced_exa` is available
-- a selective fetch when `web_fetch_exa` is available
-- optionally a similar-source expansion when a strong seed URL exists and `web_find_similar_exa` is available
-- optionally a cheap grounded answer when it may resolve a narrow question and `web_answer_exa` is available
-- or a deep-research draft if the work is already mature enough
+Keep the report concise unless the user asked for a long-form research memo.
 
-### 3. Why this step makes sense now
-Explain what uncertainty this step will reduce or what evidence it should gather.
-If a stronger opt-in tool is unavailable, explain the fallback and its limitation in one or two sentences.
-If a normally available default tool is missing, note it briefly as an unusual constraint and continue with the best available fallback.
+## Response Patterns
 
-### 4. What we learned so far
-If one or more discovery rounds already happened, summarize the main findings and how they changed the plan.
+### Planning Response
 
-### 5. Proposed deep research draft
-When appropriate, show the candidate `web_research_exa` JSON.
-If deep research is unavailable, show the polished draft anyway and label it clearly as a draft for later execution.
+Use this structure when not executing yet:
 
-### 6. Suggested refinements
-Offer 2-4 concrete improvements, such as:
-- narrow to official sources
-- add a recency window
-- do another cheap pass with refined terminology
-- convert output to a comparison object
-- split one broad topic into two passes
+- **Research objective:** what the research should answer.
+- **Coverage plan:** human-readable criteria, source strategy, and discovery rounds.
+- **Next step:** the cheapest useful move.
+- **Why:** what uncertainty it reduces.
+- **Implementation payload:** optional JSON only after the human-readable plan, or when the user asks for it.
+- **Question:** one clear confirmation or refinement question.
 
-### 7. Confirmation question
-Ask whether to:
-- refine further
-- do another cheap discovery round
-- run the deep-research draft as-is
-- broaden or narrow scope
+### Execution Response
 
-## Output Format
+Use this structure when executing deep research:
 
-Prefer concise, decision-oriented responses.
+- **Research objective:** one sentence.
+- **Payload:** show the important parameters briefly when useful.
+- Call `web_research_exa`.
+- **Synthesis:** return the report format above.
 
-A good default structure is:
-- **Plan:** one short paragraph
-- **Next step:** one concrete recommendation
-- **Why:** one short paragraph
-- **Draft:** JSON only when a concrete payload is useful
-- **Question:** one clear choice for the user
+## Examples
 
-Do not bury the user in long checklists if the situation is simple.
+### Explicit deep-research request
 
-## Example Interaction Pattern
+User: `Do deep research on observability platforms for startups.`
 
-User intent:
-- `Help me design a deep research query to compare observability tools for startups.`
+Behavior:
 
-Good response pattern:
-1. clarify whether they care most about cost, ease of setup, or product depth
-2. propose a cheap first-pass search to discover vendors and criteria
-3. explain why that first pass is cheaper and more useful than jumping straight to deep research
-4. optionally do a second cheap pass with filters or better terminology
-5. draft a query and `systemPrompt` only after the brief is sharper
-6. propose optional source/date filters
-7. ask whether to execute deep research now or keep iterating cheaply
+- Do not ask whether to run deep research again.
+- Ask one clarifying question only if needed, such as whether cost or ease of setup matters most.
+- Otherwise run `web_research_exa` with a clear comparison query and `outputSchema: { "type": "text" }`.
 
-## Example Draft
+### Plan-first request
 
-```json
-{
-  "query": "Compare observability platforms suitable for startups, focusing on ease of setup, pricing transparency, core monitoring coverage, alerting quality, and team scalability.",
-  "type": "deep-reasoning",
-  "systemPrompt": "Prefer official docs, pricing pages, GitHub repos where relevant, and credible engineering evaluations. Focus on trade-offs, startup suitability, and uncertainty in pricing or feature claims.",
-  "additionalQueries": [
-    "best observability tools for startups",
-    "Datadog vs Grafana Cloud vs New Relic startup teams",
-    "startup-friendly application monitoring platforms"
-  ],
-  "numResults": 10,
-  "outputSchema": { "type": "text" }
-}
-```
+User: `Help me design a deep research query to compare observability tools for startups.`
 
-Do not run this automatically. Ask the user whether they want to refine it, do another cheap discovery round, or execute it.
+Behavior:
 
-## Skill Quality Notes
+- Clarify key criteria if missing.
+- Optionally run cheap discovery to identify vendors and terms.
+- Draft a payload.
+- Ask whether to execute, refine, or do one more cheap discovery pass.
 
-Keep this skill practical and lean:
-- prefer short, high-signal plans over long generic advice
-- explain why a step is useful instead of giving rigid commands without context
-- avoid suggesting expensive deep research before cheap evidence-gathering has had a fair chance
-- do not force every workflow through every tool; skip steps that are not earning their keep
-- be proactive about recommending the next best move when the user seems uncertain
-- when the user already has a strong brief, move quickly from clarification to a concrete plan instead of repeating generic planning advice
+## Quality Notes
+
+- Prefer short, high-signal plans over generic checklists.
+- Do not spend tools on discovery that will not change the final research prompt.
+- Do not block explicit deep-research requests behind unnecessary confirmation.
+- Be transparent when deep research cannot run because `web_research_exa` is unavailable.
+- Favor primary sources and dated materials for fast-moving topics.
+- Call out uncertainty instead of smoothing over source disagreement.

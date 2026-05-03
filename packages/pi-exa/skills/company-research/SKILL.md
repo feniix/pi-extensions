@@ -6,53 +6,47 @@ context: fork
 
 # Company Research (Exa)
 
+Use this skill for company discovery, competitor scans, vendor profiles, funding or hiring signals, market maps, and quick diligence.
+
 ## Tool Selection
 
 | Intent | Primary Tool | Notes |
 |---|---|---|
-| Company discovery / competitive list | `web_search_exa` | Use category filters when needed |
-| Company page metadata or focused category search | `web_search_advanced_exa` | `category: "company"`, use domain filters |
-| Comparative write-up across multiple companies | `web_research_exa` | Requires `systemPrompt`, `additionalQueries`, optionally `outputSchema.type: "object"` |
-| Direct question about a company topic | `web_answer_exa` | Prefer `outputSchema` for downstream processing |
-| Follow-up deep reading | `web_fetch_exa` | Pulls content from selected URLs |
+| Broad company or competitor discovery | `web_search_exa` | Best first pass when terminology, category fit, or target companies are unclear. |
+| Company-profile style results | `web_search_advanced_exa` with `category: "company"` | Use when available; do not use deep search types here. |
+| Comparative write-up across companies | `web_research_exa` | Use when enabled and the user needs synthesis or recommendations. |
+| Direct factual question about one company | `web_answer_exa` | Good for concise cited answers. |
+| Read selected company pages, filings, or posts | `web_fetch_exa` | Fetch 1-3 high-signal URLs after discovery. |
+| Find companies or pages similar to one strong source | `web_find_similar_exa` | Use when a seed URL is clearly representative. |
+
+If `web_search_advanced_exa` is unavailable, use `web_search_exa` with stronger query wording. If `web_research_exa` is unavailable, stop at discovery plus a concise manual synthesis.
 
 ## Category Behavior
 
 - `category: "company"` focuses on company-facing pages and profile-like structure.
-- Deep search (`deep`, `deep-lite`) belongs to **`web_research_exa`**, not `web_search_advanced_exa`.
+- Deep search types (`deep-reasoning`, `deep-lite`, `deep`) belong to `web_research_exa`, not `web_search_advanced_exa`.
 
 ## Filter Restrictions
 
 When using `web_search_advanced_exa` with `category: "company"`, avoid:
-- `includeDomains`
+
+- `excludeDomains`
 - `startPublishedDate` / `endPublishedDate`
 
-These filters commonly trigger Exa `400` errors for this category. Prefer running a broader query first, then post-filtering results locally if needed.
+These combinations are rejected by the extension before reaching Exa. If you need freshness or exclusions, run broader discovery first and filter locally.
 
-## Recommended settings
+## Recommended Settings
 
-```json
-{
-  "web_search_exa": { "query": "AI infrastructure startups in 2025", "numResults": 20 },
-  "web_search_advanced_exa": {
-    "category": "company",
-    "type": "auto",
-    "numResults": 12
-  },
-  "web_research_exa": {
-    "systemPrompt": "Prefer official sources and filings; return concise competitive summary.",
-    "outputSchema": {
-      "type": "object",
-      "properties": {
-        "summary": { "type": "string" }
-      }
-    }
-  }
-}
-```
+- Broad discovery
+  - `{ "query": "AI infrastructure startups serving enterprise developers 2025", "numResults": 10 }`
+- Company category search
+  - `{ "query": "AI infrastructure developer tools startups", "category": "company", "type": "auto", "numResults": 12 }`
+- Comparative synthesis
+  - `{ "query": "Compare AI infrastructure startups serving enterprise developer teams, focusing on product positioning, traction signals, and differentiation.", "systemPrompt": "Prefer official sources, filings, funding announcements, customer pages, and reputable news. Avoid overclaiming from sparse data.", "outputSchema": { "type": "text" } }`
 
 ## Output Guidance
 
-1) Return structured findings list first (name, signals, links).
-2) Note assumptions or data gaps.
-3) Avoid overclaiming on incomplete information.
+1. Return a structured findings list first: company, what they do, signals, and links.
+2. Distinguish direct evidence from interpretation.
+3. Call out stale, sparse, or conflicting data.
+4. Avoid implying private traction or revenue unless sourced.

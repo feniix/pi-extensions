@@ -87,5 +87,70 @@ describe("pi-exa", () => {
       expect(skill).toContain("web_find_similar_exa");
       expect(skill).toContain("web_search_exa");
     });
+
+    it("skills only mention supported tool parameters", () => {
+      const skillFiles = [
+        "code-search",
+        "company-research",
+        "exa-research-planner",
+        "financial-report-search",
+        "people-research",
+        "personal-site-search",
+        "research-paper-search",
+      ];
+
+      for (const skillName of skillFiles) {
+        const skill = readFileSync(join(__dirname, `../skills/${skillName}/SKILL.md`), "utf-8");
+        expect(skill).not.toContain("excludeText");
+      }
+    });
+
+    it("structured outputSchema skill examples define array items", () => {
+      const financialSkill = readFileSync(join(__dirname, "../skills/financial-report-search/SKILL.md"), "utf-8");
+      const peopleSkill = readFileSync(join(__dirname, "../skills/people-research/SKILL.md"), "utf-8");
+
+      expect(financialSkill).toContain('"risks": { "type": "array", "items": { "type": "string" } }');
+      expect(peopleSkill).toContain('"experts": { "type": "array", "items": { "type": "object" } }');
+    });
+
+    it("exa-research-planner supports explicit deep research execution", () => {
+      const skill = readFileSync(join(__dirname, "../skills/exa-research-planner/SKILL.md"), "utf-8");
+
+      expect(skill).toContain("Explicit deep-research execution");
+      expect(skill).toContain("A direct user request to run deep research counts as approval");
+      expect(skill).toContain("web_research_exa");
+    });
+
+    it("exa-research-planner requires paper retrieval for white paper sources", () => {
+      const skill = readFileSync(join(__dirname, "../skills/exa-research-planner/SKILL.md"), "utf-8");
+
+      expect(skill).toContain("White Papers and Source Retrieval");
+      expect(skill).toContain("return the actual paper URLs");
+      expect(skill).toContain("web_fetch_exa");
+    });
+
+    it("exa-research-planner requires paper contents to inform synthesis", () => {
+      const skill = readFileSync(join(__dirname, "../skills/exa-research-planner/SKILL.md"), "utf-8");
+
+      expect(skill).toContain("Paper Content Synthesis Rule");
+      expect(skill).toContain("Do not rely only on `web_research_exa` synthesis");
+      expect(skill).toContain("Use fetched paper contents as first-class evidence");
+    });
+
+    it("exa-research-planner supports iterative discovery and clarification", () => {
+      const skill = readFileSync(join(__dirname, "../skills/exa-research-planner/SKILL.md"), "utf-8");
+
+      expect(skill).toContain("Iterative Discovery and Clarification Loop");
+      expect(skill).toContain("Run multiple cheap discovery rounds when each round changes the plan");
+      expect(skill).toContain("Ask the user one focused clarification question");
+    });
+
+    it("exa-research-planner presents human-readable drafts before payloads", () => {
+      const skill = readFileSync(join(__dirname, "../skills/exa-research-planner/SKILL.md"), "utf-8");
+
+      expect(skill).toContain("Human-Readable Drafts First");
+      expect(skill).toContain("Show the user the research plan in human-consumable form first");
+      expect(skill).toContain("Do not lead with raw JSON");
+    });
   });
 });
