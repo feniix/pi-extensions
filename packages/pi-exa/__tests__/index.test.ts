@@ -152,5 +152,13 @@ describe("pi-exa", () => {
       expect(skill).toContain("Show the user the research plan in human-consumable form first");
       expect(skill).toContain("Do not lead with raw JSON");
     });
+
+    it("exa-research-planner references planned stateful research tools", () => {
+      const skill = readFileSync(join(__dirname, "../skills/exa-research-planner/SKILL.md"), "utf-8");
+
+      expect(skill).toContain("Stateful Planning Tools");
+      expect(skill).toContain("exa_research_step");
+      expect(skill).toContain("stateful planning is unavailable");
+    });
   });
 });

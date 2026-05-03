@@ -49,6 +49,19 @@ Warn clearly when an important tool is unavailable:
 
 Never suggest unavailable tools as if they can be used.
 
+## Stateful Planning Tools
+
+`PRD-008` defines planned stateful research-planning tools: `exa_research_step`, `exa_research_status`, `exa_research_summary`, and `exa_research_reset`.
+
+When these tools are available, use them for non-trivial research planning:
+
+1. Call `exa_research_step` for framing, criteria discovery, each meaningful discovery round, source retrieval, coverage analysis, and conclusion.
+2. Call `exa_research_status` when you need to inspect current criteria, source pack, gaps, branches, or recommended next action.
+3. Call `exa_research_summary` before showing a final plan, payload, handoff, or Source Pack to the user.
+4. Call `exa_research_reset` when starting a separate research topic.
+
+If these tools are not available in the current session, continue with the prompt-guided workflow below and be explicit that stateful planning is unavailable. Do not claim criteria, source-pack status, gaps, or revisions are durably tracked unless the `exa_research_*` tools are actually present.
+
 ## Fast Path: Explicit Deep Research
 
 When the user explicitly asks for deep research:

@@ -213,8 +213,8 @@ For white papers, academic papers, technical reports, standards, filings, or PDF
 
 | ADR | Title | Status | Notes |
 |---|---|---|---|
-| ADR-TBD | Stateful Exa Research Planning Tools | Proposed | Decide prompt-only skill vs stateful tools and whether planning tools should auto-call retrieval tools. |
-| ADR-TBD | Exa Research Session Persistence | Optional | Decide in-memory vs persisted sessions if persistence becomes necessary. |
+| `docs/adr/ADR-0016-stateful-exa-research-planning-tools.md` | Stateful Exa Research Planning Tools | Proposed | Chooses stateful `exa_research_*` planning tools inside `pi-exa`; planning tools recommend but do not execute Exa retrieval calls. |
+| `docs/adr/ADR-0017-in-memory-exa-research-planning-sessions.md` | In-Memory Exa Research Planning Sessions | Proposed | Chooses in-memory planning sessions for the first implementation and defers persistence. |
 
 ## Risks and Mitigations
 
@@ -244,7 +244,7 @@ Expected flow:
 
 ## Open Questions
 
-1. Should planning sessions persist to disk like `packages/pi-sequential-thinking`, or remain in-memory like `packages/pi-code-reasoning`?
+1. **Resolved:** Planning sessions start in-memory, as captured in `docs/adr/ADR-0017-in-memory-exa-research-planning-sessions.md`.
 2. Should `exa_research_step` allow arbitrary source metadata, or should source records be strictly typed from day one?
 3. Should `exa_research_summary(mode: "payload")` generate only `web_research_exa` payloads, or also recommended `web_search_exa` / `web_fetch_exa` calls?
 4. Should research planning tools be enabled by default, or gated behind a flag to avoid adding tool surface area for users who only need basic search?

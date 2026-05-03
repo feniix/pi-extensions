@@ -363,10 +363,10 @@ And packages/pi-exa/README.md lists the research planning tools
 
 | # | Question | Owner | Due | Status |
 |---|----------|-------|-----|--------|
-| Q1 | Should research planning sessions persist to disk or stay in-memory initially? | Sebastian | Before implementation | Open |
+| Q1 | Should research planning sessions persist to disk or stay in-memory initially? | Sebastian | Before implementation | **Resolved:** Start in-memory; see `docs/adr/ADR-0017-in-memory-exa-research-planning-sessions.md`. |
 | Q2 | Should planning tools be enabled by default or gated behind config? | Sebastian | Before implementation | Open |
 | Q3 | Should `exa_research_summary(mode: "payload")` generate only `web_research_exa` payloads or also suggested search/fetch calls? | Sebastian | During implementation | Open |
-| Q4 | Should this require an ADR before implementation? | Sebastian | Before implementation | Open |
+| Q4 | Should this require an ADR before implementation? | Sebastian | Before implementation | **Resolved:** ADRs drafted; see `docs/adr/ADR-0016-stateful-exa-research-planning-tools.md` and `docs/adr/ADR-0017-in-memory-exa-research-planning-sessions.md`. |
 
 ---
 
