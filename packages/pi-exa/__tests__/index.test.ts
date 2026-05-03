@@ -153,12 +153,12 @@ describe("pi-exa", () => {
       expect(skill).toContain("Do not lead with raw JSON");
     });
 
-    it("exa-research-planner references planned stateful research tools", () => {
+    it("exa-research-planner does not reference unimplemented planning tools", () => {
       const skill = readFileSync(join(__dirname, "../skills/exa-research-planner/SKILL.md"), "utf-8");
 
-      expect(skill).toContain("Stateful Planning Tools");
-      expect(skill).toContain("exa_research_step");
-      expect(skill).toContain("stateful planning is unavailable");
+      expect(skill).not.toContain("PRD-008");
+      expect(skill).not.toContain("exa_research_step");
+      expect(skill).not.toContain("exa_research_summary");
     });
   });
 });
