@@ -106,7 +106,7 @@ function findCriterion(input: ResearchCriterionInput): ResearchCriterion | undef
 function normalizeCriterion(input: ResearchCriterionInput, existing?: ResearchCriterion): ResearchCriterion {
   reserveExplicitId("C", input.id);
   return {
-    id: input.id ?? existing?.id ?? nextId("C"),
+    id: existing?.id ?? input.id ?? nextId("C"),
     label: input.label,
     category: input.category ?? existing?.category ?? "other",
     description: input.description ?? existing?.description,
@@ -124,7 +124,7 @@ function findSource(input: ResearchSourceInput): ResearchSource | undefined {
 function normalizeSource(input: ResearchSourceInput, existing?: ResearchSource): ResearchSource {
   reserveExplicitId("S", input.id);
   return {
-    id: input.id ?? existing?.id ?? nextId("S"),
+    id: existing?.id ?? input.id ?? nextId("S"),
     title: input.title,
     url: input.url ?? existing?.url,
     sourceType: input.sourceType ?? existing?.sourceType ?? "other",
@@ -144,7 +144,7 @@ function findGap(input: ResearchGapInput): ResearchGap | undefined {
 function normalizeGap(input: ResearchGapInput, existing?: ResearchGap): ResearchGap {
   reserveExplicitId("G", input.id);
   return {
-    id: input.id ?? existing?.id ?? nextId("G"),
+    id: existing?.id ?? input.id ?? nextId("G"),
     description: input.description,
     severity: input.severity ?? existing?.severity ?? "important",
     resolution: input.resolution ?? existing?.resolution ?? "search_more",
@@ -182,9 +182,16 @@ function validateSources(): void {
   }
 }
 
-function mergeCriteria(inputs: ResearchCriterionInput[] = []): void {
+function mergeCriteria(inputs: ResearchCriterionInput[] = []): string[] {
+  const warnings: string[] = [];
   for (const input of inputs) {
     const existing = findCriterion(input);
+    if (existing && input.id !== undefined && existing.id === input.id && existing.label !== input.label) {
+      warnings.push(
+        `Criterion ${existing.id} already exists as "${existing.label}"; conflicting label "${input.label}" was ignored.`,
+      );
+      continue;
+    }
     const normalized = normalizeCriterion(input, existing);
     if (existing) {
       Object.assign(existing, normalized);
@@ -192,11 +199,26 @@ function mergeCriteria(inputs: ResearchCriterionInput[] = []): void {
       state.criteria.push(normalized);
     }
   }
+  return warnings;
 }
 
-function mergeSources(inputs: ResearchSourceInput[] = []): void {
+function mergeSources(inputs: ResearchSourceInput[] = []): string[] {
+  const warnings: string[] = [];
   for (const input of inputs) {
     const existing = findSource(input);
+    if (
+      existing &&
+      input.id !== undefined &&
+      existing.id === input.id &&
+      existing.url &&
+      input.url &&
+      existing.url !== input.url
+    ) {
+      warnings.push(
+        `Source ${existing.id} already exists for ${existing.url}; conflicting URL ${input.url} was ignored.`,
+      );
+      continue;
+    }
     const normalized = normalizeSource(input, existing);
     if (existing) {
       Object.assign(existing, normalized);
@@ -204,11 +226,19 @@ function mergeSources(inputs: ResearchSourceInput[] = []): void {
       state.sources.push(normalized);
     }
   }
+  return warnings;
 }
 
-function mergeGaps(inputs: ResearchGapInput[] = []): void {
+function mergeGaps(inputs: ResearchGapInput[] = []): string[] {
+  const warnings: string[] = [];
   for (const input of inputs) {
     const existing = findGap(input);
+    if (existing && input.id !== undefined && existing.id === input.id && existing.description !== input.description) {
+      warnings.push(
+        `Gap ${existing.id} already exists as "${existing.description}"; conflicting description "${input.description}" was ignored.`,
+      );
+      continue;
+    }
     const normalized = normalizeGap(input, existing);
     if (existing) {
       Object.assign(existing, normalized);
@@ -216,6 +246,7 @@ function mergeGaps(inputs: ResearchGapInput[] = []): void {
       state.gaps.push(normalized);
     }
   }
+  return warnings;
 }
 
 function validateStepReferences(input: ResearchStepInput): string[] {
@@ -368,9 +399,9 @@ export function recordResearchStep(input: ResearchStepInput): ResearchStepResult
     state.topic = input.topic;
   }
 
-  mergeSources(input.sources);
-  mergeCriteria(input.criteria);
-  mergeGaps(input.gaps);
+  warnings.push(...mergeSources(input.sources));
+  warnings.push(...mergeCriteria(input.criteria));
+  warnings.push(...mergeGaps(input.gaps));
   state.assumptions = uniqueStrings([...state.assumptions, ...(input.assumptions ?? [])]);
 
   if (input.branch_id && input.branch_from_step !== undefined) {

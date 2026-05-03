@@ -9,6 +9,40 @@ import {
   recordResearchStep,
   resetResearchPlanner,
 } from "../extensions/research-planner.js";
+import {
+  CRITERION_CATEGORIES,
+  CRITERION_STATUSES,
+  GAP_RESOLUTIONS,
+  GAP_SEVERITIES,
+  RESEARCH_NEXT_ACTIONS,
+  RESEARCH_STAGES,
+  RETRIEVAL_STATUSES,
+  SOURCE_TYPES,
+  SUMMARY_MODES,
+} from "../extensions/research-planner-types.js";
+import { exaResearchStepParams, exaResearchSummaryParams } from "../extensions/schemas.js";
+
+const literalValues = (schema: { anyOf?: Array<{ const: string }> }) => schema.anyOf?.map((entry) => entry.const) ?? [];
+
+describe("research planner schemas", () => {
+  it("keeps schema enum literals aligned with planner constants", () => {
+    const stepProperties = exaResearchStepParams.properties;
+    const criterionProperties = stepProperties.criteria.items.properties;
+    const sourceProperties = stepProperties.sources.items.properties;
+    const gapProperties = stepProperties.gaps.items.properties;
+
+    expect(literalValues(stepProperties.stage)).toEqual([...RESEARCH_STAGES]);
+    expect(literalValues(stepProperties.nextAction)).toEqual([...RESEARCH_NEXT_ACTIONS]);
+    expect(literalValues(criterionProperties.category)).toEqual([...CRITERION_CATEGORIES]);
+    expect(literalValues(criterionProperties.status)).toEqual([...CRITERION_STATUSES]);
+    expect(literalValues(criterionProperties.priority)).toEqual(["high", "medium", "low"]);
+    expect(literalValues(sourceProperties.sourceType)).toEqual([...SOURCE_TYPES]);
+    expect(literalValues(sourceProperties.retrievalStatus)).toEqual([...RETRIEVAL_STATUSES]);
+    expect(literalValues(gapProperties.severity)).toEqual([...GAP_SEVERITIES]);
+    expect(literalValues(gapProperties.resolution)).toEqual([...GAP_RESOLUTIONS]);
+    expect(literalValues(exaResearchSummaryParams.properties.mode)).toEqual([...SUMMARY_MODES]);
+  });
+});
 
 describe("research planner state", () => {
   beforeEach(() => {
@@ -96,6 +130,87 @@ describe("research planner state", () => {
     const status = getResearchStatus();
     expect(status.sources).toHaveLength(2);
     expect(status.sources.map((source) => source.url)).toEqual(["https://example.com/a", "https://example.com/b"]);
+  });
+
+  it("preserves stable source IDs when merging by URL", () => {
+    recordResearchStep({
+      topic: "source id stability",
+      stage: "source_retrieval",
+      note: "Record initial source and evidence.",
+      thought_number: 1,
+      total_thoughts: 2,
+      next_step_needed: true,
+      sources: [{ id: "S1", title: "Initial", url: "https://example.com/a", retrievalStatus: "fetched" }],
+      criteria: [{ id: "C1", label: "Evidence", status: "supported", evidenceRefs: ["S1"] }],
+    });
+
+    recordResearchStep({
+      topic: "source id stability",
+      stage: "source_retrieval",
+      note: "Record the same URL with a conflicting explicit ID.",
+      thought_number: 2,
+      total_thoughts: 2,
+      next_step_needed: false,
+      sources: [
+        {
+          id: "S2",
+          title: "Updated",
+          url: "https://example.com/a",
+          retrievalStatus: "fetched",
+          retrievalEvidence: "tool:web_fetch_exa call-2",
+        },
+      ],
+    });
+
+    const status = getResearchStatus();
+    expect(status.sources).toHaveLength(1);
+    expect(status.sources[0].id).toBe("S1");
+    expect(status.sources[0].title).toBe("Updated");
+    expect(status.criteria[0].evidenceIssues).toEqual([]);
+    expect(status.criteriaCoverage.supported).toBe(1);
+  });
+
+  it("warns instead of rewriting conflicting stable IDs", () => {
+    recordResearchStep({
+      topic: "conflict handling",
+      stage: "source_retrieval",
+      note: "Record initial stable IDs.",
+      thought_number: 1,
+      total_thoughts: 2,
+      next_step_needed: true,
+      criteria: [
+        { id: "C1", label: "Original criterion", status: "supported", evidenceRefs: ["tool:web_search_exa call-1"] },
+      ],
+      sources: [{ id: "S1", title: "Original source", url: "https://example.com/a" }],
+      gaps: [{ id: "G1", description: "Original gap" }],
+    });
+
+    const result = recordResearchStep({
+      topic: "conflict handling",
+      stage: "coverage_analysis",
+      note: "Try conflicting stable IDs.",
+      thought_number: 2,
+      total_thoughts: 2,
+      next_step_needed: false,
+      criteria: [{ id: "C1", label: "Different criterion" }],
+      sources: [{ id: "S1", title: "Different source", url: "https://example.com/b" }],
+      gaps: [{ id: "G1", description: "Different gap" }],
+    });
+
+    expect(result.warnings).toContain(
+      'Criterion C1 already exists as "Original criterion"; conflicting label "Different criterion" was ignored.',
+    );
+    expect(result.warnings).toContain(
+      "Source S1 already exists for https://example.com/a; conflicting URL https://example.com/b was ignored.",
+    );
+    expect(result.warnings).toContain(
+      'Gap G1 already exists as "Original gap"; conflicting description "Different gap" was ignored.',
+    );
+
+    const status = getResearchStatus();
+    expect(status.criteria[0].label).toBe("Original criterion");
+    expect(status.sources[0].url).toBe("https://example.com/a");
+    expect(status.openGaps[0].description).toBe("Original gap");
   });
 
   it("aggregates criteria and validates evidence references", () => {
