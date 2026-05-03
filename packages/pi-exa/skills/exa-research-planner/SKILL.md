@@ -10,7 +10,7 @@ Use this skill to turn a vague or broad research request into a high-quality Exa
 
 This skill has two jobs:
 
-1. **Research planning** — sharpen the question, decide whether cheap discovery is useful, and draft a strong deep-research payload.
+1. **Research planning** — sharpen the question, decide whether cheap discovery is useful, track criteria/source/gap state with the local `exa_research_*` planning tools, and draft a strong deep-research payload.
 2. **Explicit deep-research execution** — when the user directly asks for deep research or approves a draft, run `web_research_exa` and return a source-grounded synthesis.
 
 ## Operating Modes
@@ -29,7 +29,14 @@ Do not force an explicit deep-research request through a long planning loop. If 
 
 Build the workflow only from tools actually available in the current session.
 
-Common default tools:
+Local planning tools, enabled by default and safe to use without an Exa API key:
+
+- `exa_research_step` — record one planning step with criteria, sources, gaps, assumptions, and next action.
+- `exa_research_status` — inspect current planning state without mutating it.
+- `exa_research_summary` — produce a human-readable brief, execution plan, source pack, or labeled optional payload.
+- `exa_research_reset` — clear the active in-memory planning session.
+
+Common default retrieval tools:
 
 - `web_search_exa`
 - `web_fetch_exa`
@@ -47,7 +54,7 @@ Warn clearly when an important tool is unavailable:
 - If `web_search_advanced_exa` is unavailable, say advanced filters are unavailable and fall back to `web_search_exa` with better query wording.
 - If a common default tool is missing, mention it briefly and adapt without dwelling on it.
 
-Never suggest unavailable tools as if they can be used.
+Never suggest unavailable tools as if they can be used. The `exa_research_*` planning tools do not execute network calls; they recommend explicit retrieval calls that the model must invoke separately.
 
 ## Fast Path: Explicit Deep Research
 
@@ -68,7 +75,7 @@ A direct user request to run deep research counts as approval. Do not ask “sho
 
 ## Cost-Aware Planning Workflow
 
-Use this staged flow when the user has not clearly asked to run deep research yet, or when the topic would benefit from reconnaissance.
+Use this staged flow when the user has not clearly asked to run deep research yet, or when the topic would benefit from reconnaissance. For non-trivial planning, call `exa_research_step` before retrieval to record the objective, assumptions, initial criteria, and cheapest useful next action. Skip the full planner only for simple lookups or explicit deep-research requests where the brief is already usable.
 
 ### Phase 1: Clarify the Goal
 
@@ -116,7 +123,7 @@ Use available tools selectively:
 | Expand from one strong seed URL | `web_find_similar_exa` | Use only with a clearly representative source. |
 | Resolve a narrow sub-question cheaply | `web_answer_exa` | Use when it may avoid deeper research. |
 
-Each discovery round must have a purpose. After each round, summarize what changed:
+Each discovery round must have a purpose. After each round, call `exa_research_step` to record what changed:
 
 - better terminology,
 - stronger candidate sources,
@@ -126,7 +133,7 @@ Each discovery round must have a purpose. After each round, summarize what chang
 
 ## Iterative Discovery and Clarification Loop
 
-Run multiple cheap discovery rounds when each round changes the plan. The planner should behave like an active research lead: discover criteria, search for evidence, revise the coverage map, and only then draft or execute deep synthesis.
+Run multiple cheap discovery rounds when each round changes the plan. The planner should behave like an active research lead: discover criteria, search for evidence, revise the coverage map in `exa_research_step`, inspect it with `exa_research_status`, and only then draft or execute deep synthesis.
 
 Use this loop for broad, ambiguous, or high-stakes research:
 
@@ -189,7 +196,7 @@ In the final report, explicitly identify which findings came from directly fetch
 
 ### Phase 4: Draft the Deep Research Plan
 
-Show the user the research plan in human-consumable form first. Do not lead with raw JSON.
+Show the user the research plan in human-consumable form first. Use `exa_research_summary` for stateful plans. Do not lead with raw JSON.
 
 #### Human-Readable Drafts First
 

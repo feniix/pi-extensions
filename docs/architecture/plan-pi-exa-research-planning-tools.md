@@ -3,7 +3,7 @@ title: "pi-exa Research Planning Tools"
 prd: "PRD-008-pi-exa-research-planning-tools"
 date: 2026-05-03
 author: "pi"
-status: Draft
+status: Implemented
 ---
 
 # Plan: pi-exa Research Planning Tools

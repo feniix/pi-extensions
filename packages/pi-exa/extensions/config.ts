@@ -255,7 +255,11 @@ export function isToolEnabledForConfig(pi: ExtensionAPI, config: ExaConfig | nul
     toolName === "web_search_exa" ||
     toolName === "web_fetch_exa" ||
     toolName === "web_answer_exa" ||
-    toolName === "web_find_similar_exa"
+    toolName === "web_find_similar_exa" ||
+    toolName === "exa_research_step" ||
+    toolName === "exa_research_status" ||
+    toolName === "exa_research_summary" ||
+    toolName === "exa_research_reset"
   ) {
     return true;
   }
