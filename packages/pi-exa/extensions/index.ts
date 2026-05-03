@@ -8,7 +8,12 @@ import { defineTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { Static, TSchema } from "typebox";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
 import type { ToolPerformResult } from "./formatters.js";
+import { getResearchStatus, getResearchSummary, recordResearchStep, resetResearchPlanner } from "./research-planner.js";
 import {
+  exaResearchResetParams,
+  exaResearchStatusParams,
+  exaResearchStepParams,
+  exaResearchSummaryParams,
   webAnswerParams,
   webFetchParams,
   webFindSimilarParams,
@@ -52,6 +57,16 @@ type ExaToolSpec<TParams extends TSchema> = {
   perform: (apiKey: string, params: Static<TParams>) => Promise<ToolPerformResult>;
 };
 
+type LocalToolSpec<TParams extends TSchema> = {
+  name: string;
+  label: string;
+  description: string;
+  promptSnippet: string;
+  promptGuidelines: string[];
+  parameters: TParams;
+  perform: (params: Static<TParams>) => unknown;
+};
+
 function toolDetails(toolName: string): { tool: string } {
   return { tool: toolName };
 }
@@ -75,6 +90,40 @@ function cancelledResult(toolName: string) {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function toText(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+function registerLocalTool<TParams extends TSchema>(pi: ExtensionAPI, spec: LocalToolSpec<TParams>): void {
+  pi.registerTool(
+    defineTool({
+      name: spec.name,
+      label: spec.label,
+      description: spec.description,
+      promptSnippet: spec.promptSnippet,
+      promptGuidelines: spec.promptGuidelines,
+      parameters: spec.parameters,
+      async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+        if (signal?.aborted) {
+          return cancelledResult(spec.name);
+        }
+
+        try {
+          const result = spec.perform(params);
+          return { content: [{ type: "text" as const, text: toText(result) }], details: toolDetails(spec.name) };
+        } catch (error) {
+          const message = toErrorMessage(error);
+          return {
+            content: [{ type: "text" as const, text: `${spec.label} error: ${message}` }],
+            isError: true,
+            details: { ...toolDetails(spec.name), error: message },
+          };
+        }
+      },
+    }),
+  );
 }
 
 function registerExaTool<TParams extends TSchema>(pi: ExtensionAPI, spec: ExaToolSpec<TParams>): void {
@@ -117,6 +166,64 @@ function registerExaTool<TParams extends TSchema>(pi: ExtensionAPI, spec: ExaToo
   );
 }
 
+function registerResearchPlannerTools(pi: ExtensionAPI, isToolEnabled: (toolName: string) => boolean): void {
+  const plannerGuidelines = [
+    "Use exa_research_step to externalize non-trivial Exa research planning before expensive retrieval.",
+    "Planning tools recommend Exa retrieval calls but never execute network or cost-incurring operations internally.",
+    "Use exa_research_summary for human-readable plans before requesting payload mode.",
+  ];
+
+  if (isToolEnabled("exa_research_step")) {
+    registerLocalTool(pi, {
+      name: "exa_research_step",
+      label: "Exa Research Step",
+      description: "Record one step in a stateful, local Exa research planning session without calling Exa APIs.",
+      promptSnippet: "Record iterative research-planning state before retrieval.",
+      promptGuidelines: plannerGuidelines,
+      parameters: exaResearchStepParams,
+      perform: recordResearchStep,
+    });
+  }
+
+  if (isToolEnabled("exa_research_status")) {
+    registerLocalTool(pi, {
+      name: "exa_research_status",
+      label: "Exa Research Status",
+      description:
+        "Report current local Exa research planning state, criteria coverage, sources, gaps, and next action.",
+      promptSnippet: "Inspect current research-planning state.",
+      promptGuidelines: plannerGuidelines,
+      parameters: exaResearchStatusParams,
+      perform: () => getResearchStatus(),
+    });
+  }
+
+  if (isToolEnabled("exa_research_summary")) {
+    registerLocalTool(pi, {
+      name: "exa_research_summary",
+      label: "Exa Research Summary",
+      description:
+        "Generate a human-readable Exa research plan, Source Pack, or optional suggested web_research_exa payload.",
+      promptSnippet: "Summarize the accumulated Exa research plan.",
+      promptGuidelines: plannerGuidelines,
+      parameters: exaResearchSummaryParams,
+      perform: getResearchSummary,
+    });
+  }
+
+  if (isToolEnabled("exa_research_reset")) {
+    registerLocalTool(pi, {
+      name: "exa_research_reset",
+      label: "Exa Research Reset",
+      description: "Clear the current in-memory Exa research planning session.",
+      promptSnippet: "Reset local Exa research-planning state.",
+      promptGuidelines: plannerGuidelines,
+      parameters: exaResearchResetParams,
+      perform: () => resetResearchPlanner(),
+    });
+  }
+}
+
 function registerFlags(pi: ExtensionAPI): void {
   pi.registerFlag("--exa-api-key", {
     description: "Exa AI API key for search operations",
@@ -149,6 +256,7 @@ export default function exaExtension(pi: ExtensionAPI) {
 
   const resolvedConfig = getResolvedConfig(pi);
   const isToolEnabled = (toolName: string): boolean => isToolEnabledForConfig(pi, resolvedConfig, toolName);
+  registerResearchPlannerTools(pi, isToolEnabled);
 
   if (isToolEnabled("web_search_exa")) {
     registerExaTool(pi, {

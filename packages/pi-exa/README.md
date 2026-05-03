@@ -10,6 +10,7 @@
 - **web_research_exa**: deep-research synthesis (disabled by default).
 - **web_answer_exa**: quick grounded answers.
 - **web_find_similar_exa**: discover related URLs.
+- **exa_research_step/status/summary/reset**: local, stateful research-planning tools that recommend explicit Exa retrieval calls without executing them.
 
 ## Install
 
@@ -25,7 +26,9 @@ pi -e npm:@feniix/pi-exa
 
 ## Configuration
 
-You need an Exa API key from [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys).
+You need an Exa API key from [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) for retrieval tools. The local `exa_research_*` planning tools work without an API key because they do not call Exa network APIs.
+
+If you configure `enabledTools`, it acts as a strict allowlist. Include the `exa_research_*` names if you want the planner tools available with an explicit allowlist.
 
 ### Recommended: environment variable
 
@@ -40,7 +43,16 @@ Use a private config file when you want to store an API key outside shared proje
 ```json
 {
   "apiKey": "your-key",
-  "enabledTools": ["web_search_exa", "web_fetch_exa", "web_answer_exa", "web_find_similar_exa"],
+  "enabledTools": [
+    "exa_research_step",
+    "exa_research_status",
+    "exa_research_summary",
+    "exa_research_reset",
+    "web_search_exa",
+    "web_fetch_exa",
+    "web_answer_exa",
+    "web_find_similar_exa"
+  ],
   "advancedEnabled": false,
   "researchEnabled": false
 }
@@ -64,7 +76,16 @@ Example:
 ```json
 {
   "pi-exa": {
-    "enabledTools": ["web_search_exa", "web_fetch_exa", "web_answer_exa", "web_find_similar_exa"],
+    "enabledTools": [
+      "exa_research_step",
+      "exa_research_status",
+      "exa_research_summary",
+      "exa_research_reset",
+      "web_search_exa",
+      "web_fetch_exa",
+      "web_answer_exa",
+      "web_find_similar_exa"
+    ],
     "advancedEnabled": false,
     "researchEnabled": false
   }
@@ -82,6 +103,22 @@ Example:
 - `--exa-config <path>` (deprecated alias for `--exa-config-file`).
 
 ## Tools
+
+### exa_research_step
+
+Records one step in an in-memory research-planning session. Params include `topic`, `stage`, `note`, optional `criteria`, `sources`, `gaps`, `assumptions`, `nextAction`, branch/revision metadata, `thought_number`, `total_thoughts`, and `next_step_needed`.
+
+### exa_research_status
+
+Reports the current local planning state: topic, step count, active stage, branches, criteria coverage, source pack summary, open gaps, assumptions, and recommended next action.
+
+### exa_research_summary
+
+Generates human-readable research planning output. Modes: `brief`, `execution_plan`, `source_pack`, and `payload`. Payload mode suggests a `web_research_exa` payload only; it does not run retrieval.
+
+### exa_research_reset
+
+Clears the active in-memory planning session.
 
 ### web_search_exa
 
@@ -142,5 +179,6 @@ PI_EXA_LIVE=1 EXA_API_KEY=your-key npx vitest run packages/pi-exa/__tests__/inte
 
 ## Notes
 
+- `exa_research_*` planning tools are enabled by default when no explicit `enabledTools` allowlist is configured, local-only, and do not require an Exa API key.
 - `web_search_advanced_exa` and `web_research_exa` are opt-in and disabled by default.
 - Research/tool output may include both `text` and `details.parsedOutput` depending on `outputSchema.type`.

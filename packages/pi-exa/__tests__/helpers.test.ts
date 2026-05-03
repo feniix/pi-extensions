@@ -392,6 +392,10 @@ describe("pi-exa tool enablement helpers", () => {
     const pi = { getFlag: () => undefined } as { getFlag: (flag: string) => unknown };
     expect(isToolEnabledForConfig(pi as never, null, "web_search_exa")).toBe(true);
     expect(isToolEnabledForConfig(pi as never, null, "web_fetch_exa")).toBe(true);
+    expect(isToolEnabledForConfig(pi as never, null, "exa_research_step")).toBe(true);
+    expect(isToolEnabledForConfig(pi as never, null, "exa_research_status")).toBe(true);
+    expect(isToolEnabledForConfig(pi as never, null, "exa_research_summary")).toBe(true);
+    expect(isToolEnabledForConfig(pi as never, null, "exa_research_reset")).toBe(true);
   });
 
   it("respects advanced tool flag override", () => {

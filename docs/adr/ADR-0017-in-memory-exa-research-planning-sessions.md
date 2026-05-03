@@ -91,11 +91,11 @@ The implementation should keep stable in-memory IDs for criteria, sources, and g
 ### Negative
 
 - Users lose active planning state when the extension runtime ends.
-  - Mitigation: `exa_research_summary(mode: "handoff")` can produce a copyable handoff packet.
+  - Mitigation: `exa_research_summary(mode: "execution_plan")` and `exa_research_summary(mode: "source_pack")` can produce copyable summaries for manual handoff until explicit handoff/export modes exist.
 - Long research workflows cannot be resumed automatically.
   - Mitigation: add export/import or persistence later if this becomes a real usage need.
 - Automated audit trails are limited to the current session transcript.
-  - Mitigation: Source Pack and handoff summaries preserve the most important state in user-visible output.
+  - Mitigation: Source Pack and execution-plan summaries preserve the most important state in user-visible output.
 
 ### Neutral
 

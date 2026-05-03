@@ -131,8 +131,74 @@ describe("pi-exa extension", () => {
     expect(toolNames).toContain("web_fetch_exa");
     expect(toolNames).toContain("web_answer_exa");
     expect(toolNames).toContain("web_find_similar_exa");
+    expect(toolNames).toContain("exa_research_step");
+    expect(toolNames).toContain("exa_research_status");
+    expect(toolNames).toContain("exa_research_summary");
+    expect(toolNames).toContain("exa_research_reset");
     expect(toolNames).not.toContain("web_search_advanced_exa");
     expect(toolNames).not.toContain("web_research_exa");
+  });
+
+  it("executes research planning tools without an Exa API key", async () => {
+    const mockPi = createMockPi();
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const resetTool = getRegisteredTool(mockPi, "exa_research_reset");
+    await resetTool?.execute("call-reset", {}, { aborted: false } as AbortSignal, undefined, undefined as never);
+
+    const stepTool = getRegisteredTool(mockPi, "exa_research_step");
+    const stepResult = await stepTool?.execute(
+      "call-step",
+      {
+        topic: "local planner",
+        stage: "framing",
+        note: "Plan locally without authentication.",
+        thought_number: 1,
+        total_thoughts: 2,
+        next_step_needed: true,
+      },
+      { aborted: false } as AbortSignal,
+      undefined,
+      undefined as never,
+    );
+
+    expect(stepResult?.isError).toBeUndefined();
+    expect(stepResult?.content[0].text).toContain("local planner");
+    expect(mockExaConstructor).not.toHaveBeenCalled();
+
+    const statusTool = getRegisteredTool(mockPi, "exa_research_status");
+    const statusResult = await statusTool?.execute(
+      "call-status",
+      {},
+      { aborted: false } as AbortSignal,
+      undefined,
+      undefined as never,
+    );
+
+    expect(statusResult?.content[0].text).toContain("local planner");
+    expect(statusResult?.details.tool).toBe("exa_research_status");
+
+    const summaryTool = getRegisteredTool(mockPi, "exa_research_summary");
+    const summaryResult = await summaryTool?.execute(
+      "call-summary",
+      { mode: "execution_plan" },
+      { aborted: false } as AbortSignal,
+      undefined,
+      undefined as never,
+    );
+
+    expect(summaryResult?.content[0].text).toContain("# Research Execution Plan");
+    expect(summaryResult?.details.tool).toBe("exa_research_summary");
+    expect(mockExaConstructor).not.toHaveBeenCalled();
+  });
+
+  it("honors enabledTools allowlists for research planning tools", () => {
+    const configPath = writeTempConfig({ enabledTools: ["web_search_exa"] });
+    const mockPi = createMockPi({ "--exa-config-file": configPath });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const toolNames = mockPi.registerTool.mock.calls.map(([tool]) => tool.name);
+    expect(toolNames).toEqual(["web_search_exa"]);
   });
 
   it("registers web_search_advanced_exa when config enables it", () => {
@@ -735,6 +801,10 @@ describe("pi-exa extension", () => {
   it("adds cross-tool prompt guidance for all registered tools", () => {
     const configPath = writeTempConfig({
       enabledTools: [
+        "exa_research_step",
+        "exa_research_status",
+        "exa_research_summary",
+        "exa_research_reset",
         "web_search_exa",
         "web_fetch_exa",
         "web_search_advanced_exa",
@@ -748,11 +818,13 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-    expect(tools).toHaveLength(6);
+    const webTools = tools.filter((tool) => tool.name.startsWith("web_"));
+    expect(webTools).toHaveLength(6);
+    expect(tools).toEqual(expect.arrayContaining([expect.objectContaining({ name: "exa_research_step" })]));
 
     const exaToolNamePattern = /web_(search|fetch|search_advanced|research|answer|find_similar)_exa/g;
 
-    for (const tool of tools) {
+    for (const tool of webTools) {
       expect(tool.promptSnippet).toBeTypeOf("string");
       expect(tool.promptSnippet.length).toBeLessThan(100);
       expect(tool.promptSnippet).not.toContain("\n");

@@ -153,12 +153,17 @@ describe("pi-exa", () => {
       expect(skill).toContain("Do not lead with raw JSON");
     });
 
-    it("exa-research-planner does not reference unimplemented planning tools", () => {
+    it("exa-research-planner references implemented planning tools", () => {
       const skill = readFileSync(join(__dirname, "../skills/exa-research-planner/SKILL.md"), "utf-8");
+      const readme = readFileSync(join(__dirname, "../README.md"), "utf-8");
 
       expect(skill).not.toContain("PRD-008");
-      expect(skill).not.toContain("exa_research_step");
-      expect(skill).not.toContain("exa_research_summary");
+      expect(skill).toContain("exa_research_step");
+      expect(skill).toContain("exa_research_status");
+      expect(skill).toContain("exa_research_summary");
+      expect(skill).toContain("exa_research_reset");
+      expect(readme).toContain("exa_research_step");
+      expect(readme).toContain("local-only");
     });
   });
 });

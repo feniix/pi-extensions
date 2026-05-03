@@ -3,7 +3,7 @@ title: "pi-exa Research Planning Tools"
 prd: "PRD-008-pi-exa-research-planning-tools"
 date: 2026-05-03
 author: "pi"
-status: Draft
+status: Implemented
 ---
 
 # Plan: pi-exa Research Planning Tools
@@ -22,6 +22,8 @@ Add stateful research-planning tools to `packages/pi-exa` that mirror the ergono
 - one tool reports current status,
 - one tool summarizes the accumulated plan,
 - one tool resets the session.
+
+V1 uses one active in-memory planning session at a time. Planning tools are default-enabled local tools and do not require an Exa API key because they do not perform network calls.
 
 These tools do **not** replace Exa retrieval tools. Instead, they orchestrate how the model should use existing tools such as `web_search_exa`, `web_fetch_exa`, `web_research_exa`, `web_answer_exa`, and `web_find_similar_exa`.
 
@@ -98,17 +100,16 @@ Includes:
 
 ### 3. `exa_research_summary`
 
-Generates a human-readable plan or handoff packet from current state.
+Generates a human-readable plan, Source Pack, or optional implementation payload from current state.
 
 | Mode | Output |
 |---|---|
 | `brief` | Short plan with objective, coverage areas, source strategy, next action. |
 | `execution_plan` | Detailed multi-round research plan suitable for user review. |
-| `payload` | Optional implementation payload for `web_research_exa`, derived from the readable plan. |
 | `source_pack` | Table of discovered/fetched sources with retrieval status. |
-| `handoff` | Complete packet for another agent/session. |
+| `payload` | Optional implementation payload for `web_research_exa`, derived from the readable plan. |
 
-Default output must be human-readable. JSON payloads should be labeled **Implementation payload** and shown only after the readable plan or when requested.
+Default output must be human-readable. JSON payloads should be labeled **Implementation payload** and shown only after the readable plan or when requested. V1 payload mode generates only `web_research_exa` payloads; search/fetch calls remain plain next-action recommendations.
 
 ### 4. `exa_research_reset`
 
@@ -128,7 +129,7 @@ Fields:
 - `description`: what this criterion covers.
 - `priority`: `high`, `medium`, `low`.
 - `status`: `proposed`, `searched`, `supported`, `conflicting`, `missing`, `excluded`.
-- `evidenceRefs`: source IDs or tool-call notes.
+- `evidenceRefs`: source IDs or tool-call notes. Refs must resolve to known sources or explicit tool-call notes before the criterion is counted as covered.
 
 #### Source Record
 
@@ -141,6 +142,7 @@ Fields:
 - `url`.
 - `sourceType`: `paper`, `white_paper`, `pdf`, `official_doc`, `filing`, `news`, `blog`, `github`, `forum`, `analyst_report`, `other`.
 - `retrievalStatus`: `discovered_only`, `fetched`, `fetch_failed`, `unavailable`.
+- `retrievalEvidence`: optional reference to fetched URL, tool-call/result ID, or other evidence that content was directly inspected.
 - `usedFor`: criteria IDs.
 - `contentNotes`: methods, claims, data, limitations, or relevant excerpts.
 - `qualityNotes`: bias, recency, sample size, vendor framing, peer review status.
@@ -192,7 +194,7 @@ For white papers, academic papers, technical reports, standards, filings, or PDF
 
 - discover actual paper/report URLs,
 - fetch the contents with `web_fetch_exa` when available,
-- track retrieval status in the Source Pack,
+- track retrieval status and retrieval evidence in the Source Pack,
 - synthesize from fetched contents, not only from `web_research_exa`,
 - mark unfetched items as `discovered_only`,
 - prefer directly inspected source text over broader synthesis when they conflict.
@@ -201,9 +203,9 @@ For white papers, academic papers, technical reports, standards, filings, or PDF
 
 | Phase | Component | Change | Dependencies | Estimated Scope | Files | Verification |
 |---:|---|---|---|---|---|---|
-| 1 | Research planner state | Add research planning types and in-memory tracker. | None | Medium | `packages/pi-exa/extensions/research-planner.ts`, `packages/pi-exa/extensions/research-planner-types.ts` | Unit tests for add/reset/status. |
-| 2 | Tool registration | Register `exa_research_step`, `exa_research_status`, `exa_research_summary`, `exa_research_reset`. | Phase 1 | Medium | `packages/pi-exa/extensions/index.ts`, `packages/pi-exa/extensions/schemas.ts` | Extension registration tests. |
-| 3 | Coverage model | Implement criteria/source/gap aggregation. | Phase 1 | Medium | `packages/pi-exa/extensions/research-planner.ts` | Tests for coverage and source pack summaries. |
+| 1 | Research planner state | Add research planning types and in-memory tracker with one active session and topic-mismatch warnings. | None | Medium | `packages/pi-exa/extensions/research-planner.ts`, `packages/pi-exa/extensions/research-planner-types.ts` | Unit tests for add/reset/status. |
+| 2 | Tool registration | Register default-enabled, no-auth `exa_research_step`, `exa_research_status`, `exa_research_summary`, `exa_research_reset`. | Phase 1 | Medium | `packages/pi-exa/extensions/index.ts`, `packages/pi-exa/extensions/schemas.ts` | Extension registration tests. |
+| 3 | Coverage model | Implement criteria/source/gap aggregation, evidence-ref validation, and retrieval-evidence flags. | Phase 1 | Medium | `packages/pi-exa/extensions/research-planner.ts` | Tests for coverage and source pack summaries. |
 | 4 | Branching model | Add branch/revision validation. | Phase 1 | Small | `packages/pi-exa/extensions/research-planner.ts` | Tests mirroring code-reasoning branch/revision behavior. |
 | 5 | Skill integration | Update `exa-research-planner` skill to require the tools. | Phases 2-4 | Small | `packages/pi-exa/skills/exa-research-planner/SKILL.md` | Skill text tests. |
 | 6 | Documentation | Document tools in README. | Phases 2-5 | Small | `packages/pi-exa/README.md` | README/package tests. |
@@ -220,11 +222,11 @@ For white papers, academic papers, technical reports, standards, filings, or PDF
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Tool surface area grows too large. | More prompt/tool-selection overhead. | Keep planning tools clearly prefixed with `exa_research_`; consider gating behind config if needed. |
+| Tool surface area grows too large. | More prompt/tool-selection overhead. | Keep planning tools clearly prefixed with `exa_research_`, default-enabled because they are local-only, and document their orchestration role. |
 | Planning tool duplicates existing Exa tools. | Confusing workflow and accidental hidden costs. | Planning tools only recommend next actions; existing Exa tools perform retrieval/synthesis explicitly. |
 | State becomes too verbose. | Poor model usability and truncated outputs. | Summaries should compress criteria/source/gap state and support output truncation limits. |
 | Model still shows JSON-first drafts. | User experience regresses. | Add tests and skill guidance requiring human-readable summaries before implementation payloads. |
-| Paper retrieval creates false confidence when fetch fails. | Weak evidence may be overused. | Track `retrievalStatus` and mark unfetched sources as `discovered_only`. |
+| Paper retrieval creates false confidence when fetch fails. | Weak evidence may be overused. | Track `retrievalStatus`, `retrievalEvidence`, and mark unfetched sources as `discovered_only`. |
 
 ## Example Flow
 
@@ -246,5 +248,5 @@ Expected flow:
 
 1. **Resolved:** Planning sessions start in-memory, as captured in `docs/adr/ADR-0017-in-memory-exa-research-planning-sessions.md`.
 2. Should `exa_research_step` allow arbitrary source metadata, or should source records be strictly typed from day one?
-3. Should `exa_research_summary(mode: "payload")` generate only `web_research_exa` payloads, or also recommended `web_search_exa` / `web_fetch_exa` calls?
-4. Should research planning tools be enabled by default, or gated behind a flag to avoid adding tool surface area for users who only need basic search?
+3. **Resolved:** V1 `exa_research_summary(mode: "payload")` generates only `web_research_exa` payloads; recommended search/fetch calls remain plain next-action text.
+4. **Resolved:** Research planning tools are default-enabled in V1 because they are local-only and non-cost-incurring; retrieval tools keep existing gating.
