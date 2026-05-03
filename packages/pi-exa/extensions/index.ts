@@ -4,8 +4,10 @@
  * Provides Exa search tools via native TypeScript using the Exa API directly.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { defineTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { Static, TSchema } from "typebox";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
+import type { ToolPerformResult } from "./formatters.js";
 import {
   webAnswerParams,
   webFetchParams,
@@ -35,11 +37,87 @@ export { DEFAULT_MAX_CHARACTERS } from "./web-fetch.js";
 export { DEFAULT_NUM_RESULTS } from "./web-search.js";
 
 // =============================================================================
-// Extension Entry Point
+// Tool Registration Helpers
 // =============================================================================
 
-export default function exaExtension(pi: ExtensionAPI) {
-  // Register CLI flags
+type ExaToolSpec<TParams extends TSchema> = {
+  name: string;
+  label: string;
+  description: string;
+  promptSnippet: string;
+  promptGuidelines: string[];
+  parameters: TParams;
+  pendingMessage: string;
+  errorPrefix: string;
+  perform: (apiKey: string, params: Static<TParams>) => Promise<ToolPerformResult>;
+};
+
+function toolDetails(toolName: string): { tool: string } {
+  return { tool: toolName };
+}
+
+function missingApiKeyResult(toolName: string) {
+  return {
+    content: [
+      { type: "text" as const, text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." },
+    ],
+    isError: true,
+    details: { ...toolDetails(toolName), error: "missing_api_key" },
+  };
+}
+
+function cancelledResult(toolName: string) {
+  return {
+    content: [{ type: "text" as const, text: "Cancelled." }],
+    details: { ...toolDetails(toolName), cancelled: true },
+  };
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function registerExaTool<TParams extends TSchema>(pi: ExtensionAPI, spec: ExaToolSpec<TParams>): void {
+  pi.registerTool(
+    defineTool({
+      name: spec.name,
+      label: spec.label,
+      description: spec.description,
+      promptSnippet: spec.promptSnippet,
+      promptGuidelines: spec.promptGuidelines,
+      parameters: spec.parameters,
+      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+        const apiKey = resolveAuth(pi).apiKey;
+        if (!apiKey) {
+          return missingApiKeyResult(spec.name);
+        }
+
+        if (signal?.aborted) {
+          return cancelledResult(spec.name);
+        }
+
+        onUpdate?.({
+          content: [{ type: "text", text: spec.pendingMessage }],
+          details: { status: "pending" },
+        });
+
+        try {
+          const result = await spec.perform(apiKey, params);
+          return { content: [{ type: "text", text: result.text }], details: result.details };
+        } catch (error) {
+          const message = toErrorMessage(error);
+          return {
+            content: [{ type: "text", text: `${spec.errorPrefix}: ${message}` }],
+            isError: true,
+            details: { ...toolDetails(spec.name), error: message },
+          };
+        }
+      },
+    }),
+  );
+}
+
+function registerFlags(pi: ExtensionAPI): void {
   pi.registerFlag("--exa-api-key", {
     description: "Exa AI API key for search operations",
     type: "string",
@@ -60,17 +138,20 @@ export default function exaExtension(pi: ExtensionAPI) {
     description: "Deprecated alias for --exa-config-file.",
     type: "string",
   });
+}
 
-  const getApiKey = (): string => resolveAuth(pi).apiKey;
-  const isToolEnabled = (toolName: string): boolean => isToolEnabledForConfig(pi, getResolvedConfig(pi), toolName);
+// =============================================================================
+// Extension Entry Point
+// =============================================================================
 
-  function toolDetails(toolName: string): { tool: string } {
-    return { tool: toolName };
-  }
+export default function exaExtension(pi: ExtensionAPI) {
+  registerFlags(pi);
 
-  // Register web_search_exa tool
+  const resolvedConfig = getResolvedConfig(pi);
+  const isToolEnabled = (toolName: string): boolean => isToolEnabledForConfig(pi, resolvedConfig, toolName);
+
   if (isToolEnabled("web_search_exa")) {
-    pi.registerTool({
+    registerExaTool(pi, {
       name: "web_search_exa",
       label: "Exa Web Search",
       description:
@@ -83,47 +164,14 @@ export default function exaExtension(pi: ExtensionAPI) {
         "Use web_search_exa for retrieval; use web_research_exa for comparisons, synthesis, and recommendations.",
       ],
       parameters: webSearchParams,
-      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-        const apiKey = getApiKey();
-        if (!apiKey) {
-          return {
-            content: [{ type: "text", text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." }],
-            isError: true,
-            details: { tool: "web_search_exa", error: "missing_api_key" },
-          };
-        }
-
-        if (signal?.aborted) {
-          return {
-            content: [{ type: "text", text: "Cancelled." }],
-            details: { ...toolDetails("web_search_exa"), cancelled: true },
-          };
-        }
-
-        onUpdate?.({
-          content: [{ type: "text", text: "Searching the web via Exa..." }],
-          details: { status: "pending" },
-        });
-
-        try {
-          const { query, numResults } = params;
-          const result = await performWebSearch(apiKey, query, numResults || DEFAULT_NUM_RESULTS);
-          return { content: [{ type: "text", text: result.text }], details: result.details };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return {
-            content: [{ type: "text", text: `Exa search error: ${message}` }],
-            isError: true,
-            details: { ...toolDetails("web_search_exa"), error: message },
-          };
-        }
-      },
+      pendingMessage: "Searching the web via Exa...",
+      errorPrefix: "Exa search error",
+      perform: (apiKey, params) => performWebSearch(apiKey, params.query, params.numResults || DEFAULT_NUM_RESULTS),
     });
   }
 
-  // Register web_fetch_exa tool
   if (isToolEnabled("web_fetch_exa")) {
-    pi.registerTool({
+    registerExaTool(pi, {
       name: "web_fetch_exa",
       label: "Exa Web Fetch",
       description: "Read a webpage's full content as clean markdown. Best for extracting full content from known URLs.",
@@ -134,51 +182,20 @@ export default function exaExtension(pi: ExtensionAPI) {
         "Use web_fetch_exa to inspect returned pages; use web_find_similar_exa when you want more pages like a source URL.",
       ],
       parameters: webFetchParams,
-      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-        const apiKey = getApiKey();
-        if (!apiKey) {
-          return {
-            content: [{ type: "text", text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." }],
-            isError: true,
-            details: { ...toolDetails("web_fetch_exa"), error: "missing_api_key" },
-          };
-        }
-
-        if (signal?.aborted) {
-          return {
-            content: [{ type: "text", text: "Cancelled." }],
-            details: { ...toolDetails("web_fetch_exa"), cancelled: true },
-          };
-        }
-
-        onUpdate?.({
-          content: [{ type: "text", text: "Fetching content via Exa..." }],
-          details: { status: "pending" },
-        });
-
-        try {
-          const result = await performWebFetch(apiKey, params.urls, {
-            maxCharacters: params.maxCharacters,
-            highlights: params.highlights,
-            summary: params.summary,
-            maxAgeHours: params.maxAgeHours,
-          });
-          return { content: [{ type: "text", text: result.text }], details: result.details };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return {
-            content: [{ type: "text", text: `Exa fetch error: ${message}` }],
-            isError: true,
-            details: { ...toolDetails("web_fetch_exa"), error: message },
-          };
-        }
-      },
+      pendingMessage: "Fetching content via Exa...",
+      errorPrefix: "Exa fetch error",
+      perform: (apiKey, params) =>
+        performWebFetch(apiKey, params.urls, {
+          maxCharacters: params.maxCharacters,
+          highlights: params.highlights,
+          summary: params.summary,
+          maxAgeHours: params.maxAgeHours,
+        }),
     });
   }
 
-  // Register web_search_advanced_exa tool (disabled by default)
   if (isToolEnabled("web_search_advanced_exa")) {
-    pi.registerTool({
+    registerExaTool(pi, {
       name: "web_search_advanced_exa",
       label: "Exa Advanced Search",
       description:
@@ -190,57 +207,26 @@ export default function exaExtension(pi: ExtensionAPI) {
         "Use web_search_advanced_exa to find filtered result sets; use web_fetch_exa to read the selected URLs.",
       ],
       parameters: webSearchAdvancedParams,
-      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-        const apiKey = getApiKey();
-        if (!apiKey) {
-          return {
-            content: [{ type: "text", text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." }],
-            isError: true,
-            details: { ...toolDetails("web_search_advanced_exa"), error: "missing_api_key" },
-          };
-        }
-
-        if (signal?.aborted) {
-          return {
-            content: [{ type: "text", text: "Cancelled." }],
-            details: { ...toolDetails("web_search_advanced_exa"), cancelled: true },
-          };
-        }
-
-        onUpdate?.({
-          content: [{ type: "text", text: "Performing advanced search via Exa..." }],
-          details: { status: "pending" },
-        });
-
-        try {
-          const result = await performAdvancedSearch(apiKey, params.query, {
-            numResults: params.numResults,
-            category: params.category,
-            type: params.type,
-            startPublishedDate: params.startPublishedDate,
-            endPublishedDate: params.endPublishedDate,
-            includeDomains: params.includeDomains,
-            excludeDomains: params.excludeDomains,
-            textMaxCharacters: params.textMaxCharacters,
-            enableHighlights: params.enableHighlights,
-            highlightsNumSentences: params.highlightsNumSentences,
-          });
-          return { content: [{ type: "text", text: result.text }], details: result.details };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return {
-            content: [{ type: "text", text: `Exa advanced search error: ${message}` }],
-            isError: true,
-            details: { ...toolDetails("web_search_advanced_exa"), error: message },
-          };
-        }
-      },
+      pendingMessage: "Performing advanced search via Exa...",
+      errorPrefix: "Exa advanced search error",
+      perform: (apiKey, params) =>
+        performAdvancedSearch(apiKey, params.query, {
+          numResults: params.numResults,
+          category: params.category,
+          type: params.type,
+          startPublishedDate: params.startPublishedDate,
+          endPublishedDate: params.endPublishedDate,
+          includeDomains: params.includeDomains,
+          excludeDomains: params.excludeDomains,
+          textMaxCharacters: params.textMaxCharacters,
+          enableHighlights: params.enableHighlights,
+          highlightsNumSentences: params.highlightsNumSentences,
+        }),
     });
   }
 
-  // Register web_research_exa tool (disabled by default, opt-in)
   if (isToolEnabled("web_research_exa")) {
-    pi.registerTool({
+    registerExaTool(pi, {
       name: "web_research_exa",
       label: "Exa Deep Research",
       description: "Deep-reasoning Exa search with synthesized, grounded output for complex research topics.",
@@ -251,58 +237,27 @@ export default function exaExtension(pi: ExtensionAPI) {
         "Use web_research_exa when a systemPrompt or outputSchema is needed; use web_search_advanced_exa for filtered retrieval only.",
       ],
       parameters: webResearchParams,
-      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-        const apiKey = getApiKey();
-        if (!apiKey) {
-          return {
-            content: [{ type: "text", text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." }],
-            isError: true,
-            details: { ...toolDetails("web_research_exa"), error: "missing_api_key" },
-          };
-        }
-
-        if (signal?.aborted) {
-          return {
-            content: [{ type: "text", text: "Cancelled." }],
-            details: { ...toolDetails("web_research_exa"), cancelled: true },
-          };
-        }
-
-        onUpdate?.({
-          content: [{ type: "text", text: "Performing deep research via Exa..." }],
-          details: { status: "pending" },
-        });
-
-        try {
-          const result = await performResearch(apiKey, {
-            query: params.query,
-            type: params.type,
-            systemPrompt: params.systemPrompt,
-            textMaxCharacters: params.textMaxCharacters,
-            outputSchema: params.outputSchema,
-            additionalQueries: params.additionalQueries,
-            numResults: params.numResults,
-            includeDomains: params.includeDomains,
-            excludeDomains: params.excludeDomains,
-            startPublishedDate: params.startPublishedDate,
-            endPublishedDate: params.endPublishedDate,
-          });
-          return { content: [{ type: "text", text: result.text }], details: result.details };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return {
-            content: [{ type: "text", text: `Exa research error: ${message}` }],
-            isError: true,
-            details: { ...toolDetails("web_research_exa"), error: message },
-          };
-        }
-      },
+      pendingMessage: "Performing deep research via Exa...",
+      errorPrefix: "Exa research error",
+      perform: (apiKey, params) =>
+        performResearch(apiKey, {
+          query: params.query,
+          type: params.type,
+          systemPrompt: params.systemPrompt,
+          textMaxCharacters: params.textMaxCharacters,
+          outputSchema: params.outputSchema,
+          additionalQueries: params.additionalQueries,
+          numResults: params.numResults,
+          includeDomains: params.includeDomains,
+          excludeDomains: params.excludeDomains,
+          startPublishedDate: params.startPublishedDate,
+          endPublishedDate: params.endPublishedDate,
+        }),
     });
   }
 
-  // Register web_answer_exa tool
   if (isToolEnabled("web_answer_exa")) {
-    pi.registerTool({
+    registerExaTool(pi, {
       name: "web_answer_exa",
       label: "Exa Answer",
       description: "Get a grounded answer with source citations and optional structured output.",
@@ -313,51 +268,20 @@ export default function exaExtension(pi: ExtensionAPI) {
         "Use web_answer_exa for a cited response; use web_fetch_exa when you need the full source text.",
       ],
       parameters: webAnswerParams,
-      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-        const apiKey = getApiKey();
-        if (!apiKey) {
-          return {
-            content: [{ type: "text", text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." }],
-            isError: true,
-            details: { ...toolDetails("web_answer_exa"), error: "missing_api_key" },
-          };
-        }
-
-        if (signal?.aborted) {
-          return {
-            content: [{ type: "text", text: "Cancelled." }],
-            details: { ...toolDetails("web_answer_exa"), cancelled: true },
-          };
-        }
-
-        onUpdate?.({
-          content: [{ type: "text", text: "Fetching answer from Exa..." }],
-          details: { status: "pending" },
-        });
-
-        try {
-          const result = await performAnswer(apiKey, {
-            query: params.query,
-            systemPrompt: params.systemPrompt,
-            text: params.text,
-            outputSchema: params.outputSchema,
-          });
-          return { content: [{ type: "text", text: result.text }], details: result.details };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return {
-            content: [{ type: "text", text: `Exa answer error: ${message}` }],
-            isError: true,
-            details: { ...toolDetails("web_answer_exa"), error: message },
-          };
-        }
-      },
+      pendingMessage: "Fetching answer from Exa...",
+      errorPrefix: "Exa answer error",
+      perform: (apiKey, params) =>
+        performAnswer(apiKey, {
+          query: params.query,
+          systemPrompt: params.systemPrompt,
+          text: params.text,
+          outputSchema: params.outputSchema,
+        }),
     });
   }
 
-  // Register web_find_similar_exa tool
   if (isToolEnabled("web_find_similar_exa")) {
-    pi.registerTool({
+    registerExaTool(pi, {
       name: "web_find_similar_exa",
       label: "Exa Similar Pages",
       description: "Find web pages similar to a given URL.",
@@ -368,49 +292,19 @@ export default function exaExtension(pi: ExtensionAPI) {
         "Use web_find_similar_exa to discover related pages; use web_fetch_exa to inspect the returned URLs in full.",
       ],
       parameters: webFindSimilarParams,
-      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-        const apiKey = getApiKey();
-        if (!apiKey) {
-          return {
-            content: [{ type: "text", text: "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag." }],
-            isError: true,
-            details: { ...toolDetails("web_find_similar_exa"), error: "missing_api_key" },
-          };
-        }
-
-        if (signal?.aborted) {
-          return {
-            content: [{ type: "text", text: "Cancelled." }],
-            details: { ...toolDetails("web_find_similar_exa"), cancelled: true },
-          };
-        }
-
-        onUpdate?.({
-          content: [{ type: "text", text: "Finding similar pages via Exa..." }],
-          details: { status: "pending" },
-        });
-
-        try {
-          const result = await performFindSimilar(apiKey, {
-            url: params.url,
-            numResults: params.numResults,
-            textMaxCharacters: params.textMaxCharacters,
-            excludeSourceDomain: params.excludeSourceDomain,
-            startPublishedDate: params.startPublishedDate,
-            endPublishedDate: params.endPublishedDate,
-            includeDomains: params.includeDomains,
-            excludeDomains: params.excludeDomains,
-          });
-          return { content: [{ type: "text", text: result.text }], details: result.details };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return {
-            content: [{ type: "text", text: `Exa similar search error: ${message}` }],
-            isError: true,
-            details: { ...toolDetails("web_find_similar_exa"), error: message },
-          };
-        }
-      },
+      pendingMessage: "Finding similar pages via Exa...",
+      errorPrefix: "Exa similar search error",
+      perform: (apiKey, params) =>
+        performFindSimilar(apiKey, {
+          url: params.url,
+          numResults: params.numResults,
+          textMaxCharacters: params.textMaxCharacters,
+          excludeSourceDomain: params.excludeSourceDomain,
+          startPublishedDate: params.startPublishedDate,
+          endPublishedDate: params.endPublishedDate,
+          includeDomains: params.includeDomains,
+          excludeDomains: params.excludeDomains,
+        }),
     });
   }
 }
