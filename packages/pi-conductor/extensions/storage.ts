@@ -433,8 +433,12 @@ export function updateTask(run: RunRecord, input: { taskId: string; title?: stri
 
 export function assignTaskToWorker(run: RunRecord, taskId: string, workerId: string): RunRecord {
   const normalized = normalizeProjectRecord(run);
-  if (!normalized.workers.some((worker) => worker.workerId === workerId)) {
+  const worker = normalized.workers.find((entry) => entry.workerId === workerId);
+  if (!worker) {
     throw new Error(`Worker ${workerId} not found`);
+  }
+  if (worker.lifecycle !== "idle" || worker.recoverable) {
+    throw new Error(`Worker ${workerId} is ${worker.lifecycle} and cannot be assigned work`);
   }
 
   let found = false;

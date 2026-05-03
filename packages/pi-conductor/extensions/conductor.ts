@@ -36,7 +36,6 @@ import {
   completeTaskRun,
   createWorkerRecord,
   markConductorGateUsed,
-  removeWorker,
   setWorkerPrState,
 } from "./storage.js";
 import { terminalRunSummaryMarkdown } from "./task-brief-summary.js";
@@ -75,6 +74,7 @@ import {
 } from "./work-routing.js";
 import { isStatusOnlyWorkRequest, selectRuntimeModeForWork } from "./work-runtime-selection.js";
 import { type RunWorkRuntimeSummary, summarizeRunWorkRuntime } from "./work-runtime-summary.js";
+import { hasActiveWorkerCleanupReservation } from "./worker-cleanup.js";
 
 export { buildEvidenceBundleForRepo, checkReadinessForRepo } from "./evidence-service.js";
 export { createGateForRepo, resolveGateForRepo, resolveGateFromTrustedHumanForRepo } from "./gate-service.js";
@@ -1623,84 +1623,7 @@ export async function createWorkerForRepo(repoRoot: string, workerName: string):
   }
   return worker;
 }
-function workerCleanupGeneration(run: RunRecord, workerId: string): number {
-  return (
-    run.tasks.filter((task) => task.assignedWorkerId === workerId).length +
-    run.runs.filter((entry) => entry.workerId === workerId).length
-  );
-}
-
-export function removeWorkerForRepo(repoRoot: string, workerName: string): WorkerRecord {
-  const run = getOrCreateRunForRepo(repoRoot);
-  const worker = run.workers.find((entry) => entry.name === workerName);
-  if (!worker) {
-    throw new Error(`Worker named ${workerName} not found`);
-  }
-  const currentCleanupGeneration = workerCleanupGeneration(run, worker.workerId);
-  const cleanupGate = run.gates.find(
-    (gate) =>
-      gate.type === "destructive_cleanup" &&
-      gate.resourceRefs.workerId === worker.workerId &&
-      gate.operation === "destructive_cleanup" &&
-      gate.status !== "canceled" &&
-      gate.usedAt === null &&
-      gate.targetRevision === currentCleanupGeneration,
-  );
-  const wrongOperationGate = run.gates.find(
-    (gate) =>
-      gate.type === "destructive_cleanup" &&
-      gate.resourceRefs.workerId === worker.workerId &&
-      gate.status === "approved" &&
-      gate.operation !== "destructive_cleanup" &&
-      gate.usedAt === null,
-  );
-  if (wrongOperationGate) {
-    throw new Error(`Worker ${worker.name} requires a destructive_cleanup gate scoped to destructive_cleanup`);
-  }
-  if (cleanupGate?.status !== "approved") {
-    if (!cleanupGate) {
-      createGateForRepo(repoRoot, {
-        type: "destructive_cleanup",
-        resourceRefs: { workerId: worker.workerId },
-        requestedDecision: `Approve deleting worker ${worker.name}, its worktree, session link, and managed branch`,
-        targetRevision: currentCleanupGeneration,
-      });
-    }
-    throw new Error(
-      `Worker ${worker.name} requires an approved destructive_cleanup gate before cleanup. Approve via /conductor human dashboard, then rerun conductor_cleanup_worker(${JSON.stringify({ name: worker.name })}).`,
-    );
-  }
-  const updatedRun = mutateRepoRunSync(repoRoot, (latest) => {
-    const latestGate = latest.gates.find((gate) => gate.gateId === cleanupGate.gateId);
-    if (!latestGate || latestGate.status !== "approved" || latestGate.usedAt !== null) {
-      throw new Error(`Worker ${worker.name} requires a fresh destructive_cleanup gate before cleanup finalization`);
-    }
-    const latestWorker = assertWorkerCleanupReady(latest, worker.workerId, worker.name);
-    if (latestGate.targetRevision !== workerCleanupGeneration(latest, worker.workerId)) {
-      throw new Error(`Worker ${worker.name} requires a fresh destructive_cleanup gate after worker activity changed`);
-    }
-    if (latestWorker.worktreePath && existsSync(latestWorker.worktreePath)) {
-      removeManagedWorktree(latest.repoRoot, latestWorker.worktreePath);
-    }
-    if (latestWorker.sessionFile && existsSync(latestWorker.sessionFile))
-      rmSync(latestWorker.sessionFile, { force: true });
-    if (latestWorker.branch) removeManagedBranch(latest.repoRoot, latestWorker.branch);
-    return appendExternalOperationEvent(
-      removeWorker(markConductorGateUsed(latest, cleanupGate.gateId), worker.workerId),
-      {
-        status: "succeeded",
-        resourceRefs: { workerId: worker.workerId, gateId: cleanupGate.gateId },
-        payload: {
-          operation: "cleanup_worker",
-          name: worker.name,
-          worktreePath: latestWorker.worktreePath,
-          branch: latestWorker.branch,
-        },
-      },
-    );
-  });
-  return updatedRun.archivedWorkers.find((entry) => entry.workerId === worker.workerId) ?? worker;
-}
+export { removeWorkerForRepo } from "./worker-cleanup.js";
 export function commitWorkerForRepo(repoRoot: string, workerName: string, message: string): WorkerRecord {
   const run = getOrCreateRunForRepo(repoRoot);
   const worker = run.workers.find((entry) => entry.name === workerName);
@@ -2114,6 +2037,9 @@ export async function recoverWorkerForRepo(repoRoot: string, workerName: string)
   if (!worker) {
     throw new Error(`Worker named ${workerName} not found`);
   }
+  if (hasActiveWorkerCleanupReservation(run, worker.workerId)) {
+    throw new Error(`Worker ${worker.name} is reserved for destructive cleanup and cannot be recovered`);
+  }
   let worktreePath = worker.worktreePath;
   let runtime = null;
   try {
@@ -2146,6 +2072,9 @@ export async function recoverWorkerForRepo(repoRoot: string, workerName: string)
     throw error;
   }
   const updatedRun = mutateRepoRunSync(repoRoot, (latest) => {
+    if (hasActiveWorkerCleanupReservation(latest, worker.workerId)) {
+      throw new Error(`Worker ${worker.name} is reserved for destructive cleanup and cannot be recovered`);
+    }
     const workers = latest.workers.map((entry) =>
       entry.workerId === worker.workerId
         ? {

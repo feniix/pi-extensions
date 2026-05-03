@@ -15,6 +15,7 @@ function execGit(cwd: string, command: string): string {
     cwd,
     encoding: "utf-8",
     stdio: ["pipe", "pipe", "pipe"],
+    timeout: 30_000,
   }).trim();
 }
 
