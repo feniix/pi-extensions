@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerEvidenceTools } from "./tools/evidence-tools.js";
 import { registerGateTools } from "./tools/gate-tools.js";
 import { registerObjectiveTools } from "./tools/objective-tools.js";

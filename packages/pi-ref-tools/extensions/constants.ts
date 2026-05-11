@@ -1,4 +1,4 @@
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@mariozechner/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
 
 export const DEFAULT_ENDPOINT = "https://api.ref.tools/mcp";
 export const DEFAULT_TIMEOUT_MS = 30000;

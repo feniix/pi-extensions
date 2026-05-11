@@ -1,5 +1,5 @@
 import { basename, normalize } from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { GitSnapshot, WorktreeEntry } from "./types.js";
 
 const GIT_TIMEOUT_MS = 3_000;

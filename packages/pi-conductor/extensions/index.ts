@@ -1,6 +1,6 @@
 /* v8 ignore file -- extension registration glue is covered by command/tool runtime tests at service boundaries. */
 import { execSync } from "node:child_process";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { runConductorCommand } from "./commands.js";
 import { getOrCreateRunForRepo } from "./conductor.js";
 import { openHumanGateQueueDashboard, resolveHumanGateDecision, toHumanGateDecisionUi } from "./human-gates.js";

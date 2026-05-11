@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-devtools",
-  "version": "2.2.3",
+  "version": "3.0.0",
   "description": "Devtools extension for pi — branch and PR workflow, release automation, PR feedback resolution, merge commands, with GitHub and Linear tracker support",
   "keywords": [
     "pi",
@@ -34,8 +34,8 @@
     ]
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
   },
   "repository": {
@@ -51,5 +51,16 @@
   "bugs": {
     "url": "https://github.com/feniix/pi-extensions/issues"
   },
-  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-devtools#readme"
+  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-devtools#readme",
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  }
 }

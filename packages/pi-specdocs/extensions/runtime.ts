@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { type ExtensionContext, withFileMutationQueue } from "@mariozechner/pi-coding-agent";
+import { type ExtensionContext, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import remarkFrontmatter from "remark-frontmatter";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";

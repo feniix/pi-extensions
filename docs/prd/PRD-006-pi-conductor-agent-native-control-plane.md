@@ -752,7 +752,7 @@ Then the README describes conductor as agent-first durable orchestration
 
 ## 10. Dependencies & Constraints
 
-* **Pi SDK / extension APIs:** implementation depends on `@mariozechner/pi-coding-agent` extension APIs for command registration, tool registration, `AgentSession`, `SessionManager`, and context access.
+* **Pi SDK / extension APIs:** implementation depends on `@earendil-works/pi-coding-agent` extension APIs for command registration, tool registration, `AgentSession`, `SessionManager`, and context access.
 * **Local git repository:** conductor continues to require a git repository for worker branch/worktree isolation.
 * **Local file storage:** conductor state remains project-scoped and local under `PI_CONDUCTOR_HOME` when set, otherwise `~/.pi/agent/conductor/projects/<projectKey>/`.
 * **Node/TypeScript workspace:** implementation must stay compatible with the repository's TypeScript, Vitest, and Biome setup.

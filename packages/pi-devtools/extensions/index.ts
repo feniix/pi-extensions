@@ -4,7 +4,7 @@
  * Provides Git workflow tools, PR operations, and release automation.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getGitContext } from "./git.js";
 import { checkCiTool, createPrTool, mergePrTool } from "./pull-request-tools.js";
 import {

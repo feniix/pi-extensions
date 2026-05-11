@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { compareVersions, getGitContext, parseVersion } from "../extensions/git.js";
 import devtoolsExtension, { parseConventionalCommit, toolDefinitions } from "../extensions/index.js";

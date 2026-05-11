@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type { AssistantMessage, StopReason } from "@mariozechner/pi-ai";
+import type { AssistantMessage, StopReason } from "@earendil-works/pi-ai";
 import {
   AuthStorage,
   createAgentSession,
@@ -8,7 +8,7 @@ import {
   defineTool,
   ModelRegistry,
   SessionManager,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { createTmuxWorkerRunRuntimeBackend } from "./tmux-runtime.js";
 import type {

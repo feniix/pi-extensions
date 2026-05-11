@@ -5,7 +5,7 @@
  * Token-efficient documentation search and URL reading via Ref's Model Context Protocol.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { formatSessionStartMessage, resolveRuntimeSettings } from "./config.js";
 import { DEFAULT_CONFIG_FILE } from "./constants.js";
 import { RefMcpClient } from "./mcp-client.js";

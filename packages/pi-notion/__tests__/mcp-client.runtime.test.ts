@@ -354,7 +354,7 @@ describe("pi-notion mcp client runtime helpers", () => {
     const emit = vi.fn();
     const notify = createUiNotifier({
       events: { emit },
-    } as unknown as import("@mariozechner/pi-coding-agent").ExtensionAPI);
+    } as unknown as import("@earendil-works/pi-coding-agent").ExtensionAPI);
     notify("hello");
     expect(emit).toHaveBeenCalledWith("ui:notify", { message: "hello", type: "info" });
 
@@ -379,7 +379,7 @@ describe("pi-notion mcp client runtime helpers", () => {
           throw new Error("no ui");
         }),
       },
-    } as unknown as import("@mariozechner/pi-coding-agent").ExtensionAPI);
+    } as unknown as import("@earendil-works/pi-coding-agent").ExtensionAPI);
 
     notify("fallback message", "error");
     expect(logSpy).toHaveBeenCalledWith("[pi-notion] fallback message");

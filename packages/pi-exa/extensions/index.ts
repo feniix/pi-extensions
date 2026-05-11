@@ -4,7 +4,7 @@
  * Provides Exa search tools via native TypeScript using the Exa API directly.
  */
 
-import { defineTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Static, TSchema } from "typebox";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
 import type { ToolPerformResult } from "./formatters.js";

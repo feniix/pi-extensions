@@ -1,5 +1,5 @@
-import { Type } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Type } from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { extractFrontmatterField, parseFrontmatter } from "./frontmatter.js";
 import { formatPaths, getValidationResult, handleDocLint, runFormat, runValidation } from "./runtime.js";
 import {

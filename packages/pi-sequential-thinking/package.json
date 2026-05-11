@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-sequential-thinking",
-  "version": "2.1.1",
+  "version": "3.0.0",
   "description": "Sequential Thinking MCP extension for pi — structured progressive thinking through defined stages",
   "keywords": [
     "pi",
@@ -25,8 +25,8 @@
     ]
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": "*",
-    "@mariozechner/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
   },
   "repository": {
@@ -42,5 +42,16 @@
   "bugs": {
     "url": "https://github.com/feniix/pi-extensions/issues"
   },
-  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-sequential-thinking#readme"
+  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-sequential-thinking#readme",
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  }
 }

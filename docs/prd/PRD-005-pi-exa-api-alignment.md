@@ -796,7 +796,7 @@ The `enabledTools` array in config continues to work as a fine-grained override.
 
 * **exa-js >=2.8 <3.0** — already installed (^2.8.0 in package.json); has full types for all endpoints. No SDK upgrade needed.
 * **@sinclair/typebox** — peer dependency, already used for parameter schemas
-* **@mariozechner/pi-coding-agent** — peer dependency; `ExtensionAPI`, `registerTool()`, `onUpdate`, `details` field all confirmed available
+* **@earendil-works/pi-coding-agent** — peer dependency; `ExtensionAPI`, `registerTool()`, `onUpdate`, `details` field all confirmed available
 * **Exa API account** — must have payment method on file (research session confirmed 403/1010 error without billing setup)
 
 ---

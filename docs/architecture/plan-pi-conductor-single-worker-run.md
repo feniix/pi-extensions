@@ -126,7 +126,7 @@ The safest rollout is to implement the run feature in five layers: storage/type 
 ### Code dependencies
 
 * `packages/pi-conductor/extensions/types.ts` and `storage.ts` must stabilize the `lastRun` model before status or orchestration code can rely on it.
-* `packages/pi-conductor/extensions/runtime.ts` depends on Pi SDK executable session APIs being available through `@mariozechner/pi-coding-agent` in this workspace; in practice this means adding new `createAgentSession`-level imports to `runtime.ts`, not adding a new package dependency.
+* `packages/pi-conductor/extensions/runtime.ts` depends on Pi SDK executable session APIs being available through `@earendil-works/pi-coding-agent` in this workspace; in practice this means adding new `createAgentSession`-level imports to `runtime.ts`, not adding a new package dependency.
 * `packages/pi-conductor/extensions/conductor.ts` depends on both storage helpers and the new runtime execution seam.
 * `packages/pi-conductor/extensions/index.ts` and `commands.ts` depend on a stable conductor entrypoint for the run workflow.
 
