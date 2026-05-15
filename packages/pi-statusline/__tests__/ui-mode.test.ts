@@ -21,4 +21,17 @@ describe("UI-mode event helpers", () => {
     expect(result).toBe("handled");
     expect(handler).toHaveBeenCalledOnce();
   });
+
+  it("treats stale context access like an unavailable UI", async () => {
+    const handler = vi.fn();
+    const uiOnly = createUiOnlyHandler(handler);
+    const staleCtx = {
+      get hasUI() {
+        throw new Error("This extension ctx is stale after session replacement or reload");
+      },
+    };
+
+    await expect(Promise.resolve(uiOnly({ type: "event" }, staleCtx))).resolves.toBeUndefined();
+    expect(handler).not.toHaveBeenCalled();
+  });
 });

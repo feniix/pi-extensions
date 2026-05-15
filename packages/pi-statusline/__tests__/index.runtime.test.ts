@@ -338,6 +338,100 @@ describe("pi-statusline extension runtime", () => {
     expect(text).not.toContain("slow-repo");
   });
 
+  it("reinstalls the footer for repeated UI session starts", async () => {
+    const mockPi = createMockPi();
+    statuslineExtension(mockPi as unknown as ExtensionAPI);
+
+    const sessionStartHandler = mockPi.on.mock.calls.find(([name]) => name === "session_start")?.[1];
+    const setFooter = vi.fn();
+    const ctx = {
+      cwd: "/tmp/project",
+      hasUI: true,
+      model: { id: "opus", contextWindow: 1000000 },
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ percent: 12 }),
+      ui: { setFooter },
+    };
+
+    await sessionStartHandler?.({}, ctx);
+    await sessionStartHandler?.({}, ctx);
+
+    expect(setFooter).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not rerender when async agent-end refresh loses the session race", async () => {
+    vi.useRealTimers();
+    const mockPi = createMockPi();
+    let releaseGit: (() => void) | undefined;
+    let blockNextGitRefresh = false;
+
+    mockPi.exec.mockImplementation(async (_cmd: string, args: string[]) => {
+      const joined = args.join(" ");
+      if (joined.includes("rev-parse --is-inside-work-tree")) {
+        if (blockNextGitRefresh) {
+          await new Promise<void>((resolve) => {
+            releaseGit = resolve;
+          });
+        }
+        return { code: 0, stdout: "true", stderr: "", killed: false };
+      }
+      if (joined.includes("rev-parse --show-toplevel"))
+        return { code: 0, stdout: "/tmp/project", stderr: "", killed: false };
+      if (joined.includes("rev-parse --git-dir")) return { code: 0, stdout: ".git", stderr: "", killed: false };
+      if (joined.includes("branch --show-current")) return { code: 0, stdout: "main", stderr: "", killed: false };
+      if (joined.includes("status --porcelain")) return { code: 0, stdout: "", stderr: "", killed: false };
+      if (joined.includes("worktree list --porcelain")) {
+        return {
+          code: 0,
+          stdout: "worktree /tmp/project\nHEAD abc\nbranch refs/heads/main\n",
+          stderr: "",
+          killed: false,
+        };
+      }
+      return { code: 1, stdout: "", stderr: "", killed: false };
+    });
+
+    statuslineExtension(mockPi as unknown as ExtensionAPI);
+
+    const sessionStartHandler = mockPi.on.mock.calls.find(([name]) => name === "session_start")?.[1];
+    const sessionShutdownHandler = mockPi.on.mock.calls.find(([name]) => name === "session_shutdown")?.[1];
+    const agentEndHandler = mockPi.on.mock.calls.find(([name]) => name === "agent_end")?.[1];
+    const setFooter = vi.fn();
+    const ctx = {
+      cwd: "/tmp/project",
+      hasUI: true,
+      model: { id: "opus", contextWindow: 1000000 },
+      sessionManager: { getBranch: () => [] },
+      getContextUsage: () => ({ percent: 12 }),
+      ui: { setFooter },
+    };
+
+    await sessionStartHandler?.({}, ctx);
+    const footerFactory = setFooter.mock.calls[0]?.[0];
+    const requestRender = vi.fn();
+    footerFactory?.(
+      { requestRender },
+      {},
+      {
+        getGitBranch: () => "main",
+        onBranchChange: () => vi.fn(),
+      },
+    );
+
+    blockNextGitRefresh = true;
+    const result = agentEndHandler?.({}, ctx);
+    for (let i = 0; i < 20 && !releaseGit; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(releaseGit).toBeDefined();
+
+    await sessionShutdownHandler?.({}, ctx);
+    releaseGit?.();
+    await result;
+
+    expect(requestRender).not.toHaveBeenCalled();
+  });
+
   it("does not read session context after async agent-end refreshes", async () => {
     const mockPi = createMockPi();
     mockPi.exec.mockImplementation(async (_cmd: string, args: string[]) => {

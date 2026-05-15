@@ -40,4 +40,14 @@ describe("render scheduler", () => {
 
     expect(render).toHaveBeenCalledTimes(1);
   });
+
+  it("rethrows unrecoverable render callback failures", () => {
+    const render = vi.fn(() => {
+      throw new Error("boom");
+    });
+    const scheduler = createRenderScheduler(100, () => false);
+    scheduler.setRenderCallback(render);
+
+    expect(() => scheduler.rerender(true)).toThrow("boom");
+  });
 });

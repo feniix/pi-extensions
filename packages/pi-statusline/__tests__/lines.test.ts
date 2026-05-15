@@ -25,11 +25,21 @@ describe("statusline line helpers", () => {
         activityLabel: "Act: responding",
       },
       "main",
-      30,
+      120,
     );
 
+    const text = stripAnsi(lines.join("\n"));
+    expect(text).toContain("Model: opus");
+    expect(text).toContain("Thinking: medium");
+    expect(text).toContain("Ctx: 10.0%");
+    expect(text).toContain("⎇ main");
+    expect(text).toContain("dirty: +3");
+    expect(text).toContain("project");
+    expect(text).toContain("𖠰 main");
+    expect(text).toContain("Skill: release");
+    expect(text).toContain("Act: responding");
     expect(lines).toHaveLength(2);
-    expect(stripAnsi(lines[0] ?? "").length).toBeLessThanOrEqual(30);
-    expect(stripAnsi(lines[1] ?? "").length).toBeLessThanOrEqual(30);
+    expect(stripAnsi(lines[0] ?? "").length).toBeLessThanOrEqual(120);
+    expect(stripAnsi(lines[1] ?? "").length).toBeLessThanOrEqual(120);
   });
 });
