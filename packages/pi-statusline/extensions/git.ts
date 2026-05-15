@@ -103,11 +103,13 @@ export async function getGitSnapshot(pi: ExtensionAPI, cwd: string): Promise<Git
     };
   }
 
-  const topLevel = await runGit(pi, cwd, ["rev-parse", "--show-toplevel"]);
-  const gitDir = await runGit(pi, cwd, ["rev-parse", "--git-dir"]);
-  const branch = await runGit(pi, cwd, ["branch", "--show-current"]);
-  const dirtyOutput = await runGit(pi, cwd, ["--no-optional-locks", "status", "--porcelain"]);
-  const worktreeOutput = await runGit(pi, cwd, ["worktree", "list", "--porcelain"]);
+  const [topLevel, gitDir, branch, dirtyOutput, worktreeOutput] = await Promise.all([
+    runGit(pi, cwd, ["rev-parse", "--show-toplevel"]),
+    runGit(pi, cwd, ["rev-parse", "--git-dir"]),
+    runGit(pi, cwd, ["branch", "--show-current"]),
+    runGit(pi, cwd, ["--no-optional-locks", "status", "--porcelain"]),
+    runGit(pi, cwd, ["worktree", "list", "--porcelain"]),
+  ]);
 
   const repoName = topLevel ? basename(topLevel) : null;
   const dirtyCount = dirtyOutput === null ? 0 : parseDirtyCountFromPorcelain(dirtyOutput);

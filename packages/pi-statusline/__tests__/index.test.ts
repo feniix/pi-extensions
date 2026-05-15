@@ -35,9 +35,22 @@ describe("pi-statusline extension", () => {
     );
   });
 
-  it("registers /statusline tool", () => {
+  it("registers /statusline tool in UI mode", async () => {
     const mockPi = createMockPi();
     statuslineExtension(mockPi as unknown as ExtensionAPI);
+
+    const sessionStartHandler = mockPi.on.mock.calls.find(([name]) => name === "session_start")?.[1];
+    await sessionStartHandler?.(
+      {},
+      {
+        cwd: "/tmp/project",
+        hasUI: true,
+        model: { id: "opus", contextWindow: 1_000_000 },
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ percent: 11 }),
+        ui: { setFooter: vi.fn() },
+      },
+    );
 
     expect(mockPi.registerTool).toHaveBeenCalledTimes(1);
     expect(mockPi.registerTool).toHaveBeenCalledWith(

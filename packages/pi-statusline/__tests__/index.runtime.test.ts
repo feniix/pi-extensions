@@ -95,7 +95,7 @@ describe("pi-statusline extension runtime", () => {
     vi.restoreAllMocks();
   });
 
-  it("emits status lines on non-UI session start and updates footer in UI mode", async () => {
+  it("skips non-UI session starts and updates footer in UI mode", async () => {
     const mockPi = createMockPi();
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     statuslineExtension(mockPi as unknown as ExtensionAPI);
@@ -117,7 +117,9 @@ describe("pi-statusline extension runtime", () => {
       },
     );
 
-    expect(logSpy).toHaveBeenCalled();
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(setFooter).not.toHaveBeenCalled();
+    expect(mockPi.registerTool).not.toHaveBeenCalled();
 
     await sessionStartHandler?.(
       {},
@@ -132,6 +134,7 @@ describe("pi-statusline extension runtime", () => {
     );
 
     expect(setFooter).toHaveBeenCalledTimes(1);
+    expect(mockPi.registerTool).toHaveBeenCalledTimes(1);
   });
 
   it("throttles footer rerenders during rapid streaming updates", async () => {
@@ -237,14 +240,172 @@ describe("pi-statusline extension runtime", () => {
     }).not.toThrow();
   });
 
+  it("ignores stale async session-start git refreshes", async () => {
+    vi.useRealTimers();
+    const mockPi = createMockPi();
+    let releaseSlowGit: (() => void) | undefined;
+    let slowGitReleased = false;
+
+    mockPi.exec.mockImplementation(async (_cmd: string, args: string[], options?: { cwd?: string }) => {
+      const cwd = options?.cwd ?? "/tmp/fast";
+      const joined = args.join(" ");
+      if (cwd === "/tmp/slow" && joined.includes("rev-parse --is-inside-work-tree") && !slowGitReleased) {
+        await new Promise<void>((resolve) => {
+          releaseSlowGit = () => {
+            slowGitReleased = true;
+            resolve();
+          };
+        });
+      }
+
+      if (joined.includes("rev-parse --is-inside-work-tree"))
+        return { code: 0, stdout: "true", stderr: "", killed: false };
+      if (joined.includes("rev-parse --show-toplevel")) {
+        return {
+          code: 0,
+          stdout: cwd === "/tmp/slow" ? "/tmp/slow-repo" : "/tmp/fast-repo",
+          stderr: "",
+          killed: false,
+        };
+      }
+      if (joined.includes("rev-parse --git-dir")) return { code: 0, stdout: ".git", stderr: "", killed: false };
+      if (joined.includes("branch --show-current")) {
+        return { code: 0, stdout: cwd === "/tmp/slow" ? "slow-branch" : "fast-branch", stderr: "", killed: false };
+      }
+      if (joined.includes("status --porcelain")) {
+        return { code: 0, stdout: cwd === "/tmp/slow" ? " M slow.ts\n" : "", stderr: "", killed: false };
+      }
+      if (joined.includes("worktree list --porcelain")) {
+        return {
+          code: 0,
+          stdout: `worktree ${cwd === "/tmp/slow" ? "/tmp/slow-repo" : "/tmp/fast-repo"}\nHEAD abc\nbranch refs/heads/main\n`,
+          stderr: "",
+          killed: false,
+        };
+      }
+      return { code: 1, stdout: "", stderr: "", killed: false };
+    });
+
+    statuslineExtension(mockPi as unknown as ExtensionAPI);
+
+    const sessionStartHandler = mockPi.on.mock.calls.find(([name]) => name === "session_start")?.[1];
+    const setFooter = vi.fn();
+    const slowStart = sessionStartHandler?.(
+      {},
+      {
+        cwd: "/tmp/slow",
+        hasUI: true,
+        model: { id: "opus", contextWindow: 1000000 },
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ percent: 12 }),
+        ui: { setFooter },
+      },
+    );
+
+    for (let i = 0; i < 20 && !releaseSlowGit; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(releaseSlowGit).toBeDefined();
+
+    const fastStart = sessionStartHandler?.(
+      {},
+      {
+        cwd: "/tmp/fast",
+        hasUI: true,
+        model: { id: "opus", contextWindow: 1000000 },
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ percent: 12 }),
+        ui: { setFooter },
+      },
+    );
+
+    await fastStart;
+    releaseSlowGit?.();
+    await slowStart;
+
+    const footerFactory = setFooter.mock.calls[0]?.[0];
+    const footer = footerFactory?.(
+      { requestRender: vi.fn() },
+      {},
+      {
+        getGitBranch: () => "fast-branch",
+        onBranchChange: () => vi.fn(),
+      },
+    );
+
+    const text = stripAnsi(footer?.render(120).join("\n") ?? "");
+    expect(text).toContain("fast-repo");
+    expect(text).not.toContain("slow-repo");
+  });
+
+  it("does not read session context after async agent-end refreshes", async () => {
+    const mockPi = createMockPi();
+    mockPi.exec.mockImplementation(async (_cmd: string, args: string[]) => {
+      await Promise.resolve();
+      const joined = args.join(" ");
+      if (joined.includes("rev-parse --is-inside-work-tree"))
+        return { code: 0, stdout: "true", stderr: "", killed: false };
+      if (joined.includes("rev-parse --show-toplevel"))
+        return { code: 0, stdout: "/tmp/project", stderr: "", killed: false };
+      if (joined.includes("rev-parse --git-dir")) return { code: 0, stdout: ".git", stderr: "", killed: false };
+      if (joined.includes("branch --show-current")) return { code: 0, stdout: "main", stderr: "", killed: false };
+      if (joined.includes("status --porcelain")) return { code: 0, stdout: " M file.ts\n", stderr: "", killed: false };
+      if (joined.includes("worktree list --porcelain")) {
+        return {
+          code: 0,
+          stdout: "worktree /tmp/project\nHEAD abc\nbranch refs/heads/main\n",
+          stderr: "",
+          killed: false,
+        };
+      }
+      return { code: 1, stdout: "", stderr: "", killed: false };
+    });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    statuslineExtension(mockPi as unknown as ExtensionAPI);
+
+    const agentEndHandler = mockPi.on.mock.calls.find(([name]) => name === "agent_end")?.[1];
+
+    let stale = false;
+    const ctx = {
+      get cwd() {
+        if (stale) throw new Error("This extension ctx is stale after session replacement or reload");
+        return "/tmp/project";
+      },
+      get hasUI() {
+        if (stale) throw new Error("This extension ctx is stale after session replacement or reload");
+        return true;
+      },
+      get model() {
+        if (stale) throw new Error("This extension ctx is stale after session replacement or reload");
+        return { id: "opus", contextWindow: 1000000 };
+      },
+      sessionManager: {
+        getBranch: () => {
+          if (stale) throw new Error("This extension ctx is stale after session replacement or reload");
+          return [];
+        },
+      },
+      getContextUsage: () => {
+        if (stale) throw new Error("This extension ctx is stale after session replacement or reload");
+        return { percent: 12 };
+      },
+    };
+
+    const result = agentEndHandler?.({}, ctx);
+    stale = true;
+
+    await expect(result).resolves.not.toThrow();
+    expect(logSpy).not.toHaveBeenCalled();
+  });
+
   it("tracks activity and live token usage during tool execution", async () => {
     const mockPi = createMockPi();
     statuslineExtension(mockPi as unknown as ExtensionAPI);
 
+    const sessionStartHandler = mockPi.on.mock.calls.find(([name]) => name === "session_start")?.[1];
     const inputHandler = mockPi.on.mock.calls.find(([name]) => name === "input")?.[1];
     const messageUpdateHandler = mockPi.on.mock.calls.find(([name]) => name === "message_update")?.[1];
     const toolStartHandler = mockPi.on.mock.calls.find(([name]) => name === "tool_execution_start")?.[1];
-    const toolDef = mockPi.registerTool.mock.calls[0]?.[0];
 
     const branchEntries = [
       { type: "message", message: { role: "assistant", usage: { input: 100, output: 40 } } },
@@ -252,11 +413,15 @@ describe("pi-statusline extension runtime", () => {
     ];
     const ctx = {
       cwd: "/tmp/project",
-      hasUI: false,
+      hasUI: true,
       model: { id: "opus", contextWindow: 1000000 },
       sessionManager: { getBranch: () => branchEntries },
       getContextUsage: () => ({ percent: 12 }),
+      ui: { setFooter: vi.fn() },
     };
+
+    await sessionStartHandler?.({}, ctx);
+    const toolDef = mockPi.registerTool.mock.calls[0]?.[0];
 
     await inputHandler?.({ text: "/release" }, ctx);
     await messageUpdateHandler?.(
