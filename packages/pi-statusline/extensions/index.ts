@@ -94,13 +94,17 @@ export default function statuslineExtension(pi: ExtensionAPI) {
     };
   };
 
+  const readDynamicState = (ctx: Pick<ExtensionContext, "model" | "sessionManager" | "getContextUsage">) => ({
+    modelLabel: getModelLabel(ctx.model),
+    thinkingLabel: getThinkingLabel(pi.getThinkingLevel()),
+    contextLabel: getContextLabel(ctx.getContextUsage(), ctx.model),
+    tokenLabel: getTokenLabel(ctx.sessionManager.getBranch(), state.liveAssistantUsage),
+  });
+
   const refreshDynamicState = (ctx: Pick<ExtensionContext, "model" | "sessionManager" | "getContextUsage">) => {
     state = {
       ...state,
-      modelLabel: getModelLabel(ctx.model),
-      thinkingLabel: getThinkingLabel(pi.getThinkingLevel()),
-      contextLabel: getContextLabel(ctx.getContextUsage(), ctx.model),
-      tokenLabel: getTokenLabel(ctx.sessionManager.getBranch(), state.liveAssistantUsage),
+      ...readDynamicState(ctx),
     };
   };
 
@@ -151,12 +155,21 @@ export default function statuslineExtension(pi: ExtensionAPI) {
     }
   };
 
-  const refreshState = async (ctx: ExtensionContext) => {
+  const refreshState = async (ctx: ExtensionContext): Promise<boolean> => {
     const cwd = ctx.cwd;
     const epoch = sessionEpoch;
+    const dynamicState = readDynamicState(ctx);
+    const gitSnapshot = await getGitSnapshot(pi, cwd);
+    if (epoch !== sessionEpoch) {
+      return false;
+    }
 
-    refreshDynamicState(ctx);
-    await refreshGitState(cwd, epoch);
+    state = {
+      ...state,
+      ...dynamicState,
+      gitSnapshot,
+    };
+    return true;
   };
 
   const registerStatuslineTool = () => {
@@ -191,6 +204,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
 
     state = createInitialState();
     footerCwd = cwd;
+    footerRegistered = false;
     footerRenderScheduler.clear();
 
     if (!hasUI) {
@@ -366,16 +380,18 @@ export default function statuslineExtension(pi: ExtensionAPI) {
     createUiOnlyHandler(async (_event, ctx) => {
       clearLiveUsage();
       updateActivity("idle", null, 0);
-      await refreshState(ctx);
-      rerenderFooter(true);
+      if (await refreshState(ctx)) {
+        rerenderFooter(true);
+      }
     }),
   );
 
   pi.on(
     "model_select",
     createUiOnlyHandler(async (_event, ctx) => {
-      await refreshState(ctx);
-      rerenderFooter(true);
+      if (await refreshState(ctx)) {
+        rerenderFooter(true);
+      }
     }),
   );
 }
