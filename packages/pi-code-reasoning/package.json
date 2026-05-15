@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-code-reasoning",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Code Reasoning extension for pi — reflective problem-solving through sequential thinking with branching and revision support",
   "keywords": [
     "pi",

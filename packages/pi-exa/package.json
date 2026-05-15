@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-exa",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "Exa API extension for pi — web search, content fetching, and advanced search via Exa AI",
   "keywords": [
     "pi",
