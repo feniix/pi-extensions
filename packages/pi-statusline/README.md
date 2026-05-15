@@ -2,9 +2,9 @@
 
 A fixed two-line status display for pi.
 
-By default it renders in the footer in interactive/RPC mode and logs to stdout in non-UI modes (`-p`, JSON mode).
+By default it renders in the footer in interactive/RPC mode and stays inert in non-UI modes (`-p`, JSON mode).
 It is not injected into model context and is not sent as messages.
-It also exposes a `/statusline` tool for explicit retrieval.
+In UI-capable sessions, it also exposes a `/statusline` tool for explicit retrieval.
 
 ## Display
 

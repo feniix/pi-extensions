@@ -24,9 +24,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/arben-adm/mcp-sequential-thinking@f3727d858769495befaf56e6b4f2e84509dc6456",
-        "--with",
-        "portalocker",
+        "sequential-thinking@0.7.0",
         "mcp-sequential-thinking"
       ]
     },
@@ -41,13 +39,12 @@
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/oraios/serena@66cbe31045107ddcd3851886f8b5854f625e4638",
+        "git+https://github.com/oraios/serena@v1.3.0",
         "serena",
         "start-mcp-server",
         "--context",
-        "ide-assistant",
-        "--project",
-        "${PROJECT_ROOT}"
+        "claude-code",
+        "--project-from-cwd"
       ]
     }
   }
