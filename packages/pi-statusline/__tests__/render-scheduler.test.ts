@@ -50,4 +50,18 @@ describe("render scheduler", () => {
 
     expect(() => scheduler.rerender(true)).toThrow("boom");
   });
+
+  it("cancels pending throttled renders on clear", async () => {
+    const render = vi.fn();
+    const scheduler = createRenderScheduler(100, () => false);
+    scheduler.setRenderCallback(render);
+
+    scheduler.rerender();
+    scheduler.rerender();
+    scheduler.clear();
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(render).toHaveBeenCalledTimes(1);
+  });
 });

@@ -185,8 +185,27 @@ export default function statuslineExtension(pi: ExtensionAPI) {
         "Show the current status line with model, thinking effort, context, git info, token counts, and live activity",
       parameters: Type.Object({}),
       async execute(_toolCallId, _params, _signal, _onUpdate, ctx: ExtensionContext) {
+        const unavailable = () => ({
+          content: [{ type: "text" as const, text: "Statusline is unavailable in non-UI sessions." }],
+          details: {},
+        });
+
+        try {
+          if (!ctx.hasUI) {
+            return unavailable();
+          }
+        } catch (error) {
+          if (!isStaleExtensionContextError(error)) {
+            throw error;
+          }
+          return unavailable();
+        }
+
         const cwd = ctx.cwd;
-        await refreshState(ctx);
+        if (!(await refreshState(ctx))) {
+          return unavailable();
+        }
+
         const text = buildLines(cwd, state, state.gitSnapshot.branch, undefined, currentPalette).join("\n");
         return {
           content: [{ type: "text", text }],
@@ -259,23 +278,23 @@ export default function statuslineExtension(pi: ExtensionAPI) {
     footerCwd = "";
   });
 
-  pi.on("input", async (event, ctx) => {
-    if (!ctx.hasUI) {
-      return { action: "continue" };
-    }
-
+  const handleUiInput = createUiOnlyHandler(async (event: { text: string }, ctx: DynamicCtx) => {
     clearLiveUsage();
     updateActivity("queued", null, 0);
     refreshDynamicFooter(ctx, true);
 
     const skillName = extractSkillName(event.text, pi.getCommands() as CommandLike[]);
     if (!skillName) {
-      return { action: "continue" };
+      return { action: "continue" as const };
     }
 
     setSkill(skillName);
     rerenderFooter(true);
-    return { action: "continue" };
+    return { action: "continue" as const };
+  });
+
+  pi.on("input", async (event, ctx) => {
+    return (await handleUiInput(event, ctx)) ?? { action: "continue" as const };
   });
 
   pi.on(

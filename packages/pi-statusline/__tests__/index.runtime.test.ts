@@ -492,6 +492,59 @@ describe("pi-statusline extension runtime", () => {
     expect(logSpy).not.toHaveBeenCalled();
   });
 
+  it("continues input handling when the input context is stale", async () => {
+    const mockPi = createMockPi();
+    statuslineExtension(mockPi as unknown as ExtensionAPI);
+
+    const inputHandler = mockPi.on.mock.calls.find(([name]) => name === "input")?.[1];
+    const ctx = {
+      get hasUI() {
+        throw new Error("This extension ctx is stale after session replacement or reload");
+      },
+    };
+
+    await expect(Promise.resolve(inputHandler?.({ text: "/release" }, ctx))).resolves.toEqual({ action: "continue" });
+  });
+
+  it("keeps statusline tool inert in non-UI sessions after a UI session", async () => {
+    const mockPi = createMockPi();
+    statuslineExtension(mockPi as unknown as ExtensionAPI);
+
+    const sessionStartHandler = mockPi.on.mock.calls.find(([name]) => name === "session_start")?.[1];
+    const setFooter = vi.fn();
+
+    await sessionStartHandler?.(
+      {},
+      {
+        cwd: "/tmp/project",
+        hasUI: true,
+        model: { id: "opus", contextWindow: 1000000 },
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ percent: 12 }),
+        ui: { setFooter },
+      },
+    );
+    await sessionStartHandler?.(
+      {},
+      {
+        cwd: "/tmp/project",
+        hasUI: false,
+        model: { id: "opus", contextWindow: 1000000 },
+        sessionManager: { getBranch: () => [] },
+        getContextUsage: () => ({ percent: 12 }),
+        ui: { setFooter },
+      },
+    );
+
+    const toolDef = mockPi.registerTool.mock.calls[0]?.[0];
+    const result = await toolDef.execute("tool-id", {}, new AbortController().signal, undefined, {
+      cwd: "/tmp/project",
+      hasUI: false,
+    });
+
+    expect(result.content[0]?.text).toContain("unavailable in non-UI sessions");
+  });
+
   it("tracks activity and live token usage during tool execution", async () => {
     const mockPi = createMockPi();
     statuslineExtension(mockPi as unknown as ExtensionAPI);
