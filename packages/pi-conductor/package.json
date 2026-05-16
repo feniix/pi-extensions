@@ -14,7 +14,7 @@
   ],
   "type": "module",
   "bin": {
-    "pi-conductor-runner": "./extensions/runner-cli.mjs"
+    "pi-conductor-runner": "extensions/runner-cli.mjs"
   },
   "files": [
     "extensions/",
