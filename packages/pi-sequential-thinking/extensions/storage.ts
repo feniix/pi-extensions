@@ -2,144 +2,677 @@
  * ThoughtStorage - Persistence layer for sequential thinking sessions
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  accessSync,
+  chmodSync,
+  existsSync,
+  constants as fsConstants,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { type ThoughtData, thoughtFromDict, thoughtToDict } from "./types.js";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  DEFAULT_HISTORY_LIMIT,
+  MAX_HISTORY_LIMIT,
+  MAX_IMPORT_BYTES,
+  normalizeSessionId,
+  normalizeThoughtRecord,
+  SCHEMA_VERSION,
+  type SessionInfo,
+  STATUS_ENUMERATION_SESSION_THRESHOLD,
+  type ThoughtData,
+  ThoughtStage,
+  thoughtToDict,
+} from "./types.js";
+
+// =============================================================================
+// Public Types
+// =============================================================================
+
+export interface SessionOperationResult {
+  sessionId: string | null;
+  sessionLabel: string;
+  preCount: number;
+  postCount: number;
+  changed: boolean;
+  savedAt: string;
+  stateFingerprint: string;
+  warnings?: string[];
+}
+
+export interface ExportSessionResult extends SessionOperationResult {
+  exportedAt: string;
+  overwroteExistingFile: boolean;
+  filePath: string;
+}
+
+export interface ImportSessionResult extends SessionOperationResult {
+  importedAt: string;
+  embeddedSessionId?: string | null;
+}
+
+export interface HistoryRequest {
+  sessionId?: string | null;
+  limit?: number;
+  offset?: number;
+  includeFullThoughts?: boolean;
+}
+
+export interface HistoryThoughtItem {
+  id: string;
+  thoughtNumber: number;
+  totalThoughts: number;
+  nextThoughtNeeded: boolean;
+  stage: string;
+  tags: string[];
+  axiomsUsed: string[];
+  assumptionsChallenged: string[];
+  timestamp: string;
+  thought?: string;
+  snippet?: string;
+}
+
+export interface ThinkingHistory {
+  sessionId: string | null;
+  sessionLabel: string;
+  totalThoughts: number;
+  offset: number;
+  limit: number;
+  returnedThoughts: number;
+  hasMore: boolean;
+  thoughts: HistoryThoughtItem[];
+}
+
+export interface EffectiveConfigStatus {
+  storageDir?: string;
+  maxBytes: number;
+  maxLines: number;
+  sources: {
+    storageDir: string;
+    maxBytes: string;
+    maxLines: string;
+  };
+}
+
+export interface SessionStatusMetadata {
+  sessionId: string | null;
+  label: string;
+  thoughtCount: number;
+  lastUpdated: string | null;
+  isDefault: boolean;
+  stateFingerprint: string;
+}
+
+export interface ThinkingStatus {
+  storageDir: string;
+  defaultSessionFile: string;
+  pathDisclosure: "home_redacted" | "relative" | "absolute_diagnostic";
+  namedSessionCount: number;
+  totalThoughts?: number;
+  sessions: SessionStatusMetadata[];
+  effectiveConfig?: EffectiveConfigStatus;
+  writable: boolean;
+  backupFiles: string[];
+  statusCompleteness: {
+    complete: boolean;
+    reason?: string;
+    inspectedNamedSessions: number;
+    namedSessionThreshold: number;
+  };
+  schemaVersion: number;
+  storageVersion: number;
+}
+
+interface StoredSession {
+  thoughts: ThoughtData[];
+  lastUpdated: string | null;
+  warnings: string[];
+  embeddedSessionId?: string | null;
+}
+
+interface ThoughtStorageOptions {
+  homeDir?: string;
+}
 
 // =============================================================================
 // Storage Class
 // =============================================================================
 
 export class ThoughtStorage {
-  private thoughts: ThoughtData[] = [];
   private readonly storageDir: string;
   private readonly currentSessionFile: string;
+  private readonly homeDir: string;
 
-  constructor(storageDir?: string) {
-    if (storageDir) {
-      this.storageDir = storageDir;
-    } else {
-      this.storageDir = join(homedir(), ".mcp_sequential_thinking");
-    }
+  constructor(storageDir?: string, options: ThoughtStorageOptions = {}) {
+    this.storageDir = storageDir ? resolve(storageDir) : join(homedir(), ".mcp_sequential_thinking");
+    this.homeDir = options.homeDir ? resolve(options.homeDir) : homedir();
 
-    // Ensure storage directory exists
-    mkdirSync(this.storageDir, { recursive: true });
-
+    this.ensureDirectory(this.storageDir);
     this.currentSessionFile = join(this.storageDir, "current_session.json");
 
-    // Load existing session
-    this.loadSession();
+    // Load default once at startup for compatibility with corrupted-file backup behavior.
+    this.loadSessionFile(this.currentSessionFile, {
+      missingAsEmpty: true,
+      backupCorrupted: true,
+      explicitImport: false,
+    });
   }
 
   // =============================================================================
   // Public API
   // =============================================================================
 
-  addThought(thought: ThoughtData): void {
-    this.thoughts.push(thought);
-    this.saveSession();
+  addThought(thought: ThoughtData, sessionId?: string | null): SessionOperationResult {
+    const session = this.resolveSession(sessionId);
+    const loaded = this.loadSession(session.sessionId);
+    const preCount = loaded.thoughts.length;
+    const thoughts = [...loaded.thoughts, thought];
+    const savedAt = this.saveSession(session.sessionId, thoughts);
+    return this.createOperationResult(session, preCount, thoughts.length, thoughts, savedAt, true);
   }
 
-  getAllThoughts(): ThoughtData[] {
-    // Return a copy to prevent external modification
-    return [...this.thoughts];
+  getAllThoughts(sessionId?: string | null): ThoughtData[] {
+    return this.getThoughts(sessionId);
   }
 
-  clearHistory(): void {
-    this.thoughts = [];
-    this.saveSession();
+  getThoughts(sessionId?: string | null): ThoughtData[] {
+    const session = this.resolveSession(sessionId);
+    return [...this.loadSession(session.sessionId).thoughts];
   }
 
-  exportSession(filePath: string): void {
-    const exportData = {
-      thoughts: this.thoughts.map((t) => thoughtToDict(t, true)),
-      lastUpdated: new Date().toISOString(),
-      exportedAt: new Date().toISOString(),
-      metadata: {
-        totalThoughts: this.thoughts.length,
-        stages: this.getStageCounts(),
+  clearHistory(sessionId?: string | null): SessionOperationResult {
+    const session = this.resolveSession(sessionId);
+    const loaded = this.loadSession(session.sessionId);
+    const preCount = loaded.thoughts.length;
+    const savedAt = this.saveSession(session.sessionId, []);
+    return this.createOperationResult(session, preCount, 0, [], savedAt, preCount > 0);
+  }
+
+  getHistory(request: HistoryRequest = {}): ThinkingHistory {
+    const session = this.resolveSession(request.sessionId);
+    const limit = request.limit ?? DEFAULT_HISTORY_LIMIT;
+    const offset = request.offset ?? 0;
+    const includeFullThoughts = request.includeFullThoughts ?? true;
+
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_HISTORY_LIMIT) {
+      throw new Error(`limit must be between 1 and ${MAX_HISTORY_LIMIT}`);
+    }
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new Error("offset must be a non-negative integer");
+    }
+
+    const thoughts = this.loadSession(session.sessionId).thoughts;
+    const selected = thoughts.slice(offset, offset + limit);
+
+    return {
+      sessionId: session.sessionId,
+      sessionLabel: session.sessionLabel,
+      totalThoughts: thoughts.length,
+      offset,
+      limit,
+      returnedThoughts: selected.length,
+      hasMore: offset + limit < thoughts.length,
+      thoughts: selected.map((thought) => this.toHistoryThought(thought, includeFullThoughts)),
+    };
+  }
+
+  exportSession(filePath: string, sessionId?: string | null): ExportSessionResult {
+    if (!filePath?.trim()) {
+      throw new Error("file_path is required");
+    }
+    const session = this.resolveSession(sessionId);
+    const thoughts = this.loadSession(session.sessionId).thoughts;
+    const targetPath = this.resolveExternalPath(filePath);
+    this.ensureExternalWriteTarget(targetPath);
+
+    const exportedAt = new Date().toISOString();
+    const overwroteExistingFile = existsSync(targetPath);
+    const data = this.createSessionEnvelope(session, thoughts, exportedAt);
+    this.saveToFile(targetPath, data);
+
+    return {
+      ...this.createOperationResult(session, thoughts.length, thoughts.length, thoughts, exportedAt, true),
+      exportedAt,
+      overwroteExistingFile,
+      filePath: this.redactPath(targetPath).value,
+    };
+  }
+
+  importSession(filePath: string, sessionId?: string | null): ImportSessionResult {
+    if (!filePath?.trim()) {
+      throw new Error("file_path is required");
+    }
+    const importPath = this.resolveExternalPath(filePath);
+    const loaded = this.loadSessionFile(importPath, {
+      missingAsEmpty: false,
+      backupCorrupted: false,
+      explicitImport: true,
+    });
+
+    const explicitSession = sessionId === undefined || sessionId === null ? undefined : this.resolveSession(sessionId);
+    const embeddedSession =
+      loaded.embeddedSessionId === undefined ? undefined : this.resolveSession(loaded.embeddedSessionId);
+    const targetSession = explicitSession ?? embeddedSession ?? this.resolveSession(undefined);
+    const warnings = [...loaded.warnings];
+    if (explicitSession && embeddedSession && explicitSession.sessionId !== embeddedSession.sessionId) {
+      warnings.push(
+        `Import target session_id '${explicitSession.sessionLabel}' overrides embedded sessionId '${embeddedSession.sessionLabel}'.`,
+      );
+    }
+
+    const previous = this.loadSession(targetSession.sessionId).thoughts;
+    const importedAt = new Date().toISOString();
+    const savedAt = this.saveSession(targetSession.sessionId, loaded.thoughts);
+    const result = this.createOperationResult(
+      targetSession,
+      previous.length,
+      loaded.thoughts.length,
+      loaded.thoughts,
+      savedAt,
+      this.fingerprintFor(targetSession, previous, null) !==
+        this.fingerprintFor(targetSession, loaded.thoughts, savedAt),
+    );
+
+    return {
+      ...result,
+      importedAt,
+      embeddedSessionId: loaded.embeddedSessionId,
+      warnings: warnings.length > 0 ? warnings : undefined,
+    };
+  }
+
+  getStatus(options: { effectiveConfig?: EffectiveConfigStatus } = {}): ThinkingStatus {
+    const namedSessionIds = this.listNamedSessionIds();
+    const complete = namedSessionIds.length <= STATUS_ENUMERATION_SESSION_THRESHOLD;
+    const inspectedNamedSessionIds = complete
+      ? namedSessionIds
+      : namedSessionIds.slice(0, STATUS_ENUMERATION_SESSION_THRESHOLD);
+
+    const sessions: SessionStatusMetadata[] = [this.getSessionMetadata(null)];
+    for (const sessionId of inspectedNamedSessionIds) {
+      sessions.push(this.getSessionMetadata(sessionId));
+    }
+
+    const totalThoughts = complete ? sessions.reduce((sum, session) => sum + session.thoughtCount, 0) : undefined;
+    const storageRedaction = this.redactPath(this.storageDir);
+    const defaultFileRedaction = this.redactPath(this.currentSessionFile);
+
+    return {
+      storageDir: storageRedaction.value,
+      defaultSessionFile: defaultFileRedaction.value,
+      pathDisclosure: storageRedaction.disclosure,
+      namedSessionCount: namedSessionIds.length,
+      totalThoughts,
+      sessions,
+      effectiveConfig: options.effectiveConfig ? this.redactEffectiveConfig(options.effectiveConfig) : undefined,
+      writable: this.isWritable(this.storageDir),
+      backupFiles: this.listBackupFiles(),
+      statusCompleteness: {
+        complete,
+        reason: complete
+          ? undefined
+          : `Named session count exceeds threshold ${STATUS_ENUMERATION_SESSION_THRESHOLD}; status is partial.`,
+        inspectedNamedSessions: inspectedNamedSessionIds.length,
+        namedSessionThreshold: STATUS_ENUMERATION_SESSION_THRESHOLD,
       },
+      schemaVersion: SCHEMA_VERSION,
+      storageVersion: SCHEMA_VERSION,
     };
-
-    this.saveToFile(filePath, exportData);
-  }
-
-  importSession(filePath: string): void {
-    const loadedThoughts = this.loadFromFile(filePath);
-    this.thoughts = loadedThoughts;
-    this.saveSession();
   }
 
   // =============================================================================
-  // Private Methods
+  // Session helpers
   // =============================================================================
 
-  private loadSession(): void {
-    this.thoughts = this.loadFromFile(this.currentSessionFile);
+  private resolveSession(sessionId?: string | null): SessionInfo {
+    return normalizeSessionId(sessionId === null ? undefined : sessionId);
   }
 
-  private saveSession(): void {
-    const data = {
-      thoughts: this.thoughts.map((t) => thoughtToDict(t, true)),
-      lastUpdated: new Date().toISOString(),
+  private resolveSessionFile(sessionId: string | null): string {
+    if (sessionId === null) {
+      return this.currentSessionFile;
+    }
+    const sessionsDir = join(this.storageDir, "sessions");
+    this.ensureDirectory(sessionsDir);
+    return join(sessionsDir, `${sessionId}.json`);
+  }
+
+  private loadSession(sessionId: string | null): StoredSession {
+    return this.loadSessionFile(this.resolveSessionFile(sessionId), {
+      missingAsEmpty: true,
+      backupCorrupted: true,
+      explicitImport: false,
+    });
+  }
+
+  private saveSession(sessionId: string | null, thoughts: ThoughtData[]): string {
+    const session = this.resolveSession(sessionId);
+    const lastUpdated = new Date().toISOString();
+    this.saveToFile(
+      this.resolveSessionFile(session.sessionId),
+      this.createSessionEnvelope(session, thoughts, undefined, lastUpdated),
+    );
+    return lastUpdated;
+  }
+
+  private getSessionMetadata(sessionId: string | null): SessionStatusMetadata {
+    const session = this.resolveSession(sessionId);
+    const loaded = this.loadSession(session.sessionId);
+    return {
+      sessionId: session.sessionId,
+      label: session.sessionLabel,
+      thoughtCount: loaded.thoughts.length,
+      lastUpdated: loaded.lastUpdated,
+      isDefault: session.sessionId === null,
+      stateFingerprint: this.fingerprintFor(session, loaded.thoughts, loaded.lastUpdated),
     };
-
-    this.saveToFile(this.currentSessionFile, data);
   }
 
-  private loadFromFile(filePath: string): ThoughtData[] {
+  // =============================================================================
+  // File parsing and serialization
+  // =============================================================================
+
+  private loadSessionFile(
+    filePath: string,
+    options: { missingAsEmpty: boolean; backupCorrupted: boolean; explicitImport: boolean },
+  ): StoredSession {
     if (!existsSync(filePath)) {
-      return [];
+      if (options.missingAsEmpty) {
+        return { thoughts: [], lastUpdated: null, warnings: [] };
+      }
+      throw new Error(`File not found: ${this.redactPath(filePath).value}`);
+    }
+
+    this.ensureReadableFile(filePath, options.explicitImport);
+
+    if (options.explicitImport && statSync(filePath).size > MAX_IMPORT_BYTES) {
+      throw new Error("Import file exceeds maximum size of 10 MiB");
     }
 
     try {
       const content = readFileSync(filePath, "utf-8");
-      const data = JSON.parse(content);
-
-      if (!data || !Array.isArray(data.thoughts)) {
-        // Handle legacy format (array directly)
-        if (Array.isArray(data)) {
-          return data.map((item) => thoughtFromDict(item as Record<string, unknown>));
-        }
-        return [];
-      }
-
-      return data.thoughts.map((item: Record<string, unknown>) => thoughtFromDict(item));
+      const data = JSON.parse(content) as unknown;
+      return this.parseSessionData(data, options.explicitImport);
     } catch (error) {
-      // Handle corrupted file - create backup and return empty
-      console.warn(`[pi-sequential-thinking] Error loading ${filePath}: ${error}`);
-      this.backupCorruptedFile(filePath);
-      return [];
+      if (options.backupCorrupted) {
+        console.warn(`[pi-sequential-thinking] Error loading ${this.redactPath(filePath).value}: ${error}`);
+        this.backupCorruptedFile(filePath);
+        return { thoughts: [], lastUpdated: null, warnings: [] };
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Invalid session file ${this.redactPath(filePath).value}: ${message}`);
     }
+  }
+
+  private parseSessionData(data: unknown, explicitImport: boolean): StoredSession {
+    if (Array.isArray(data)) {
+      const normalized = this.normalizeThoughtRecords(data);
+      return {
+        thoughts: normalized.thoughts,
+        lastUpdated: null,
+        warnings: ["Imported legacy array session format.", ...normalized.warnings],
+      };
+    }
+
+    if (!this.isRecord(data)) {
+      throw new Error("Session file must be an object or legacy thought array");
+    }
+
+    if (!Array.isArray(data.thoughts)) {
+      if (!explicitImport) {
+        return { thoughts: [], lastUpdated: null, warnings: [] };
+      }
+      throw new Error("Session file must contain a thoughts array");
+    }
+
+    const normalized = this.normalizeThoughtRecords(data.thoughts);
+    return {
+      thoughts: normalized.thoughts,
+      lastUpdated: typeof data.lastUpdated === "string" ? data.lastUpdated : null,
+      warnings: normalized.warnings,
+      embeddedSessionId: this.parseEmbeddedSessionId(data.sessionId),
+    };
+  }
+
+  private normalizeThoughtRecords(records: unknown[]): { thoughts: ThoughtData[]; warnings: string[] } {
+    const thoughts: ThoughtData[] = [];
+    const warnings: string[] = [];
+    records.forEach((record, index) => {
+      if (!this.isRecord(record)) {
+        throw new Error(`thoughts[${index}] must be an object`);
+      }
+      const normalized = normalizeThoughtRecord(record);
+      thoughts.push(normalized.thought);
+      warnings.push(...normalized.warnings.map((warning) => `thoughts[${index}]: ${warning}`));
+    });
+    return { thoughts, warnings };
+  }
+
+  private parseEmbeddedSessionId(value: unknown): string | null | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (value === null) {
+      return null;
+    }
+    return normalizeSessionId(value).sessionId;
+  }
+
+  private createSessionEnvelope(
+    session: SessionInfo,
+    thoughts: ThoughtData[],
+    exportedAt?: string,
+    lastUpdated = new Date().toISOString(),
+  ): Record<string, unknown> {
+    const data: Record<string, unknown> = {
+      schemaVersion: SCHEMA_VERSION,
+      sessionId: session.sessionId,
+      sessionLabel: session.sessionLabel,
+      thoughts: thoughts.map((thought) => thoughtToDict(thought, true)),
+      lastUpdated,
+      metadata: {
+        totalThoughts: thoughts.length,
+        stages: this.getStageCounts(thoughts),
+      },
+    };
+    if (exportedAt) {
+      data.exportedAt = exportedAt;
+    }
+    return data;
   }
 
   private saveToFile(filePath: string, data: Record<string, unknown>): void {
-    // Ensure parent directory exists
-    mkdirSync(dirname(filePath), { recursive: true });
+    this.ensureDirectory(dirname(filePath));
+    const tempPath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(16).slice(2)}`;
+    writeFileSync(tempPath, JSON.stringify(data, null, 2), { encoding: "utf-8", mode: 0o600 });
+    this.restrictFilePermissions(tempPath);
+    renameSync(tempPath, filePath);
+    this.restrictFilePermissions(filePath);
+  }
 
-    const lockPath = `${filePath}.lock`;
+  // =============================================================================
+  // Diagnostics and receipts
+  // =============================================================================
 
-    // Simple file locking simulation using atomic write
-    // In production, you'd use a proper file locking library
-    this.acquireLock(lockPath);
-    try {
-      const tempPath = `${filePath}.tmp.${Date.now()}`;
-      writeFileSync(tempPath, JSON.stringify(data, null, 2), "utf-8");
-      // Atomic rename
-      renameSync(tempPath, filePath);
-    } finally {
-      this.releaseLock(lockPath);
+  private createOperationResult(
+    session: SessionInfo,
+    preCount: number,
+    postCount: number,
+    thoughts: ThoughtData[],
+    savedAt: string,
+    changed: boolean,
+  ): SessionOperationResult {
+    return {
+      sessionId: session.sessionId,
+      sessionLabel: session.sessionLabel,
+      preCount,
+      postCount,
+      changed,
+      savedAt,
+      stateFingerprint: this.fingerprintFor(session, thoughts, savedAt),
+    };
+  }
+
+  private fingerprintFor(session: SessionInfo, thoughts: ThoughtData[], lastUpdated: string | null): string {
+    const payload = {
+      schemaVersion: SCHEMA_VERSION,
+      sessionId: session.sessionId,
+      thoughtCount: thoughts.length,
+      thoughtIds: thoughts.map((thought) => thought.id),
+      thoughtTimestamps: thoughts.map((thought) => thought.timestamp),
+      lastUpdated,
+    };
+    return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+  }
+
+  private toHistoryThought(thought: ThoughtData, includeFullThoughts: boolean): HistoryThoughtItem {
+    const item: HistoryThoughtItem = {
+      id: thought.id,
+      thoughtNumber: thought.thought_number,
+      totalThoughts: thought.total_thoughts,
+      nextThoughtNeeded: thought.next_thought_needed,
+      stage: thought.stage,
+      tags: thought.tags,
+      axiomsUsed: thought.axioms_used,
+      assumptionsChallenged: thought.assumptions_challenged,
+      timestamp: thought.timestamp,
+    };
+    if (includeFullThoughts) {
+      item.thought = thought.thought;
+    } else {
+      item.snippet = thought.thought.length > 120 ? `${thought.thought.slice(0, 117)}...` : thought.thought;
+    }
+    return item;
+  }
+
+  private getStageCounts(thoughts: ThoughtData[]): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const stage of Object.values(ThoughtStage)) {
+      const count = thoughts.filter((thought) => thought.stage === stage).length;
+      if (count > 0) {
+        counts[stage] = count;
+      }
+    }
+    return counts;
+  }
+
+  private listNamedSessionIds(): string[] {
+    const sessionsDir = join(this.storageDir, "sessions");
+    if (!existsSync(sessionsDir)) {
+      return [];
+    }
+    return readdirSync(sessionsDir)
+      .filter((file) => file.endsWith(".json"))
+      .map((file) => file.slice(0, -".json".length))
+      .sort();
+  }
+
+  private listBackupFiles(): string[] {
+    const files: string[] = [];
+    const collect = (dir: string) => {
+      if (!existsSync(dir)) return;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          collect(fullPath);
+        } else if (entry.name.includes(".bak.")) {
+          files.push(relative(this.storageDir, fullPath));
+        }
+      }
+    };
+    collect(this.storageDir);
+    return files.sort();
+  }
+
+  private redactEffectiveConfig(config: EffectiveConfigStatus): EffectiveConfigStatus {
+    return {
+      ...config,
+      storageDir: config.storageDir ? this.redactPath(resolve(config.storageDir)).value : undefined,
+      sources: { ...config.sources },
+    };
+  }
+
+  private redactPath(filePath: string): { value: string; disclosure: ThinkingStatus["pathDisclosure"] } {
+    const resolvedHome = resolve(this.homeDir);
+    const resolvedPath = resolve(filePath);
+    if (resolvedPath === resolvedHome || resolvedPath.startsWith(`${resolvedHome}/`)) {
+      const suffix = resolvedPath.slice(resolvedHome.length);
+      return { value: suffix ? `~${suffix}` : "~", disclosure: "home_redacted" };
+    }
+    if (!isAbsolute(filePath)) {
+      return { value: filePath, disclosure: "relative" };
+    }
+    return { value: `<absolute:${basename(filePath)}>`, disclosure: "absolute_diagnostic" };
+  }
+
+  // =============================================================================
+  // Filesystem utilities
+  // =============================================================================
+
+  private resolveExternalPath(filePath: string): string {
+    const trimmed = filePath.trim();
+    return isAbsolute(trimmed) ? trimmed : resolve(process.cwd(), trimmed);
+  }
+
+  private ensureExternalWriteTarget(filePath: string): void {
+    if (existsSync(filePath)) {
+      const stats = lstatSync(filePath);
+      if (stats.isDirectory()) {
+        throw new Error(`Cannot export to directory: ${this.redactPath(filePath).value}`);
+      }
+      if (stats.isSymbolicLink()) {
+        throw new Error(`Cannot export to symlink: ${this.redactPath(filePath).value}`);
+      }
     }
   }
 
-  private acquireLock(_lockPath: string): void {
-    // Simplified locking - in production use proper file locking
-    // The atomic rename pattern above provides reasonable safety
+  private ensureReadableFile(filePath: string, explicitImport: boolean): void {
+    const stats = lstatSync(filePath);
+    if (stats.isDirectory()) {
+      throw new Error(`Cannot import directory: ${this.redactPath(filePath).value}`);
+    }
+    if (explicitImport && stats.isSymbolicLink()) {
+      throw new Error(`Cannot import symlink: ${this.redactPath(filePath).value}`);
+    }
   }
 
-  private releaseLock(_lockPath: string): void {
-    // Simplified locking release
+  private ensureDirectory(dir: string): void {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    this.restrictDirectoryPermissions(dir);
+  }
+
+  private restrictDirectoryPermissions(dir: string): void {
+    if (process.platform === "win32") return;
+    try {
+      chmodSync(dir, 0o700);
+    } catch {
+      // Best effort only; some filesystems ignore POSIX modes.
+    }
+  }
+
+  private restrictFilePermissions(filePath: string): void {
+    if (process.platform === "win32") return;
+    try {
+      chmodSync(filePath, 0o600);
+    } catch {
+      // Best effort only; some filesystems ignore POSIX modes.
+    }
+  }
+
+  private isWritable(dir: string): boolean {
+    try {
+      accessSync(dir, fsConstants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private backupCorruptedFile(filePath: string): void {
@@ -152,17 +685,13 @@ export class ThoughtStorage {
 
     try {
       renameSync(filePath, backupPath);
-      console.log(`[pi-sequential-thinking] Backed up corrupted file to ${backupPath}`);
+      console.log(`[pi-sequential-thinking] Backed up corrupted file to ${this.redactPath(backupPath).value}`);
     } catch {
-      console.warn(`[pi-sequential-thinking] Could not backup corrupted file ${filePath}`);
+      console.warn(`[pi-sequential-thinking] Could not backup corrupted file ${this.redactPath(filePath).value}`);
     }
   }
 
-  private getStageCounts(): Record<string, number> {
-    const counts: Record<string, number> = {};
-    for (const thought of this.thoughts) {
-      counts[thought.stage] = (counts[thought.stage] || 0) + 1;
-    }
-    return counts;
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
   }
 }
