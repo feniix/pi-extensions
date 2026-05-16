@@ -11,6 +11,7 @@ import {
   normalizeString,
   parseConfig,
   resolveConfigPath,
+  resolveEffectiveConfig,
   resolveEffectiveLimits,
   splitParams,
   toJsonString,
@@ -18,6 +19,39 @@ import {
 } from "../extensions/index.js";
 
 describe("pi-sequential-thinking helpers", () => {
+  it("resolves effective config values with source labels", () => {
+    const effective = resolveEffectiveConfig({
+      flags: { storageDir: "/flag/storage", maxBytes: "1000" },
+      env: { MCP_STORAGE_DIR: "/env/storage", SEQ_THINK_MAX_BYTES: "2000", SEQ_THINK_MAX_LINES: "3000" },
+      config: {
+        config: { storageDir: "/config/storage", maxBytes: 111, maxLines: 222 },
+        sources: { storageDir: "project_settings", maxBytes: "global_settings", maxLines: "config_file" },
+      },
+    });
+
+    expect(effective).toEqual({
+      storageDir: "/flag/storage",
+      maxBytes: 1000,
+      maxLines: 3000,
+      sources: { storageDir: "flag", maxBytes: "flag", maxLines: "env" },
+    });
+  });
+
+  it("falls back to config and defaults in effective config", () => {
+    const effective = resolveEffectiveConfig({
+      flags: {},
+      env: {},
+      config: { config: { storageDir: "/project/storage" }, sources: { storageDir: "project_settings" } },
+    });
+
+    expect(effective).toEqual({
+      storageDir: "/project/storage",
+      maxBytes: 51200,
+      maxLines: 2000,
+      sources: { storageDir: "project_settings", maxBytes: "default", maxLines: "default" },
+    });
+  });
+
   it("splits params and clamps limits", () => {
     const { toolArgs, requestedLimits } = splitParams({
       piMaxBytes: "100",
