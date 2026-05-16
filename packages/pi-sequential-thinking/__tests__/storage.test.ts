@@ -1,6 +1,7 @@
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -176,6 +177,16 @@ describe("ThoughtStorage", () => {
       expect(() => storage.getHistory({ limit: 101 })).toThrow(/limit/i);
       expect(() => storage.getHistory({ offset: -1 })).toThrow(/offset/i);
     });
+
+    it("rejects oversized persisted history files before parsing", () => {
+      const storage = new ThoughtStorage(tempDir);
+      const sessionFile = join(tempDir, "current_session.json");
+      writeFileSync(sessionFile, "{".repeat(MAX_IMPORT_BYTES + 1), "utf-8");
+
+      expect(() => storage.getHistory()).toThrow(/10 MiB/i);
+      expect(existsSync(sessionFile)).toBe(true);
+      expect(storage.getStatus().backupFiles.some((file) => file.startsWith("current_session.json.bak."))).toBe(false);
+    });
   });
 
   describe("exportSession", () => {
@@ -256,6 +267,43 @@ describe("ThoughtStorage", () => {
         total_thoughts: 6,
         next_thought_needed: true,
       });
+    });
+
+    it("imports legacy objects without session metadata into the default session", () => {
+      const storage = new ThoughtStorage(tempDir);
+      storage.addThought(createThought({ thought: "Replaced default" }));
+      const legacyPath = join(tempDir, "legacy-object.json");
+      writeFileSync(
+        legacyPath,
+        JSON.stringify({
+          thoughts: [
+            {
+              id: "legacy-object-id",
+              thought: "Legacy object thought",
+              thoughtNumber: 2,
+              totalThoughts: 3,
+              nextThoughtNeeded: true,
+              stage: "Research",
+              timestamp: "2026-05-16T00:00:00.000Z",
+            },
+          ],
+        }),
+        "utf-8",
+      );
+
+      const result = storage.importSession(legacyPath);
+
+      expect(result).toMatchObject({ sessionId: null, preCount: 1, postCount: 1, changed: true });
+      expect(storage.getAllThoughts()).toEqual([
+        expect.objectContaining({
+          id: "legacy-object-id",
+          thought: "Legacy object thought",
+          thought_number: 2,
+          total_thoughts: 3,
+          next_thought_needed: true,
+          stage: ThoughtStage.RESEARCH,
+        }),
+      ]);
     });
 
     it("uses embedded sessionId when no explicit target is provided", () => {
@@ -349,9 +397,11 @@ describe("ThoughtStorage", () => {
     });
 
     it("reports partial status after the named-session enumeration threshold", () => {
+      const sessionsDir = join(tempDir, "sessions");
+      mkdirSync(sessionsDir, { recursive: true });
       const storage = new ThoughtStorage(tempDir);
-      for (let index = 0; index < STATUS_ENUMERATION_SESSION_THRESHOLD + 1; index++) {
-        storage.addThought(createThought({ id: `thought-${index}` }), `session-${index}`);
+      for (let index = 0; index < STATUS_ENUMERATION_SESSION_THRESHOLD + 5; index++) {
+        writeFileSync(join(sessionsDir, `session-${index}.json`), JSON.stringify({ thoughts: [] }), "utf-8");
       }
 
       const status = storage.getStatus();
@@ -364,6 +414,36 @@ describe("ThoughtStorage", () => {
         namedSessionThreshold: STATUS_ENUMERATION_SESSION_THRESHOLD,
       });
       expect(status.sessions).toHaveLength(STATUS_ENUMERATION_SESSION_THRESHOLD + 1); // default + inspected named sessions
+    });
+
+    it("skips invalid named session files while reporting status", () => {
+      const sessionsDir = join(tempDir, "sessions");
+      mkdirSync(sessionsDir, { recursive: true });
+      const storage = new ThoughtStorage(tempDir);
+      storage.addThought(createThought({ id: "valid-id" }), "valid");
+      writeFileSync(join(sessionsDir, "default.json"), "{}", "utf-8");
+
+      const status = storage.getStatus();
+
+      expect(status.sessions).toEqual(expect.arrayContaining([expect.objectContaining({ sessionId: "valid" })]));
+      expect(status.sessions).not.toEqual(expect.arrayContaining([expect.objectContaining({ sessionId: "default" })]));
+      expect(status.statusCompleteness.skippedInvalidNamedSessions).toBe(1);
+    });
+
+    it("reports corrupt named sessions without moving the file to a backup", () => {
+      const sessionsDir = join(tempDir, "sessions");
+      mkdirSync(sessionsDir, { recursive: true });
+      const corruptSessionFile = join(sessionsDir, "corrupt.json");
+      writeFileSync(corruptSessionFile, "not valid json {{{{json", "utf-8");
+      const storage = new ThoughtStorage(tempDir);
+
+      const status = storage.getStatus();
+
+      expect(existsSync(corruptSessionFile)).toBe(true);
+      expect(status.backupFiles.some((file) => file.includes("corrupt.json.bak."))).toBe(false);
+      expect(status.sessions).toEqual(
+        expect.arrayContaining([expect.objectContaining({ sessionId: "corrupt", thoughtCount: 0, corrupt: true })]),
+      );
     });
   });
 

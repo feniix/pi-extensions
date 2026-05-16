@@ -136,7 +136,7 @@ Example named-session call:
 
 ### `get_thinking_history`
 
-Read recorded thoughts for one session with bounded pagination.
+Read recorded thoughts for one session with bounded pagination. With the V1 JSON-per-session storage layout, history reads reject persisted session files over 10 MiB instead of parsing unbounded local state.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -157,7 +157,7 @@ Example:
 
 ### `get_thinking_status`
 
-Return content-free diagnostics: session counts, storage writability, backup file names, effective config source labels, and current state fingerprints. Home-directory paths are redacted with `~` where possible.
+Return content-free diagnostics: session counts, storage writability, backup file names, effective config source labels, and current state fingerprints. Home-directory paths are redacted with `~` where possible. Status output may be partial after the named-session threshold, skips invalid session filenames, and reports corrupt session files without moving them to backups.
 
 Example:
 

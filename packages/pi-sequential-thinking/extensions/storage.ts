@@ -3,6 +3,7 @@
  */
 
 import { createHash } from "node:crypto";
+import type { Dir } from "node:fs";
 import {
   accessSync,
   chmodSync,
@@ -10,7 +11,7 @@ import {
   constants as fsConstants,
   lstatSync,
   mkdirSync,
-  readdirSync,
+  opendirSync,
   readFileSync,
   renameSync,
   statSync,
@@ -29,6 +30,7 @@ import {
   STATUS_ENUMERATION_SESSION_THRESHOLD,
   type ThoughtData,
   ThoughtStage,
+  ThoughtValidationError,
   thoughtToDict,
 } from "./types.js";
 
@@ -108,6 +110,8 @@ export interface SessionStatusMetadata {
   lastUpdated: string | null;
   isDefault: boolean;
   stateFingerprint: string;
+  corrupt?: boolean;
+  error?: string;
 }
 
 export interface ThinkingStatus {
@@ -125,6 +129,7 @@ export interface ThinkingStatus {
     reason?: string;
     inspectedNamedSessions: number;
     namedSessionThreshold: number;
+    skippedInvalidNamedSessions?: number;
   };
   schemaVersion: number;
   storageVersion: number;
@@ -208,6 +213,7 @@ export class ThoughtStorage {
       throw new Error("offset must be a non-negative integer");
     }
 
+    this.ensureHistoryFileWithinSizeLimit(this.resolveSessionFile(session.sessionId));
     const thoughts = this.loadSession(session.sessionId).thoughts;
     const selected = thoughts.slice(offset, offset + limit);
 
@@ -290,17 +296,37 @@ export class ThoughtStorage {
 
   getStatus(options: { effectiveConfig?: EffectiveConfigStatus } = {}): ThinkingStatus {
     const namedSessionIds = this.listNamedSessionIds();
-    const complete = namedSessionIds.length <= STATUS_ENUMERATION_SESSION_THRESHOLD;
-    const inspectedNamedSessionIds = complete
+    const namedSessionsComplete = namedSessionIds.length <= STATUS_ENUMERATION_SESSION_THRESHOLD;
+    const inspectedNamedSessionIds = namedSessionsComplete
       ? namedSessionIds
       : namedSessionIds.slice(0, STATUS_ENUMERATION_SESSION_THRESHOLD);
 
     const sessions: SessionStatusMetadata[] = [this.getSessionMetadata(null)];
+    let skippedInvalidNamedSessions = 0;
     for (const sessionId of inspectedNamedSessionIds) {
-      sessions.push(this.getSessionMetadata(sessionId));
+      try {
+        normalizeSessionId(sessionId);
+        sessions.push(this.getSessionMetadata(sessionId));
+      } catch (error) {
+        if (error instanceof ThoughtValidationError) {
+          skippedInvalidNamedSessions += 1;
+          continue;
+        }
+        throw error;
+      }
     }
 
-    const totalThoughts = complete ? sessions.reduce((sum, session) => sum + session.thoughtCount, 0) : undefined;
+    const backupListing = this.listBackupFiles();
+    const complete = namedSessionsComplete && backupListing.complete;
+    const completenessReasons = [
+      namedSessionsComplete
+        ? undefined
+        : `Named session count exceeds threshold ${STATUS_ENUMERATION_SESSION_THRESHOLD}; status is partial.`,
+      backupListing.reason,
+    ].filter((reason): reason is string => Boolean(reason));
+    const totalThoughts = namedSessionsComplete
+      ? sessions.reduce((sum, session) => sum + session.thoughtCount, 0)
+      : undefined;
     const storageRedaction = this.redactPath(this.storageDir);
     const defaultFileRedaction = this.redactPath(this.currentSessionFile);
 
@@ -313,14 +339,13 @@ export class ThoughtStorage {
       sessions,
       effectiveConfig: options.effectiveConfig ? this.redactEffectiveConfig(options.effectiveConfig) : undefined,
       writable: this.isWritable(this.storageDir),
-      backupFiles: this.listBackupFiles(),
+      backupFiles: backupListing.files,
       statusCompleteness: {
         complete,
-        reason: complete
-          ? undefined
-          : `Named session count exceeds threshold ${STATUS_ENUMERATION_SESSION_THRESHOLD}; status is partial.`,
+        reason: completenessReasons.length > 0 ? completenessReasons.join(" ") : undefined,
         inspectedNamedSessions: inspectedNamedSessionIds.length,
         namedSessionThreshold: STATUS_ENUMERATION_SESSION_THRESHOLD,
+        skippedInvalidNamedSessions: skippedInvalidNamedSessions || undefined,
       },
       schemaVersion: SCHEMA_VERSION,
       storageVersion: SCHEMA_VERSION,
@@ -352,6 +377,12 @@ export class ThoughtStorage {
     });
   }
 
+  private ensureHistoryFileWithinSizeLimit(filePath: string): void {
+    if (existsSync(filePath) && statSync(filePath).size > MAX_IMPORT_BYTES) {
+      throw new Error("History session file exceeds maximum size of 10 MiB");
+    }
+  }
+
   private saveSession(sessionId: string | null, thoughts: ThoughtData[]): string {
     const session = this.resolveSession(sessionId);
     const lastUpdated = new Date().toISOString();
@@ -364,15 +395,33 @@ export class ThoughtStorage {
 
   private getSessionMetadata(sessionId: string | null): SessionStatusMetadata {
     const session = this.resolveSession(sessionId);
-    const loaded = this.loadSession(session.sessionId);
-    return {
-      sessionId: session.sessionId,
-      label: session.sessionLabel,
-      thoughtCount: loaded.thoughts.length,
-      lastUpdated: loaded.lastUpdated,
-      isDefault: session.sessionId === null,
-      stateFingerprint: this.fingerprintFor(session, loaded.thoughts, loaded.lastUpdated),
-    };
+    try {
+      const loaded = this.loadSessionFile(this.resolveSessionFile(session.sessionId), {
+        missingAsEmpty: true,
+        backupCorrupted: false,
+        explicitImport: false,
+      });
+      return {
+        sessionId: session.sessionId,
+        label: session.sessionLabel,
+        thoughtCount: loaded.thoughts.length,
+        lastUpdated: loaded.lastUpdated,
+        isDefault: session.sessionId === null,
+        stateFingerprint: this.fingerprintFor(session, loaded.thoughts, loaded.lastUpdated),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        sessionId: session.sessionId,
+        label: session.sessionLabel,
+        thoughtCount: 0,
+        lastUpdated: null,
+        isDefault: session.sessionId === null,
+        stateFingerprint: this.fingerprintFor(session, [], null),
+        corrupt: true,
+        error: message,
+      };
+    }
   }
 
   // =============================================================================
@@ -568,27 +617,89 @@ export class ThoughtStorage {
     if (!existsSync(sessionsDir)) {
       return [];
     }
-    return readdirSync(sessionsDir)
-      .filter((file) => file.endsWith(".json"))
-      .map((file) => file.slice(0, -".json".length))
-      .sort();
-  }
 
-  private listBackupFiles(): string[] {
-    const files: string[] = [];
-    const collect = (dir: string) => {
-      if (!existsSync(dir)) return;
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const fullPath = join(dir, entry.name);
-        if (entry.isDirectory()) {
-          collect(fullPath);
-        } else if (entry.name.includes(".bak.")) {
-          files.push(relative(this.storageDir, fullPath));
+    const sessionIds: string[] = [];
+    const dir = opendirSync(sessionsDir);
+    try {
+      for (let entry = dir.readSync(); entry !== null; entry = dir.readSync()) {
+        if (entry.isFile() && entry.name.endsWith(".json")) {
+          sessionIds.push(entry.name.slice(0, -".json".length));
+          if (sessionIds.length > STATUS_ENUMERATION_SESSION_THRESHOLD) {
+            break;
+          }
         }
       }
+    } finally {
+      dir.closeSync();
+    }
+
+    return sessionIds.sort();
+  }
+
+  private listBackupFiles(): { files: string[]; complete: boolean; reason?: string } {
+    const files: string[] = [];
+    const dirs = [this.storageDir];
+    const maxInspectedEntries = STATUS_ENUMERATION_SESSION_THRESHOLD * 10;
+    let inspectedEntries = 0;
+    let complete = true;
+    let errorCount = 0;
+
+    while (dirs.length > 0) {
+      if (inspectedEntries >= maxInspectedEntries || files.length > STATUS_ENUMERATION_SESSION_THRESHOLD) {
+        complete = false;
+        break;
+      }
+
+      const dirPath = dirs.pop();
+      if (!dirPath || !existsSync(dirPath)) {
+        continue;
+      }
+
+      let dir: Dir;
+      try {
+        dir = opendirSync(dirPath);
+      } catch {
+        complete = false;
+        errorCount += 1;
+        continue;
+      }
+
+      try {
+        for (let entry = dir.readSync(); entry !== null; entry = dir.readSync()) {
+          inspectedEntries += 1;
+          const fullPath = join(dirPath, entry.name);
+          if (entry.isDirectory()) {
+            dirs.push(fullPath);
+          } else if (entry.isFile() && entry.name.includes(".bak.")) {
+            files.push(relative(this.storageDir, fullPath));
+          }
+
+          if (inspectedEntries >= maxInspectedEntries || files.length > STATUS_ENUMERATION_SESSION_THRESHOLD) {
+            complete = false;
+            break;
+          }
+        }
+      } catch {
+        complete = false;
+        errorCount += 1;
+      } finally {
+        dir.closeSync();
+      }
+    }
+
+    const reasons: string[] = [];
+    if (files.length > STATUS_ENUMERATION_SESSION_THRESHOLD || inspectedEntries >= maxInspectedEntries) {
+      reasons.push("Backup file enumeration exceeded status bounds; backupFiles is partial.");
+    }
+    if (errorCount > 0) {
+      reasons.push("Backup file enumeration skipped unreadable directories; backupFiles is partial.");
+    }
+
+    return {
+      files: files.slice(0, STATUS_ENUMERATION_SESSION_THRESHOLD).sort(),
+      complete,
+      reason: reasons.length > 0 ? reasons.join(" ") : undefined,
     };
-    collect(this.storageDir);
-    return files.sort();
   }
 
   private redactEffectiveConfig(config: EffectiveConfigStatus): EffectiveConfigStatus {
