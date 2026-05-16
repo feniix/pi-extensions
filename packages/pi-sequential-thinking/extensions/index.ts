@@ -207,10 +207,10 @@ function resolveEffectiveLimits(
 function resolveConfigPath(configPath: string): string {
   const trimmed = configPath.trim();
   if (trimmed.startsWith("~/")) {
-    return join(homedir(), trimmed.slice(2));
+    return join(getHomeDir(), trimmed.slice(2));
   }
   if (trimmed.startsWith("~")) {
-    return join(homedir(), trimmed.slice(1));
+    return join(getHomeDir(), trimmed.slice(1));
   }
   if (isAbsolute(trimmed)) {
     return trimmed;
@@ -624,7 +624,7 @@ export default function sequentialThinking(pi: ExtensionAPI) {
     const config = getEffectiveConfig();
     return {
       ...config,
-      storageDir: config.storageDir ?? join(homedir(), ".mcp_sequential_thinking"),
+      storageDir: config.storageDir ?? join(getHomeDir(), ".mcp_sequential_thinking"),
     };
   };
 
@@ -704,7 +704,10 @@ export default function sequentialThinking(pi: ExtensionAPI) {
     message: string;
     receipt: Record<string, unknown>;
   } {
-    const filePath = args.file_path as string;
+    const filePath = normalizeString(args.file_path);
+    if (!filePath) {
+      throw new ThoughtValidationError([{ field: "file_path", message: "file_path is required" }]);
+    }
     const sessionId = sessionIdFromArgs(args);
     const result = storage.exportSession(filePath, sessionId);
     return {
@@ -719,7 +722,10 @@ export default function sequentialThinking(pi: ExtensionAPI) {
     message: string;
     receipt: Record<string, unknown>;
   } {
-    const filePath = args.file_path as string;
+    const filePath = normalizeString(args.file_path);
+    if (!filePath) {
+      throw new ThoughtValidationError([{ field: "file_path", message: "file_path is required" }]);
+    }
     const sessionId = sessionIdFromArgs(args);
     const result = storage.importSession(filePath, sessionId);
     return {
@@ -750,8 +756,8 @@ export default function sequentialThinking(pi: ExtensionAPI) {
     summary: unknown;
     receipt: Record<string, unknown>;
   } {
-    const topic = args.topic as string;
-    if (!topic?.trim()) {
+    const topic = normalizeString(args.topic);
+    if (!topic) {
       throw new ThoughtValidationError([{ field: "topic", message: "topic cannot be empty" }]);
     }
     const requestedThoughts = normalizeNumber(args.num_thoughts) ?? 5;

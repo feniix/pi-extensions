@@ -163,46 +163,47 @@ function normalizeOptionalStringArray(field: string, value: unknown): { value?: 
   return { value };
 }
 
+type FieldResult<T> = { ok: true; value: T } | { ok: false; errors: ValidationError[] };
+
 function readAliasedField<T>(
   args: Record<string, unknown>,
   field: string,
   alias: string,
   normalizer: (field: string, value: unknown) => { value?: T; error?: ValidationError },
   options: { required: true } | { required: false; defaultValue: T },
-): { value?: T; errors: ValidationError[] } {
-  const errors: ValidationError[] = [];
+): FieldResult<T> {
   const hasField = hasOwn(args, field);
   const hasAlias = hasOwn(args, alias);
 
   if (!hasField && !hasAlias) {
     if (options.required) {
-      return { errors: [createError(field, `${field} is required`)] };
+      return { ok: false, errors: [createError(field, `${field} is required`)] };
     }
-    return { value: options.defaultValue, errors };
+    return { ok: true, value: options.defaultValue };
   }
 
   const normalizedField = hasField ? normalizer(field, args[field]) : undefined;
   const normalizedAlias = hasAlias ? normalizer(field, args[alias]) : undefined;
 
-  if (normalizedField?.error) {
-    errors.push(normalizedField.error);
-  }
-  if (normalizedAlias?.error) {
-    errors.push(normalizedAlias.error);
-  }
+  const errors: ValidationError[] = [];
+  if (normalizedField?.error) errors.push(normalizedField.error);
+  if (normalizedAlias?.error) errors.push(normalizedAlias.error);
   if (errors.length > 0) {
-    return { errors };
+    return { ok: false, errors };
   }
 
   if (hasField && hasAlias) {
     if (!valuesEqual(normalizedField?.value, normalizedAlias?.value)) {
-      errors.push(createError(field, `Conflicting aliases for ${field}`));
-      return { errors };
+      return { ok: false, errors: [createError(field, `Conflicting aliases for ${field}`)] };
     }
-    return { value: normalizedField?.value, errors };
+    return { ok: true, value: normalizedField?.value as T };
   }
 
-  return { value: hasField ? normalizedField?.value : normalizedAlias?.value, errors };
+  return { ok: true, value: (hasField ? normalizedField?.value : normalizedAlias?.value) as T };
+}
+
+function pushErrors(target: ValidationError[], result: FieldResult<unknown>): void {
+  if (!result.ok) target.push(...result.errors);
 }
 
 export function normalizeSessionId(value: unknown): SessionInfo {
@@ -278,12 +279,12 @@ export function normalizeThoughtInput(
   const thoughtNumberResult = readAliasedField(args, "thought_number", "thoughtNumber", normalizeRequiredInteger, {
     required: true,
   });
-  errors.push(...thoughtNumberResult.errors);
+  pushErrors(errors, thoughtNumberResult);
 
   const totalThoughtsResult = readAliasedField(args, "total_thoughts", "totalThoughts", normalizeRequiredInteger, {
     required: true,
   });
-  errors.push(...totalThoughtsResult.errors);
+  pushErrors(errors, totalThoughtsResult);
 
   const nextThoughtNeededResult = readAliasedField(
     args,
@@ -292,7 +293,7 @@ export function normalizeThoughtInput(
     normalizeRequiredBoolean,
     { required: true },
   );
-  errors.push(...nextThoughtNeededResult.errors);
+  pushErrors(errors, nextThoughtNeededResult);
 
   let stage: ThoughtStage | undefined;
   if (typeof args.stage !== "string") {
@@ -313,7 +314,7 @@ export function normalizeThoughtInput(
     required: false,
     defaultValue: [],
   });
-  errors.push(...axiomsResult.errors);
+  pushErrors(errors, axiomsResult);
 
   const assumptionsResult = readAliasedField(
     args,
@@ -322,7 +323,7 @@ export function normalizeThoughtInput(
     normalizeOptionalStringArray,
     { required: false, defaultValue: [] },
   );
-  errors.push(...assumptionsResult.errors);
+  pushErrors(errors, assumptionsResult);
 
   const sessionResult = readSession(args);
   errors.push(...sessionResult.errors);
@@ -331,8 +332,22 @@ export function normalizeThoughtInput(
     throw new ThoughtValidationError(errors);
   }
 
-  const thoughtNumber = thoughtNumberResult.value as number;
-  const originalTotalThoughts = totalThoughtsResult.value as number;
+  // Past the error gate, all field results must be ok. Narrow them explicitly
+  // so we do not rely on unchecked `as` casts.
+  if (
+    !thoughtResult.value ||
+    !thoughtNumberResult.ok ||
+    !totalThoughtsResult.ok ||
+    !nextThoughtNeededResult.ok ||
+    !axiomsResult.ok ||
+    !assumptionsResult.ok ||
+    stage === undefined
+  ) {
+    throw new ThoughtValidationError([createError("input", "internal invariant violation after validation gate")]);
+  }
+
+  const thoughtNumber = thoughtNumberResult.value;
+  const originalTotalThoughts = totalThoughtsResult.value;
   const totalThoughts = Math.max(originalTotalThoughts, thoughtNumber);
   const adjustments: ThoughtInputAdjustments = {};
   if (totalThoughts !== originalTotalThoughts) {
@@ -341,14 +356,14 @@ export function normalizeThoughtInput(
 
   return {
     thought: {
-      thought: thoughtResult.value as string,
+      thought: thoughtResult.value,
       thought_number: thoughtNumber,
       total_thoughts: totalThoughts,
-      next_thought_needed: nextThoughtNeededResult.value as boolean,
-      stage: stage as ThoughtStage,
+      next_thought_needed: nextThoughtNeededResult.value,
+      stage,
       tags: tagsResult.value ?? [],
-      axioms_used: axiomsResult.value ?? [],
-      assumptions_challenged: assumptionsResult.value ?? [],
+      axioms_used: axiomsResult.value,
+      assumptions_challenged: assumptionsResult.value,
       timestamp: options.timestamp ?? new Date().toISOString(),
       id: options.id ?? generateUuid(),
     },
