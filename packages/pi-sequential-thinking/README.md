@@ -121,6 +121,19 @@ Record and analyze a sequential thought with metadata.
 
 Successful mutation responses include a content-free `receipt` with the session label, pre/post counts, save time, and a state fingerprint.
 
+Example named-session call:
+
+```json
+{
+  "thought": "Compare storage options before choosing one.",
+  "thoughtNumber": 1,
+  "totalThoughts": 3,
+  "nextThoughtNeeded": true,
+  "stage": "Analysis",
+  "session_id": "architecture-review"
+}
+```
+
 ### `get_thinking_history`
 
 Read recorded thoughts for one session with bounded pagination.
@@ -132,9 +145,25 @@ Read recorded thoughts for one session with bounded pagination.
 | `offset` | integer | `0` | Number of thoughts to skip from the start |
 | `include_full_thoughts` / `includeFullThoughts` | boolean | `true` | Set `false` to return metadata plus a short snippet instead of full thought text |
 
+Example:
+
+```json
+{
+  "session_id": "architecture-review",
+  "limit": 20,
+  "include_full_thoughts": false
+}
+```
+
 ### `get_thinking_status`
 
 Return content-free diagnostics: session counts, storage writability, backup file names, effective config source labels, and current state fingerprints. Home-directory paths are redacted with `~` where possible.
+
+Example:
+
+```json
+{}
+```
 
 ### `generate_summary`
 
@@ -146,7 +175,7 @@ Clear one session. Accepts optional `session_id` / `sessionId` and returns a mut
 
 ### `export_session`
 
-Export one session to a JSON file.
+Export one session to a JSON file. `file_path` may be absolute or repo-relative; parent directories are created automatically. Export rejects directory targets and final-path symlinks. Existing files may be overwritten by this explicit tool call, and the receipt reports `overwroteExistingFile`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -155,7 +184,7 @@ Export one session to a JSON file.
 
 ### `import_session`
 
-Import a JSON session file. Imports are limited to 10 MiB, validated as untrusted content, and assigned fresh IDs/timestamps when needed.
+Import a JSON session file. `file_path` may be absolute or repo-relative. Parent directories are not created for import. Imports reject directories, final-path symlinks, malformed top-level records, and files over 10 MiB. Thought text is treated as inert untrusted content; missing IDs/timestamps are normalized when needed.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -198,6 +227,8 @@ The Sequential Thinking framework organizes thoughts through five cognitive stag
 - `process_thought`, `get_thinking_history`, `generate_summary`, `export_session`, `import_session`, and `sequential_think` are content-bearing tools.
 - `get_thinking_status` and mutation receipts are designed to avoid thought text, tags, axioms, and assumptions.
 - V1 assumes one active pi process per storage directory. Add locking before using a shared directory with multiple writers.
+- Branch/revision metadata is not included in this release.
+- A dual pi extension + MCP server architecture is not included in this release; this remains a native pi extension only.
 
 ## Requirements
 
