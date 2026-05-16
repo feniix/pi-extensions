@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_SESSION_LABEL,
   generateUuid,
   isValidThoughtData,
+  normalizeSessionId,
+  normalizeThoughtInput,
   parseThoughtStage,
   ThoughtStage,
-  thoughtFromDict,
+  ThoughtValidationError,
   thoughtToDict,
   validateThoughtData,
 } from "../extensions/types.js";
@@ -25,74 +28,219 @@ describe("ThoughtStage", () => {
   });
 });
 
-describe("validateThoughtData", () => {
-  it("returns no errors for valid data", () => {
-    const data = {
-      thought: "My thought",
+describe("normalizeSessionId", () => {
+  it("normalizes omitted sessions to the default label", () => {
+    expect(normalizeSessionId(undefined)).toEqual({ sessionId: null, sessionLabel: DEFAULT_SESSION_LABEL });
+  });
+
+  it("trims and accepts path-safe named sessions", () => {
+    expect(normalizeSessionId("  architecture.review-1  ")).toEqual({
+      sessionId: "architecture.review-1",
+      sessionLabel: "architecture.review-1",
+    });
+  });
+
+  it("rejects empty, traversal, separator, long, and reserved default session ids", () => {
+    for (const sessionId of ["", "   ", "bad/session", "bad\\session", "../bad", ".", "..", "default", "DEFAULT"]) {
+      expect(() => normalizeSessionId(sessionId)).toThrow(ThoughtValidationError);
+    }
+
+    expect(() => normalizeSessionId("a".repeat(81))).toThrow(ThoughtValidationError);
+  });
+});
+
+describe("normalizeThoughtInput", () => {
+  it("normalizes snake_case thought input", () => {
+    const result = normalizeThoughtInput({
+      thought: "Use snake case",
       thought_number: 1,
       total_thoughts: 3,
-    };
-    expect(validateThoughtData(data)).toEqual([]);
+      next_thought_needed: true,
+      stage: "Analysis",
+      tags: ["compat"],
+      axioms_used: ["Preserve old calls"],
+      assumptions_challenged: ["Only camelCase matters"],
+    });
+
+    expect(result.thought).toMatchObject({
+      thought: "Use snake case",
+      thought_number: 1,
+      total_thoughts: 3,
+      next_thought_needed: true,
+      stage: ThoughtStage.ANALYSIS,
+      tags: ["compat"],
+      axioms_used: ["Preserve old calls"],
+      assumptions_challenged: ["Only camelCase matters"],
+    });
+    expect(result.session).toEqual({ sessionId: null, sessionLabel: DEFAULT_SESSION_LABEL });
+    expect(result.adjustments).toEqual({});
+  });
+
+  it("normalizes camelCase aliases and named sessions", () => {
+    const result = normalizeThoughtInput({
+      thought: "Use aliases",
+      thoughtNumber: 2,
+      totalThoughts: 4,
+      nextThoughtNeeded: false,
+      stage: "Synthesis",
+      axiomsUsed: ["Boundary compatibility"],
+      assumptionsChallenged: ["Schemas must stay snake-only"],
+      sessionId: "review",
+    });
+
+    expect(result.thought.thought_number).toBe(2);
+    expect(result.thought.total_thoughts).toBe(4);
+    expect(result.thought.next_thought_needed).toBe(false);
+    expect(result.thought.stage).toBe(ThoughtStage.SYNTHESIS);
+    expect(result.thought.axioms_used).toEqual(["Boundary compatibility"]);
+    expect(result.thought.assumptions_challenged).toEqual(["Schemas must stay snake-only"]);
+    expect(result.session).toEqual({ sessionId: "review", sessionLabel: "review" });
+  });
+
+  it("allows matching snake_case and camelCase aliases after normalization", () => {
+    const result = normalizeThoughtInput({
+      thought: "Both aliases agree",
+      thought_number: 1,
+      thoughtNumber: 1,
+      total_thoughts: 2,
+      totalThoughts: 2,
+      next_thought_needed: true,
+      nextThoughtNeeded: true,
+      stage: "Research",
+      axioms_used: ["a", "b"],
+      axiomsUsed: ["a", "b"],
+      session_id: "  aliases  ",
+      sessionId: "aliases",
+    });
+
+    expect(result.thought.thought_number).toBe(1);
+    expect(result.thought.axioms_used).toEqual(["a", "b"]);
+    expect(result.session.sessionId).toBe("aliases");
+  });
+
+  it("fails on conflicting aliases", () => {
+    expect(() =>
+      normalizeThoughtInput({
+        thought: "Conflict",
+        thought_number: 1,
+        thoughtNumber: 2,
+        total_thoughts: 2,
+        next_thought_needed: false,
+        stage: "Analysis",
+      }),
+    ).toThrow(/conflicting aliases.*thought_number/i);
+
+    expect(() =>
+      normalizeThoughtInput({
+        thought: "Array conflict",
+        thought_number: 1,
+        total_thoughts: 2,
+        next_thought_needed: false,
+        stage: "Analysis",
+        axioms_used: ["a", "b"],
+        axiomsUsed: ["b", "a"],
+      }),
+    ).toThrow(/conflicting aliases.*axioms_used/i);
+  });
+
+  it("rejects thought_number and total_thoughts beyond the upper bound", () => {
+    expect(() =>
+      normalizeThoughtInput({
+        thought: "Way too big",
+        thought_number: Number.MAX_SAFE_INTEGER,
+        total_thoughts: 3,
+        next_thought_needed: false,
+        stage: "Analysis",
+      }),
+    ).toThrow(/thought_number/);
+
+    expect(() =>
+      normalizeThoughtInput({
+        thought: "Way too big total",
+        thought_number: 1,
+        total_thoughts: 1_000_001,
+        next_thought_needed: false,
+        stage: "Analysis",
+      }),
+    ).toThrow(/total_thoughts/);
+  });
+
+  it("dynamically raises total_thoughts for the incoming thought only", () => {
+    const result = normalizeThoughtInput({
+      thought: "Need more steps",
+      thought_number: 5,
+      total_thoughts: 3,
+      next_thought_needed: true,
+      stage: "Analysis",
+    });
+
+    expect(result.thought.total_thoughts).toBe(5);
+    expect(result.adjustments.totalThoughtsAdjusted).toEqual({ from: 3, to: 5 });
+  });
+
+  it("returns field-specific validation errors", () => {
+    try {
+      normalizeThoughtInput({
+        thought: "   ",
+        thought_number: 0,
+        total_thoughts: 0,
+        next_thought_needed: "nope",
+        stage: "Unknown",
+        tags: ["ok", 123],
+      });
+      throw new Error("Expected validation to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ThoughtValidationError);
+      const validationError = error as ThoughtValidationError;
+      expect(validationError.errors.map((e) => e.field)).toEqual(
+        expect.arrayContaining(["thought", "thought_number", "total_thoughts", "next_thought_needed", "stage", "tags"]),
+      );
+    }
+  });
+});
+
+describe("validateThoughtData", () => {
+  it("returns no errors for valid data", () => {
+    expect(
+      validateThoughtData({
+        thought: "My thought",
+        thought_number: 1,
+        total_thoughts: 3,
+        next_thought_needed: true,
+        stage: ThoughtStage.ANALYSIS,
+        tags: [],
+        axioms_used: [],
+        assumptions_challenged: [],
+      }),
+    ).toEqual([]);
+  });
+
+  it("does not reject total_thoughts below thought_number because normalization adjusts it", () => {
+    expect(
+      validateThoughtData({
+        thought: "My thought",
+        thought_number: 5,
+        total_thoughts: 3,
+        next_thought_needed: true,
+        stage: ThoughtStage.ANALYSIS,
+        tags: [],
+        axioms_used: [],
+        assumptions_challenged: [],
+      }),
+    ).toEqual([]);
   });
 
   it("returns error for empty thought", () => {
-    const data = {
-      thought: "",
-      thought_number: 1,
-      total_thoughts: 3,
-    };
-    expect(validateThoughtData(data)).toContainEqual({
+    expect(validateThoughtData({ thought: "", thought_number: 1, total_thoughts: 3 })).toContainEqual({
       field: "thought",
       message: "Thought content cannot be empty",
-    });
-  });
-
-  it("returns error for whitespace-only thought", () => {
-    const data = {
-      thought: "   ",
-      thought_number: 1,
-      total_thoughts: 3,
-    };
-    expect(validateThoughtData(data)).toContainEqual({
-      field: "thought",
-      message: "Thought content cannot be empty",
-    });
-  });
-
-  it("returns error for non-positive thought_number", () => {
-    const data = {
-      thought: "My thought",
-      thought_number: 0,
-      total_thoughts: 3,
-    };
-    expect(validateThoughtData(data)).toContainEqual({
-      field: "thought_number",
-      message: "Thought number must be a positive integer",
-    });
-  });
-
-  it("returns error when total_thoughts < thought_number", () => {
-    const data = {
-      thought: "My thought",
-      thought_number: 5,
-      total_thoughts: 3,
-    };
-    expect(validateThoughtData(data)).toContainEqual({
-      field: "total_thoughts",
-      message: "Total thoughts must be greater or equal to current thought number",
     });
   });
 });
 
 describe("isValidThoughtData", () => {
   it("returns true for valid data", () => {
-    expect(
-      isValidThoughtData({
-        thought: "My thought",
-        thought_number: 1,
-        total_thoughts: 3,
-      }),
-    ).toBe(true);
+    expect(isValidThoughtData({ thought: "My thought", thought_number: 1, total_thoughts: 3 })).toBe(true);
   });
 
   it("returns false for invalid data", () => {
@@ -140,72 +288,13 @@ describe("thoughtToDict", () => {
       timestamp: "2024-01-01T00:00:00.000Z",
       id: "test-id",
     };
-    const dict = thoughtToDict(thought, true);
-    expect(dict.id).toBe("test-id");
-  });
-});
-
-describe("thoughtFromDict", () => {
-  it("parses dict with camelCase keys", () => {
-    const dict = {
-      thought: "Test thought",
-      thoughtNumber: 2,
-      totalThoughts: 5,
-      nextThoughtNeeded: false,
-      stage: "Synthesis",
-      tags: ["tag1", "tag2"],
-      axiomsUsed: ["axiom1"],
-      assumptionsChallenged: [],
-      timestamp: "2024-01-01T00:00:00.000Z",
-      id: "parsed-id",
-    };
-    const thought = thoughtFromDict(dict);
-    expect(thought.thought).toBe("Test thought");
-    expect(thought.thought_number).toBe(2);
-    expect(thought.total_thoughts).toBe(5);
-    expect(thought.next_thought_needed).toBe(false);
-    expect(thought.stage).toBe(ThoughtStage.SYNTHESIS);
-    expect(thought.tags).toEqual(["tag1", "tag2"]);
-    expect(thought.axioms_used).toEqual(["axiom1"]);
-    expect(thought.id).toBe("parsed-id");
-  });
-
-  it("parses dict with snake_case keys", () => {
-    const dict = {
-      thought: "Test thought",
-      thought_number: 1,
-      total_thoughts: 3,
-      next_thought_needed: true,
-      stage: "Conclusion",
-      tags: [],
-      axioms_used: [],
-      assumptions_challenged: [],
-      timestamp: "2024-01-01T00:00:00.000Z",
-      id: "snake-id",
-    };
-    const thought = thoughtFromDict(dict);
-    expect(thought.thought_number).toBe(1);
-    expect(thought.stage).toBe(ThoughtStage.CONCLUSION);
-  });
-
-  it("generates id when not provided", () => {
-    const dict = {
-      thought: "Test thought",
-      thoughtNumber: 1,
-      totalThoughts: 1,
-      nextThoughtNeeded: false,
-      stage: "Analysis",
-    };
-    const thought = thoughtFromDict(dict);
-    expect(thought.id).toBeDefined();
-    expect(thought.id).toMatch(/^[0-9a-f-]+$/);
+    expect(thoughtToDict(thought, true).id).toBe("test-id");
   });
 });
 
 describe("generateUuid", () => {
   it("generates valid UUID format", () => {
-    const uuid = generateUuid();
-    expect(uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(generateUuid()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
   it("generates unique IDs", () => {

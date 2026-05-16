@@ -3,14 +3,14 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  DEFAULT_CONFIG_FILE,
   formatToolOutput,
   isRecord,
-  loadConfig,
+  loadConfigWithSources,
   normalizeNumber,
   normalizeString,
   parseConfig,
   resolveConfigPath,
+  resolveEffectiveConfig,
   resolveEffectiveLimits,
   splitParams,
   toJsonString,
@@ -18,6 +18,39 @@ import {
 } from "../extensions/index.js";
 
 describe("pi-sequential-thinking helpers", () => {
+  it("resolves effective config values with source labels", () => {
+    const effective = resolveEffectiveConfig({
+      flags: { storageDir: "/flag/storage", maxBytes: "1000" },
+      env: { MCP_STORAGE_DIR: "/env/storage", SEQ_THINK_MAX_BYTES: "2000", SEQ_THINK_MAX_LINES: "3000" },
+      config: {
+        config: { storageDir: "/config/storage", maxBytes: 111, maxLines: 222 },
+        sources: { storageDir: "project_settings", maxBytes: "global_settings", maxLines: "config_file" },
+      },
+    });
+
+    expect(effective).toEqual({
+      storageDir: "/flag/storage",
+      maxBytes: 1000,
+      maxLines: 3000,
+      sources: { storageDir: "flag", maxBytes: "flag", maxLines: "env" },
+    });
+  });
+
+  it("falls back to config and defaults in effective config", () => {
+    const effective = resolveEffectiveConfig({
+      flags: {},
+      env: {},
+      config: { config: { storageDir: "/project/storage" }, sources: { storageDir: "project_settings" } },
+    });
+
+    expect(effective).toEqual({
+      storageDir: "/project/storage",
+      maxBytes: 51200,
+      maxLines: 2000,
+      sources: { storageDir: "project_settings", maxBytes: "default", maxLines: "default" },
+    });
+  });
+
   it("splits params and clamps limits", () => {
     const { toolArgs, requestedLimits } = splitParams({
       piMaxBytes: "100",
@@ -55,14 +88,6 @@ describe("pi-sequential-thinking helpers", () => {
     expect(normalizeNumber(Number.POSITIVE_INFINITY)).toBeUndefined();
   });
 
-  it("keeps DEFAULT_CONFIG_FILE available for reference", () => {
-    expect(DEFAULT_CONFIG_FILE).toMatchObject({
-      storageDir: null,
-      maxBytes: 51200,
-      maxLines: 2000,
-    });
-  });
-
   it("loads config from standard pi settings files", async () => {
     const originalHome = process.env.HOME;
     const originalCwd = process.cwd();
@@ -92,7 +117,7 @@ describe("pi-sequential-thinking helpers", () => {
 
     try {
       const mod = await import("../extensions/index.js");
-      expect(mod.loadConfig(undefined)).toEqual({
+      expect(mod.loadConfigWithSources(undefined)?.config).toEqual({
         storageDir: "/tmp/thoughts",
         maxBytes: 111,
         maxLines: 22,
@@ -124,7 +149,7 @@ describe("pi-sequential-thinking helpers", () => {
 
     try {
       const mod = await import("../extensions/index.js");
-      expect(mod.loadConfig(undefined)).toBeNull();
+      expect(mod.loadConfigWithSources(undefined)).toBeNull();
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Ignoring legacy config file"));
     } finally {
       warnSpy.mockRestore();
@@ -203,17 +228,31 @@ describe("pi-sequential-thinking resolveConfigPath", () => {
     expect(resolveConfigPath(absolute)).toBe(absolute);
   });
 
+  it("resolves effective home-relative storage directories", () => {
+    expect(resolveEffectiveConfig({ flags: { storageDir: "~/.seq-think-flag" } }).storageDir).toBe(
+      join(homedir(), ".seq-think-flag"),
+    );
+    expect(resolveEffectiveConfig({ env: { MCP_STORAGE_DIR: "~/.seq-think-env" } }).storageDir).toBe(
+      join(homedir(), ".seq-think-env"),
+    );
+    expect(
+      resolveEffectiveConfig({
+        config: { config: { storageDir: "~/.seq-think-config" }, sources: { storageDir: "project_settings" } },
+      }).storageDir,
+    ).toBe(join(homedir(), ".seq-think-config"));
+  });
+
   it("resolves relative paths from cwd", () => {
     const result = resolveConfigPath("relative/path.json");
     expect(result).toBe(resolve(process.cwd(), "relative/path.json"));
   });
 });
 
-describe("pi-sequential-thinking loadConfig", () => {
+describe("pi-sequential-thinking loadConfigWithSources", () => {
   it("returns null when no config exists", () => {
     const base = mkdtempSync(join(tmpdir(), "pi-seq-think-load-"));
     const configPath = join(base, "nonexistent.json");
-    expect(loadConfig(configPath)).toBeNull();
+    expect(loadConfigWithSources(configPath)).toBeNull();
   });
 
   it("loads valid config file", () => {
@@ -221,7 +260,11 @@ describe("pi-sequential-thinking loadConfig", () => {
     const configPath = join(base, "seq-think.json");
     writeFileSync(configPath, JSON.stringify({ storageDir: "/custom", maxBytes: 123 }), "utf-8");
 
-    expect(loadConfig(configPath)).toEqual({ storageDir: "/custom", maxBytes: 123, maxLines: undefined });
+    expect(loadConfigWithSources(configPath)?.config).toEqual({
+      storageDir: "/custom",
+      maxBytes: 123,
+      maxLines: undefined,
+    });
   });
 
   it("returns null on invalid JSON", () => {
@@ -229,7 +272,7 @@ describe("pi-sequential-thinking loadConfig", () => {
     const configPath = join(base, "invalid.json");
     writeFileSync(configPath, "not valid json", "utf-8");
 
-    expect(loadConfig(configPath)).toBeNull();
+    expect(loadConfigWithSources(configPath)).toBeNull();
   });
 });
 
@@ -300,6 +343,8 @@ describe("pi-sequential-thinking writeTempFile", () => {
 
   it("writes temp file and returns path", () => {
     const path = writeTempFile("test_tool", "content here");
+    expect(path).toBeDefined();
+    if (!path) throw new Error("expected path");
     tempFiles.push(path);
     expect(path).toContain("pi-seq-think-test_tool");
     expect(path).toContain(".txt");
@@ -308,6 +353,8 @@ describe("pi-sequential-thinking writeTempFile", () => {
 
   it("sanitizes tool name", () => {
     const path = writeTempFile("my-tool!@#", "content");
+    expect(path).toBeDefined();
+    if (!path) throw new Error("expected path");
     tempFiles.push(path);
     expect(path).toContain("my-tool__");
   });

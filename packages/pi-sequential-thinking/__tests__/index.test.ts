@@ -23,8 +23,27 @@ describe("pi-sequential-thinking", () => {
         "clear_history",
         "export_session",
         "import_session",
+        "get_thinking_history",
+        "get_thinking_status",
+        "sequential_think",
       ]),
     );
+  });
+
+  it("registers process_thought schema without requiring snake_case aliases only", () => {
+    const mockPi = createMockPi();
+    sequentialThinking(mockPi as unknown as ExtensionAPI);
+
+    const processTool = mockPi.registerTool.mock.calls
+      .map(([tool]) => tool)
+      .find((tool) => tool.name === "process_thought");
+    const required = (processTool?.parameters as { required?: string[] }).required ?? [];
+
+    expect(required).toContain("thought");
+    expect(required).toContain("stage");
+    expect(required).not.toContain("thought_number");
+    expect(required).not.toContain("total_thoughts");
+    expect(required).not.toContain("next_thought_needed");
   });
 
   it("registers flags", () => {

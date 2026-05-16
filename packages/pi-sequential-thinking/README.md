@@ -4,14 +4,17 @@
 
 ## Features
 
-- **Process Thought** (`process_thought`): Record and analyze sequential thoughts with stage metadata
-- **Generate Summary** (`generate_summary`): Summarize the entire thinking process
-- **Clear History** (`clear_history`): Reset the thinking session
-- **Export Session** (`export_session`): Save thinking sessions to JSON files
-- **Import Session** (`import_session`): Load previously exported sessions
-- **Configurable Output Limits**: Client-side byte and line truncation
-- **Flexible Configuration**: settings.json, custom JSON config files, environment variables, and CLI flags
-- **Native TypeScript**: No external dependencies or child processes
+- **Process Thought** (`process_thought`): Record and analyze sequential thoughts with stage metadata.
+- **Session-Scoped History**: Use the default session or named `session_id` values for independent thinking threads.
+- **Get History** (`get_thinking_history`): Read bounded, paginated session history.
+- **Get Status** (`get_thinking_status`): Inspect content-free storage/config diagnostics and state fingerprints.
+- **Generate Summary** (`generate_summary`): Summarize one thinking session.
+- **Clear History** (`clear_history`): Reset one thinking session.
+- **Export/Import Session** (`export_session`, `import_session`): Move session JSON files with validation and receipts.
+- **MCP-Compatible Aliases**: Accept snake_case fields and camelCase aliases such as `thoughtNumber` and `totalThoughts`.
+- **Dynamic Depth**: If `thought_number` exceeds `total_thoughts`, the incoming thought is normalized to the larger total.
+- **Configurable Output Limits**: Client-side byte and line truncation.
+- **Native TypeScript**: No MCP server transport or child process dependencies.
 
 ## Install
 
@@ -27,11 +30,23 @@ pi -e npm:@feniix/pi-sequential-thinking
 
 ## Configuration
 
-### Option 1: Default Configuration
+### Default Configuration
 
-Works out of the box. Sessions are stored in `~/.mcp_sequential_thinking/`.
+Works out of the box. The default session is stored at:
 
-### Option 2: Environment Variables
+```text
+~/.mcp_sequential_thinking/current_session.json
+```
+
+Named sessions are stored under:
+
+```text
+~/.mcp_sequential_thinking/sessions/<session_id>.json
+```
+
+`default` is reserved as the default-session label and cannot be used as a named `session_id`.
+
+### Environment Variables
 
 ```bash
 export MCP_STORAGE_DIR="~/.my-thinking-sessions"
@@ -39,7 +54,7 @@ export SEQ_THINK_MAX_BYTES=102400
 export SEQ_THINK_MAX_LINES=5000
 ```
 
-### Option 3: Settings File
+### Settings File
 
 Use pi's standard settings locations:
 
@@ -62,20 +77,29 @@ Under the `pi-sequential-thinking` key:
 > If you want a separate private override file, use `--seq-think-config-file` or `SEQ_THINK_CONFIG_FILE` to point to a custom JSON config file.
 > Legacy aliases `--seq-think-config` and `SEQ_THINK_CONFIG` are still accepted but deprecated.
 
-### Option 4: CLI Flags
+### CLI Flags
 
 ```bash
 pi --seq-think-storage-dir=/tmp/thoughts --seq-think-max-bytes=102400
 ```
 
-### Config Resolution Order
+### Effective Configuration Precedence
 
-1. `--seq-think-config-file` flag path
-2. `SEQ_THINK_CONFIG_FILE` environment variable
-3. legacy `--seq-think-config` flag path (deprecated)
-4. legacy `SEQ_THINK_CONFIG` environment variable (deprecated)
-3. `.pi/settings.json` under `pi-sequential-thinking` (project-level)
-4. `~/.pi/agent/settings.json` under `pi-sequential-thinking` (global)
+Per-field precedence is:
+
+1. CLI flags
+2. Environment variables
+3. Project settings (`.pi/settings.json`)
+4. Global settings (`~/.pi/agent/settings.json`)
+5. Built-in defaults
+
+Custom config file discovery uses:
+
+1. `--seq-think-config-file`
+2. deprecated `--seq-think-config`
+3. `SEQ_THINK_CONFIG_FILE`
+4. deprecated `SEQ_THINK_CONFIG`
+5. settings files listed above
 
 ## Tools
 
@@ -86,44 +110,103 @@ Record and analyze a sequential thought with metadata.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `thought` | string | yes | The content of your thought |
-| `thought_number` | integer | yes | Position in sequence (starting at 1) |
-| `total_thoughts` | integer | yes | Expected total thoughts |
-| `next_thought_needed` | boolean | yes | Whether more thoughts follow |
-| `stage` | string | yes | One of: "Problem Definition", "Research", "Analysis", "Synthesis", "Conclusion" |
+| `thought_number` / `thoughtNumber` | integer | yes | Position in sequence, starting at 1 |
+| `total_thoughts` / `totalThoughts` | integer | yes | Estimated total thoughts; normalized upward for dynamic depth |
+| `next_thought_needed` / `nextThoughtNeeded` | boolean | yes | Whether more thoughts follow |
+| `stage` | string | yes | One of: `Problem Definition`, `Research`, `Analysis`, `Synthesis`, `Conclusion` |
+| `session_id` / `sessionId` | string | no | Named session to write; omit for the default session |
 | `tags` | string[] | no | Keywords or categories |
-| `axioms_used` | string[] | no | Principles applied |
-| `assumptions_challenged` | string[] | no | Assumptions questioned |
+| `axioms_used` / `axiomsUsed` | string[] | no | Principles applied |
+| `assumptions_challenged` / `assumptionsChallenged` | string[] | no | Assumptions questioned |
+
+Successful mutation responses include a content-free `receipt` with the session label, pre/post counts, save time, and a state fingerprint.
+
+Example named-session call:
+
+```json
+{
+  "thought": "Compare storage options before choosing one.",
+  "thoughtNumber": 1,
+  "totalThoughts": 3,
+  "nextThoughtNeeded": true,
+  "stage": "Analysis",
+  "session_id": "architecture-review"
+}
+```
+
+### `get_thinking_history`
+
+Read recorded thoughts for one session with bounded pagination. With the V1 JSON-per-session storage layout, history reads reject persisted session files over 10 MiB instead of parsing unbounded local state.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `session_id` / `sessionId` | string | default session | Session to read |
+| `limit` | integer | `20` | Maximum thoughts to return, capped at `100` |
+| `offset` | integer | `0` | Number of thoughts to skip from the start |
+| `include_full_thoughts` / `includeFullThoughts` | boolean | `true` | Set `false` to return metadata plus a short snippet instead of full thought text |
+
+Example:
+
+```json
+{
+  "session_id": "architecture-review",
+  "limit": 20,
+  "include_full_thoughts": false
+}
+```
+
+### `get_thinking_status`
+
+Return content-free diagnostics: session counts, storage writability, backup file names, effective config source labels, and current state fingerprints. Home-directory paths are redacted with `~` where possible. Status output may be partial after the named-session threshold, skips invalid session filenames, and reports corrupt session files without moving them to backups.
+
+Example:
+
+```json
+{}
+```
 
 ### `generate_summary`
 
-Generate a summary of the entire thinking process. Returns stage counts, timeline, top tags, and completion status.
+Generate a summary for one session. Accepts optional `session_id` / `sessionId`.
 
 ### `clear_history`
 
-Reset the thinking process by clearing all recorded thoughts.
+Clear one session. Accepts optional `session_id` / `sessionId` and returns a mutation receipt.
 
 ### `export_session`
 
-Export the current thinking session to a JSON file.
+Export one session to a JSON file. `file_path` may be absolute or repo-relative; parent directories are created automatically. Export rejects directory targets and final-path symlinks. Existing files may be overwritten by this explicit tool call, and the receipt reports `overwroteExistingFile`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `file_path` | string | yes | Path to save the exported JSON file |
+| `session_id` / `sessionId` | string | no | Session to export; omit for the default session |
 
 ### `import_session`
 
-Import a previously exported thinking session from a JSON file.
+Import a JSON session file. `file_path` may be absolute or repo-relative. Parent directories are not created for import. Imports reject directories, final-path symlinks, malformed top-level records, and files over 10 MiB. Thought text is treated as inert untrusted content; missing IDs/timestamps are normalized when needed.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `file_path` | string | yes | Path to the JSON file to import |
+| `session_id` / `sessionId` | string | no | Target session; explicit target wins over embedded session metadata |
+
+### `sequential_think`
+
+Compatibility helper that generates a staged sequence for a topic and writes it to the selected session.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `topic` | string | yes | Topic or question to think through |
+| `num_thoughts` | integer | no | Number of generated stages, 3–10; default `5` |
+| `session_id` / `sessionId` | string | no | Session to write |
 
 ## CLI Flags
 
 | Flag | Env Variable | Default | Description |
 |------|-------------|---------|-------------|
-| `--seq-think-storage-dir` | `MCP_STORAGE_DIR` | — | Storage directory for sessions |
-| `--seq-think-config-file` | `SEQ_THINK_CONFIG_FILE` | — | Custom JSON config file path (overrides settings.json lookup) |
+| `--seq-think-storage-dir` | `MCP_STORAGE_DIR` | `~/.mcp_sequential_thinking` | Storage directory for sessions |
+| `--seq-think-config-file` | `SEQ_THINK_CONFIG_FILE` | — | Custom JSON config file path |
 | `--seq-think-config` | `SEQ_THINK_CONFIG` | — | Deprecated alias for the config file path |
 | `--seq-think-max-bytes` | `SEQ_THINK_MAX_BYTES` | `51200` | Max output bytes |
 | `--seq-think-max-lines` | `SEQ_THINK_MAX_LINES` | `2000` | Max output lines |
@@ -137,6 +220,13 @@ The Sequential Thinking framework organizes thoughts through five cognitive stag
 3. **Analysis** — Examine and evaluate the evidence
 4. **Synthesis** — Combine insights into a coherent view
 5. **Conclusion** — Draw final conclusions and recommendations
+
+## Privacy and Storage Notes
+
+- V1 storage is local plaintext JSON.
+- `process_thought`, `get_thinking_history`, `generate_summary`, `export_session`, `import_session`, and `sequential_think` are content-bearing tools.
+- `get_thinking_status` and mutation receipts are designed to avoid thought text, tags, axioms, and assumptions.
+- V1 assumes one active pi process per storage directory. Add locking before using a shared directory with multiple writers.
 
 ## Requirements
 
