@@ -228,12 +228,7 @@ jobs:
 
           for pkg in $(echo '${{ needs.checks.outputs.matrix }}' | jq -r '.[]'); do
             echo "Publishing $pkg"
-            if [ "$pkg" = "packages/pi-conductor" ]; then
-              echo "Publishing archived pi-conductor without provenance because its final package metadata points to the archive repository."
-              (cd "$pkg" && npm publish --access public)
-            else
-              (cd "$pkg" && npm publish --access public --provenance)
-            fi
+            (cd "$pkg" && npm publish --access public --provenance)
           done
 
   publish_skipped:
