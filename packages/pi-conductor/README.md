@@ -1,5 +1,7 @@
 # @feniix/pi-conductor
 
+> **Archived discontinued experiment.** `pi-conductor` is no longer under active development. This package is kept for historical reference and one final archival publish before the code moves to a separate archive repository. Prefer the maintained Pi workflow tools instead of starting new work on conductor.
+
 Agent-native local control plane for Pi worker orchestration.
 
 `pi-conductor` manages durable project-scoped workers, tasks, runs, gates, artifacts, and events. It keeps conductor-owned state outside the repository, uses `@feniix/worktrees-core` for managed git worktrees, and treats execution backends as evidence sources rather than canonical state owners.

@@ -1,7 +1,7 @@
 {
   "name": "@feniix/pi-conductor",
-  "version": "0.12.1",
-  "description": "Long-lived multi-session worker orchestration for pi with git worktrees, resumable sessions, and PR flows",
+  "version": "0.13.0",
+  "description": "Archived discontinued experiment: long-lived multi-session worker orchestration for pi with git worktrees, resumable sessions, and PR flows",
   "keywords": [
     "pi",
     "pi-package",
@@ -39,8 +39,8 @@
     "@feniix/worktrees-core": "^1.1.0"
   },
   "repository": {
-    "url": "git+https://github.com/feniix/pi-extensions.git",
-    "directory": "packages/pi-conductor"
+    "type": "git",
+    "url": "git+https://github.com/feniix/pi-conductor.git"
   },
   "author": {
     "name": "Sebastian Otaegui",
@@ -48,9 +48,9 @@
   },
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/feniix/pi-extensions/issues"
+    "url": "https://github.com/feniix/pi-conductor/issues"
   },
-  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-conductor#readme",
+  "homepage": "https://github.com/feniix/pi-conductor#readme",
   "peerDependenciesMeta": {
     "@earendil-works/pi-ai": {
       "optional": true
