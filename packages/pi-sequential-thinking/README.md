@@ -227,8 +227,6 @@ The Sequential Thinking framework organizes thoughts through five cognitive stag
 - `process_thought`, `get_thinking_history`, `generate_summary`, `export_session`, `import_session`, and `sequential_think` are content-bearing tools.
 - `get_thinking_status` and mutation receipts are designed to avoid thought text, tags, axioms, and assumptions.
 - V1 assumes one active pi process per storage directory. Add locking before using a shared directory with multiple writers.
-- Branch/revision metadata is not included in this release.
-- A dual pi extension + MCP server architecture is not included in this release; this remains a native pi extension only.
 
 ## Requirements
 
