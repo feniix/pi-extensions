@@ -324,6 +324,21 @@ describe("thoughtFromDict", () => {
     expect(thought.id).toMatch(/^[0-9a-f-]+$/);
     expect(Date.parse(thought.timestamp)).not.toBeNaN();
   });
+
+  it("preserves legacy defaults for partial records", () => {
+    const thought = thoughtFromDict({});
+
+    expect(thought).toMatchObject({
+      thought: "",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_thought_needed: false,
+      stage: ThoughtStage.ANALYSIS,
+      tags: [],
+      axioms_used: [],
+      assumptions_challenged: [],
+    });
+  });
 });
 
 describe("generateUuid", () => {

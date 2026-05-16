@@ -370,8 +370,10 @@ function resolveEffectiveConfig(input: ResolveEffectiveConfigInput = {}): Effect
   const envMaxLines = normalizeNumber(env.SEQ_THINK_MAX_LINES);
   const configMaxLines = config?.config.maxLines;
 
+  const storageDir = flagStorageDir ?? envStorageDir ?? configStorageDir;
+
   return {
-    storageDir: flagStorageDir ?? envStorageDir ?? configStorageDir,
+    storageDir: storageDir ? resolveConfigPath(storageDir) : undefined,
     maxBytes: flagMaxBytes ?? envMaxBytes ?? configMaxBytes ?? DEFAULT_MAX_BYTES,
     maxLines: flagMaxLines ?? envMaxLines ?? configMaxLines ?? DEFAULT_MAX_LINES,
     sources: {
@@ -412,6 +414,31 @@ function sessionIdFromArgs(args: Record<string, unknown>): string | null {
     return snakeSession.sessionId;
   }
   return normalizeSessionId(snake ?? camel).sessionId;
+}
+
+function includeFullThoughtsFromArgs(args: Record<string, unknown>): boolean {
+  const snake = args.include_full_thoughts;
+  const camel = args.includeFullThoughts;
+  const hasSnake = snake !== undefined;
+  const hasCamel = camel !== undefined;
+
+  if (hasSnake && typeof snake !== "boolean") {
+    throw new ThoughtValidationError([
+      { field: "include_full_thoughts", message: "include_full_thoughts must be a boolean" },
+    ]);
+  }
+  if (hasCamel && typeof camel !== "boolean") {
+    throw new ThoughtValidationError([
+      { field: "include_full_thoughts", message: "include_full_thoughts must be a boolean" },
+    ]);
+  }
+  if (hasSnake && hasCamel && snake !== camel) {
+    throw new ThoughtValidationError([
+      { field: "include_full_thoughts", message: "Conflicting aliases for include_full_thoughts" },
+    ]);
+  }
+
+  return hasSnake ? (snake as boolean) : hasCamel ? (camel as boolean) : true;
 }
 
 function toReceipt(
@@ -719,12 +746,7 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 
   function getThinkingHistory(args: Record<string, unknown>) {
     const sessionId = sessionIdFromArgs(args);
-    const includeFullThoughts =
-      typeof args.include_full_thoughts === "boolean"
-        ? args.include_full_thoughts
-        : typeof args.includeFullThoughts === "boolean"
-          ? args.includeFullThoughts
-          : true;
+    const includeFullThoughts = includeFullThoughtsFromArgs(args);
     return storage.getHistory({
       sessionId,
       limit: normalizeNumber(args.limit) ?? DEFAULT_HISTORY_LIMIT,

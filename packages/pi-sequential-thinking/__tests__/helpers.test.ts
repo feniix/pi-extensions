@@ -237,6 +237,20 @@ describe("pi-sequential-thinking resolveConfigPath", () => {
     expect(resolveConfigPath(absolute)).toBe(absolute);
   });
 
+  it("resolves effective home-relative storage directories", () => {
+    expect(resolveEffectiveConfig({ flags: { storageDir: "~/.seq-think-flag" } }).storageDir).toBe(
+      join(homedir(), ".seq-think-flag"),
+    );
+    expect(resolveEffectiveConfig({ env: { MCP_STORAGE_DIR: "~/.seq-think-env" } }).storageDir).toBe(
+      join(homedir(), ".seq-think-env"),
+    );
+    expect(
+      resolveEffectiveConfig({
+        config: { config: { storageDir: "~/.seq-think-config" }, sources: { storageDir: "project_settings" } },
+      }).storageDir,
+    ).toBe(join(homedir(), ".seq-think-config"));
+  });
+
   it("resolves relative paths from cwd", () => {
     const result = resolveConfigPath("relative/path.json");
     expect(result).toBe(resolve(process.cwd(), "relative/path.json"));

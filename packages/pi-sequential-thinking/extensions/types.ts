@@ -445,7 +445,46 @@ export function normalizeThoughtRecord(dict: Record<string, unknown>): ThoughtRe
 }
 
 export function thoughtFromDict(dict: Record<string, unknown>): ThoughtData {
-  return normalizeThoughtRecord(dict).thought;
+  const stageValue = typeof dict.stage === "string" ? parseThoughtStage(dict.stage) : ThoughtStage.ANALYSIS;
+  const thoughtNumber =
+    typeof dict.thoughtNumber === "number"
+      ? dict.thoughtNumber
+      : typeof dict.thought_number === "number"
+        ? dict.thought_number
+        : 1;
+  const totalThoughts =
+    typeof dict.totalThoughts === "number"
+      ? dict.totalThoughts
+      : typeof dict.total_thoughts === "number"
+        ? dict.total_thoughts
+        : 1;
+  const nextThoughtNeeded =
+    typeof dict.nextThoughtNeeded === "boolean"
+      ? dict.nextThoughtNeeded
+      : typeof dict.next_thought_needed === "boolean"
+        ? dict.next_thought_needed
+        : false;
+
+  return {
+    thought: typeof dict.thought === "string" ? dict.thought : "",
+    thought_number: thoughtNumber,
+    total_thoughts: totalThoughts,
+    next_thought_needed: nextThoughtNeeded,
+    stage: stageValue,
+    tags: Array.isArray(dict.tags) ? dict.tags.filter((tag): tag is string => typeof tag === "string") : [],
+    axioms_used: Array.isArray(dict.axiomsUsed)
+      ? dict.axiomsUsed.filter((axiom): axiom is string => typeof axiom === "string")
+      : Array.isArray(dict.axioms_used)
+        ? dict.axioms_used.filter((axiom): axiom is string => typeof axiom === "string")
+        : [],
+    assumptions_challenged: Array.isArray(dict.assumptionsChallenged)
+      ? dict.assumptionsChallenged.filter((assumption): assumption is string => typeof assumption === "string")
+      : Array.isArray(dict.assumptions_challenged)
+        ? dict.assumptions_challenged.filter((assumption): assumption is string => typeof assumption === "string")
+        : [],
+    timestamp: typeof dict.timestamp === "string" ? dict.timestamp : new Date().toISOString(),
+    id: typeof dict.id === "string" && dict.id.trim() ? dict.id : generateUuid(),
+  };
 }
 
 // =============================================================================

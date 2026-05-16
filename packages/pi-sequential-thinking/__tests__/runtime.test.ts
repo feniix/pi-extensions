@@ -84,6 +84,43 @@ describe("pi-sequential-thinking runtime", () => {
     expect(history.thoughts[0].thought).toBeUndefined();
   });
 
+  it("rejects conflicting history include_full_thoughts aliases", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "pi-seq-runtime-history-aliases-"));
+    const mockPi = createMockPi({ "--seq-think-storage-dir": storageDir });
+    sequentialThinking(mockPi as unknown as ExtensionAPI);
+
+    const processTool = getRegisteredTool(mockPi, "process_thought");
+    const historyTool = getRegisteredTool(mockPi, "get_thinking_history");
+
+    await processTool.execute(
+      "call-history-aliases-1",
+      {
+        thought: "Alias conflict should not expose this full text",
+        thought_number: 1,
+        total_thoughts: 1,
+        next_thought_needed: false,
+        stage: "Analysis",
+      },
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    const historyResult = await historyTool.execute(
+      "call-history-aliases-2",
+      { include_full_thoughts: true, includeFullThoughts: false },
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    expect(historyResult.isError).toBe(true);
+    expect(historyResult.details.validationErrors).toContainEqual({
+      field: "include_full_thoughts",
+      message: "Conflicting aliases for include_full_thoughts",
+    });
+  });
+
   it("summarizes, clears, exports, imports, and runs sequential_think per session", async () => {
     const storageDir = mkdtempSync(join(tmpdir(), "pi-seq-runtime-tools-"));
     const exportPath = join(storageDir, "nested", "session.json");
@@ -129,7 +166,7 @@ describe("pi-sequential-thinking runtime", () => {
 
     const summaryResult = await summaryTool.execute(
       "call-5",
-      { session_id: "research" },
+      { sessionId: "research" },
       undefined,
       undefined,
       undefined,
@@ -139,7 +176,7 @@ describe("pi-sequential-thinking runtime", () => {
 
     const exportResult = await exportTool.execute(
       "call-6",
-      { file_path: exportPath, session_id: "research" },
+      { file_path: exportPath, sessionId: "research" },
       undefined,
       undefined,
       undefined,
@@ -149,7 +186,7 @@ describe("pi-sequential-thinking runtime", () => {
     expect(parseToolJson(exportResult).receipt.operation).toBe("export_session");
     expect(JSON.parse(readFileSync(exportPath, "utf-8")).sessionId).toBe("research");
 
-    const clearResult = await clearTool.execute("call-7", { session_id: "research" }, undefined, undefined, undefined);
+    const clearResult = await clearTool.execute("call-7", { sessionId: "research" }, undefined, undefined, undefined);
     expect(parseToolJson(clearResult).receipt).toMatchObject({
       operation: "clear_history",
       sessionId: "research",
@@ -176,7 +213,7 @@ describe("pi-sequential-thinking runtime", () => {
 
     const importResult = await importTool.execute(
       "call-8",
-      { file_path: legacyPath, session_id: "legacy-import" },
+      { file_path: legacyPath, sessionId: "legacy-import" },
       undefined,
       undefined,
       undefined,
@@ -190,13 +227,13 @@ describe("pi-sequential-thinking runtime", () => {
     });
 
     const importedHistory = parseToolJson(
-      await historyTool.execute("call-9", { session_id: "legacy-import" }, undefined, undefined, undefined),
+      await historyTool.execute("call-9", { sessionId: "legacy-import" }, undefined, undefined, undefined),
     );
     expect(importedHistory.thoughts[0].thoughtNumber).toBe(4);
 
     const sequentialResult = await sequentialTool.execute(
       "call-10",
-      { topic: "Database migration strategy", num_thoughts: 5, session_id: "scratch" },
+      { topic: "Database migration strategy", num_thoughts: 5, sessionId: "scratch" },
       undefined,
       undefined,
       undefined,
@@ -211,7 +248,7 @@ describe("pi-sequential-thinking runtime", () => {
     });
 
     const scratchHistory = parseToolJson(
-      await historyTool.execute("call-11", { session_id: "scratch" }, undefined, undefined, undefined),
+      await historyTool.execute("call-11", { sessionId: "scratch" }, undefined, undefined, undefined),
     );
     expect(scratchHistory.totalThoughts).toBe(5);
 
@@ -273,6 +310,7 @@ describe("pi-sequential-thinking runtime", () => {
     sequentialThinking(mockPi as unknown as ExtensionAPI);
 
     const processTool = getRegisteredTool(mockPi, "process_thought");
+    const summaryTool = getRegisteredTool(mockPi, "generate_summary");
     const importTool = getRegisteredTool(mockPi, "import_session");
 
     const invalidThought = await processTool.execute(
@@ -304,5 +342,18 @@ describe("pi-sequential-thinking runtime", () => {
     );
     expect(missingImport.isError).toBe(true);
     expect(missingImport.content[0].text).toContain("File not found");
+
+    const conflictingSession = await summaryTool.execute(
+      "call-15",
+      { session_id: "one", sessionId: "two" },
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(conflictingSession.isError).toBe(true);
+    expect(conflictingSession.details.validationErrors).toContainEqual({
+      field: "session_id",
+      message: "Conflicting aliases for session_id",
+    });
   });
 });
