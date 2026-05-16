@@ -343,6 +343,8 @@ describe("pi-sequential-thinking writeTempFile", () => {
 
   it("writes temp file and returns path", () => {
     const path = writeTempFile("test_tool", "content here");
+    expect(path).toBeDefined();
+    if (!path) throw new Error("expected path");
     tempFiles.push(path);
     expect(path).toContain("pi-seq-think-test_tool");
     expect(path).toContain(".txt");
@@ -351,6 +353,8 @@ describe("pi-sequential-thinking writeTempFile", () => {
 
   it("sanitizes tool name", () => {
     const path = writeTempFile("my-tool!@#", "content");
+    expect(path).toBeDefined();
+    if (!path) throw new Error("expected path");
     tempFiles.push(path);
     expect(path).toContain("my-tool__");
   });

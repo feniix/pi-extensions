@@ -13,6 +13,7 @@ export const STATUS_ENUMERATION_SESSION_THRESHOLD = 100;
 export const DEFAULT_HISTORY_LIMIT = 20;
 export const MAX_HISTORY_LIMIT = 100;
 const MAX_SESSION_ID_LENGTH = 80;
+const MAX_THOUGHT_COUNT = 1000;
 
 // =============================================================================
 // ThoughtStage Enum
@@ -135,6 +136,11 @@ function normalizeRequiredString(field: string, value: unknown): { value?: strin
 
 function normalizeRequiredInteger(field: string, value: unknown): { value?: number; error?: ValidationError } {
   if (isPositiveInteger(value)) {
+    if ((field === "thought_number" || field === "total_thoughts") && value > MAX_THOUGHT_COUNT) {
+      return {
+        error: createError(field, `${field} must be ${MAX_THOUGHT_COUNT} or fewer (received ${value})`),
+      };
+    }
     return { value };
   }
   const message =

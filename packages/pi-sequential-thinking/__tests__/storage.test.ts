@@ -406,7 +406,9 @@ describe("ThoughtStorage", () => {
 
       const status = storage.getStatus();
 
-      expect(status.namedSessionCount).toBe(STATUS_ENUMERATION_SESSION_THRESHOLD + 1);
+      // namedSessionCount is capped at the enumeration threshold so the value
+      // is interpretable; the partial-completion flag signals overflow.
+      expect(status.namedSessionCount).toBe(STATUS_ENUMERATION_SESSION_THRESHOLD);
       expect(status.totalThoughts).toBeUndefined();
       expect(status.statusCompleteness).toMatchObject({
         complete: false,
@@ -458,6 +460,147 @@ describe("ThoughtStorage", () => {
       expect(storage.getStatus().backupFiles.some((file) => file.startsWith("current_session.json.bak."))).toBe(true);
       storage.addThought(createThought());
       expect(storage.getAllThoughts()).toHaveLength(1);
+    });
+
+    it("backs up default session file that parses to an object missing the thoughts array", () => {
+      const sessionFile = join(tempDir, "current_session.json");
+      writeFileSync(sessionFile, JSON.stringify({ lastUpdated: "2026-05-16T00:00:00.000Z" }), "utf-8");
+
+      const storage = new ThoughtStorage(tempDir);
+
+      expect(storage.getAllThoughts()).toEqual([]);
+      expect(storage.getStatus().backupFiles.some((file) => file.startsWith("current_session.json.bak."))).toBe(true);
+    });
+
+    it("does not back up a named session that has a valid thoughts array but an invalid embedded sessionId", () => {
+      const sessionsDir = join(tempDir, "sessions");
+      mkdirSync(sessionsDir, { recursive: true });
+      const sessionFile = join(sessionsDir, "review.json");
+      writeFileSync(
+        sessionFile,
+        JSON.stringify({
+          schemaVersion: 1,
+          sessionId: "default",
+          thoughts: [createThought({ thought: "Still valid" })],
+        }),
+        "utf-8",
+      );
+
+      const storage = new ThoughtStorage(tempDir);
+      expect(storage.getAllThoughts("review")[0].thought).toBe("Still valid");
+      expect(storage.getStatus().backupFiles.some((file) => file.includes("review.json.bak."))).toBe(false);
+    });
+  });
+
+  describe("reads do not materialize session directories", () => {
+    it("does not create the sessions/ directory when calling getAllThoughts on the default session", () => {
+      const storage = new ThoughtStorage(tempDir);
+      storage.getAllThoughts();
+      expect(existsSync(join(tempDir, "sessions"))).toBe(false);
+    });
+
+    it("does not create the sessions/ directory when reading history for the default session", () => {
+      const storage = new ThoughtStorage(tempDir);
+      storage.getHistory();
+      expect(existsSync(join(tempDir, "sessions"))).toBe(false);
+    });
+
+    it("does not create the sessions/ directory when calling getStatus with no named sessions", () => {
+      const storage = new ThoughtStorage(tempDir);
+      storage.getStatus();
+      expect(existsSync(join(tempDir, "sessions"))).toBe(false);
+    });
+  });
+
+  describe("importSession overwrite reporting", () => {
+    it("reports preCount and overwroteExistingThoughts when importing into a populated session", () => {
+      const storage = new ThoughtStorage(tempDir);
+      storage.addThought(createThought({ thought: "Existing" }), "target");
+
+      const importPath = join(tempDir, "import.json");
+      writeFileSync(
+        importPath,
+        JSON.stringify({ schemaVersion: 1, sessionId: "target", thoughts: [createThought({ thought: "Replaced" })] }),
+        "utf-8",
+      );
+
+      const result = storage.importSession(importPath, "target");
+
+      expect(result.preCount).toBe(1);
+      expect(result.postCount).toBe(1);
+      expect(result.overwroteExistingThoughts).toBe(true);
+    });
+
+    it("reports overwroteExistingThoughts false when target session was empty", () => {
+      const storage = new ThoughtStorage(tempDir);
+
+      const importPath = join(tempDir, "import.json");
+      writeFileSync(
+        importPath,
+        JSON.stringify({ schemaVersion: 1, sessionId: "empty", thoughts: [createThought({ thought: "New" })] }),
+        "utf-8",
+      );
+
+      const result = storage.importSession(importPath, "empty");
+      expect(result.preCount).toBe(0);
+      expect(result.overwroteExistingThoughts).toBe(false);
+    });
+
+    it("reports changed=false when imported content is identical to existing", () => {
+      const storage = new ThoughtStorage(tempDir);
+      const existing = createThought({ id: "fixed-id", thought: "Same", timestamp: "2026-05-16T00:00:00.000Z" });
+      storage.addThought(existing, "stable");
+
+      const importPath = join(tempDir, "identical.json");
+      writeFileSync(
+        importPath,
+        JSON.stringify({ schemaVersion: 1, sessionId: "stable", thoughts: [existing] }),
+        "utf-8",
+      );
+
+      const result = storage.importSession(importPath, "stable");
+      expect(result.changed).toBe(false);
+    });
+  });
+
+  describe("getStatus completeness with corrupt sessions", () => {
+    it("flags totalThoughts undefined and complete=false when any session is corrupt", () => {
+      const sessionsDir = join(tempDir, "sessions");
+      mkdirSync(sessionsDir, { recursive: true });
+      writeFileSync(join(sessionsDir, "broken.json"), "not valid json", "utf-8");
+      const storage = new ThoughtStorage(tempDir);
+      storage.addThought(createThought({ thought: "Default" }));
+
+      const status = storage.getStatus();
+
+      expect(status.statusCompleteness.complete).toBe(false);
+      expect(status.statusCompleteness.reason).toMatch(/corrupt/i);
+      expect(status.totalThoughts).toBeUndefined();
+    });
+  });
+
+  describe("namedSessionCount accuracy", () => {
+    it("caps reported namedSessionCount at the enumeration threshold so the value is not misleading", () => {
+      const sessionsDir = join(tempDir, "sessions");
+      mkdirSync(sessionsDir, { recursive: true });
+      const storage = new ThoughtStorage(tempDir);
+      for (let index = 0; index < STATUS_ENUMERATION_SESSION_THRESHOLD + 5; index++) {
+        writeFileSync(join(sessionsDir, `session-${index}.json`), JSON.stringify({ thoughts: [] }), "utf-8");
+      }
+
+      const status = storage.getStatus();
+      expect(status.namedSessionCount).toBeLessThanOrEqual(STATUS_ENUMERATION_SESSION_THRESHOLD);
+      expect(status.statusCompleteness.complete).toBe(false);
+    });
+  });
+
+  describe("non-explicit load size guard", () => {
+    it("rejects oversized named session file when loading via getAllThoughts (non-explicit load)", () => {
+      const sessionsDir = join(tempDir, "sessions");
+      mkdirSync(sessionsDir, { recursive: true });
+      writeFileSync(join(sessionsDir, "huge.json"), " ".repeat(MAX_IMPORT_BYTES + 1), "utf-8");
+      const storage = new ThoughtStorage(tempDir);
+      expect(() => storage.getAllThoughts("huge")).toThrow(/10 MiB/i);
     });
   });
 });

@@ -115,10 +115,12 @@ function formatToolOutput(
 
   if (truncation.truncated) {
     tempFile = writeTempFile(toolName, rawText);
+    const tempSuffix = tempFile
+      ? `Full output saved to: ${tempFile}`
+      : "Full output unavailable (could not write overflow file)";
     text +=
       `\n\n[Output truncated: ${truncation.outputLines} of ${truncation.totalLines} lines ` +
-      `(${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)}). ` +
-      `Full output saved to: ${tempFile}]`;
+      `(${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)}). ${tempSuffix}]`;
   }
 
   if (truncation.firstLineExceedsLimit && rawText.length > 0) {
@@ -146,12 +148,20 @@ function formatToolOutput(
   };
 }
 
-function writeTempFile(toolName: string, content: string): string {
+function writeTempFile(toolName: string, content: string): string | undefined {
   const safeName = toolName.replace(/[^a-z0-9_-]/gi, "_");
   const filename = `pi-seq-think-${safeName}-${Date.now()}.txt`;
   const filePath = join(tmpdir(), filename);
-  writeFileSync(filePath, content, "utf-8");
-  return filePath;
+  try {
+    writeFileSync(filePath, content, "utf-8");
+    return filePath;
+  } catch (error) {
+    // If /tmp is full or unwritable, the truncated tool result is still
+    // useful — don't convert a successful tool call into an error.
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[pi-sequential-thinking] Could not write truncation overflow file: ${message}`);
+    return undefined;
+  }
 }
 
 function normalizeString(value: unknown): string | undefined {

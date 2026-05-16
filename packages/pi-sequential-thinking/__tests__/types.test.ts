@@ -143,6 +143,28 @@ describe("normalizeThoughtInput", () => {
     ).toThrow(/conflicting aliases.*axioms_used/i);
   });
 
+  it("rejects thought_number and total_thoughts beyond the upper bound", () => {
+    expect(() =>
+      normalizeThoughtInput({
+        thought: "Way too big",
+        thought_number: Number.MAX_SAFE_INTEGER,
+        total_thoughts: 3,
+        next_thought_needed: false,
+        stage: "Analysis",
+      }),
+    ).toThrow(/thought_number/);
+
+    expect(() =>
+      normalizeThoughtInput({
+        thought: "Way too big total",
+        thought_number: 1,
+        total_thoughts: 1_000_001,
+        next_thought_needed: false,
+        stage: "Analysis",
+      }),
+    ).toThrow(/total_thoughts/);
+  });
+
   it("dynamically raises total_thoughts for the incoming thought only", () => {
     const result = normalizeThoughtInput({
       thought: "Need more steps",
