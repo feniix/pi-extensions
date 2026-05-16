@@ -8,7 +8,6 @@ import {
   parseThoughtStage,
   ThoughtStage,
   ThoughtValidationError,
-  thoughtFromDict,
   thoughtToDict,
   validateThoughtData,
 } from "../extensions/types.js";
@@ -268,76 +267,6 @@ describe("thoughtToDict", () => {
       id: "test-id",
     };
     expect(thoughtToDict(thought, true).id).toBe("test-id");
-  });
-});
-
-describe("thoughtFromDict", () => {
-  it("parses dict with camelCase keys", () => {
-    const thought = thoughtFromDict({
-      thought: "Test thought",
-      thoughtNumber: 2,
-      totalThoughts: 5,
-      nextThoughtNeeded: false,
-      stage: "Synthesis",
-      tags: ["tag1", "tag2"],
-      axiomsUsed: ["axiom1"],
-      assumptionsChallenged: [],
-      timestamp: "2024-01-01T00:00:00.000Z",
-      id: "parsed-id",
-    });
-    expect(thought.thought_number).toBe(2);
-    expect(thought.total_thoughts).toBe(5);
-    expect(thought.next_thought_needed).toBe(false);
-    expect(thought.stage).toBe(ThoughtStage.SYNTHESIS);
-    expect(thought.axioms_used).toEqual(["axiom1"]);
-    expect(thought.id).toBe("parsed-id");
-  });
-
-  it("parses dict with snake_case keys without defaulting numeric and boolean fields", () => {
-    const thought = thoughtFromDict({
-      thought: "Test thought",
-      thought_number: 4,
-      total_thoughts: 6,
-      next_thought_needed: true,
-      stage: "Conclusion",
-      tags: [],
-      axioms_used: [],
-      assumptions_challenged: [],
-      timestamp: "2024-01-01T00:00:00.000Z",
-      id: "snake-id",
-    });
-    expect(thought.thought_number).toBe(4);
-    expect(thought.total_thoughts).toBe(6);
-    expect(thought.next_thought_needed).toBe(true);
-    expect(thought.stage).toBe(ThoughtStage.CONCLUSION);
-  });
-
-  it("generates id and timestamp when not provided", () => {
-    const thought = thoughtFromDict({
-      thought: "Test thought",
-      thoughtNumber: 1,
-      totalThoughts: 1,
-      nextThoughtNeeded: false,
-      stage: "Analysis",
-    });
-    expect(thought.id).toBeDefined();
-    expect(thought.id).toMatch(/^[0-9a-f-]+$/);
-    expect(Date.parse(thought.timestamp)).not.toBeNaN();
-  });
-
-  it("preserves legacy defaults for partial records", () => {
-    const thought = thoughtFromDict({});
-
-    expect(thought).toMatchObject({
-      thought: "",
-      thought_number: 1,
-      total_thoughts: 1,
-      next_thought_needed: false,
-      stage: ThoughtStage.ANALYSIS,
-      tags: [],
-      axioms_used: [],
-      assumptions_challenged: [],
-    });
   });
 });
 

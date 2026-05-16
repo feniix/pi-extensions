@@ -21,6 +21,7 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   DEFAULT_HISTORY_LIMIT,
+  isRecord,
   MAX_HISTORY_LIMIT,
   MAX_IMPORT_BYTES,
   normalizeSessionId,
@@ -132,7 +133,6 @@ export interface ThinkingStatus {
     skippedInvalidNamedSessions?: number;
   };
   schemaVersion: number;
-  storageVersion: number;
 }
 
 interface StoredSession {
@@ -175,7 +175,7 @@ export class ThoughtStorage {
   // =============================================================================
 
   addThought(thought: ThoughtData, sessionId?: string | null): SessionOperationResult {
-    const session = this.resolveSession(sessionId);
+    const session = normalizeSessionId(sessionId);
     const loaded = this.loadSession(session.sessionId);
     const preCount = loaded.thoughts.length;
     const thoughts = [...loaded.thoughts, thought];
@@ -184,16 +184,12 @@ export class ThoughtStorage {
   }
 
   getAllThoughts(sessionId?: string | null): ThoughtData[] {
-    return this.getThoughts(sessionId);
-  }
-
-  getThoughts(sessionId?: string | null): ThoughtData[] {
-    const session = this.resolveSession(sessionId);
+    const session = normalizeSessionId(sessionId);
     return [...this.loadSession(session.sessionId).thoughts];
   }
 
   clearHistory(sessionId?: string | null): SessionOperationResult {
-    const session = this.resolveSession(sessionId);
+    const session = normalizeSessionId(sessionId);
     const loaded = this.loadSession(session.sessionId);
     const preCount = loaded.thoughts.length;
     const savedAt = this.saveSession(session.sessionId, []);
@@ -201,7 +197,7 @@ export class ThoughtStorage {
   }
 
   getHistory(request: HistoryRequest = {}): ThinkingHistory {
-    const session = this.resolveSession(request.sessionId);
+    const session = normalizeSessionId(request.sessionId);
     const limit = request.limit ?? DEFAULT_HISTORY_LIMIT;
     const offset = request.offset ?? 0;
     const includeFullThoughts = request.includeFullThoughts ?? true;
@@ -233,7 +229,7 @@ export class ThoughtStorage {
     if (!filePath?.trim()) {
       throw new Error("file_path is required");
     }
-    const session = this.resolveSession(sessionId);
+    const session = normalizeSessionId(sessionId);
     const thoughts = this.loadSession(session.sessionId).thoughts;
     const targetPath = this.resolveExternalPath(filePath);
     this.ensureExternalWriteTarget(targetPath);
@@ -262,10 +258,10 @@ export class ThoughtStorage {
       explicitImport: true,
     });
 
-    const explicitSession = sessionId === undefined || sessionId === null ? undefined : this.resolveSession(sessionId);
+    const explicitSession = sessionId === undefined || sessionId === null ? undefined : normalizeSessionId(sessionId);
     const embeddedSession =
-      loaded.embeddedSessionId === undefined ? undefined : this.resolveSession(loaded.embeddedSessionId);
-    const targetSession = explicitSession ?? embeddedSession ?? this.resolveSession(undefined);
+      loaded.embeddedSessionId === undefined ? undefined : normalizeSessionId(loaded.embeddedSessionId);
+    const targetSession = explicitSession ?? embeddedSession ?? normalizeSessionId(undefined);
     const warnings = [...loaded.warnings];
     if (explicitSession && embeddedSession && explicitSession.sessionId !== embeddedSession.sessionId) {
       warnings.push(
@@ -348,17 +344,12 @@ export class ThoughtStorage {
         skippedInvalidNamedSessions: skippedInvalidNamedSessions || undefined,
       },
       schemaVersion: SCHEMA_VERSION,
-      storageVersion: SCHEMA_VERSION,
     };
   }
 
   // =============================================================================
   // Session helpers
   // =============================================================================
-
-  private resolveSession(sessionId?: string | null): SessionInfo {
-    return normalizeSessionId(sessionId === null ? undefined : sessionId);
-  }
 
   private resolveSessionFile(sessionId: string | null): string {
     if (sessionId === null) {
@@ -384,7 +375,7 @@ export class ThoughtStorage {
   }
 
   private saveSession(sessionId: string | null, thoughts: ThoughtData[]): string {
-    const session = this.resolveSession(sessionId);
+    const session = normalizeSessionId(sessionId);
     const lastUpdated = new Date().toISOString();
     this.saveToFile(
       this.resolveSessionFile(session.sessionId),
@@ -394,7 +385,7 @@ export class ThoughtStorage {
   }
 
   private getSessionMetadata(sessionId: string | null): SessionStatusMetadata {
-    const session = this.resolveSession(sessionId);
+    const session = normalizeSessionId(sessionId);
     try {
       const loaded = this.loadSessionFile(this.resolveSessionFile(session.sessionId), {
         missingAsEmpty: true,
@@ -470,7 +461,7 @@ export class ThoughtStorage {
       };
     }
 
-    if (!this.isRecord(data)) {
+    if (!isRecord(data)) {
       throw new Error("Session file must be an object or legacy thought array");
     }
 
@@ -494,7 +485,7 @@ export class ThoughtStorage {
     const thoughts: ThoughtData[] = [];
     const warnings: string[] = [];
     records.forEach((record, index) => {
-      if (!this.isRecord(record)) {
+      if (!isRecord(record)) {
         throw new Error(`thoughts[${index}] must be an object`);
       }
       const normalized = normalizeThoughtRecord(record);
@@ -802,7 +793,4 @@ export class ThoughtStorage {
     }
   }
 
-  private isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-  }
 }

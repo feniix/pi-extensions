@@ -3,10 +3,9 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  DEFAULT_CONFIG_FILE,
   formatToolOutput,
   isRecord,
-  loadConfig,
+  loadConfigWithSources,
   normalizeNumber,
   normalizeString,
   parseConfig,
@@ -89,14 +88,6 @@ describe("pi-sequential-thinking helpers", () => {
     expect(normalizeNumber(Number.POSITIVE_INFINITY)).toBeUndefined();
   });
 
-  it("keeps DEFAULT_CONFIG_FILE available for reference", () => {
-    expect(DEFAULT_CONFIG_FILE).toMatchObject({
-      storageDir: null,
-      maxBytes: 51200,
-      maxLines: 2000,
-    });
-  });
-
   it("loads config from standard pi settings files", async () => {
     const originalHome = process.env.HOME;
     const originalCwd = process.cwd();
@@ -126,7 +117,7 @@ describe("pi-sequential-thinking helpers", () => {
 
     try {
       const mod = await import("../extensions/index.js");
-      expect(mod.loadConfig(undefined)).toEqual({
+      expect(mod.loadConfigWithSources(undefined)?.config).toEqual({
         storageDir: "/tmp/thoughts",
         maxBytes: 111,
         maxLines: 22,
@@ -158,7 +149,7 @@ describe("pi-sequential-thinking helpers", () => {
 
     try {
       const mod = await import("../extensions/index.js");
-      expect(mod.loadConfig(undefined)).toBeNull();
+      expect(mod.loadConfigWithSources(undefined)).toBeNull();
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Ignoring legacy config file"));
     } finally {
       warnSpy.mockRestore();
@@ -257,11 +248,11 @@ describe("pi-sequential-thinking resolveConfigPath", () => {
   });
 });
 
-describe("pi-sequential-thinking loadConfig", () => {
+describe("pi-sequential-thinking loadConfigWithSources", () => {
   it("returns null when no config exists", () => {
     const base = mkdtempSync(join(tmpdir(), "pi-seq-think-load-"));
     const configPath = join(base, "nonexistent.json");
-    expect(loadConfig(configPath)).toBeNull();
+    expect(loadConfigWithSources(configPath)).toBeNull();
   });
 
   it("loads valid config file", () => {
@@ -269,7 +260,11 @@ describe("pi-sequential-thinking loadConfig", () => {
     const configPath = join(base, "seq-think.json");
     writeFileSync(configPath, JSON.stringify({ storageDir: "/custom", maxBytes: 123 }), "utf-8");
 
-    expect(loadConfig(configPath)).toEqual({ storageDir: "/custom", maxBytes: 123, maxLines: undefined });
+    expect(loadConfigWithSources(configPath)?.config).toEqual({
+      storageDir: "/custom",
+      maxBytes: 123,
+      maxLines: undefined,
+    });
   });
 
   it("returns null on invalid JSON", () => {
@@ -277,7 +272,7 @@ describe("pi-sequential-thinking loadConfig", () => {
     const configPath = join(base, "invalid.json");
     writeFileSync(configPath, "not valid json", "utf-8");
 
-    expect(loadConfig(configPath)).toBeNull();
+    expect(loadConfigWithSources(configPath)).toBeNull();
   });
 });
 

@@ -22,6 +22,7 @@ import {
 import {
   DEFAULT_HISTORY_LIMIT,
   generateUuid,
+  isRecord,
   MAX_HISTORY_LIMIT,
   normalizeSessionId,
   normalizeThoughtInput,
@@ -34,12 +35,6 @@ import {
 // =============================================================================
 // Constants
 // =============================================================================
-
-const DEFAULT_CONFIG_FILE: Record<string, unknown> = {
-  storageDir: null,
-  maxBytes: DEFAULT_MAX_BYTES,
-  maxLines: DEFAULT_MAX_LINES,
-};
 
 type ConfigSource = "flag" | "env" | "project_settings" | "global_settings" | "config_file" | "default";
 
@@ -61,8 +56,6 @@ interface SeqThinkConfigWithSources {
   config: SeqThinkConfig;
   sources: Partial<Record<keyof SeqThinkConfig, ConfigSource>>;
 }
-
-interface EffectiveSeqThinkConfig extends EffectiveConfigStatus {}
 
 interface ResolveEffectiveConfigInput {
   flags?: {
@@ -94,10 +87,6 @@ interface McpToolDetails {
 // =============================================================================
 // Utility Functions
 // =============================================================================
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function toJsonString(value: unknown): string {
   if (typeof value === "string") {
@@ -285,10 +274,6 @@ function warnIgnoredLegacyConfigFiles(): void {
   }
 }
 
-function loadConfig(configPath: string | undefined): SeqThinkConfig | null {
-  return loadConfigWithSources(configPath)?.config ?? null;
-}
-
 function loadConfigWithSources(configPath: string | undefined): SeqThinkConfigWithSources | null {
   const envConfigFile = process.env.SEQ_THINK_CONFIG_FILE;
   const legacyEnvConfig = process.env.SEQ_THINK_CONFIG;
@@ -353,7 +338,7 @@ function mergeConfigWithSources(
   };
 }
 
-function resolveEffectiveConfig(input: ResolveEffectiveConfigInput = {}): EffectiveSeqThinkConfig {
+function resolveEffectiveConfig(input: ResolveEffectiveConfigInput = {}): EffectiveConfigStatus {
   const flags = input.flags ?? {};
   const env = input.env ?? process.env;
   const config = input.config;
@@ -613,7 +598,7 @@ export default function sequentialThinking(pi: ExtensionAPI) {
         : undefined;
   };
 
-  const getEffectiveConfig = (): EffectiveSeqThinkConfig => {
+  const getEffectiveConfig = (): EffectiveConfigStatus => {
     const config = loadConfigWithSources(getConfiguredFile());
     return resolveEffectiveConfig({
       flags: {
@@ -635,7 +620,7 @@ export default function sequentialThinking(pi: ExtensionAPI) {
     return { maxBytes: config.maxBytes, maxLines: config.maxLines };
   };
 
-  const effectiveConfigForStatus = (): EffectiveSeqThinkConfig => {
+  const effectiveConfigForStatus = (): EffectiveConfigStatus => {
     const config = getEffectiveConfig();
     return {
       ...config,
@@ -980,10 +965,8 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 
 // Export utilities for testing
 export {
-  DEFAULT_CONFIG_FILE,
   formatToolOutput,
   isRecord,
-  loadConfig,
   loadConfigWithSources,
   normalizeNumber,
   normalizeString,
