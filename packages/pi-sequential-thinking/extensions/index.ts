@@ -479,16 +479,43 @@ const outputLimitParams = {
 const processThoughtParams = Type.Object(
   {
     thought: Type.String({ description: "The content of your thought." }),
-    thought_number: Type.Optional(Type.Integer({ minimum: 1, description: "Position in your sequence." })),
-    thoughtNumber: Type.Optional(Type.Integer({ minimum: 1, description: "camelCase alias for thought_number." })),
+    thought_number: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        description:
+          "Position in your sequence. Required at runtime — supply this field or its camelCase alias thoughtNumber.",
+      }),
+    ),
+    thoughtNumber: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        description: "camelCase alias for thought_number. Required at runtime — supply either form.",
+      }),
+    ),
     total_thoughts: Type.Optional(
-      Type.Integer({ minimum: 1, description: "Expected total thoughts in the sequence." }),
+      Type.Integer({
+        minimum: 1,
+        description:
+          "Expected total thoughts in the sequence. Required at runtime — supply this field or its camelCase alias totalThoughts.",
+      }),
     ),
-    totalThoughts: Type.Optional(Type.Integer({ minimum: 1, description: "camelCase alias for total_thoughts." })),
+    totalThoughts: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        description: "camelCase alias for total_thoughts. Required at runtime — supply either form.",
+      }),
+    ),
     next_thought_needed: Type.Optional(
-      Type.Boolean({ description: "Whether more thoughts are needed after this one." }),
+      Type.Boolean({
+        description:
+          "Whether more thoughts are needed after this one. Required at runtime — supply this field or its camelCase alias nextThoughtNeeded.",
+      }),
     ),
-    nextThoughtNeeded: Type.Optional(Type.Boolean({ description: "camelCase alias for next_thought_needed." })),
+    nextThoughtNeeded: Type.Optional(
+      Type.Boolean({
+        description: "camelCase alias for next_thought_needed. Required at runtime — supply either form.",
+      }),
+    ),
     stage: Type.Union(
       [
         Type.Literal("Problem Definition"),
@@ -545,8 +572,14 @@ const getThinkingHistoryParams = Type.Object(
       Type.Integer({ minimum: 1, maximum: MAX_HISTORY_LIMIT, description: "Maximum thoughts to return." }),
     ),
     offset: Type.Optional(Type.Integer({ minimum: 0, description: "Number of thoughts to skip from the start." })),
-    include_full_thoughts: Type.Optional(Type.Boolean({ description: "Whether to include full thought text." })),
-    includeFullThoughts: Type.Optional(Type.Boolean({ description: "camelCase alias for include_full_thoughts." })),
+    include_full_thoughts: Type.Optional(
+      Type.Boolean({
+        description: "Whether to include full thought text. Default true; pass false to receive 120-char snippets.",
+      }),
+    ),
+    includeFullThoughts: Type.Optional(
+      Type.Boolean({ description: "camelCase alias for include_full_thoughts. Default true." }),
+    ),
     ...outputLimitParams,
   },
   { additionalProperties: true },
@@ -947,7 +980,12 @@ export default function sequentialThinking(pi: ExtensionAPI) {
   pi.registerTool({
     name: "get_thinking_status",
     label: "Get Thinking Status",
-    description: "Read content-free storage and configuration diagnostics for sequential thinking sessions.",
+    description:
+      "Read content-free storage and configuration diagnostics for sequential thinking sessions. " +
+      "Returns storage writability, per-session thought counts and state fingerprints, corrupt-session flags with error strings, " +
+      "backup file names, effectiveConfig.sources labels (flag/env/project_settings/global_settings/config_file/default), " +
+      "and a statusCompleteness block indicating whether the listing was truncated or contained corrupt entries. " +
+      "Use writable=false or sessions[].corrupt=true to diagnose write and parse failures.",
     parameters: getThinkingStatusParams,
     async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
       return executeTool(
@@ -964,7 +1002,9 @@ export default function sequentialThinking(pi: ExtensionAPI) {
     name: "sequential_think",
     label: "Sequential Thinking",
     description:
-      "Think through a topic systematically using structured cognitive stages. Compatibility helper that writes generated prompts to the selected session.",
+      "Scaffold a complete staged thinking sequence for a topic in one call. " +
+      "Generates one thought per cognitive stage (Problem Definition through Conclusion) and writes them to the selected session. " +
+      "Use process_thought instead when you want to record your own thoughts step-by-step.",
     parameters: sequentialThinkParams,
     async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
       const { toolArgs } = splitParams(params as Record<string, unknown>);
