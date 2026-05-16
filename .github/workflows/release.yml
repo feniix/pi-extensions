@@ -120,6 +120,11 @@ jobs:
 
             while IFS= read -r FILE; do
               [[ -z "$FILE" ]] && continue
+              if [[ ! -f "$FILE" ]]; then
+                echo "::notice::Skipping deleted package manifest $FILE"
+                continue
+              fi
+
               PKG="$(dirname "$FILE")"
               OLD_VERSION="$(git show "$BASE:$FILE" 2>/dev/null | jq -r '.version // empty' || echo "")"
               NEW_VERSION="$(jq -r '.version // empty' "$FILE")"
