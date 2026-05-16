@@ -14,13 +14,15 @@ version: "1.0"
 
 ## 1. Problem & Context
 
-`packages/pi-sequential-thinking` gives pi users a native structured-thinking extension with staged thoughts, tags, axioms, assumptions, summaries, import/export, and persistent JSON storage. It is useful today, but its state model is still too global and too strict for repeated agent use:
+`packages/pi-sequential-thinking` gives pi users a native structured-thinking extension with staged thoughts, tags, axioms, assumptions, summaries, import/export, and persistent JSON storage. It is useful today, but its state model is still too global and too strict for repeated use by one active pi process:
 
 * `process_thought` only reads snake\_case inputs even though the wider MCP sequential-thinking ecosystem uses camelCase fields such as `thoughtNumber`, `totalThoughts`, and `nextThoughtNeeded`.
 * `total_thoughts < thought_number` is rejected, while the canonical MCP sequential-thinking behavior treats the total as an estimate and expands it dynamically.
 * validation is split between `extensions/types.ts` and inline checks in `extensions/index.ts`, making future field additions riskier.
 * all thoughts live in one implicit `current_session.json`; there is no `session_id`, no read-only history inspection tool, and no way to summarize, clear, export, or import one named session.
 * stateful behavior is not observable enough: users cannot ask which storage directory/config is active, whether the store is writable, how many sessions/thoughts exist, or whether a mutating call actually changed persisted state.
+
+These gaps have already appeared in the work that produced this PRD: external MCP examples need manual field-name translation before they can be reused, the current `total_thoughts >= thought_number` rule conflicts with canonical sequential-thinking examples that expand the estimate midstream, and reviewing/clearing the persisted `current_session.json` requires either summary generation or manual file inspection rather than a safe read-only history/status tool. The first implementation is assumption-backed foundation work for one active pi process per storage directory; concurrent multi-process coordination is deliberately not claimed by this slice.
 
 This PRD turns the selected first ideation slice into implementation requirements. It is original work, not a PRD for an existing tracker issue. Related ideation is captured in `docs/ideation/2026-05-16-pi-sequential-thinking-improvements-ideation.md`; deferred work is preserved in `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md`.
 
@@ -34,7 +36,7 @@ This PRD turns the selected first ideation slice into implementation requirement
 | **Dynamic depth**              | Calls with `thought_number > total_thoughts` are accepted and normalized             | Stored `total_thoughts` becomes at least `thought_number`; receipt reports the adjustment                                                                                   |
 | **Centralized validation**     | Thought validation logic has one implementation path                                 | Inline validation duplication in `processThought` is removed or delegates to shared helpers                                                                                 |
 | **Session-scoped history**     | Named sessions can be written, read, summarized, cleared, exported, and imported     | `session_id` works across `process_thought`, `get_thinking_history`, `generate_summary`, `clear_history`, `export_session`, `import_session`, and legacy `sequential_think` |
-| **Backward compatibility**     | Existing default-session behavior and legacy exports remain usable                   | Current tests pass; legacy array and `{ thoughts: [...] }` imports still load                                                                                               |
+| **Backward compatibility**     | Existing default-session behavior and legacy exports remain usable                   | Existing non-obsoleted behavior remains covered; tests superseded by this PRD are updated; legacy array and `{ thoughts: [...] }` imports still load                        |
 | **State observability**        | Users can inspect effective state without reading files directly                     | New status tool reports effective config, storage path, session counts, writability, and backup/corruption file hints                                                       |
 | **Auditable mutations**        | Mutating tools return compact receipts                                               | `process_thought`, `clear_history`, `import_session`, `export_session`, and `sequential_think` include pre/post counts and session metadata                                 |
 
@@ -85,15 +87,23 @@ This PRD turns the selected first ideation slice into implementation requirement
 
 ### Out of scope / later
 
-| What                                                         | Why                                                                                                              | Tracked in                                                         |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| Branch/revision metadata                                     | Depends on stable sessions/history and should not expand the first slice                                         | `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md` |
-| Persistence safety layer: bounds, redaction, export warnings | Important follow-up, but should use the state/status foundation from this PRD                                    | `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md` |
-| Focused synthesis, outcome contracts, and resume prompts     | More valuable after sessions and branch metadata exist                                                           | `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md` |
-| Redesign, replacement, or deprecation of `sequential_think`  | This PRD only makes the existing helper session-aware; broader behavior changes are part of later synthesis work | `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md` |
-| Evidence/artifact reference anchors                          | Add after the core thought record shape stabilizes                                                               | `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md` |
-| Dual pi extension + MCP server architecture                  | Separate architectural exploration; not part of this product slice                                               | #99                                                                |
-| Full branch switch/merge/close workflows                     | Too large for the selected foundation slice                                                                      | `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md` |
+| What                                                                            | Why                                                                                                                                                             | Tracked in                                                         |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Branch/revision metadata                                                        | Depends on stable sessions/history and should not expand the first slice                                                                                        | `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md` |
+| Persistence safety layer: automatic bounds, redaction, and rich export warnings | Important follow-up, but should use the state/status foundation from this PRD; V1 still states a content privacy posture and validates import/export boundaries | `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md` |
+| Focused synthesis, outcome contracts, and resume prompts                        | More valuable after sessions and branch metadata exist                                                                                                          | `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md` |
+| Redesign, replacement, or deprecation of `sequential_think`                     | This PRD only makes the existing helper session-aware; broader behavior changes are part of later synthesis work                                                | `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md` |
+| Evidence/artifact reference anchors                                             | Add after the core thought record shape stabilizes                                                                                                              | `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md` |
+| Dual pi extension + MCP server architecture                                     | Separate architectural exploration; not part of this product slice                                                                                              | #99                                                                |
+| Full branch switch/merge/close workflows                                        | Too large for the selected foundation slice                                                                                                                     | `docs/ideation/2026-05-16-pi-sequential-thinking-later-backlog.md` |
+
+### Content privacy posture for this slice
+
+Stored thoughts, tags, axioms, and assumptions are potentially sensitive user-authored content. V1 keeps the existing local plaintext JSON storage model and does not add automatic redaction or encryption, but it must make that posture explicit in README documentation and tool descriptions. Content-bearing tools (`get_thinking_history`, `generate_summary`, `export_session`, and `import_session`) may return or move thought content by design; diagnostic surfaces (`get_thinking_status` and mutation receipts) must remain content-free. Export/import operations must be explicit user/model calls and must not be triggered by status or summary tools.
+
+### Implementation slicing within this PRD
+
+The implementation plan should treat this PRD as a sequence of validating increments rather than one irreversible batch. The minimum validating increment is normalization/dynamic totals plus default/named session writes and `get_thinking_history`. Status diagnostics, import/export expansion, and receipts should build on that increment after the storage layout is proven by tests. This preserves the selected foundation scope while reducing reversal cost if the per-session file layout needs adjustment.
 
 ### Design for future (build with awareness)
 
@@ -149,7 +159,7 @@ And the error identifies the conflicting aliases for thought_number
 
 `total_thoughts` must be treated as an estimate. If a call provides `thought_number` greater than `total_thoughts`, the tool must accept the thought and store `total_thoughts` equal to `thought_number`. The response must include a receipt field that reports the adjustment.
 
-Existing calls where `total_thoughts >= thought_number` must preserve the provided total.
+Existing calls where `total_thoughts >= thought_number` must preserve the provided total. Dynamic adjustment normalizes only the incoming thought record; it must not backfill or rewrite earlier thoughts in the same session. Summaries should continue to derive completion from the session's recorded thoughts, using the maximum recorded `total_thoughts` where needed.
 
 **Acceptance criteria:**
 
@@ -317,6 +327,13 @@ New-format exports must use this top-level schema:
 
 For named sessions, `sessionId` is the normalized session ID and `sessionLabel` matches it. The default session uses `sessionId: null` and `sessionLabel: "default"`. If a caller provides `session_id` during import and it conflicts with the file's embedded `sessionId`, the provided target wins and the receipt includes a warning.
 
+Import/export file boundary policy:
+
+* `file_path` may be absolute or repo-relative, matching existing tool behavior, but parent directories are created only for export.
+* Export must not overwrite a directory; if the target file already exists, overwrite is allowed only for explicit `export_session` calls and the receipt reports `overwroteExistingFile`.
+* Import must validate JSON shape, enforce a default maximum import file size of 10 MiB before parsing, reject malformed top-level records with a structured error, and preserve the existing corrupted-current-session backup behavior for active storage files.
+* Import treats files as untrusted content: it must normalize IDs/timestamps/session IDs through the same validation path as tool input and must never execute or dereference paths, URLs, or text inside thought records.
+
 **Acceptance criteria:**
 
 ```gherkin
@@ -371,17 +388,21 @@ The extension must register a read-only status tool, named `get_thinking_status`
 
 The response must include at least:
 
-* `storageDir` as the resolved active storage directory;
-* `defaultSessionFile` as the default session file path or relative file name;
+* `storageDir` as the resolved active storage directory, redacted to `~` for the current user's home directory by default;
+* `defaultSessionFile` as the default session file path or relative file name, also home-redacted by default;
+* `pathDisclosure` describing whether paths are `home_redacted`, `relative`, or `absolute_diagnostic`;
 * `namedSessionCount`;
 * `totalThoughts` across known sessions;
 * `sessions` metadata with `sessionId`, `label`, `thoughtCount`, `lastUpdated`, and `isDefault`;
-* `effectiveConfig` with `storageDir`, `maxBytes`, and `maxLines`, plus source labels such as `flag`, `env`, `project_settings`, `global_settings`, `config_file`, or `default`;
+* `effectiveConfig` with `storageDir`, `maxBytes`, and `maxLines`, plus source labels such as `flag`, `env`, `project_settings`, `global_settings`, `config_file`, or `default`; all path-bearing fields inside `effectiveConfig`, including `effectiveConfig.storageDir`, use the same redaction policy as top-level status paths;
 * `writable` for whether the storage directory appears writable;
 * `backupFiles` as relative filenames under the storage directory, not absolute paths;
+* `statusCompleteness`, with `complete: true` when all known session files were inspected and `complete: false` plus a reason when a documented threshold prevents full enumeration;
 * `schemaVersion` or `storageVersion` when available.
 
-The tool must not include full thought text, thought snippets, tags, axioms, assumptions, or content-derived hashes.
+V1 may compute status by scanning the default session file and `sessions/*.json` files rather than maintaining a metadata index. Default enumeration threshold is 100 named session files; above that threshold, status may return partial counts with `statusCompleteness.complete: false` instead of loading every session file.
+
+The tool must not include full thought text, thought snippets, tags, axioms, assumptions, or content-derived hashes. Absolute path disclosure, if added later for diagnostics, must be an explicit option and must not be the default.
 
 **Acceptance criteria:**
 
@@ -389,7 +410,8 @@ The tool must not include full thought text, thought snippets, tags, axioms, ass
 Given default session has 1 thought
 And named session "research" has 2 thoughts
 When the model calls get_thinking_status
-Then the response includes storageDir
+Then the response includes storageDir with the current user's home directory redacted to ~
+And it reports pathDisclosure "home_redacted"
 And it reports namedSessionCount 1
 And it reports totalThoughts 3
 And it includes session metadata where the default session has sessionId null and label "default"
@@ -420,6 +442,13 @@ Receipt fields should include:
 * `savedAt` or `exportedAt` / `importedAt`;
 * `stateFingerprint` derived only from non-content inputs: schema/storage version, normalized session ID, thought count, thought IDs, thought timestamps, and session `lastUpdated`;
 * optional operation-specific data such as `totalThoughtsAdjusted` or import warnings.
+
+V1 identity rules:
+
+* New thoughts continue to receive an `id` and `timestamp` before storage.
+* Imported legacy thoughts without an `id` receive a generated ID during normalization.
+* Imported legacy thoughts without a `timestamp` receive an import-time timestamp and the receipt includes a normalization warning.
+* Fingerprints are allowed to change after an import that normalizes missing IDs or timestamps; this is expected and must be visible through import warnings.
 
 `stateFingerprint` must not hash or encode thought text, tags, axioms, assumptions, or local absolute paths.
 
@@ -463,7 +492,9 @@ Required README updates:
 * dynamic total behavior;
 * accepted alias naming;
 * default-session backward compatibility;
-* explicit note that branch/revision metadata and dual MCP server architecture are not included in this release.
+* explicit note that branch/revision metadata and dual MCP server architecture are not included in this release;
+* local plaintext storage posture, including which tools are content-bearing and which diagnostics stay content-free;
+* import/export path, overwrite, and maximum import-size behavior.
 
 **Acceptance criteria:**
 
@@ -484,17 +515,17 @@ And how to check storage/status diagnostics
 
 ## 6. Non-Functional Requirements
 
-| Category                   | Requirement                                                                                                                                                  |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Backward compatibility** | Existing persisted default-session files and legacy exports must continue to load without a manual migration step.                                           |
-| **No new transport scope** | The implementation must remain a native pi extension and must not add an MCP server entrypoint.                                                              |
-| **Dependency discipline**  | Prefer no new runtime dependencies; if a dependency is necessary, justify it in the implementation plan before adding it.                                    |
-| **Path safety**            | Named session IDs must not allow path traversal, directory separators, or the reserved case-insensitive ID `default`.                                        |
-| **Determinism**            | Validation and alias conflict behavior must be deterministic and covered by tests.                                                                           |
-| **Privacy**                | `get_thinking_status` and receipts must not include full thought content.                                                                                    |
-| **Concurrency**            | V1 may assume one active pi process per storage directory; if concurrent writers exist, behavior is last-writer-wins and must not be presented as lock-safe. |
-| **Performance**            | Status and history reads should be bounded and avoid loading more content than needed for requested session output where practical.                          |
-| **Testability**            | All new tools and storage paths must be covered by fast Vitest tests under `packages/pi-sequential-thinking/__tests__/`.                                     |
+| Category                   | Requirement                                                                                                                                                                                                                                    |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Backward compatibility** | Existing persisted default-session files and legacy exports must continue to load without a manual migration step.                                                                                                                             |
+| **No new transport scope** | The implementation must remain a native pi extension and must not add an MCP server entrypoint.                                                                                                                                                |
+| **Dependency discipline**  | Prefer no new runtime dependencies; if a dependency is necessary, justify it in the implementation plan before adding it.                                                                                                                      |
+| **Path safety**            | Named session IDs must not allow path traversal, directory separators, or the reserved case-insensitive ID `default`.                                                                                                                          |
+| **Determinism**            | Validation and alias conflict behavior must be deterministic and covered by tests.                                                                                                                                                             |
+| **Privacy**                | Stored thoughts are potentially sensitive plaintext local content; status and receipts must remain content-free, all status path fields must be home-redacted by default, and README/tool docs must state the local plaintext storage posture. |
+| **Concurrency**            | V1 targets one active pi process per storage directory; if concurrent writers exist, behavior is last-writer-wins and must not be presented as lock-safe.                                                                                      |
+| **Performance**            | Status and history reads should be bounded and avoid loading more content than needed for requested session output where practical.                                                                                                            |
+| **Testability**            | All new tools and storage paths must be covered by fast Vitest tests under `packages/pi-sequential-thinking/__tests__/`.                                                                                                                       |
 
 ---
 
@@ -502,15 +533,16 @@ And how to check storage/status diagnostics
 
 ### Risks
 
-| Risk                                                        | Severity | Likelihood | Mitigation                                                                                                                                           |
-| ----------------------------------------------------------- | -------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session storage migration breaks existing users             | High     | Medium     | Keep default session at `current_session.json`; add tests using existing export/current-session shapes.                                              |
-| Alias support creates ambiguous inputs                      | Medium   | Medium     | Fail on conflicting aliases rather than choosing precedence; document accepted aliases.                                                              |
-| Status output leaks thought content                         | Medium   | Low        | Build status from metadata only and add a test that known thought text is absent.                                                                    |
-| Receipts become noisy and destabilize tests                 | Medium   | Medium     | Keep receipt schema compact; assert field presence and stable counts rather than exact timestamps.                                                   |
-| Import/export semantics become confusing with sessions      | Medium   | Medium     | Require explicit `session_id` for named imports/exports and clearly document default-session behavior.                                               |
-| This first slice drifts into branch/revision or safety work | Medium   | Medium     | Keep out-of-scope table explicit and defer those to the later backlog.                                                                               |
-| Concurrent pi processes overwrite session files             | Medium   | Low        | Document V1 single-process assumptions; preserve atomic rename writes; do not claim cross-process locking until a later locking/index design exists. |
+| Risk                                                         | Severity | Likelihood | Mitigation                                                                                                                                                                                        |
+| ------------------------------------------------------------ | -------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session storage migration breaks existing users              | High     | Medium     | Keep default session at `current_session.json`; add tests using existing export/current-session shapes.                                                                                           |
+| Alias support creates ambiguous inputs                       | Medium   | Medium     | Fail on conflicting aliases rather than choosing precedence; document accepted aliases.                                                                                                           |
+| Status output leaks thought content or sensitive paths       | Medium   | Low        | Build status from metadata only, redact home paths by default, use relative backup filenames, and add tests that known thought text and raw home paths are absent.                                |
+| Receipts become noisy and destabilize tests                  | Medium   | Medium     | Keep receipt schema compact; assert field presence and stable counts rather than exact timestamps.                                                                                                |
+| Test expectations conflict with intentional behavior changes | Medium   | Low        | Update tests that encode superseded behavior, including strict `total_thoughts >= thought_number` rejection and empty-object import handling, while preserving non-obsoleted compatibility tests. |
+| Import/export semantics become confusing with sessions       | Medium   | Medium     | Document import destination precedence clearly: explicit `session_id` wins; otherwise embedded `sessionId` is used; otherwise import into the default session.                                    |
+| This first slice drifts into branch/revision or safety work  | Medium   | Medium     | Keep out-of-scope table explicit and defer those to the later backlog.                                                                                                                            |
+| Concurrent pi processes overwrite session files              | Medium   | Low        | Narrow V1 language to one active pi process per storage directory; preserve atomic rename writes; do not claim cross-process locking until a later locking/index design exists.                   |
 
 ### Assumptions
 
@@ -519,7 +551,10 @@ And how to check storage/status diagnostics
 * Named session IDs do not need human-readable titles or archive status in this first slice.
 * Per-session files are acceptable for V1 and easier to inspect/recover than one monolithic sessions file.
 * V1 can assume a single active pi process per storage directory; cross-process locking is not part of this PRD.
+* Local plaintext storage is acceptable for V1 when documented; automatic redaction/encryption is deferred.
 * Existing output truncation is sufficient for V1 bounded responses when combined with `get_thinking_history` limits.
+* Default import file size limit is 10 MiB.
+* Default status enumeration threshold is 100 named session files.
 
 ---
 
@@ -624,24 +659,28 @@ And how to check storage/status diagnostics
 
 1. Add shared normalization and validation helpers with tests, including dynamic total adjustment.
 2. Update `process_thought` to use the shared helpers and emit mutation receipts.
-3. Extend `ThoughtStorage` for default/named sessions while preserving `current_session.json` behavior.
-4. Add `get_thinking_history` and session-aware summary/clear/export/import behavior.
-5. Add `get_thinking_status` and storage diagnostics.
-6. Update README examples and tool documentation.
-7. Run targeted package tests, typecheck, and Biome checks.
+3. Extend `ThoughtStorage` for default/named session writes while preserving `current_session.json` behavior.
+4. Add `get_thinking_history` and prove default/named session isolation as the minimum validating increment.
+5. Add session-aware summary/clear/export/import behavior, including the file boundary policy and import normalization warnings.
+6. Add `get_thinking_status` and storage diagnostics, including home-redacted paths and the V1 enumeration threshold.
+7. Update README examples, tool documentation, and plaintext local-storage privacy posture.
+8. Run targeted package tests, typecheck, and Biome checks.
 
 ---
 
 ## 12. Open Questions
 
-| #  | Question                                                                        | Owner             | Due        | Status                                                                                                                                                                      |
-| -- | ------------------------------------------------------------------------------- | ----------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Q1 | Should branch/revision metadata be included in this first slice?                | Sebastian Otaegui | 2026-05-16 | **Resolved:** No. It is deferred to the later backlog.                                                                                                                      |
-| Q2 | Should dual pi extension + MCP server architecture be part of this PRD?         | Sebastian Otaegui | 2026-05-16 | **Resolved:** No. It is tracked separately in #99.                                                                                                                          |
-| Q3 | Should named session IDs allow slashes or nested paths?                         | Sebastian Otaegui | 2026-05-16 | **Resolved:** No. V1 session IDs are path-safe labels only.                                                                                                                 |
-| Q4 | Should `get_thinking_history` default to returning full thought bodies?         | Sebastian Otaegui | 2026-05-16 | **Resolved:** Yes, bounded by `limit` and existing output truncation; snippets are available through `include_full_thoughts: false`.                                        |
-| Q5 | Should `sequential_think` participate in sessions?                              | Sebastian Otaegui | 2026-05-16 | **Resolved:** Yes, as a compatibility shim only. It accepts optional `session_id`, writes to the selected session, and returns receipts; broader redesign remains deferred. |
-| Q6 | What wins when an import file embeds one session but the caller passes another? | Sebastian Otaegui | 2026-05-16 | **Resolved:** The caller-provided session wins and the receipt reports a warning.                                                                                           |
+| #  | Question                                                                          | Owner             | Due        | Status                                                                                                                                                                      |
+| -- | --------------------------------------------------------------------------------- | ----------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1 | Should branch/revision metadata be included in this first slice?                  | Sebastian Otaegui | 2026-05-16 | **Resolved:** No. It is deferred to the later backlog.                                                                                                                      |
+| Q2 | Should dual pi extension + MCP server architecture be part of this PRD?           | Sebastian Otaegui | 2026-05-16 | **Resolved:** No. It is tracked separately in #99.                                                                                                                          |
+| Q3 | Should named session IDs allow slashes or nested paths?                           | Sebastian Otaegui | 2026-05-16 | **Resolved:** No. V1 session IDs are path-safe labels only.                                                                                                                 |
+| Q4 | Should `get_thinking_history` default to returning full thought bodies?           | Sebastian Otaegui | 2026-05-16 | **Resolved:** Yes, bounded by `limit` and existing output truncation; snippets are available through `include_full_thoughts: false`.                                        |
+| Q5 | Should `sequential_think` participate in sessions?                                | Sebastian Otaegui | 2026-05-16 | **Resolved:** Yes, as a compatibility shim only. It accepts optional `session_id`, writes to the selected session, and returns receipts; broader redesign remains deferred. |
+| Q6 | What wins when an import file embeds one session but the caller passes another?   | Sebastian Otaegui | 2026-05-16 | **Resolved:** The caller-provided session wins and the receipt reports a warning.                                                                                           |
+| Q7 | Does V1 protect persisted thought content with encryption or automatic redaction? | Sebastian Otaegui | 2026-05-16 | **Resolved:** No. V1 keeps local plaintext JSON storage, documents that posture, and keeps diagnostics content-free; richer safety/redaction is deferred.                   |
+| Q8 | Does V1 support concurrent writers to the same storage directory?                 | Sebastian Otaegui | 2026-05-16 | **Resolved:** No. V1 targets one active pi process per storage directory and documents last-writer-wins if users violate that assumption.                                   |
+| Q9 | What are V1's default import and status thresholds?                               | Sebastian Otaegui | 2026-05-16 | **Resolved:** Imports reject files over 10 MiB by default; status may return partial counts after 100 named session files.                                                  |
 
 ---
 
@@ -660,9 +699,11 @@ And how to check storage/status diagnostics
 
 ## 14. Changelog
 
-| Date       | Change        | Author            |
-| ---------- | ------------- | ----------------- |
-| 2026-05-16 | Initial draft | Sebastian Otaegui |
+| Date       | Change                             | Author            |
+| ---------- | ---------------------------------- | ----------------- |
+| 2026-05-16 | Addressed second refine findings   | Sebastian Otaegui |
+| 2026-05-16 | Addressed document review findings | Sebastian Otaegui |
+| 2026-05-16 | Initial draft                      | Sebastian Otaegui |
 
 ---
 
@@ -677,6 +718,8 @@ Post-implementation checklist:
 5. Manually exercise `process_thought` with camelCase aliases and verify stored history is normalized.
 6. Record thoughts in default session and a named session, then confirm `get_thinking_history` returns isolated results.
 7. Call `sequential_think` with a named `session_id` and confirm generated prompts are written only to that session with a receipt.
-8. Call `get_thinking_status` and confirm it reports storage/session metadata, config source labels, and relative backup filenames without thought content.
+8. Call `get_thinking_status` and confirm it reports storage/session metadata, config source labels, home-redacted paths, status completeness, and relative backup filenames without thought content.
 9. Export and import a legacy `{ thoughts: [...] }` session into a named session and confirm the default session remains unchanged.
 10. Import a new-format export with an embedded `sessionId` into a different explicit `session_id` and confirm the explicit target wins with a warning.
+11. Import legacy thoughts missing IDs or timestamps and confirm generated identity fields plus receipt warnings.
+12. Attempt import/export with malformed files, directories, and oversized files and confirm structured errors without unintended state changes.
