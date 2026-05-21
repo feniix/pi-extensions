@@ -1,8 +1,8 @@
 # @feniix/pi-code-reasoning
 
-[Code Reasoning](https://github.com/mettamatt/code-reasoning) extension for [pi](https://pi.dev/) — reflective problem-solving through sequential thinking with branching and revision support.
+[Code Reasoning](https://github.com/mettamatt/code-reasoning) tools for [pi](https://pi.dev/) and MCP — reflective problem-solving through sequential thinking with branching and revision support.
 
-Based on the MCP server by Matt Westgate, this native TypeScript extension provides structured thinking tools without external dependencies.
+Based on the MCP server by Matt Westgate, this package defines its tools once with [BridgeKit](https://www.npmjs.com/package/@feniix/bridgekit) and exposes the same implementation through both pi and MCP adapters.
 
 ## Features
 
@@ -23,6 +23,22 @@ Ephemeral (one-off) use:
 ```bash
 pi -e npm:@feniix/pi-code-reasoning
 ```
+
+## MCP usage
+
+Use the MCP adapter entrypoint when wiring the same tools into an MCP host:
+
+```ts
+import { createMcpServerOptions, runServer } from "@feniix/pi-code-reasoning/mcp";
+
+// For tests or custom hosts:
+const options = createMcpServerOptions();
+
+// For a stdio MCP server entrypoint:
+await runServer();
+```
+
+The shared portable tool definitions are available from `@feniix/pi-code-reasoning/tools` for advanced adapters.
 
 ## Tools
 
@@ -100,6 +116,8 @@ Reset the session, clearing all thoughts and branches.
 
 ### CLI Flags
 
+CLI flags apply when running as a pi extension:
+
 ```bash
 pi --code-reasoning-max-bytes=102400 --code-reasoning-max-lines=5000
 ```
@@ -144,7 +162,8 @@ Under the `pi-code-reasoning` key:
 
 ## Requirements
 
-- pi v0.51.0 or later
+- Node.js 22.19.0 or later
+- pi v0.51.0 or later when using the pi extension
 
 ## License
 
