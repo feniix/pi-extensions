@@ -33,7 +33,8 @@
     ".": "./extensions/index.ts",
     "./mcp": "./extensions/mcp-server.ts",
     "./tools": "./extensions/tools.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./extensions/*": "./extensions/*"
   },
   "engines": {
     "node": ">=22.19.0"

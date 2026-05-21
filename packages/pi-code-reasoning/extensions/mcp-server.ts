@@ -2,7 +2,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type CreateMcpServerOptions, runMcpStdioServer } from "@feniix/bridgekit/mcp";
+import { type CreateMcpServerOptions, runMcpStdioServer as defaultRunMcpStdioServer } from "@feniix/bridgekit/mcp";
 import { isRecord } from "./config.js";
 import { createCodeReasoningTools } from "./tools.js";
 
@@ -21,7 +21,9 @@ export function createMcpServerOptions(): CreateMcpServerOptions {
   };
 }
 
-export async function runServer(): Promise<void> {
+type RunMcpStdioServer = (options: CreateMcpServerOptions) => Promise<void>;
+
+export async function runServer(runMcpStdioServer: RunMcpStdioServer = defaultRunMcpStdioServer): Promise<void> {
   await runMcpStdioServer(createMcpServerOptions());
 }
 

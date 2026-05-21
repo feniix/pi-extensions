@@ -1,6 +1,6 @@
 import { createMcpServer } from "@feniix/bridgekit/mcp";
-import { describe, expect, it } from "vitest";
-import { createMcpServerOptions } from "../extensions/mcp-server.js";
+import { describe, expect, it, vi } from "vitest";
+import { createMcpServerOptions, runServer } from "../extensions/mcp-server.js";
 
 const toolNames = (options: ReturnType<typeof createMcpServerOptions>) => options.tools.map((tool) => tool.name);
 
@@ -18,5 +18,13 @@ describe("code reasoning MCP server", () => {
     const server = createMcpServer(createMcpServerOptions());
 
     expect(server).toBeDefined();
+  });
+
+  it("starts stdio with the MCP options", async () => {
+    const runMcpStdioServer = vi.fn().mockResolvedValue(undefined);
+
+    await runServer(runMcpStdioServer);
+
+    expect(runMcpStdioServer).toHaveBeenCalledWith(expect.objectContaining({ name: "pi-code-reasoning" }));
   });
 });

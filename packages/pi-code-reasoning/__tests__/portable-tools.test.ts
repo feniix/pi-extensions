@@ -46,6 +46,47 @@ describe("portable code reasoning tools", () => {
     expect(status.text).toContain('"thought_count": 1');
   });
 
+  it("rejects invalid per-call truncation limits before execution", async () => {
+    const tool = getTool("code_reasoning_status");
+
+    const result = await executePortableTool(tool, { piMaxBytes: 0 }, { host: "test" });
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("Invalid arguments");
+  });
+
+  it("does not mirror oversized truncated output into structuredContent", async () => {
+    const tools = createCodeReasoningTools();
+    const reasoningTool = findTool(tools, "code_reasoning");
+
+    await executePortableTool(
+      reasoningTool,
+      {
+        thought: "First thought",
+        thought_number: 1,
+        total_thoughts: 2,
+        next_thought_needed: true,
+      },
+      { host: "test" },
+    );
+    const result = await executePortableTool(
+      reasoningTool,
+      {
+        thought: "Branch thought",
+        thought_number: 2,
+        total_thoughts: 2,
+        next_thought_needed: false,
+        branch_from_thought: 1,
+        branch_id: "x".repeat(500),
+        piMaxBytes: 200,
+      },
+      { host: "test" },
+    );
+
+    expect(result.structuredContent?.truncated).toBe(true);
+    expect(result.structuredContent).not.toHaveProperty("branches");
+  });
+
   it("reports tool-level validation failures as portable errors", async () => {
     const tool = getTool("code_reasoning");
 

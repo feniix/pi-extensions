@@ -52,13 +52,26 @@ export const codeReasoningParams = Type.Object(
     ),
     branch_id: Type.Optional(Type.String({ description: "Identifier for this branch." })),
     needs_more_thoughts: Type.Optional(Type.Boolean({ description: "If more thoughts are needed." })),
-    piMaxBytes: Type.Optional(Type.Integer({ description: "Client-side max bytes override (clamped by config)." })),
-    piMaxLines: Type.Optional(Type.Integer({ description: "Client-side max lines override (clamped by config)." })),
+    piMaxBytes: Type.Optional(
+      Type.Integer({ minimum: 1, description: "Client-side max bytes override (clamped by config)." }),
+    ),
+    piMaxLines: Type.Optional(
+      Type.Integer({ minimum: 1, description: "Client-side max lines override (clamped by config)." }),
+    ),
   },
   { additionalProperties: true },
 );
 
-const statusParams = Type.Object({}, { additionalProperties: true });
+const outputLimitParams = {
+  piMaxBytes: Type.Optional(
+    Type.Integer({ minimum: 1, description: "Client-side max bytes override (clamped by config)." }),
+  ),
+  piMaxLines: Type.Optional(
+    Type.Integer({ minimum: 1, description: "Client-side max lines override (clamped by config)." }),
+  ),
+};
+
+const statusParams = Type.Object(outputLimitParams, { additionalProperties: true });
 const resetParams = Type.Object({}, { additionalProperties: true });
 
 export function createEnvironmentMaxLimitsResolver(): MaxLimitsResolver {
@@ -84,7 +97,10 @@ function resolveToolLimits(requestedLimits: OutputLimitRequest, getMaxLimits: Ma
 }
 
 function structuredContentFor(result: unknown, details: McpToolDetails): Record<string, unknown> {
-  return isRecord(result) ? { ...details, ...result } : { ...details };
+  if (!isRecord(result) || details.truncated) {
+    return { ...details };
+  }
+  return { ...details, ...result };
 }
 
 function formatPortableResult(
