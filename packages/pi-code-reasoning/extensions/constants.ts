@@ -1,6 +1,7 @@
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
-
 export const SETTINGS_KEY = "pi-code-reasoning";
+
+export const DEFAULT_MAX_BYTES = 51200;
+export const DEFAULT_MAX_LINES = 2000;
 
 export const DEFAULT_CONFIG_FILE: Record<string, unknown> = {
   maxBytes: DEFAULT_MAX_BYTES,

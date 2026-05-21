@@ -1,7 +1,7 @@
 {
   "name": "@feniix/pi-code-reasoning",
   "version": "3.0.1",
-  "description": "Code Reasoning extension for pi — reflective problem-solving through sequential thinking with branching and revision support",
+  "description": "Code Reasoning tools for pi and MCP — reflective sequential thinking with branching and revision support",
   "keywords": [
     "pi",
     "pi-package",
@@ -12,7 +12,11 @@
     "sequential-thinking",
     "branching",
     "revision",
-    "problem-solving"
+    "problem-solving",
+    "mcp",
+    "model-context-protocol",
+    "bridgekit",
+    "portable-tools"
   ],
   "type": "module",
   "files": [
@@ -25,10 +29,22 @@
       "./extensions/index.ts"
     ]
   },
+  "exports": {
+    ".": "./extensions/index.ts",
+    "./mcp": "./extensions/mcp-server.ts",
+    "./tools": "./extensions/tools.ts",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@feniix/bridgekit": "^0.4.0",
+    "typebox": "^1.1.31"
+  },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": "*"
   },
   "repository": {
     "type": "git",
@@ -49,9 +65,6 @@
       "optional": true
     },
     "@earendil-works/pi-coding-agent": {
-      "optional": true
-    },
-    "typebox": {
       "optional": true
     }
   }
