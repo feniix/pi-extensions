@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -87,6 +87,13 @@ describe("pi-code-reasoning toJsonString", () => {
     expect(JSON.parse(result)).toEqual({ a: 1, b: 2 });
   });
 
+  it("falls back to String for values that cannot be JSON-stringified", () => {
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+
+    expect(toJsonString(circular)).toBe("[object Object]");
+  });
+
   it("converts primitives", () => {
     expect(toJsonString(42)).toBe("42");
     expect(toJsonString(true)).toBe("true");
@@ -102,8 +109,9 @@ describe("pi-code-reasoning resolveConfigPath", () => {
   });
 
   it("resolves paths starting with ~", () => {
-    const result = resolveConfigPath("~/.pi/config.json");
-    expect(result).toContain(".pi/config.json");
+    const result = resolveConfigPath("~config.json");
+    expect(result).toContain("config.json");
+    expect(result).not.toContain("~");
   });
 
   it("returns absolute paths as-is", () => {
@@ -155,6 +163,31 @@ describe("pi-code-reasoning formatToolOutput", () => {
     const result = formatToolOutput("test_tool", { data: 123 }, {});
     expect(result.text).toContain("data");
     expect(result.text).toContain("123");
+  });
+
+  it("writes a temp file when output is truncated", () => {
+    const result = formatToolOutput(
+      "test_tool",
+      { rows: Array.from({ length: 20 }, (_, index) => index) },
+      { maxLines: 3 },
+    );
+
+    expect(result.details.truncated).toBe(true);
+    expect(result.details.tempFile).toBeDefined();
+    expect(result.text).toContain("Output truncated");
+    expect(existsSync(result.details.tempFile as string)).toBe(true);
+
+    unlinkSync(result.details.tempFile as string);
+  });
+
+  it("marks output when the first line exceeds the byte limit", () => {
+    const result = formatToolOutput("test_tool", "x".repeat(200), { maxBytes: 20, maxLines: 2000 });
+
+    expect(result.details.truncated).toBe(true);
+    expect(result.text).toContain("First line exceeded");
+    expect(result.details.tempFile).toBeDefined();
+
+    unlinkSync(result.details.tempFile as string);
   });
 });
 

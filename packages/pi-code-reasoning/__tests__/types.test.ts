@@ -304,6 +304,20 @@ describe("enforceCrossFieldRules", () => {
     expect(errors[0].message).toContain("revises_thought");
   });
 
+  it("rejects revises_thought without revision mode", () => {
+    const data = {
+      thought: "Invalid revision reference",
+      thought_number: 2,
+      total_thoughts: 5,
+      next_thought_needed: true,
+      revises_thought: 1,
+    };
+    const errors = enforceCrossFieldRules(data);
+    expect(errors).toContainEqual({
+      message: "revises_thought only allowed when is_revision=true.",
+    });
+  });
+
   it("accepts valid branch", () => {
     const data = {
       thought: "Exploring alternative",
