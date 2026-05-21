@@ -181,11 +181,20 @@ describe("pi-code-reasoning", () => {
 
     const mainTool = getRegisteredTool(mockPi, "code_reasoning");
 
-    const result = await mainTool?.execute("call-123", { thought: "" }, undefined, undefined, undefined);
-
-    expect(result).toBeDefined();
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Thought cannot be empty");
+    await expect(
+      mainTool?.execute(
+        "call-123",
+        {
+          thought: "",
+          thought_number: 1,
+          total_thoughts: 1,
+          next_thought_needed: false,
+        },
+        undefined,
+        undefined,
+        undefined,
+      ),
+    ).rejects.toThrow("Thought cannot be empty");
   });
 
   it("handles non-Error exceptions from tool setup", async () => {
@@ -196,10 +205,8 @@ describe("pi-code-reasoning", () => {
     codeReasoning(mockPi as unknown as ExtensionAPI);
 
     const statusTool = getRegisteredTool(mockPi, "code_reasoning_status");
-    const result = await statusTool?.execute("call-123", {}, undefined, undefined, undefined);
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("flag failed");
+    await expect(statusTool?.execute("call-123", {}, undefined, undefined, undefined)).rejects.toThrow("flag failed");
   });
 
   it("tracks multiple thoughts", async () => {
@@ -243,21 +250,20 @@ describe("pi-code-reasoning", () => {
 
     const mainTool = getRegisteredTool(mockPi, "code_reasoning");
 
-    const result = await mainTool?.execute(
-      "call-123",
-      baseThought({
-        thought: "Invalid ordering",
-        thought_number: 4,
-        total_thoughts: 3,
-        next_thought_needed: true,
-      }),
-      undefined,
-      undefined,
-      undefined,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("thought_number cannot exceed total_thoughts");
+    await expect(
+      mainTool?.execute(
+        "call-123",
+        baseThought({
+          thought: "Invalid ordering",
+          thought_number: 4,
+          total_thoughts: 3,
+          next_thought_needed: true,
+        }),
+        undefined,
+        undefined,
+        undefined,
+      ),
+    ).rejects.toThrow("thought_number cannot exceed total_thoughts");
   });
 
   it("rejects thoughts above the configured thought number limit", async () => {
@@ -266,16 +272,15 @@ describe("pi-code-reasoning", () => {
 
     const mainTool = getRegisteredTool(mockPi, "code_reasoning");
 
-    const result = await mainTool?.execute(
-      "call-123",
-      baseThought({ thought_number: 21, total_thoughts: 21 }),
-      undefined,
-      undefined,
-      undefined,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Max thought_number exceeded");
+    await expect(
+      mainTool?.execute(
+        "call-123",
+        baseThought({ thought_number: 21, total_thoughts: 21 }),
+        undefined,
+        undefined,
+        undefined,
+      ),
+    ).rejects.toThrow("Max thought_number exceeded");
   });
 
   it("rejects invalid branch field combinations", async () => {
@@ -284,16 +289,9 @@ describe("pi-code-reasoning", () => {
 
     const mainTool = getRegisteredTool(mockPi, "code_reasoning");
 
-    const result = await mainTool?.execute(
-      "call-123",
-      baseThought({ branch_id: "missing-source" }),
-      undefined,
-      undefined,
-      undefined,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("branch_id and branch_from_thought required together");
+    await expect(
+      mainTool?.execute("call-123", baseThought({ branch_id: "missing-source" }), undefined, undefined, undefined),
+    ).rejects.toThrow("branch_id and branch_from_thought required together");
   });
 
   it("applies config-file and output-limit flags", async () => {
@@ -311,7 +309,7 @@ describe("pi-code-reasoning", () => {
     const statusTool = getRegisteredTool(mockPi, "code_reasoning_status");
     const result = await statusTool?.execute("call-123", {}, undefined, undefined, undefined);
 
-    expect(result.isError).toBe(false);
+    expect(result.content[0].text).toContain("thought_count");
     expect(result.details.truncated).toBe(false);
   });
 
@@ -326,7 +324,7 @@ describe("pi-code-reasoning", () => {
     const statusTool = getRegisteredTool(mockPi, "code_reasoning_status");
     const result = await statusTool?.execute("call-123", {}, undefined, undefined, undefined);
 
-    expect(result.isError).toBe(false);
+    expect(result.content[0].text).toContain("thought_count");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("--code-reasoning-config is deprecated"));
   });
 
@@ -344,18 +342,11 @@ describe("pi-code-reasoning", () => {
         undefined,
         undefined,
       );
-      expect(result.isError).toBe(false);
+      expect(result.content[0].text).toContain("processed");
     }
 
-    const result = await mainTool?.execute(
-      "call-21",
-      baseThought({ thought: "One thought too many" }),
-      undefined,
-      undefined,
-      undefined,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Max thought limit reached");
+    await expect(
+      mainTool?.execute("call-21", baseThought({ thought: "One thought too many" }), undefined, undefined, undefined),
+    ).rejects.toThrow("Max thought limit reached");
   });
 });
