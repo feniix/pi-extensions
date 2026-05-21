@@ -5,10 +5,25 @@ import codeReasoning from "../extensions/index.js";
 const createMockPi = () =>
   ({
     registerFlag: vi.fn(),
-    getFlag: vi.fn(() => undefined),
+    getFlag: vi.fn((_flagName: string): string | undefined => undefined),
     registerTool: vi.fn(),
     on: vi.fn(),
   }) satisfies Partial<ExtensionAPI>;
+
+const getRegisteredTool = (mockPi: ReturnType<typeof createMockPi>, name: string) => {
+  const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
+  const tool = tools.find((registeredTool) => registeredTool.name === name);
+  expect(tool).toBeDefined();
+  return tool;
+};
+
+const baseThought = (overrides: Record<string, unknown> = {}) => ({
+  thought: "A thought about the problem",
+  thought_number: 1,
+  total_thoughts: 1,
+  next_thought_needed: false,
+  ...overrides,
+});
 
 describe("pi-code-reasoning", () => {
   it("registers tools", () => {
@@ -67,8 +82,7 @@ describe("pi-code-reasoning", () => {
     const mockPi = createMockPi();
     codeReasoning(mockPi as unknown as ExtensionAPI);
 
-    const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-    const mainTool = tools.find((t) => t.name === "code_reasoning");
+    const mainTool = getRegisteredTool(mockPi, "code_reasoning");
     expect(mainTool?.parameters).toBeDefined();
   });
 
@@ -88,8 +102,7 @@ describe("pi-code-reasoning", () => {
     const mockPi = createMockPi();
     codeReasoning(mockPi as unknown as ExtensionAPI);
 
-    const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-    const mainTool = tools.find((t) => t.name === "code_reasoning");
+    const mainTool = getRegisteredTool(mockPi, "code_reasoning");
     expect(mainTool?.label).toBe("Code Reasoning");
   });
 
@@ -110,7 +123,6 @@ describe("pi-code-reasoning", () => {
     codeReasoning(mockPi1 as unknown as ExtensionAPI);
     codeReasoning(mockPi2 as unknown as ExtensionAPI);
 
-    // Each should register its own tools
     expect(mockPi1.registerTool).toHaveBeenCalledTimes(3);
     expect(mockPi2.registerTool).toHaveBeenCalledTimes(3);
   });
@@ -119,8 +131,7 @@ describe("pi-code-reasoning", () => {
     const mockPi = createMockPi();
     codeReasoning(mockPi as unknown as ExtensionAPI);
 
-    const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-    const mainTool = tools.find((t) => t.name === "code_reasoning");
+    const mainTool = getRegisteredTool(mockPi, "code_reasoning");
 
     const result = await mainTool?.execute(
       "call-123",
@@ -144,8 +155,7 @@ describe("pi-code-reasoning", () => {
     const mockPi = createMockPi();
     codeReasoning(mockPi as unknown as ExtensionAPI);
 
-    const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-    const statusTool = tools.find((t) => t.name === "code_reasoning_status");
+    const statusTool = getRegisteredTool(mockPi, "code_reasoning_status");
 
     const result = await statusTool?.execute("call-123", {}, undefined, undefined, undefined);
 
@@ -157,8 +167,7 @@ describe("pi-code-reasoning", () => {
     const mockPi = createMockPi();
     codeReasoning(mockPi as unknown as ExtensionAPI);
 
-    const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-    const resetTool = tools.find((t) => t.name === "code_reasoning_reset");
+    const resetTool = getRegisteredTool(mockPi, "code_reasoning_reset");
 
     const result = await resetTool?.execute("call-123", {}, undefined, undefined, undefined);
 
@@ -170,10 +179,8 @@ describe("pi-code-reasoning", () => {
     const mockPi = createMockPi();
     codeReasoning(mockPi as unknown as ExtensionAPI);
 
-    const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-    const mainTool = tools.find((t) => t.name === "code_reasoning");
+    const mainTool = getRegisteredTool(mockPi, "code_reasoning");
 
-    // Missing required parameter should fail
     const result = await mainTool?.execute("call-123", { thought: "" }, undefined, undefined, undefined);
 
     expect(result).toBeDefined();
@@ -181,14 +188,26 @@ describe("pi-code-reasoning", () => {
     expect(result.content[0].text).toContain("Thought cannot be empty");
   });
 
+  it("handles non-Error exceptions from tool setup", async () => {
+    const mockPi = createMockPi();
+    mockPi.getFlag.mockImplementation(() => {
+      throw "flag failed";
+    });
+    codeReasoning(mockPi as unknown as ExtensionAPI);
+
+    const statusTool = getRegisteredTool(mockPi, "code_reasoning_status");
+    const result = await statusTool?.execute("call-123", {}, undefined, undefined, undefined);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("flag failed");
+  });
+
   it("tracks multiple thoughts", async () => {
     const mockPi = createMockPi();
     codeReasoning(mockPi as unknown as ExtensionAPI);
 
-    const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-    const mainTool = tools.find((t) => t.name === "code_reasoning");
+    const mainTool = getRegisteredTool(mockPi, "code_reasoning");
 
-    // Add first thought
     await mainTool?.execute(
       "call-1",
       {
@@ -202,7 +221,6 @@ describe("pi-code-reasoning", () => {
       undefined,
     );
 
-    // Add second thought
     const result2 = await mainTool?.execute(
       "call-2",
       {
@@ -223,17 +241,16 @@ describe("pi-code-reasoning", () => {
     const mockPi = createMockPi();
     codeReasoning(mockPi as unknown as ExtensionAPI);
 
-    const tools = mockPi.registerTool.mock.calls.map(([tool]) => tool);
-    const mainTool = tools.find((t) => t.name === "code_reasoning");
+    const mainTool = getRegisteredTool(mockPi, "code_reasoning");
 
     const result = await mainTool?.execute(
       "call-123",
-      {
+      baseThought({
         thought: "Invalid ordering",
         thought_number: 4,
         total_thoughts: 3,
         next_thought_needed: true,
-      },
+      }),
       undefined,
       undefined,
       undefined,
@@ -241,5 +258,104 @@ describe("pi-code-reasoning", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("thought_number cannot exceed total_thoughts");
+  });
+
+  it("rejects thoughts above the configured thought number limit", async () => {
+    const mockPi = createMockPi();
+    codeReasoning(mockPi as unknown as ExtensionAPI);
+
+    const mainTool = getRegisteredTool(mockPi, "code_reasoning");
+
+    const result = await mainTool?.execute(
+      "call-123",
+      baseThought({ thought_number: 21, total_thoughts: 21 }),
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Max thought_number exceeded");
+  });
+
+  it("rejects invalid branch field combinations", async () => {
+    const mockPi = createMockPi();
+    codeReasoning(mockPi as unknown as ExtensionAPI);
+
+    const mainTool = getRegisteredTool(mockPi, "code_reasoning");
+
+    const result = await mainTool?.execute(
+      "call-123",
+      baseThought({ branch_id: "missing-source" }),
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("branch_id and branch_from_thought required together");
+  });
+
+  it("applies config-file and output-limit flags", async () => {
+    const mockPi = createMockPi();
+    mockPi.getFlag.mockImplementation((flagName) => {
+      const flags: Record<string, string> = {
+        "--code-reasoning-config-file": "/tmp/missing-code-reasoning-config.json",
+        "--code-reasoning-max-bytes": "99999",
+        "--code-reasoning-max-lines": "999",
+      };
+      return flags[String(flagName)];
+    });
+    codeReasoning(mockPi as unknown as ExtensionAPI);
+
+    const statusTool = getRegisteredTool(mockPi, "code_reasoning_status");
+    const result = await statusTool?.execute("call-123", {}, undefined, undefined, undefined);
+
+    expect(result.isError).toBe(false);
+    expect(result.details.truncated).toBe(false);
+  });
+
+  it("supports the deprecated config flag with a warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const mockPi = createMockPi();
+    mockPi.getFlag.mockImplementation((flagName) =>
+      flagName === "--code-reasoning-config" ? "/tmp/missing-code-reasoning-legacy-config.json" : undefined,
+    );
+    codeReasoning(mockPi as unknown as ExtensionAPI);
+
+    const statusTool = getRegisteredTool(mockPi, "code_reasoning_status");
+    const result = await statusTool?.execute("call-123", {}, undefined, undefined, undefined);
+
+    expect(result.isError).toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("--code-reasoning-config is deprecated"));
+  });
+
+  it("caps the in-memory thought history", async () => {
+    const mockPi = createMockPi();
+    codeReasoning(mockPi as unknown as ExtensionAPI);
+
+    const mainTool = getRegisteredTool(mockPi, "code_reasoning");
+
+    for (let call = 1; call <= 20; call += 1) {
+      const result = await mainTool?.execute(
+        `call-${call}`,
+        baseThought({ thought: `Thought ${call}` }),
+        undefined,
+        undefined,
+        undefined,
+      );
+      expect(result.isError).toBe(false);
+    }
+
+    const result = await mainTool?.execute(
+      "call-21",
+      baseThought({ thought: "One thought too many" }),
+      undefined,
+      undefined,
+      undefined,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Max thought limit reached");
   });
 });
