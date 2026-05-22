@@ -21,7 +21,7 @@ function ensureReferenceExists(
 
 export function createThoughtTracker(): ThoughtTracker {
   const thoughtHistory: ValidatedThoughtData[] = [];
-  const branches = new Map<string, ValidatedThoughtData[]>();
+  const branches = new Set<string>();
 
   return {
     add: (thought) => {
@@ -31,9 +31,7 @@ export function createThoughtTracker(): ThoughtTracker {
 
       thoughtHistory.push(thought);
       if (thought.branch_id) {
-        const branchThoughts = branches.get(thought.branch_id) ?? [];
-        branchThoughts.push(thought);
-        branches.set(thought.branch_id, branchThoughts);
+        branches.add(thought.branch_id);
       }
     },
     ensureBranchIsValid: (branchFromThought) => {
@@ -42,7 +40,7 @@ export function createThoughtTracker(): ThoughtTracker {
     ensureRevisionIsValid: (revisesThought) => {
       ensureReferenceExists("revises_thought", revisesThought, thoughtHistory.length);
     },
-    branches: () => Array.from(branches.keys()),
+    branches: () => Array.from(branches),
     count: () => thoughtHistory.length,
     reset: () => {
       thoughtHistory.length = 0;
