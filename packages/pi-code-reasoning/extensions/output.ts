@@ -16,6 +16,7 @@ export interface McpToolDetails {
     maxBytes: number;
   };
   tempFile?: string;
+  warning?: string;
 }
 
 interface TruncationResult {
@@ -123,19 +124,27 @@ export function formatToolOutput(
 
   let text = truncation.content;
   let tempFile: string | undefined;
+  let warning: string | undefined;
 
   if (truncation.truncated) {
-    tempFile = writeTempFile(toolName, rawText);
+    try {
+      tempFile = writeTempFile(toolName, rawText);
+    } catch (error) {
+      warning = `Full output could not be saved: ${error instanceof Error ? error.message : String(error)}`;
+    }
+
     text +=
       `\n\n[Output truncated: ${truncation.outputLines} of ${truncation.totalLines} lines ` +
       `(${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)}). ` +
-      `Full output saved to: ${tempFile}]`;
+      (tempFile ? `Full output saved to: ${tempFile}` : warning) +
+      "]";
   }
 
   if (truncation.firstLineExceedsLimit && rawText.length > 0) {
-    text =
-      `[First line exceeded ${formatSize(truncation.maxBytes)} limit. Full output saved to: ${tempFile ?? "N/A"}]\n` +
-      text;
+    const fullOutputLocation = tempFile
+      ? `Full output saved to: ${tempFile}`
+      : (warning ?? "Full output could not be saved");
+    text = `[First line exceeded ${formatSize(truncation.maxBytes)} limit. ${fullOutputLocation}]\n${text}`;
   }
 
   return {
@@ -153,6 +162,7 @@ export function formatToolOutput(
         maxBytes: truncation.maxBytes,
       },
       tempFile,
+      warning,
     },
   };
 }

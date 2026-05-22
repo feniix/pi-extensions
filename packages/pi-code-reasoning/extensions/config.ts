@@ -29,16 +29,17 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function normalizeNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
+  let parsed: number | undefined;
+  if (typeof value === "number") {
+    parsed = value;
+  } else if (typeof value === "string") {
+    parsed = Number(value);
   }
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
+
+  if (parsed === undefined || !Number.isInteger(parsed) || parsed <= 0) {
+    return undefined;
   }
-  return undefined;
+  return parsed;
 }
 
 export function splitParams(params: Record<string, unknown>): {
@@ -143,7 +144,12 @@ function loadSettingsConfig(path: string): CodeReasoningConfig | null {
     return null;
   }
 
-  return parseConfig(config, path);
+  try {
+    return parseConfig(config, path);
+  } catch (error) {
+    warnInvalidConfig(error, path, "settings");
+    return null;
+  }
 }
 
 function warnIgnoredLegacyConfigFiles(): void {

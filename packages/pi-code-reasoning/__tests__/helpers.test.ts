@@ -49,6 +49,9 @@ describe("pi-code-reasoning helpers", () => {
   it("normalizes numbers from strings and numbers", () => {
     expect(normalizeNumber(42)).toBe(42);
     expect(normalizeNumber("123")).toBe(123);
+    expect(normalizeNumber(0)).toBeUndefined();
+    expect(normalizeNumber(-1)).toBeUndefined();
+    expect(normalizeNumber("0")).toBeUndefined();
     expect(normalizeNumber("abc")).toBeUndefined();
     expect(normalizeNumber(null)).toBeUndefined();
     expect(normalizeNumber(undefined)).toBeUndefined();
@@ -189,21 +192,40 @@ describe("pi-code-reasoning formatToolOutput", () => {
 
     unlinkSync(result.details.tempFile as string);
   });
+
+  it("keeps truncated output available when the temp file cannot be written", () => {
+    const previousTmpdir = process.env.TMPDIR;
+    process.env.TMPDIR = resolve(process.cwd(), ".missing-tmpdir-for-code-reasoning-tests");
+
+    try {
+      const result = formatToolOutput("test_tool", "x".repeat(200), { maxBytes: 20, maxLines: 2000 });
+
+      expect(result.details.truncated).toBe(true);
+      expect(result.details.tempFile).toBeUndefined();
+      expect(result.text).toContain("Full output could not be saved");
+    } finally {
+      if (previousTmpdir === undefined) {
+        delete process.env.TMPDIR;
+      } else {
+        process.env.TMPDIR = previousTmpdir;
+      }
+    }
+  });
 });
 
 describe("pi-code-reasoning writeTempFile", () => {
   const tempFiles: string[] = [];
 
   afterEach(() => {
-    import("node:fs").then(({ unlinkSync }) => {
-      tempFiles.forEach((f) => {
-        try {
-          unlinkSync(f);
-        } catch {
-          // ignore cleanup errors
-        }
-      });
-    });
+    while (tempFiles.length > 0) {
+      const path = tempFiles.pop();
+      if (!path) continue;
+      try {
+        unlinkSync(path);
+      } catch {
+        // ignore cleanup errors
+      }
+    }
   });
 
   it("writes temp file and returns path", () => {
