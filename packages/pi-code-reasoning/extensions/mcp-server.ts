@@ -7,7 +7,7 @@ import { isRecord } from "./config.js";
 import { createCodeReasoningTools } from "./tools.js";
 
 function packageVersion(): string {
-  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
+  const packageJson: unknown = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
   return isRecord(packageJson) && typeof packageJson.version === "string" ? packageJson.version : "0.0.0";
 }
 
