@@ -44,7 +44,7 @@ describe("validateThoughtData", () => {
     });
   });
 
-  it("returns error for negative thought_number", () => {
+  it("returns error for zero thought_number", () => {
     const data = {
       thought: "My thought",
       thought_number: 0,
