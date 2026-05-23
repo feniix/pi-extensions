@@ -21,6 +21,7 @@
   "type": "module",
   "files": [
     "extensions/",
+    "dist/",
     "README.md",
     "LICENSE"
   ],
@@ -31,8 +32,14 @@
   },
   "exports": {
     ".": "./extensions/index.ts",
-    "./mcp": "./extensions/mcp-server.ts",
-    "./tools": "./extensions/tools.ts",
+    "./mcp": {
+      "types": "./dist/extensions/mcp-server.d.ts",
+      "import": "./dist/extensions/mcp-server.js"
+    },
+    "./tools": {
+      "types": "./dist/extensions/tools.d.ts",
+      "import": "./dist/extensions/tools.js"
+    },
     "./package.json": "./package.json",
     "./extensions/*": "./extensions/*"
   },
@@ -68,5 +75,12 @@
     "@earendil-works/pi-coding-agent": {
       "optional": true
     }
+  },
+  "bin": {
+    "pi-code-reasoning-mcp": "./dist/extensions/mcp-server.js"
+  },
+  "scripts": {
+    "build:mcp": "tsc --project tsconfig.mcp.json && chmod +x dist/extensions/mcp-server.js",
+    "prepack": "npm run build:mcp"
   }
 }

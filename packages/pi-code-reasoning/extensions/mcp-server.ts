@@ -6,9 +6,21 @@ import { type CreateMcpServerOptions, runMcpStdioServer as defaultRunMcpStdioSer
 import { isRecord } from "./config.js";
 import { createCodeReasoningTools } from "./tools.js";
 
+function readPackageVersion(packageJsonUrl: URL): string | undefined {
+  try {
+    const packageJson: unknown = JSON.parse(readFileSync(packageJsonUrl, "utf-8"));
+    return isRecord(packageJson) && typeof packageJson.version === "string" ? packageJson.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function packageVersion(): string {
-  const packageJson: unknown = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
-  return isRecord(packageJson) && typeof packageJson.version === "string" ? packageJson.version : "0.0.0";
+  return (
+    readPackageVersion(new URL("../package.json", import.meta.url)) ??
+    readPackageVersion(new URL("../../package.json", import.meta.url)) ??
+    "0.0.0"
+  );
 }
 
 export function createMcpServerOptions(): CreateMcpServerOptions {
