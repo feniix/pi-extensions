@@ -12,13 +12,14 @@ if (!existsSync(serverPath)) {
     cwd: packageRoot,
     stdio: "inherit",
     shell: process.platform === "win32",
+    timeout: 60_000,
   });
 
   if (build.status !== 0 || !existsSync(serverPath)) {
     console.error(
       "[pi-code-reasoning] Failed to build the local MCP server. Run `npm run build:mcp --workspace packages/pi-code-reasoning` and try again.",
     );
-    process.exit(build.status ?? 1);
+    process.exit(build.status && build.status !== 0 ? build.status : 1);
   }
 }
 
