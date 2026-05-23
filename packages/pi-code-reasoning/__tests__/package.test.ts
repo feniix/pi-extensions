@@ -49,8 +49,9 @@ describe("pi-code-reasoning package metadata", () => {
 
   it("publishes an npx-friendly MCP binary backed by the package-local build", () => {
     expect(packageJson.bin).toEqual({
-      "pi-code-reasoning": "./dist/extensions/mcp-server.js",
+      "pi-code-reasoning": "./bin/pi-code-reasoning.js",
     });
+    expect(packageJson.files).toContain("bin/");
     expect(packageJson.files).toContain("dist/");
     expect(packageJson.scripts["build:mcp"]).toContain("tsconfig.mcp.json");
     expect(packageJson.scripts["build:mcp"]).toContain("chmodSync");
@@ -72,9 +73,15 @@ describe("pi-code-reasoning package metadata", () => {
     const [packResult] = JSON.parse(pack.stdout) as [{ files: Array<{ path: string; mode: number }> }];
     const filesByPath = new Map(packResult.files.map((file) => [file.path, file]));
 
+    expect(filesByPath.get("bin/pi-code-reasoning.js")?.mode).toBe(493);
     expect(filesByPath.get("dist/extensions/mcp-server.js")?.mode).toBe(493);
     expect(filesByPath.has("dist/extensions/index.js")).toBe(true);
     expect(filesByPath.has("dist/extensions/tools.d.ts")).toBe(true);
+
+    const binEntrypoint = readFileSync(join(packageRoot, "bin", "pi-code-reasoning.js"), "utf-8");
+    expect(binEntrypoint).toContain("dist");
+    expect(binEntrypoint).toContain("build:mcp");
+    expect(binEntrypoint).toContain("runServer");
 
     const toolsDeclaration = readFileSync(join(packageRoot, "dist", "extensions", "tools.d.ts"), "utf-8");
     expect(toolsDeclaration).toContain("PortableTool<typeof codeReasoningParams>");
