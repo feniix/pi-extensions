@@ -6,16 +6,34 @@ import { describe, expect, it } from "vitest";
 const packageJson = JSON.parse(
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf-8"),
 ) as {
-  exports: Record<string, string>;
+  bin: Record<string, string>;
+  exports: Record<string, string | { types: string; import: string }>;
+  files: string[];
+  scripts: Record<string, string>;
 };
 
 describe("pi-code-reasoning package metadata", () => {
-  it("keeps extension deep imports available while adding MCP-friendly entrypoints", () => {
+  it("keeps the pi source extension available while publishing compiled MCP entrypoints", () => {
     expect(packageJson.exports).toMatchObject({
       ".": "./extensions/index.ts",
-      "./mcp": "./extensions/mcp-server.ts",
-      "./tools": "./extensions/tools.ts",
+      "./mcp": {
+        types: "./dist/extensions/mcp-server.d.ts",
+        import: "./dist/extensions/mcp-server.js",
+      },
+      "./tools": {
+        types: "./dist/extensions/tools.d.ts",
+        import: "./dist/extensions/tools.js",
+      },
       "./extensions/*": "./extensions/*",
     });
+  });
+
+  it("publishes an npx-friendly MCP binary backed by the package-local build", () => {
+    expect(packageJson.bin).toEqual({
+      "pi-code-reasoning-mcp": "./dist/extensions/mcp-server.js",
+    });
+    expect(packageJson.files).toContain("dist/");
+    expect(packageJson.scripts["build:mcp"]).toContain("tsconfig.mcp.json");
+    expect(packageJson.scripts.prepack).toBe("npm run build:mcp");
   });
 });
