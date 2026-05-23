@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -105,7 +106,7 @@ function formatSize(bytes: number): string {
 
 export function writeTempFile(toolName: string, content: string): string {
   const safeName = toolName.replace(/[^a-z0-9_-]/gi, "_");
-  const filename = `pi-code-reasoning-${safeName}-${Date.now()}.txt`;
+  const filename = `pi-code-reasoning-${safeName}-${Date.now()}-${randomUUID()}.txt`;
   const filePath = join(tmpdir(), filename);
   writeFileSync(filePath, content, "utf-8");
   return filePath;

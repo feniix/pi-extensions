@@ -1,4 +1,4 @@
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -240,6 +240,22 @@ describe("pi-code-reasoning writeTempFile", () => {
     const path = writeTempFile("my-tool!@#", "content");
     tempFiles.push(path);
     expect(path).toContain("my-tool__");
+  });
+
+  it("uses collision-resistant names for same-millisecond writes", () => {
+    const originalNow = Date.now;
+    Date.now = () => 12345;
+    try {
+      const first = writeTempFile("same_tool", "first");
+      const second = writeTempFile("same_tool", "second");
+      tempFiles.push(first, second);
+
+      expect(first).not.toBe(second);
+      expect(readFileSync(first, "utf-8")).toBe("first");
+      expect(readFileSync(second, "utf-8")).toBe("second");
+    } finally {
+      Date.now = originalNow;
+    }
   });
 });
 
