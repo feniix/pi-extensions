@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-code-reasoning",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "Code Reasoning tools for pi and MCP — reflective sequential thinking with branching and revision support",
   "keywords": [
     "pi",
