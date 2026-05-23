@@ -9,6 +9,7 @@
     "rootDir": "."
   },
   "include": [
+    "extensions/index.ts",
     "extensions/mcp-server.ts",
     "extensions/tools.ts",
     "extensions/config.ts",

@@ -63,10 +63,11 @@ The shared portable tool definitions are available from `@feniix/pi-code-reasoni
 
 | Entry point | Purpose |
 |-------------|---------|
-| `@feniix/pi-code-reasoning` | pi extension source entrypoint |
 | `@feniix/pi-code-reasoning/mcp` | compiled MCP server helpers |
 | `@feniix/pi-code-reasoning/tools` | compiled BridgeKit portable tools |
-| `@feniix/pi-code-reasoning/extensions/*` | compatibility deep imports for extension internals |
+| `@feniix/pi-code-reasoning/extensions/*` | compiled compatibility deep imports for extension internals |
+
+The pi extension entrypoint remains source-loaded through the package `pi.extensions` metadata.
 
 ## Tools
 

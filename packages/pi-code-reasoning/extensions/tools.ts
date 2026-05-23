@@ -1,5 +1,4 @@
-import { definePortableTool, type PortableToolResult } from "@feniix/bridgekit";
-import type { TObject } from "typebox";
+import { definePortableTool, type PortableTool, type PortableToolResult } from "@feniix/bridgekit";
 import { Type } from "typebox";
 import {
   isRecord,
@@ -71,8 +70,14 @@ const outputLimitParams = {
   ),
 };
 
-const statusParams = Type.Object(outputLimitParams, { additionalProperties: true });
-const resetParams = Type.Object({}, { additionalProperties: true });
+export const statusParams = Type.Object(outputLimitParams, { additionalProperties: true });
+export const resetParams = Type.Object({}, { additionalProperties: true });
+
+export type CodeReasoningTools = readonly [
+  PortableTool<typeof codeReasoningParams>,
+  PortableTool<typeof statusParams>,
+  PortableTool<typeof resetParams>,
+];
 
 export function createEnvironmentMaxLimitsResolver(): MaxLimitsResolver {
   let cachedLimits: MaxLimits | undefined;
@@ -143,7 +148,7 @@ function runFormattedTool(
   }
 }
 
-export function createCodeReasoningTools(options: CodeReasoningToolsOptions = {}) {
+export function createCodeReasoningTools(options: CodeReasoningToolsOptions = {}): CodeReasoningTools {
   const tracker = options.tracker ?? createThoughtTracker();
   const getMaxLimits = options.getMaxLimits ?? createEnvironmentMaxLimitsResolver();
 
@@ -217,5 +222,5 @@ KEY PARAMETERS:
         };
       },
     }),
-  ] satisfies readonly ReturnType<typeof definePortableTool<TObject>>[];
+  ];
 }

@@ -31,7 +31,6 @@
     ]
   },
   "exports": {
-    ".": "./extensions/index.ts",
     "./mcp": {
       "types": "./dist/extensions/mcp-server.d.ts",
       "import": "./dist/extensions/mcp-server.js"
@@ -41,7 +40,14 @@
       "import": "./dist/extensions/tools.js"
     },
     "./package.json": "./package.json",
-    "./extensions/*": "./extensions/*"
+    "./extensions/*.js": {
+      "types": "./dist/extensions/*.d.ts",
+      "import": "./dist/extensions/*.js"
+    },
+    "./extensions/*": {
+      "types": "./dist/extensions/*.d.ts",
+      "import": "./dist/extensions/*.js"
+    }
   },
   "engines": {
     "node": ">=22.19.0"
@@ -80,7 +86,7 @@
     "pi-code-reasoning": "./dist/extensions/mcp-server.js"
   },
   "scripts": {
-    "build:mcp": "tsc --project tsconfig.mcp.json && chmod +x dist/extensions/mcp-server.js",
+    "build:mcp": "tsc --project tsconfig.mcp.json && node -e \"require('node:fs').chmodSync('dist/extensions/mcp-server.js', 0o755)\"",
     "prepack": "npm run build:mcp"
   }
 }
