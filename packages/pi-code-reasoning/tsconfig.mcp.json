@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "outDir": "dist",
+    "rootDir": "."
+  },
+  "include": [
+    "extensions/index.ts",
+    "extensions/mcp-server.ts",
+    "extensions/tools.ts",
+    "extensions/config.ts",
+    "extensions/constants.ts",
+    "extensions/output.ts",
+    "extensions/processor.ts",
+    "extensions/responses.ts",
+    "extensions/tracker.ts",
+    "extensions/types.ts"
+  ],
+  "exclude": ["__tests__", "dist"]
+}

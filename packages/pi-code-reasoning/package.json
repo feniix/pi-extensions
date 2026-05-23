@@ -1,7 +1,7 @@
 {
   "name": "@feniix/pi-code-reasoning",
-  "version": "3.0.1",
-  "description": "Code Reasoning extension for pi — reflective problem-solving through sequential thinking with branching and revision support",
+  "version": "4.0.0",
+  "description": "Code Reasoning tools for pi and MCP — reflective sequential thinking with branching and revision support",
   "keywords": [
     "pi",
     "pi-package",
@@ -12,11 +12,16 @@
     "sequential-thinking",
     "branching",
     "revision",
-    "problem-solving"
+    "problem-solving",
+    "mcp",
+    "model-context-protocol",
+    "bridgekit",
+    "portable-tools"
   ],
   "type": "module",
   "files": [
     "extensions/",
+    "dist/",
     "README.md",
     "LICENSE"
   ],
@@ -25,10 +30,35 @@
       "./extensions/index.ts"
     ]
   },
+  "exports": {
+    "./mcp": {
+      "types": "./dist/extensions/mcp-server.d.ts",
+      "import": "./dist/extensions/mcp-server.js"
+    },
+    "./tools": {
+      "types": "./dist/extensions/tools.d.ts",
+      "import": "./dist/extensions/tools.js"
+    },
+    "./package.json": "./package.json",
+    "./extensions/*.js": {
+      "types": "./dist/extensions/*.d.ts",
+      "import": "./dist/extensions/*.js"
+    },
+    "./extensions/*": {
+      "types": "./dist/extensions/*.d.ts",
+      "import": "./dist/extensions/*.js"
+    }
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "@feniix/bridgekit": "^0.4.0",
+    "typebox": "^1.1.31"
+  },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": "*"
   },
   "repository": {
     "type": "git",
@@ -50,9 +80,13 @@
     },
     "@earendil-works/pi-coding-agent": {
       "optional": true
-    },
-    "typebox": {
-      "optional": true
     }
+  },
+  "bin": {
+    "pi-code-reasoning": "./dist/extensions/mcp-server.js"
+  },
+  "scripts": {
+    "build:mcp": "tsc --project tsconfig.mcp.json && node -e \"require('node:fs').chmodSync('dist/extensions/mcp-server.js', 0o755)\"",
+    "prepack": "npm run build:mcp"
   }
 }

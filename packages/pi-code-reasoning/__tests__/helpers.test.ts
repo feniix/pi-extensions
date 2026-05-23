@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -49,6 +49,9 @@ describe("pi-code-reasoning helpers", () => {
   it("normalizes numbers from strings and numbers", () => {
     expect(normalizeNumber(42)).toBe(42);
     expect(normalizeNumber("123")).toBe(123);
+    expect(normalizeNumber(0)).toBeUndefined();
+    expect(normalizeNumber(-1)).toBeUndefined();
+    expect(normalizeNumber("0")).toBeUndefined();
     expect(normalizeNumber("abc")).toBeUndefined();
     expect(normalizeNumber(null)).toBeUndefined();
     expect(normalizeNumber(undefined)).toBeUndefined();
@@ -87,6 +90,13 @@ describe("pi-code-reasoning toJsonString", () => {
     expect(JSON.parse(result)).toEqual({ a: 1, b: 2 });
   });
 
+  it("falls back to String for values that cannot be JSON-stringified", () => {
+    const circular: { self?: unknown } = {};
+    circular.self = circular;
+
+    expect(toJsonString(circular)).toBe("[object Object]");
+  });
+
   it("converts primitives", () => {
     expect(toJsonString(42)).toBe("42");
     expect(toJsonString(true)).toBe("true");
@@ -102,8 +112,9 @@ describe("pi-code-reasoning resolveConfigPath", () => {
   });
 
   it("resolves paths starting with ~", () => {
-    const result = resolveConfigPath("~/.pi/config.json");
-    expect(result).toContain(".pi/config.json");
+    const result = resolveConfigPath("~config.json");
+    expect(result).toContain("config.json");
+    expect(result).not.toContain("~");
   });
 
   it("returns absolute paths as-is", () => {
@@ -156,21 +167,65 @@ describe("pi-code-reasoning formatToolOutput", () => {
     expect(result.text).toContain("data");
     expect(result.text).toContain("123");
   });
+
+  it("writes a temp file when output is truncated", () => {
+    const result = formatToolOutput(
+      "test_tool",
+      { rows: Array.from({ length: 20 }, (_, index) => index) },
+      { maxLines: 3 },
+    );
+
+    expect(result.details.truncated).toBe(true);
+    expect(result.details.tempFile).toBeDefined();
+    expect(result.text).toContain("Output truncated");
+    expect(existsSync(result.details.tempFile as string)).toBe(true);
+
+    unlinkSync(result.details.tempFile as string);
+  });
+
+  it("marks output when the first line exceeds the byte limit", () => {
+    const result = formatToolOutput("test_tool", "x".repeat(200), { maxBytes: 20, maxLines: 2000 });
+
+    expect(result.details.truncated).toBe(true);
+    expect(result.text).toContain("First line exceeded");
+    expect(result.details.tempFile).toBeDefined();
+
+    unlinkSync(result.details.tempFile as string);
+  });
+
+  it("keeps truncated output available when the temp file cannot be written", () => {
+    const previousTmpdir = process.env.TMPDIR;
+    process.env.TMPDIR = resolve(process.cwd(), ".missing-tmpdir-for-code-reasoning-tests");
+
+    try {
+      const result = formatToolOutput("test_tool", "x".repeat(200), { maxBytes: 20, maxLines: 2000 });
+
+      expect(result.details.truncated).toBe(true);
+      expect(result.details.tempFile).toBeUndefined();
+      expect(result.text).toContain("Full output could not be saved");
+    } finally {
+      if (previousTmpdir === undefined) {
+        delete process.env.TMPDIR;
+      } else {
+        process.env.TMPDIR = previousTmpdir;
+      }
+    }
+  });
 });
 
 describe("pi-code-reasoning writeTempFile", () => {
   const tempFiles: string[] = [];
 
   afterEach(() => {
-    import("node:fs").then(({ unlinkSync }) => {
-      tempFiles.forEach((f) => {
-        try {
-          unlinkSync(f);
-        } catch {
-          // ignore cleanup errors
-        }
-      });
-    });
+    while (tempFiles.length > 0) {
+      const path = tempFiles.pop();
+      if (!path) continue;
+      try {
+        unlinkSync(path);
+      } catch {
+        // ignore cleanup errors
+      }
+    }
   });
 
   it("writes temp file and returns path", () => {
@@ -185,6 +240,22 @@ describe("pi-code-reasoning writeTempFile", () => {
     const path = writeTempFile("my-tool!@#", "content");
     tempFiles.push(path);
     expect(path).toContain("my-tool__");
+  });
+
+  it("uses collision-resistant names for same-millisecond writes", () => {
+    const originalNow = Date.now;
+    Date.now = () => 12345;
+    try {
+      const first = writeTempFile("same_tool", "first");
+      const second = writeTempFile("same_tool", "second");
+      tempFiles.push(first, second);
+
+      expect(first).not.toBe(second);
+      expect(readFileSync(first, "utf-8")).toBe("first");
+      expect(readFileSync(second, "utf-8")).toBe("second");
+    } finally {
+      Date.now = originalNow;
+    }
   });
 });
 
