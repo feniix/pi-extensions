@@ -26,7 +26,26 @@ pi -e npm:@feniix/pi-code-reasoning
 
 ## MCP usage
 
-Use the MCP adapter entrypoint when wiring the same tools into an MCP host:
+Run the stdio MCP server with `npx`:
+
+```bash
+npx -y --package @feniix/pi-code-reasoning pi-code-reasoning-mcp
+```
+
+Example MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "code-reasoning": {
+      "command": "npx",
+      "args": ["-y", "--package", "@feniix/pi-code-reasoning", "pi-code-reasoning-mcp"]
+    }
+  }
+}
+```
+
+Use the MCP adapter entrypoint when wiring the same tools into a custom host:
 
 ```ts
 import { createMcpServerOptions, runServer } from "@feniix/pi-code-reasoning/mcp";
@@ -39,6 +58,15 @@ await runServer();
 ```
 
 The shared portable tool definitions are available from `@feniix/pi-code-reasoning/tools` for advanced adapters.
+
+### Package entrypoints
+
+| Entry point | Purpose |
+|-------------|---------|
+| `@feniix/pi-code-reasoning` | pi extension source entrypoint |
+| `@feniix/pi-code-reasoning/mcp` | compiled MCP server helpers |
+| `@feniix/pi-code-reasoning/tools` | compiled BridgeKit portable tools |
+| `@feniix/pi-code-reasoning/extensions/*` | compatibility deep imports for extension internals |
 
 ## Tools
 
@@ -57,10 +85,19 @@ Record and process a thought with metadata.
 | `branch_from_thought` | integer | no | When exploring alternatives (🌿) |
 | `branch_id` | string | no | Identifier for the branch |
 | `needs_more_thoughts` | boolean | no | If more thoughts needed |
+| `piMaxBytes` | integer | no | Per-call output byte limit, clamped by configured max |
+| `piMaxLines` | integer | no | Per-call output line limit, clamped by configured max |
 
 ### `code_reasoning_status`
 
 Get current session status: branches and thought count.
+
+Optional parameters:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `piMaxBytes` | integer | no | Per-call output byte limit, clamped by configured max |
+| `piMaxLines` | integer | no | Per-call output line limit, clamped by configured max |
 
 ### `code_reasoning_reset`
 
@@ -112,6 +149,13 @@ Reset the session, clearing all thoughts and branches.
 3. Scope changed? → Adjust **total_thoughts**
 4. Done? → Set **next_thought_needed = false**
 
+## Limits
+
+- Thought text is limited to 20,000 characters.
+- A session keeps at most 20 thoughts before reset.
+- Output limit values must be positive integers.
+- When output is truncated, the full output is saved to a temp file when possible. If the temp file cannot be written, the tool output includes a warning instead.
+
 ## Configuration
 
 ### CLI Flags
@@ -124,9 +168,12 @@ pi --code-reasoning-max-bytes=102400 --code-reasoning-max-lines=5000
 
 ### Environment Variables
 
+Environment variables apply to both pi and MCP runtimes:
+
 ```bash
 export CODE_REASONING_MAX_BYTES=102400
 export CODE_REASONING_MAX_LINES=5000
+export CODE_REASONING_CONFIG_FILE=/path/to/code-reasoning.json
 ```
 
 ### Settings File
@@ -159,6 +206,20 @@ Under the `pi-code-reasoning` key:
 | `--code-reasoning-config` | `CODE_REASONING_CONFIG` | — | Deprecated alias for the config file path |
 | `--code-reasoning-max-bytes` | `CODE_REASONING_MAX_BYTES` | `51200` | Max output bytes |
 | `--code-reasoning-max-lines` | `CODE_REASONING_MAX_LINES` | `2000` | Max output lines |
+
+## Development
+
+Build the compiled MCP entrypoint locally:
+
+```bash
+npm run build:mcp --workspace packages/pi-code-reasoning
+```
+
+Run the built stdio server directly:
+
+```bash
+node packages/pi-code-reasoning/dist/extensions/mcp-server.js
+```
 
 ## Requirements
 
