@@ -77,7 +77,7 @@
     }
   },
   "bin": {
-    "pi-code-reasoning-mcp": "./dist/extensions/mcp-server.js"
+    "pi-code-reasoning": "./dist/extensions/mcp-server.js"
   },
   "scripts": {
     "build:mcp": "tsc --project tsconfig.mcp.json && chmod +x dist/extensions/mcp-server.js",

@@ -29,7 +29,7 @@ pi -e npm:@feniix/pi-code-reasoning
 Run the stdio MCP server with `npx`:
 
 ```bash
-npx -y --package @feniix/pi-code-reasoning pi-code-reasoning-mcp
+npx -y @feniix/pi-code-reasoning
 ```
 
 Example MCP client configuration:
@@ -39,7 +39,7 @@ Example MCP client configuration:
   "mcpServers": {
     "code-reasoning": {
       "command": "npx",
-      "args": ["-y", "--package", "@feniix/pi-code-reasoning", "pi-code-reasoning-mcp"]
+      "args": ["-y", "@feniix/pi-code-reasoning"]
     }
   }
 }

@@ -30,7 +30,7 @@ describe("pi-code-reasoning package metadata", () => {
 
   it("publishes an npx-friendly MCP binary backed by the package-local build", () => {
     expect(packageJson.bin).toEqual({
-      "pi-code-reasoning-mcp": "./dist/extensions/mcp-server.js",
+      "pi-code-reasoning": "./dist/extensions/mcp-server.js",
     });
     expect(packageJson.files).toContain("dist/");
     expect(packageJson.scripts["build:mcp"]).toContain("tsconfig.mcp.json");
