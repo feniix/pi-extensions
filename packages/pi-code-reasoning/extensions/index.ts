@@ -6,7 +6,8 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerPiTools } from "@feniix/bridgekit/pi";
+import { executePortableTool, type PortableTool, type PortableToolResult } from "@feniix/bridgekit";
+import type { TSchema } from "typebox";
 import { loadConfig, normalizeNumber } from "./config.js";
 import { CODE_REASONING_FLAGS, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "./constants.js";
 import { createCodeReasoningTools, type MaxLimits } from "./tools.js";
@@ -59,6 +60,51 @@ function resolveConfigFlag(pi: ExtensionAPI): string | undefined {
   return undefined;
 }
 
+type PiContent = { type: "text"; text: string };
+
+type PiToolResult = {
+  content: PiContent[];
+  details: Record<string, unknown>;
+  isError?: true;
+};
+
+function toPiDetails(result: PortableToolResult): Record<string, unknown> {
+  return result.structuredContent ?? result.details ?? {};
+}
+
+function toPiResult(result: PortableToolResult): PiToolResult {
+  const piResult = {
+    content: [{ type: "text" as const, text: result.text }],
+    details: toPiDetails(result),
+  };
+
+  if (result.isError) {
+    return { ...piResult, isError: true };
+  }
+  return piResult;
+}
+
+function registerCodeReasoningPiTools(pi: ExtensionAPI, tools: readonly PortableTool<TSchema>[]): void {
+  for (const tool of tools) {
+    pi.registerTool({
+      name: tool.name,
+      label: tool.title,
+      description: tool.description,
+      parameters: tool.parameters,
+      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+        const result = await executePortableTool(tool, params, {
+          host: "pi",
+          signal,
+          progress(update) {
+            onUpdate?.(toPiResult(update));
+          },
+        });
+        return toPiResult(result);
+      },
+    });
+  }
+}
+
 function createPiMaxLimitsResolver(pi: ExtensionAPI): () => MaxLimits {
   let cachedLimits: MaxLimits | undefined;
 
@@ -90,5 +136,5 @@ function createPiMaxLimitsResolver(pi: ExtensionAPI): () => MaxLimits {
 
 export default function codeReasoning(pi: ExtensionAPI) {
   registerFlags(pi);
-  registerPiTools(pi, createCodeReasoningTools({ getMaxLimits: createPiMaxLimitsResolver(pi) }));
+  registerCodeReasoningPiTools(pi, createCodeReasoningTools({ getMaxLimits: createPiMaxLimitsResolver(pi) }));
 }
