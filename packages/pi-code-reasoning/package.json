@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-code-reasoning",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "Code Reasoning tools for pi and MCP — reflective sequential thinking with branching and revision support",
   "keywords": [
     "pi",
@@ -20,6 +20,7 @@
   ],
   "type": "module",
   "files": [
+    "bin/",
     "extensions/",
     "dist/",
     "README.md",
@@ -83,7 +84,7 @@
     }
   },
   "bin": {
-    "pi-code-reasoning": "./dist/extensions/mcp-server.js"
+    "pi-code-reasoning": "./bin/pi-code-reasoning.js"
   },
   "scripts": {
     "build:mcp": "tsc --project tsconfig.mcp.json && node -e \"require('node:fs').chmodSync('dist/extensions/mcp-server.js', 0o755)\"",
