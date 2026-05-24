@@ -18,7 +18,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
-import type { EffectiveConfigStatus } from "./storage.js";
 import { isRecord } from "./types.js";
 
 export type ConfigSource = "flag" | "env" | "project_settings" | "global_settings" | "config_file" | "default";
@@ -27,6 +26,17 @@ export interface SeqThinkConfig {
   storageDir?: string;
   maxBytes?: number;
   maxLines?: number;
+}
+
+export interface EffectiveConfigStatus {
+  storageDir?: string;
+  maxBytes: number;
+  maxLines: number;
+  sources: {
+    storageDir: string;
+    maxBytes: string;
+    maxLines: string;
+  };
 }
 
 export interface SeqThinkConfigWithSources {
@@ -140,7 +150,10 @@ function loadSettingsConfig(
   }
 
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    if (!isRecord(parsed)) {
+      return null;
+    }
     const config = parsed["pi-sequential-thinking"];
     if (!isRecord(config)) {
       return null;

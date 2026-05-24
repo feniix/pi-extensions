@@ -243,7 +243,7 @@ export function pickAliasedArg<T>(
     throw new ThoughtValidationError([createError(snake, `Conflicting aliases for ${snake}`)]);
   }
 
-  return (hasSnake ? snakeValue : camelValue) as T;
+  return hasSnake ? snakeValue : camelValue;
 }
 
 export function normalizeSessionId(value: unknown): SessionInfo {

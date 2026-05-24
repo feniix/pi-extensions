@@ -10,6 +10,7 @@ import type { AgentToolUpdateCallback, ExtensionAPI } from "@earendil-works/pi-c
 import { Type } from "typebox";
 import { ThoughtAnalyzer } from "./analyzer.js";
 import {
+  type EffectiveConfigStatus,
   getHomeDir,
   loadConfigWithSources,
   normalizeNumber,
@@ -20,7 +21,6 @@ import {
 } from "./config.js";
 import { formatToolOutput } from "./output.js";
 import {
-  type EffectiveConfigStatus,
   type ExportSessionResult,
   type ImportSessionResult,
   type SessionOperationResult,
