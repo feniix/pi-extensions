@@ -6,6 +6,7 @@ import {
   normalizeSessionId,
   normalizeThoughtInput,
   parseThoughtStage,
+  pickAliasedArg,
   ThoughtStage,
   ThoughtValidationError,
   thoughtToDict,
@@ -289,6 +290,58 @@ describe("thoughtToDict", () => {
       id: "test-id",
     };
     expect(thoughtToDict(thought, true).id).toBe("test-id");
+  });
+});
+
+describe("pickAliasedArg", () => {
+  const identity = (value: unknown) => value;
+
+  it("returns undefined when neither alias is present", () => {
+    expect(pickAliasedArg({}, "foo", "fooBar", identity)).toBeUndefined();
+  });
+
+  it("returns the snake_case value when only snake_case is present", () => {
+    expect(pickAliasedArg({ foo: "snake" }, "foo", "fooBar", identity)).toBe("snake");
+  });
+
+  it("returns the camelCase value when only camelCase is present", () => {
+    expect(pickAliasedArg({ fooBar: "camel" }, "foo", "fooBar", identity)).toBe("camel");
+  });
+
+  it("returns the value when both aliases normalize to the same value", () => {
+    const normalize = (value: unknown) => String(value).trim();
+    expect(pickAliasedArg({ foo: " same ", fooBar: "same" }, "foo", "fooBar", normalize)).toBe("same");
+  });
+
+  it("throws ThoughtValidationError when aliases conflict after validation", () => {
+    expect(() => pickAliasedArg({ foo: "a", fooBar: "b" }, "foo", "fooBar", identity)).toThrow(ThoughtValidationError);
+    try {
+      pickAliasedArg({ foo: "a", fooBar: "b" }, "foo", "fooBar", identity);
+    } catch (error) {
+      expect(error).toBeInstanceOf(ThoughtValidationError);
+      expect((error as ThoughtValidationError).errors).toContainEqual({
+        field: "foo",
+        message: "Conflicting aliases for foo",
+      });
+    }
+  });
+
+  it("propagates ThoughtValidationError thrown by the validator", () => {
+    const strict = (value: unknown) => {
+      if (typeof value !== "boolean") {
+        throw new ThoughtValidationError([{ field: "flag", message: "flag must be a boolean" }]);
+      }
+      return value;
+    };
+    expect(() => pickAliasedArg({ flag: "not-bool" }, "flag", "flagAlias", strict)).toThrow(ThoughtValidationError);
+  });
+
+  it("treats explicit-undefined as absent for both aliases", () => {
+    // Programmatic callers using object spread can produce { foo: undefined, fooBar: 'x' };
+    // treat that as absent rather than throwing a spurious alias-conflict.
+    expect(pickAliasedArg({ foo: undefined, fooBar: "x" }, "foo", "fooBar", identity)).toBe("x");
+    expect(pickAliasedArg({ foo: "x", fooBar: undefined }, "foo", "fooBar", identity)).toBe("x");
+    expect(pickAliasedArg({ foo: undefined, fooBar: undefined }, "foo", "fooBar", identity)).toBeUndefined();
   });
 });
 

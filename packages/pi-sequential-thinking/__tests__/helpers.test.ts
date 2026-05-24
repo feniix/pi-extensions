@@ -218,9 +218,11 @@ describe("pi-sequential-thinking resolveConfigPath", () => {
     expect(result).toContain(".pi/config.json");
   });
 
-  it("resolves paths starting with ~", () => {
-    const result = resolveConfigPath("~/.pi/config.json");
-    expect(result).toContain(".pi/config.json");
+  it("resolves bare-tilde paths (no slash) by joining to home", () => {
+    // Exercises the `startsWith("~")` branch, which the `~/...` test above
+    // never reaches because `startsWith("~/")` matches first.
+    const result = resolveConfigPath("~thoughts.json");
+    expect(result).toBe(join(homedir(), "thoughts.json"));
   });
 
   it("returns absolute paths as-is", () => {
@@ -357,5 +359,20 @@ describe("pi-sequential-thinking writeTempFile", () => {
     if (!path) throw new Error("expected path");
     tempFiles.push(path);
     expect(path).toContain("my-tool__");
+  });
+
+  it("produces unique paths under rapid same-ms calls", () => {
+    // Date.now() alone collides if two truncations fire in the same
+    // millisecond; the second write would overwrite the first. Verify the
+    // filename carries enough entropy that 50 consecutive calls all land on
+    // distinct paths.
+    const paths = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      const p = writeTempFile("rapid", `payload ${i}`);
+      if (!p) throw new Error("expected path");
+      tempFiles.push(p);
+      paths.add(p);
+    }
+    expect(paths.size).toBe(50);
   });
 });

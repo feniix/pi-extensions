@@ -5,15 +5,22 @@
  * This is a native TypeScript implementation with no external dependencies.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { join } from "node:path";
 import type { AgentToolUpdateCallback, ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { ThoughtAnalyzer } from "./analyzer.js";
 import {
   type EffectiveConfigStatus,
+  getHomeDir,
+  loadConfigWithSources,
+  normalizeNumber,
+  normalizeString,
+  resolveEffectiveConfig,
+  resolveEffectiveLimits,
+  splitParams,
+} from "./config.js";
+import { formatToolOutput } from "./output.js";
+import {
   type ExportSessionResult,
   type ImportSessionResult,
   type SessionOperationResult,
@@ -22,418 +29,34 @@ import {
 import {
   DEFAULT_HISTORY_LIMIT,
   generateUuid,
-  isRecord,
   MAX_HISTORY_LIMIT,
   normalizeSessionId,
   normalizeThoughtInput,
+  pickAliasedArg,
   type ThoughtData,
   ThoughtStage,
   ThoughtValidationError,
-  type ValidationError,
 } from "./types.js";
 
 // =============================================================================
-// Constants
+// Argument helpers
 // =============================================================================
-
-type ConfigSource = "flag" | "env" | "project_settings" | "global_settings" | "config_file" | "default";
-
-function getHomeDir(): string {
-  return process.env.HOME || homedir();
-}
-
-// =============================================================================
-// Types
-// =============================================================================
-
-interface SeqThinkConfig {
-  storageDir?: string;
-  maxBytes?: number;
-  maxLines?: number;
-}
-
-interface SeqThinkConfigWithSources {
-  config: SeqThinkConfig;
-  sources: Partial<Record<keyof SeqThinkConfig, ConfigSource>>;
-}
-
-interface ResolveEffectiveConfigInput {
-  flags?: {
-    storageDir?: unknown;
-    maxBytes?: unknown;
-    maxLines?: unknown;
-  };
-  env?: Record<string, string | undefined>;
-  config?: SeqThinkConfigWithSources | null;
-}
-
-interface McpToolDetails {
-  tool: string;
-  truncated: boolean;
-  truncation?: {
-    truncatedBy: "lines" | "bytes" | null;
-    totalLines: number;
-    totalBytes: number;
-    outputLines: number;
-    outputBytes: number;
-    maxLines: number;
-    maxBytes: number;
-  };
-  tempFile?: string;
-  error?: string;
-  validationErrors?: ValidationError[];
-}
-
-// =============================================================================
-// Utility Functions
-// =============================================================================
-
-function toJsonString(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function formatToolOutput(
-  toolName: string,
-  result: unknown,
-  limits: { maxBytes?: number; maxLines?: number },
-): { text: string; details: McpToolDetails } {
-  const rawText = toJsonString(result);
-  const truncation = truncateHead(rawText, {
-    maxLines: limits?.maxLines ?? DEFAULT_MAX_LINES,
-    maxBytes: limits?.maxBytes ?? DEFAULT_MAX_BYTES,
-  });
-
-  let text = truncation.content;
-  let tempFile: string | undefined;
-
-  if (truncation.truncated) {
-    tempFile = writeTempFile(toolName, rawText);
-    const tempSuffix = tempFile
-      ? `Full output saved to: ${tempFile}`
-      : "Full output unavailable (could not write overflow file)";
-    text +=
-      `\n\n[Output truncated: ${truncation.outputLines} of ${truncation.totalLines} lines ` +
-      `(${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)}). ${tempSuffix}]`;
-  }
-
-  if (truncation.firstLineExceedsLimit && rawText.length > 0) {
-    text =
-      `[First line exceeded ${formatSize(truncation.maxBytes)} limit. Full output saved to: ${tempFile ?? "N/A"}]\n` +
-      text;
-  }
-
-  return {
-    text,
-    details: {
-      tool: toolName,
-      truncated: truncation.truncated,
-      truncation: {
-        truncatedBy: truncation.truncatedBy,
-        totalLines: truncation.totalLines,
-        totalBytes: truncation.totalBytes,
-        outputLines: truncation.outputLines,
-        outputBytes: truncation.outputBytes,
-        maxLines: truncation.maxLines,
-        maxBytes: truncation.maxBytes,
-      },
-      tempFile,
-    },
-  };
-}
-
-function writeTempFile(toolName: string, content: string): string | undefined {
-  const safeName = toolName.replace(/[^a-z0-9_-]/gi, "_");
-  const filename = `pi-seq-think-${safeName}-${Date.now()}.txt`;
-  const filePath = join(tmpdir(), filename);
-  try {
-    writeFileSync(filePath, content, "utf-8");
-    return filePath;
-  } catch (error) {
-    // If /tmp is full or unwritable, the truncated tool result is still
-    // useful — don't convert a successful tool call into an error.
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[pi-sequential-thinking] Could not write truncation overflow file: ${message}`);
-    return undefined;
-  }
-}
-
-function normalizeString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function normalizeNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  return undefined;
-}
-
-function splitParams(params: Record<string, unknown>): {
-  toolArgs: Record<string, unknown>;
-  requestedLimits: { maxBytes?: number; maxLines?: number };
-} {
-  const { piMaxBytes, piMaxLines, ...rest } = params as Record<string, unknown> & {
-    piMaxBytes?: unknown;
-    piMaxLines?: unknown;
-  };
-  return {
-    toolArgs: rest,
-    requestedLimits: {
-      maxBytes: normalizeNumber(piMaxBytes),
-      maxLines: normalizeNumber(piMaxLines),
-    },
-  };
-}
-
-function resolveEffectiveLimits(
-  requested: { maxBytes?: number; maxLines?: number },
-  maxAllowed: { maxBytes: number; maxLines: number },
-): { maxBytes: number; maxLines: number } {
-  const requestedBytes = requested.maxBytes ?? maxAllowed.maxBytes;
-  const requestedLines = requested.maxLines ?? maxAllowed.maxLines;
-  return {
-    maxBytes: Math.min(requestedBytes, maxAllowed.maxBytes),
-    maxLines: Math.min(requestedLines, maxAllowed.maxLines),
-  };
-}
-
-function resolveConfigPath(configPath: string): string {
-  const trimmed = configPath.trim();
-  if (trimmed.startsWith("~/")) {
-    return join(getHomeDir(), trimmed.slice(2));
-  }
-  if (trimmed.startsWith("~")) {
-    return join(getHomeDir(), trimmed.slice(1));
-  }
-  if (isAbsolute(trimmed)) {
-    return trimmed;
-  }
-  return resolve(process.cwd(), trimmed);
-}
-
-function parseConfig(raw: unknown, pathHint: string): SeqThinkConfig {
-  if (!isRecord(raw)) {
-    throw new Error(`Invalid Sequential Thinking config at ${pathHint}: expected an object.`);
-  }
-  return {
-    storageDir: normalizeString(raw.storageDir),
-    maxBytes: normalizeNumber(raw.maxBytes),
-    maxLines: normalizeNumber(raw.maxLines),
-  };
-}
-
-function sourceForConfig(config: SeqThinkConfig, source: ConfigSource): SeqThinkConfigWithSources {
-  const sources: SeqThinkConfigWithSources["sources"] = {};
-  if (config.storageDir !== undefined) sources.storageDir = source;
-  if (config.maxBytes !== undefined) sources.maxBytes = source;
-  if (config.maxLines !== undefined) sources.maxLines = source;
-  return { config, sources };
-}
-
-function loadSettingsConfig(
-  path: string,
-  source: "project_settings" | "global_settings",
-): SeqThinkConfigWithSources | null {
-  if (!existsSync(path)) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
-    const config = parsed["pi-sequential-thinking"];
-    if (!isRecord(config)) {
-      return null;
-    }
-    return sourceForConfig(parseConfig(config, path), source);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[pi-sequential-thinking] Failed to parse settings ${path}: ${message}`);
-    return null;
-  }
-}
-
-function warnIgnoredLegacyConfigFiles(): void {
-  const legacyPaths = [
-    join(process.cwd(), ".pi", "extensions", "sequential-thinking.json"),
-    join(getHomeDir(), ".pi", "agent", "extensions", "sequential-thinking.json"),
-  ];
-
-  for (const legacyPath of legacyPaths) {
-    if (existsSync(legacyPath)) {
-      console.warn(
-        `[pi-sequential-thinking] Ignoring legacy config file ${legacyPath}. Migrate non-secret settings to .pi/settings.json or ~/.pi/agent/settings.json under "pi-sequential-thinking", or pass --seq-think-config-file / SEQ_THINK_CONFIG_FILE explicitly.`,
-      );
-    }
-  }
-}
-
-function loadConfigWithSources(configPath: string | undefined): SeqThinkConfigWithSources | null {
-  const envConfigFile = process.env.SEQ_THINK_CONFIG_FILE;
-  const legacyEnvConfig = process.env.SEQ_THINK_CONFIG;
-  if (configPath) {
-    return loadConfigFileWithSources(resolveConfigPath(configPath));
-  }
-  if (envConfigFile) {
-    return loadConfigFileWithSources(resolveConfigPath(envConfigFile));
-  }
-  if (legacyEnvConfig) {
-    console.warn("[pi-sequential-thinking] SEQ_THINK_CONFIG is deprecated; use SEQ_THINK_CONFIG_FILE.");
-    return loadConfigFileWithSources(resolveConfigPath(legacyEnvConfig));
-  }
-
-  warnIgnoredLegacyConfigFiles();
-
-  const projectSettingsPath = join(process.cwd(), ".pi", "settings.json");
-  const globalSettingsPath = join(getHomeDir(), ".pi", "agent", "settings.json");
-
-  const globalConfig = loadSettingsConfig(globalSettingsPath, "global_settings");
-  const projectConfig = loadSettingsConfig(projectSettingsPath, "project_settings");
-
-  if (!globalConfig && !projectConfig) {
-    return null;
-  }
-
-  return mergeConfigWithSources(globalConfig, projectConfig);
-}
-
-function loadConfigFileWithSources(path: string): SeqThinkConfigWithSources | null {
-  if (!existsSync(path)) {
-    return null;
-  }
-
-  try {
-    const raw = readFileSync(path, "utf-8");
-    const parsed = JSON.parse(raw);
-    return sourceForConfig(parseConfig(parsed, path), "config_file");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[pi-sequential-thinking] Failed to parse config ${path}: ${message}`);
-    return null;
-  }
-}
-
-function mergeConfigWithSources(
-  globalConfig: SeqThinkConfigWithSources | null,
-  projectConfig: SeqThinkConfigWithSources | null,
-): SeqThinkConfigWithSources {
-  const config: SeqThinkConfig = {
-    storageDir: projectConfig?.config.storageDir ?? globalConfig?.config.storageDir,
-    maxBytes: projectConfig?.config.maxBytes ?? globalConfig?.config.maxBytes,
-    maxLines: projectConfig?.config.maxLines ?? globalConfig?.config.maxLines,
-  };
-  return {
-    config,
-    sources: {
-      storageDir: projectConfig?.sources.storageDir ?? globalConfig?.sources.storageDir,
-      maxBytes: projectConfig?.sources.maxBytes ?? globalConfig?.sources.maxBytes,
-      maxLines: projectConfig?.sources.maxLines ?? globalConfig?.sources.maxLines,
-    },
-  };
-}
-
-function resolveEffectiveConfig(input: ResolveEffectiveConfigInput = {}): EffectiveConfigStatus {
-  const flags = input.flags ?? {};
-  const env = input.env ?? process.env;
-  const config = input.config;
-
-  const flagStorageDir = normalizeString(flags.storageDir);
-  const envStorageDir = normalizeString(env.MCP_STORAGE_DIR);
-  const configStorageDir = config?.config.storageDir;
-
-  const flagMaxBytes = normalizeNumber(flags.maxBytes);
-  const envMaxBytes = normalizeNumber(env.SEQ_THINK_MAX_BYTES);
-  const configMaxBytes = config?.config.maxBytes;
-
-  const flagMaxLines = normalizeNumber(flags.maxLines);
-  const envMaxLines = normalizeNumber(env.SEQ_THINK_MAX_LINES);
-  const configMaxLines = config?.config.maxLines;
-
-  const storageDir = flagStorageDir ?? envStorageDir ?? configStorageDir;
-
-  return {
-    storageDir: storageDir ? resolveConfigPath(storageDir) : undefined,
-    maxBytes: flagMaxBytes ?? envMaxBytes ?? configMaxBytes ?? DEFAULT_MAX_BYTES,
-    maxLines: flagMaxLines ?? envMaxLines ?? configMaxLines ?? DEFAULT_MAX_LINES,
-    sources: {
-      storageDir: flagStorageDir
-        ? "flag"
-        : envStorageDir
-          ? "env"
-          : configStorageDir
-            ? (config?.sources.storageDir ?? "config_file")
-            : "default",
-      maxBytes: flagMaxBytes
-        ? "flag"
-        : envMaxBytes
-          ? "env"
-          : configMaxBytes
-            ? (config?.sources.maxBytes ?? "config_file")
-            : "default",
-      maxLines: flagMaxLines
-        ? "flag"
-        : envMaxLines
-          ? "env"
-          : configMaxLines
-            ? (config?.sources.maxLines ?? "config_file")
-            : "default",
-    },
-  };
-}
 
 function sessionIdFromArgs(args: Record<string, unknown>): string | null {
-  const snake = args.session_id;
-  const camel = args.sessionId;
-  if (snake !== undefined && camel !== undefined) {
-    const snakeSession = normalizeSessionId(snake);
-    const camelSession = normalizeSessionId(camel);
-    if (snakeSession.sessionId !== camelSession.sessionId) {
-      throw new ThoughtValidationError([{ field: "session_id", message: "Conflicting aliases for session_id" }]);
-    }
-    return snakeSession.sessionId;
-  }
-  return normalizeSessionId(snake ?? camel).sessionId;
+  const resolved = pickAliasedArg(args, "session_id", "sessionId", (value) => normalizeSessionId(value).sessionId);
+  return resolved ?? null;
 }
 
 function includeFullThoughtsFromArgs(args: Record<string, unknown>): boolean {
-  const snake = args.include_full_thoughts;
-  const camel = args.includeFullThoughts;
-  const hasSnake = snake !== undefined;
-  const hasCamel = camel !== undefined;
-
-  if (hasSnake && typeof snake !== "boolean") {
-    throw new ThoughtValidationError([
-      { field: "include_full_thoughts", message: "include_full_thoughts must be a boolean" },
-    ]);
-  }
-  if (hasCamel && typeof camel !== "boolean") {
-    throw new ThoughtValidationError([
-      { field: "include_full_thoughts", message: "include_full_thoughts must be a boolean" },
-    ]);
-  }
-  if (hasSnake && hasCamel && snake !== camel) {
-    throw new ThoughtValidationError([
-      { field: "include_full_thoughts", message: "Conflicting aliases for include_full_thoughts" },
-    ]);
-  }
-
-  return hasSnake ? (snake as boolean) : hasCamel ? (camel as boolean) : true;
+  const resolved = pickAliasedArg(args, "include_full_thoughts", "includeFullThoughts", (value) => {
+    if (typeof value !== "boolean") {
+      throw new ThoughtValidationError([
+        { field: "include_full_thoughts", message: "include_full_thoughts must be a boolean" },
+      ]);
+    }
+    return value;
+  });
+  return resolved ?? true;
 }
 
 function toReceipt(
@@ -641,41 +264,38 @@ export default function sequentialThinking(pi: ExtensionAPI) {
         : undefined;
   };
 
-  const getEffectiveConfig = (): EffectiveConfigStatus => {
-    const config = loadConfigWithSources(getConfiguredFile());
-    return resolveEffectiveConfig({
-      flags: {
-        storageDir: pi.getFlag("--seq-think-storage-dir"),
-        maxBytes: pi.getFlag("--seq-think-max-bytes"),
-        maxLines: pi.getFlag("--seq-think-max-lines"),
-      },
-      env: process.env,
-      config,
-    });
-  };
+  // Resolve config once at extension init. CLI flags, env vars, and settings
+  // files are all session-constant for this extension, so re-reading them on
+  // every tool invocation is wasted I/O.
+  const effectiveConfig = resolveEffectiveConfig({
+    flags: {
+      storageDir: pi.getFlag("--seq-think-storage-dir"),
+      maxBytes: pi.getFlag("--seq-think-max-bytes"),
+      maxLines: pi.getFlag("--seq-think-max-lines"),
+    },
+    env: process.env,
+    config: loadConfigWithSources(getConfiguredFile()),
+  });
 
-  const initialConfig = getEffectiveConfig();
-  const storage = new ThoughtStorage(initialConfig.storageDir);
+  const storage = new ThoughtStorage(effectiveConfig.storageDir);
   const analyzer = new ThoughtAnalyzer();
 
-  const getMaxLimits = (): { maxBytes: number; maxLines: number } => {
-    const config = getEffectiveConfig();
-    return { maxBytes: config.maxBytes, maxLines: config.maxLines };
+  const maxLimits = { maxBytes: effectiveConfig.maxBytes, maxLines: effectiveConfig.maxLines };
+  const effectiveConfigForStatus: EffectiveConfigStatus = {
+    ...effectiveConfig,
+    storageDir: effectiveConfig.storageDir ?? join(getHomeDir(), ".mcp_sequential_thinking"),
   };
 
-  const effectiveConfigForStatus = (): EffectiveConfigStatus => {
-    const config = getEffectiveConfig();
-    return {
-      ...config,
-      storageDir: config.storageDir ?? join(getHomeDir(), ".mcp_sequential_thinking"),
-    };
-  };
+  // Handlers return JSON-serializable objects fed to formatToolOutput. The
+  // `object` constraint is the minimal honest contract: it rejects primitives
+  // and undefined while staying assignable from every handler's concrete
+  // return interface (ThinkingStatus, ThinkingHistory, etc.).
+  type ToolHandler = (args: Record<string, unknown>) => object;
 
-  // Helper to execute a tool
   const executeTool = (
     toolName: string,
     pendingMessage: string,
-    executeFn: () => unknown,
+    handler: ToolHandler,
     onUpdate: AgentToolUpdateCallback<unknown> | undefined,
     params: Record<string, unknown>,
   ) => {
@@ -685,10 +305,9 @@ export default function sequentialThinking(pi: ExtensionAPI) {
     });
 
     try {
-      const { requestedLimits } = splitParams(params);
-      const maxLimits = getMaxLimits();
+      const { toolArgs, requestedLimits } = splitParams(params);
       const effectiveLimits = resolveEffectiveLimits(requestedLimits, maxLimits);
-      const result = executeFn();
+      const result = handler(toolArgs);
       const { text, details } = formatToolOutput(toolName, result, effectiveLimits);
       return { content: [{ type: "text" as const, text }], details, isError: false };
     } catch (error) {
@@ -790,7 +409,7 @@ export default function sequentialThinking(pi: ExtensionAPI) {
   }
 
   function getThinkingStatus() {
-    return storage.getStatus({ effectiveConfig: effectiveConfigForStatus() });
+    return storage.getStatus({ effectiveConfig: effectiveConfigForStatus });
   }
 
   function sequentialThink(args: Record<string, unknown>): {
@@ -868,161 +487,114 @@ export default function sequentialThinking(pi: ExtensionAPI) {
   // Register Tools
   // =============================================================================
 
-  pi.registerTool({
-    name: "process_thought",
-    label: "Process Thought",
-    description:
-      "Record and analyze a sequential thought with metadata. Use this to break down complex problems " +
-      "into structured steps through stages: Problem Definition, Research, Analysis, Synthesis, Conclusion. " +
-      "Accepts snake_case fields and MCP-style camelCase aliases. Content-bearing: stores thought text in local plaintext JSON.",
-    parameters: processThoughtParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "process_thought",
-        "Processing thought...",
-        () => processThought(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
+  type RegisterToolOptions = Parameters<ExtensionAPI["registerTool"]>[0];
+  type ToolParameterSchema = RegisterToolOptions["parameters"];
 
-  pi.registerTool({
-    name: "generate_summary",
-    label: "Generate Thinking Summary",
-    description:
-      "Generate a summary of one thinking session. Content-bearing: summaries derive from stored thought content.",
-    parameters: sessionScopedParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "generate_summary",
-        "Generating summary...",
-        () => generateSummary(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
+  interface ToolDefinition {
+    name: string;
+    label: string;
+    description: string;
+    parameters: ToolParameterSchema;
+    pendingMessage: string;
+    handler: ToolHandler;
+  }
 
-  pi.registerTool({
-    name: "clear_history",
-    label: "Clear Thought History",
-    description: "Reset one thinking session by clearing recorded thoughts.",
-    parameters: clearHistoryParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "clear_history",
-        "Clearing history...",
-        () => clearHistory(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
+  const toolDefinitions: ToolDefinition[] = [
+    {
+      name: "process_thought",
+      label: "Process Thought",
+      description:
+        "Record and analyze a sequential thought with metadata. Use this to break down complex problems " +
+        "into structured steps through stages: Problem Definition, Research, Analysis, Synthesis, Conclusion. " +
+        "Accepts snake_case fields and MCP-style camelCase aliases. Content-bearing: stores thought text in local plaintext JSON.",
+      parameters: processThoughtParams,
+      pendingMessage: "Processing thought...",
+      handler: processThought,
     },
-  });
+    {
+      name: "generate_summary",
+      label: "Generate Thinking Summary",
+      description:
+        "Generate a summary of one thinking session. Content-bearing: summaries derive from stored thought content.",
+      parameters: sessionScopedParams,
+      pendingMessage: "Generating summary...",
+      handler: generateSummary,
+    },
+    {
+      name: "clear_history",
+      label: "Clear Thought History",
+      description: "Reset one thinking session by clearing recorded thoughts.",
+      parameters: clearHistoryParams,
+      pendingMessage: "Clearing history...",
+      handler: clearHistory,
+    },
+    {
+      name: "export_session",
+      label: "Export Thinking Session",
+      description:
+        "Export one thinking session to a JSON file. Content-bearing: exported files include thought text. Parent directories are created automatically.",
+      parameters: exportSessionParams,
+      pendingMessage: "Exporting session...",
+      handler: exportSession,
+    },
+    {
+      name: "import_session",
+      label: "Import Thinking Session",
+      description:
+        "Import a previously exported thinking session from a JSON file. Treats imported thought text as inert content.",
+      parameters: importSessionParams,
+      pendingMessage: "Importing session...",
+      handler: importSession,
+    },
+    {
+      name: "get_thinking_history",
+      label: "Get Thinking History",
+      description:
+        "Read recorded thoughts for one session with bounded pagination. Content-bearing: may return full thought text unless include_full_thoughts=false.",
+      parameters: getThinkingHistoryParams,
+      pendingMessage: "Getting thinking history...",
+      handler: getThinkingHistory,
+    },
+    {
+      name: "get_thinking_status",
+      label: "Get Thinking Status",
+      description:
+        "Read content-free storage and configuration diagnostics for sequential thinking sessions. " +
+        "Returns storage writability, per-session thought counts and state fingerprints, corrupt-session flags with error strings, " +
+        "backup file names, effectiveConfig.sources labels (flag/env/project_settings/global_settings/config_file/default), " +
+        "and a statusCompleteness block indicating whether the listing was truncated or contained corrupt entries. " +
+        "Use writable=false or sessions[].corrupt=true to diagnose write and parse failures.",
+      parameters: getThinkingStatusParams,
+      pendingMessage: "Getting thinking status...",
+      handler: getThinkingStatus,
+    },
+    {
+      name: "sequential_think",
+      label: "Sequential Thinking",
+      description:
+        "Scaffold a complete staged thinking sequence for a topic in one call. " +
+        "Generates one thought per cognitive stage (Problem Definition through Conclusion) and writes them to the selected session. " +
+        "Use process_thought instead when you want to record your own thoughts step-by-step.",
+      parameters: sequentialThinkParams,
+      pendingMessage: "Starting structured thinking process...",
+      handler: sequentialThink,
+    },
+  ];
 
-  pi.registerTool({
-    name: "export_session",
-    label: "Export Thinking Session",
-    description:
-      "Export one thinking session to a JSON file. Content-bearing: exported files include thought text. Parent directories are created automatically.",
-    parameters: exportSessionParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "export_session",
-        "Exporting session...",
-        () => exportSession(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
-
-  pi.registerTool({
-    name: "import_session",
-    label: "Import Thinking Session",
-    description:
-      "Import a previously exported thinking session from a JSON file. Treats imported thought text as inert content.",
-    parameters: importSessionParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "import_session",
-        "Importing session...",
-        () => importSession(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
-
-  pi.registerTool({
-    name: "get_thinking_history",
-    label: "Get Thinking History",
-    description:
-      "Read recorded thoughts for one session with bounded pagination. Content-bearing: may return full thought text unless include_full_thoughts=false.",
-    parameters: getThinkingHistoryParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "get_thinking_history",
-        "Getting thinking history...",
-        () => getThinkingHistory(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
-
-  pi.registerTool({
-    name: "get_thinking_status",
-    label: "Get Thinking Status",
-    description:
-      "Read content-free storage and configuration diagnostics for sequential thinking sessions. " +
-      "Returns storage writability, per-session thought counts and state fingerprints, corrupt-session flags with error strings, " +
-      "backup file names, effectiveConfig.sources labels (flag/env/project_settings/global_settings/config_file/default), " +
-      "and a statusCompleteness block indicating whether the listing was truncated or contained corrupt entries. " +
-      "Use writable=false or sessions[].corrupt=true to diagnose write and parse failures.",
-    parameters: getThinkingStatusParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      return executeTool(
-        "get_thinking_status",
-        "Getting thinking status...",
-        getThinkingStatus,
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
-
-  pi.registerTool({
-    name: "sequential_think",
-    label: "Sequential Thinking",
-    description:
-      "Scaffold a complete staged thinking sequence for a topic in one call. " +
-      "Generates one thought per cognitive stage (Problem Definition through Conclusion) and writes them to the selected session. " +
-      "Use process_thought instead when you want to record your own thoughts step-by-step.",
-    parameters: sequentialThinkParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "sequential_think",
-        "Starting structured thinking process...",
-        () => sequentialThink(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
+  for (const def of toolDefinitions) {
+    pi.registerTool({
+      name: def.name,
+      label: def.label,
+      description: def.description,
+      parameters: def.parameters,
+      async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
+        return executeTool(def.name, def.pendingMessage, def.handler, onUpdate, params as Record<string, unknown>);
+      },
+    });
+  }
 }
 
-// Export utilities for testing
 export {
-  formatToolOutput,
-  isRecord,
   loadConfigWithSources,
   normalizeNumber,
   normalizeString,
@@ -1031,6 +603,6 @@ export {
   resolveEffectiveConfig,
   resolveEffectiveLimits,
   splitParams,
-  toJsonString,
-  writeTempFile,
-};
+} from "./config.js";
+export { formatToolOutput, toJsonString, writeTempFile } from "./output.js";
+export { isRecord } from "./types.js";

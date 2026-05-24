@@ -2,6 +2,8 @@
  * Types and normalization helpers for Sequential Thinking extension
  */
 
+import { randomUUID } from "node:crypto";
+
 // =============================================================================
 // Constants
 // =============================================================================
@@ -210,6 +212,41 @@ function readAliasedField<T>(
 
 function pushErrors(target: ValidationError[], result: FieldResult<unknown>): void {
   if (!result.ok) target.push(...result.errors);
+}
+
+/**
+ * Resolve a snake_case / camelCase alias pair from a record of arguments.
+ *
+ * Runs `validator` against whichever alias is present. If both aliases are
+ * present, comparison happens *after* validation so equivalent-but-textually-
+ * different inputs (e.g. trailing whitespace) don't trigger a false conflict.
+ *
+ * Returns `undefined` when neither alias is present; throws
+ * `ThoughtValidationError` (with field name `snake`) when the validated
+ * values diverge.
+ */
+export function pickAliasedArg<T>(
+  args: Record<string, unknown>,
+  snake: string,
+  camel: string,
+  validator: (value: unknown) => T,
+): T | undefined {
+  // Treat explicit-undefined as absent. Programmatic callers using object
+  // spread routinely produce `{ snake: undefined, camel: 'x' }`; we should
+  // resolve to 'x' rather than throw a spurious alias-conflict.
+  const hasSnake = hasOwn(args, snake) && args[snake] !== undefined;
+  const hasCamel = hasOwn(args, camel) && args[camel] !== undefined;
+
+  if (!hasSnake && !hasCamel) return undefined;
+
+  const snakeValue = hasSnake ? validator(args[snake]) : undefined;
+  const camelValue = hasCamel ? validator(args[camel]) : undefined;
+
+  if (hasSnake && hasCamel && !valuesEqual(snakeValue, camelValue)) {
+    throw new ThoughtValidationError([createError(snake, `Conflicting aliases for ${snake}`)]);
+  }
+
+  return hasSnake ? snakeValue : camelValue;
 }
 
 export function normalizeSessionId(value: unknown): SessionInfo {
@@ -470,9 +507,5 @@ export function normalizeThoughtRecord(dict: Record<string, unknown>): ThoughtRe
 // =============================================================================
 
 export function generateUuid(): string {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  return randomUUID();
 }

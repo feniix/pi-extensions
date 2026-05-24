@@ -20,6 +20,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import type { EffectiveConfigStatus } from "./config.js";
 import {
   DEFAULT_HISTORY_LIMIT,
   isRecord,
@@ -93,17 +94,6 @@ export interface ThinkingHistory {
   returnedThoughts: number;
   hasMore: boolean;
   thoughts: HistoryThoughtItem[];
-}
-
-export interface EffectiveConfigStatus {
-  storageDir?: string;
-  maxBytes: number;
-  maxLines: number;
-  sources: {
-    storageDir: string;
-    maxBytes: string;
-    maxLines: string;
-  };
 }
 
 export interface SessionStatusMetadata {
