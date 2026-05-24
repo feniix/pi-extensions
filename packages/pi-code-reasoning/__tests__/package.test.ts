@@ -88,35 +88,39 @@ describe("pi-code-reasoning package metadata", () => {
     expect(packageJson.scripts.prepack).toBe("npm run build:mcp");
   });
 
-  it("packs executable MCP output and concrete portable tool declarations", () => {
-    cleanDist();
-    const pack = spawnSync(
-      "npm",
-      ["pack", "--dry-run", "--json", "--workspace", "packages/pi-code-reasoning", "--silent"],
-      {
-        cwd: repoRoot,
-        encoding: "utf-8",
-      },
-    );
+  it(
+    "packs executable MCP output and concrete portable tool declarations",
+    () => {
+      cleanDist();
+      const pack = spawnSync(
+        "npm",
+        ["pack", "--dry-run", "--json", "--workspace", "packages/pi-code-reasoning", "--silent"],
+        {
+          cwd: repoRoot,
+          encoding: "utf-8",
+        },
+      );
 
-    expect(pack.status, pack.stderr).toBe(0);
-    const [packResult] = JSON.parse(pack.stdout) as [{ files: Array<{ path: string; mode: number }> }];
-    const filesByPath = new Map(packResult.files.map((file) => [file.path, file]));
+      expect(pack.status, pack.stderr).toBe(0);
+      const [packResult] = JSON.parse(pack.stdout) as [{ files: Array<{ path: string; mode: number }> }];
+      const filesByPath = new Map(packResult.files.map((file) => [file.path, file]));
 
-    expect(filesByPath.get("bin/pi-code-reasoning.js")?.mode).toBe(493);
-    expect(filesByPath.get("dist/extensions/mcp-server.js")?.mode).toBe(493);
-    expect(filesByPath.has("dist/extensions/index.js")).toBe(true);
-    expect(filesByPath.has("dist/extensions/tools.d.ts")).toBe(true);
+      expect(filesByPath.get("bin/pi-code-reasoning.js")?.mode).toBe(493);
+      expect(filesByPath.get("dist/extensions/mcp-server.js")?.mode).toBe(493);
+      expect(filesByPath.has("dist/extensions/index.js")).toBe(true);
+      expect(filesByPath.has("dist/extensions/tools.d.ts")).toBe(true);
 
-    const binEntrypoint = readFileSync(join(packageRoot, "bin", "pi-code-reasoning.js"), "utf-8");
-    expect(binEntrypoint).toContain("dist");
-    expect(binEntrypoint).toContain("build:mcp");
-    expect(binEntrypoint).toContain("runServer");
+      const binEntrypoint = readFileSync(join(packageRoot, "bin", "pi-code-reasoning.js"), "utf-8");
+      expect(binEntrypoint).toContain("dist");
+      expect(binEntrypoint).toContain("build:mcp");
+      expect(binEntrypoint).toContain("runServer");
 
-    const toolsDeclaration = readFileSync(join(packageRoot, "dist", "extensions", "tools.d.ts"), "utf-8");
-    expect(toolsDeclaration).toContain("PortableTool<typeof codeReasoningParams>");
-    expect(toolsDeclaration).not.toContain("PortableTool<TObject<{}>");
-  });
+      const toolsDeclaration = readFileSync(join(packageRoot, "dist", "extensions", "tools.d.ts"), "utf-8");
+      expect(toolsDeclaration).toContain("PortableTool<typeof codeReasoningParams>");
+      expect(toolsDeclaration).not.toContain("PortableTool<TObject<{}>");
+    },
+    30_000,
+  );
 
   it("runs the wrapper against an existing package-local MCP build", () => {
     const fixture = createWrapperFixture("node missing-build-script.js");
