@@ -498,11 +498,14 @@ export default function sequentialThinking(pi: ExtensionAPI) {
   // Register Tools
   // =============================================================================
 
+  type RegisterToolOptions = Parameters<ExtensionAPI["registerTool"]>[0];
+  type ToolParameterSchema = RegisterToolOptions["parameters"];
+
   interface ToolDefinition {
     name: string;
     label: string;
     description: string;
-    parameters: Parameters<typeof pi.registerTool>[0]["parameters"];
+    parameters: ToolParameterSchema;
     pendingMessage: string;
     handler: ToolHandler;
   }
