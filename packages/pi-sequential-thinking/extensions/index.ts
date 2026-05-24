@@ -5,13 +5,14 @@
  * This is a native TypeScript implementation with no external dependencies.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import type { AgentToolUpdateCallback, ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { ThoughtAnalyzer } from "./analyzer.js";
+import { formatToolOutput, toJsonString, writeTempFile } from "./output.js";
 import {
   type EffectiveConfigStatus,
   type ExportSessionResult,
@@ -30,7 +31,6 @@ import {
   type ThoughtData,
   ThoughtStage,
   ThoughtValidationError,
-  type ValidationError,
 } from "./types.js";
 
 // =============================================================================
@@ -68,102 +68,9 @@ interface ResolveEffectiveConfigInput {
   config?: SeqThinkConfigWithSources | null;
 }
 
-interface McpToolDetails {
-  tool: string;
-  truncated: boolean;
-  truncation?: {
-    truncatedBy: "lines" | "bytes" | null;
-    totalLines: number;
-    totalBytes: number;
-    outputLines: number;
-    outputBytes: number;
-    maxLines: number;
-    maxBytes: number;
-  };
-  tempFile?: string;
-  error?: string;
-  validationErrors?: ValidationError[];
-}
-
 // =============================================================================
 // Utility Functions
 // =============================================================================
-
-function toJsonString(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function formatToolOutput(
-  toolName: string,
-  result: unknown,
-  limits: { maxBytes?: number; maxLines?: number },
-): { text: string; details: McpToolDetails } {
-  const rawText = toJsonString(result);
-  const truncation = truncateHead(rawText, {
-    maxLines: limits?.maxLines ?? DEFAULT_MAX_LINES,
-    maxBytes: limits?.maxBytes ?? DEFAULT_MAX_BYTES,
-  });
-
-  let text = truncation.content;
-  let tempFile: string | undefined;
-
-  if (truncation.truncated) {
-    tempFile = writeTempFile(toolName, rawText);
-    const tempSuffix = tempFile
-      ? `Full output saved to: ${tempFile}`
-      : "Full output unavailable (could not write overflow file)";
-    text +=
-      `\n\n[Output truncated: ${truncation.outputLines} of ${truncation.totalLines} lines ` +
-      `(${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)}). ${tempSuffix}]`;
-  }
-
-  if (truncation.firstLineExceedsLimit && rawText.length > 0) {
-    text =
-      `[First line exceeded ${formatSize(truncation.maxBytes)} limit. Full output saved to: ${tempFile ?? "N/A"}]\n` +
-      text;
-  }
-
-  return {
-    text,
-    details: {
-      tool: toolName,
-      truncated: truncation.truncated,
-      truncation: {
-        truncatedBy: truncation.truncatedBy,
-        totalLines: truncation.totalLines,
-        totalBytes: truncation.totalBytes,
-        outputLines: truncation.outputLines,
-        outputBytes: truncation.outputBytes,
-        maxLines: truncation.maxLines,
-        maxBytes: truncation.maxBytes,
-      },
-      tempFile,
-    },
-  };
-}
-
-function writeTempFile(toolName: string, content: string): string | undefined {
-  const safeName = toolName.replace(/[^a-z0-9_-]/gi, "_");
-  const filename = `pi-seq-think-${safeName}-${Date.now()}.txt`;
-  const filePath = join(tmpdir(), filename);
-  try {
-    writeFileSync(filePath, content, "utf-8");
-    return filePath;
-  } catch (error) {
-    // If /tmp is full or unwritable, the truncated tool result is still
-    // useful — don't convert a successful tool call into an error.
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[pi-sequential-thinking] Could not write truncation overflow file: ${message}`);
-    return undefined;
-  }
-}
 
 function normalizeString(value: unknown): string | undefined {
   if (typeof value !== "string") {
