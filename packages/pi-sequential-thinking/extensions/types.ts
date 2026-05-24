@@ -214,6 +214,38 @@ function pushErrors(target: ValidationError[], result: FieldResult<unknown>): vo
   if (!result.ok) target.push(...result.errors);
 }
 
+/**
+ * Resolve a snake_case / camelCase alias pair from a record of arguments.
+ *
+ * Runs `validator` against whichever alias is present. If both aliases are
+ * present, comparison happens *after* validation so equivalent-but-textually-
+ * different inputs (e.g. trailing whitespace) don't trigger a false conflict.
+ *
+ * Returns `undefined` when neither alias is present; throws
+ * `ThoughtValidationError` (with field name `snake`) when the validated
+ * values diverge.
+ */
+export function pickAliasedArg<T>(
+  args: Record<string, unknown>,
+  snake: string,
+  camel: string,
+  validator: (value: unknown) => T,
+): T | undefined {
+  const hasSnake = hasOwn(args, snake);
+  const hasCamel = hasOwn(args, camel);
+
+  if (!hasSnake && !hasCamel) return undefined;
+
+  const snakeValue = hasSnake ? validator(args[snake]) : undefined;
+  const camelValue = hasCamel ? validator(args[camel]) : undefined;
+
+  if (hasSnake && hasCamel && !valuesEqual(snakeValue, camelValue)) {
+    throw new ThoughtValidationError([createError(snake, `Conflicting aliases for ${snake}`)]);
+  }
+
+  return (hasSnake ? snakeValue : camelValue) as T;
+}
+
 export function normalizeSessionId(value: unknown): SessionInfo {
   if (value === undefined || value === null) {
     return { sessionId: null, sessionLabel: DEFAULT_SESSION_LABEL };

@@ -26,6 +26,7 @@ import {
   MAX_HISTORY_LIMIT,
   normalizeSessionId,
   normalizeThoughtInput,
+  pickAliasedArg,
   type ThoughtData,
   ThoughtStage,
   ThoughtValidationError,
@@ -398,42 +399,20 @@ function resolveEffectiveConfig(input: ResolveEffectiveConfigInput = {}): Effect
 }
 
 function sessionIdFromArgs(args: Record<string, unknown>): string | null {
-  const snake = args.session_id;
-  const camel = args.sessionId;
-  if (snake !== undefined && camel !== undefined) {
-    const snakeSession = normalizeSessionId(snake);
-    const camelSession = normalizeSessionId(camel);
-    if (snakeSession.sessionId !== camelSession.sessionId) {
-      throw new ThoughtValidationError([{ field: "session_id", message: "Conflicting aliases for session_id" }]);
-    }
-    return snakeSession.sessionId;
-  }
-  return normalizeSessionId(snake ?? camel).sessionId;
+  const resolved = pickAliasedArg(args, "session_id", "sessionId", (value) => normalizeSessionId(value).sessionId);
+  return resolved ?? null;
 }
 
 function includeFullThoughtsFromArgs(args: Record<string, unknown>): boolean {
-  const snake = args.include_full_thoughts;
-  const camel = args.includeFullThoughts;
-  const hasSnake = snake !== undefined;
-  const hasCamel = camel !== undefined;
-
-  if (hasSnake && typeof snake !== "boolean") {
-    throw new ThoughtValidationError([
-      { field: "include_full_thoughts", message: "include_full_thoughts must be a boolean" },
-    ]);
-  }
-  if (hasCamel && typeof camel !== "boolean") {
-    throw new ThoughtValidationError([
-      { field: "include_full_thoughts", message: "include_full_thoughts must be a boolean" },
-    ]);
-  }
-  if (hasSnake && hasCamel && snake !== camel) {
-    throw new ThoughtValidationError([
-      { field: "include_full_thoughts", message: "Conflicting aliases for include_full_thoughts" },
-    ]);
-  }
-
-  return hasSnake ? (snake as boolean) : hasCamel ? (camel as boolean) : true;
+  const resolved = pickAliasedArg(args, "include_full_thoughts", "includeFullThoughts", (value) => {
+    if (typeof value !== "boolean") {
+      throw new ThoughtValidationError([
+        { field: "include_full_thoughts", message: "include_full_thoughts must be a boolean" },
+      ]);
+    }
+    return value;
+  });
+  return resolved ?? true;
 }
 
 function toReceipt(
