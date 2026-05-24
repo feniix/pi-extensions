@@ -218,9 +218,11 @@ describe("pi-sequential-thinking resolveConfigPath", () => {
     expect(result).toContain(".pi/config.json");
   });
 
-  it("resolves paths starting with ~", () => {
-    const result = resolveConfigPath("~/.pi/config.json");
-    expect(result).toContain(".pi/config.json");
+  it("resolves bare-tilde paths (no slash) by joining to home", () => {
+    // Exercises the `startsWith("~")` branch, which the `~/...` test above
+    // never reaches because `startsWith("~/")` matches first.
+    const result = resolveConfigPath("~thoughts.json");
+    expect(result).toBe(join(homedir(), "thoughts.json"));
   });
 
   it("returns absolute paths as-is", () => {
