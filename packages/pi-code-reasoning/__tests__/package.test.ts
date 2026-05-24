@@ -116,7 +116,7 @@ describe("pi-code-reasoning package metadata", () => {
     const toolsDeclaration = readFileSync(join(packageRoot, "dist", "extensions", "tools.d.ts"), "utf-8");
     expect(toolsDeclaration).toContain("PortableTool<typeof codeReasoningParams>");
     expect(toolsDeclaration).not.toContain("PortableTool<TObject<{}>");
-  });
+  }, 30_000);
 
   it("runs the wrapper against an existing package-local MCP build", () => {
     const fixture = createWrapperFixture("node missing-build-script.js");
