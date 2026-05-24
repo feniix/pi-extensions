@@ -768,7 +768,7 @@ export default function sequentialThinking(pi: ExtensionAPI) {
     });
   }
 
-  function getThinkingStatus() {
+  function getThinkingStatus(_args: Record<string, unknown>) {
     return storage.getStatus({ effectiveConfig: effectiveConfigForStatus() });
   }
 
@@ -847,155 +847,112 @@ export default function sequentialThinking(pi: ExtensionAPI) {
   // Register Tools
   // =============================================================================
 
-  pi.registerTool({
-    name: "process_thought",
-    label: "Process Thought",
-    description:
-      "Record and analyze a sequential thought with metadata. Use this to break down complex problems " +
-      "into structured steps through stages: Problem Definition, Research, Analysis, Synthesis, Conclusion. " +
-      "Accepts snake_case fields and MCP-style camelCase aliases. Content-bearing: stores thought text in local plaintext JSON.",
-    parameters: processThoughtParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "process_thought",
-        "Processing thought...",
-        () => processThought(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
+  type ToolHandler = (args: Record<string, unknown>) => unknown;
 
-  pi.registerTool({
-    name: "generate_summary",
-    label: "Generate Thinking Summary",
-    description:
-      "Generate a summary of one thinking session. Content-bearing: summaries derive from stored thought content.",
-    parameters: sessionScopedParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "generate_summary",
-        "Generating summary...",
-        () => generateSummary(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
+  interface ToolDefinition {
+    name: string;
+    label: string;
+    description: string;
+    parameters: Parameters<typeof pi.registerTool>[0]["parameters"];
+    pendingMessage: string;
+    handler: ToolHandler;
+  }
 
-  pi.registerTool({
-    name: "clear_history",
-    label: "Clear Thought History",
-    description: "Reset one thinking session by clearing recorded thoughts.",
-    parameters: clearHistoryParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "clear_history",
-        "Clearing history...",
-        () => clearHistory(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
+  const toolDefinitions: ToolDefinition[] = [
+    {
+      name: "process_thought",
+      label: "Process Thought",
+      description:
+        "Record and analyze a sequential thought with metadata. Use this to break down complex problems " +
+        "into structured steps through stages: Problem Definition, Research, Analysis, Synthesis, Conclusion. " +
+        "Accepts snake_case fields and MCP-style camelCase aliases. Content-bearing: stores thought text in local plaintext JSON.",
+      parameters: processThoughtParams,
+      pendingMessage: "Processing thought...",
+      handler: processThought,
     },
-  });
+    {
+      name: "generate_summary",
+      label: "Generate Thinking Summary",
+      description:
+        "Generate a summary of one thinking session. Content-bearing: summaries derive from stored thought content.",
+      parameters: sessionScopedParams,
+      pendingMessage: "Generating summary...",
+      handler: generateSummary,
+    },
+    {
+      name: "clear_history",
+      label: "Clear Thought History",
+      description: "Reset one thinking session by clearing recorded thoughts.",
+      parameters: clearHistoryParams,
+      pendingMessage: "Clearing history...",
+      handler: clearHistory,
+    },
+    {
+      name: "export_session",
+      label: "Export Thinking Session",
+      description:
+        "Export one thinking session to a JSON file. Content-bearing: exported files include thought text. Parent directories are created automatically.",
+      parameters: exportSessionParams,
+      pendingMessage: "Exporting session...",
+      handler: exportSession,
+    },
+    {
+      name: "import_session",
+      label: "Import Thinking Session",
+      description:
+        "Import a previously exported thinking session from a JSON file. Treats imported thought text as inert content.",
+      parameters: importSessionParams,
+      pendingMessage: "Importing session...",
+      handler: importSession,
+    },
+    {
+      name: "get_thinking_history",
+      label: "Get Thinking History",
+      description:
+        "Read recorded thoughts for one session with bounded pagination. Content-bearing: may return full thought text unless include_full_thoughts=false.",
+      parameters: getThinkingHistoryParams,
+      pendingMessage: "Getting thinking history...",
+      handler: getThinkingHistory,
+    },
+    {
+      name: "get_thinking_status",
+      label: "Get Thinking Status",
+      description:
+        "Read content-free storage and configuration diagnostics for sequential thinking sessions. " +
+        "Returns storage writability, per-session thought counts and state fingerprints, corrupt-session flags with error strings, " +
+        "backup file names, effectiveConfig.sources labels (flag/env/project_settings/global_settings/config_file/default), " +
+        "and a statusCompleteness block indicating whether the listing was truncated or contained corrupt entries. " +
+        "Use writable=false or sessions[].corrupt=true to diagnose write and parse failures.",
+      parameters: getThinkingStatusParams,
+      pendingMessage: "Getting thinking status...",
+      handler: getThinkingStatus,
+    },
+    {
+      name: "sequential_think",
+      label: "Sequential Thinking",
+      description:
+        "Scaffold a complete staged thinking sequence for a topic in one call. " +
+        "Generates one thought per cognitive stage (Problem Definition through Conclusion) and writes them to the selected session. " +
+        "Use process_thought instead when you want to record your own thoughts step-by-step.",
+      parameters: sequentialThinkParams,
+      pendingMessage: "Starting structured thinking process...",
+      handler: sequentialThink,
+    },
+  ];
 
-  pi.registerTool({
-    name: "export_session",
-    label: "Export Thinking Session",
-    description:
-      "Export one thinking session to a JSON file. Content-bearing: exported files include thought text. Parent directories are created automatically.",
-    parameters: exportSessionParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "export_session",
-        "Exporting session...",
-        () => exportSession(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
-
-  pi.registerTool({
-    name: "import_session",
-    label: "Import Thinking Session",
-    description:
-      "Import a previously exported thinking session from a JSON file. Treats imported thought text as inert content.",
-    parameters: importSessionParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "import_session",
-        "Importing session...",
-        () => importSession(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
-
-  pi.registerTool({
-    name: "get_thinking_history",
-    label: "Get Thinking History",
-    description:
-      "Read recorded thoughts for one session with bounded pagination. Content-bearing: may return full thought text unless include_full_thoughts=false.",
-    parameters: getThinkingHistoryParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "get_thinking_history",
-        "Getting thinking history...",
-        () => getThinkingHistory(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
-
-  pi.registerTool({
-    name: "get_thinking_status",
-    label: "Get Thinking Status",
-    description:
-      "Read content-free storage and configuration diagnostics for sequential thinking sessions. " +
-      "Returns storage writability, per-session thought counts and state fingerprints, corrupt-session flags with error strings, " +
-      "backup file names, effectiveConfig.sources labels (flag/env/project_settings/global_settings/config_file/default), " +
-      "and a statusCompleteness block indicating whether the listing was truncated or contained corrupt entries. " +
-      "Use writable=false or sessions[].corrupt=true to diagnose write and parse failures.",
-    parameters: getThinkingStatusParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      return executeTool(
-        "get_thinking_status",
-        "Getting thinking status...",
-        getThinkingStatus,
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
-
-  pi.registerTool({
-    name: "sequential_think",
-    label: "Sequential Thinking",
-    description:
-      "Scaffold a complete staged thinking sequence for a topic in one call. " +
-      "Generates one thought per cognitive stage (Problem Definition through Conclusion) and writes them to the selected session. " +
-      "Use process_thought instead when you want to record your own thoughts step-by-step.",
-    parameters: sequentialThinkParams,
-    async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-      const { toolArgs } = splitParams(params as Record<string, unknown>);
-      return executeTool(
-        "sequential_think",
-        "Starting structured thinking process...",
-        () => sequentialThink(toolArgs),
-        onUpdate,
-        params as Record<string, unknown>,
-      );
-    },
-  });
+  for (const def of toolDefinitions) {
+    pi.registerTool({
+      name: def.name,
+      label: def.label,
+      description: def.description,
+      parameters: def.parameters,
+      async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
+        const args = params as Record<string, unknown>;
+        const { toolArgs } = splitParams(args);
+        return executeTool(def.name, def.pendingMessage, () => def.handler(toolArgs), onUpdate, args);
+      },
+    });
+  }
 }
 
 // Export utilities for testing
