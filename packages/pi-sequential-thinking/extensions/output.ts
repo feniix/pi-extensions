@@ -5,6 +5,7 @@
  * spillover to a temp file when output exceeds the configured limits.
  */
 
+import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,7 +42,10 @@ export function toJsonString(value: unknown): string {
 
 export function writeTempFile(toolName: string, content: string): string | undefined {
   const safeName = toolName.replace(/[^a-z0-9_-]/gi, "_");
-  const filename = `pi-seq-think-${safeName}-${Date.now()}.txt`;
+  // Date.now() alone collides if two truncations fire within 1ms (e.g. rapid
+  // back-to-back tool calls). The uuid suffix guarantees uniqueness while
+  // keeping the timestamp for human-readable ordering of overflow files.
+  const filename = `pi-seq-think-${safeName}-${Date.now()}-${randomUUID().slice(0, 8)}.txt`;
   const filePath = join(tmpdir(), filename);
   try {
     writeFileSync(filePath, content, "utf-8");

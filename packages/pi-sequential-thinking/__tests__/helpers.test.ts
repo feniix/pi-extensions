@@ -358,4 +358,19 @@ describe("pi-sequential-thinking writeTempFile", () => {
     tempFiles.push(path);
     expect(path).toContain("my-tool__");
   });
+
+  it("produces unique paths under rapid same-ms calls", () => {
+    // Date.now() alone collides if two truncations fire in the same
+    // millisecond; the second write would overwrite the first. Verify the
+    // filename carries enough entropy that 50 consecutive calls all land on
+    // distinct paths.
+    const paths = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      const p = writeTempFile("rapid", `payload ${i}`);
+      if (!p) throw new Error("expected path");
+      tempFiles.push(p);
+      paths.add(p);
+    }
+    expect(paths.size).toBe(50);
+  });
 });
