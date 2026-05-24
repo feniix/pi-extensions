@@ -33,9 +33,9 @@ export interface EffectiveConfigStatus {
   maxBytes: number;
   maxLines: number;
   sources: {
-    storageDir: string;
-    maxBytes: string;
-    maxLines: string;
+    storageDir: ConfigSource;
+    maxBytes: ConfigSource;
+    maxLines: ConfigSource;
   };
 }
 
@@ -145,10 +145,6 @@ function loadSettingsConfig(
   path: string,
   source: "project_settings" | "global_settings",
 ): SeqThinkConfigWithSources | null {
-  if (!existsSync(path)) {
-    return null;
-  }
-
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
     if (!isRecord(parsed)) {
@@ -160,6 +156,7 @@ function loadSettingsConfig(
     }
     return sourceForConfig(parseConfig(config, path), source);
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[pi-sequential-thinking] Failed to parse settings ${path}: ${message}`);
     return null;
@@ -182,15 +179,11 @@ function warnIgnoredLegacyConfigFiles(): void {
 }
 
 function loadConfigFileWithSources(path: string): SeqThinkConfigWithSources | null {
-  if (!existsSync(path)) {
-    return null;
-  }
-
   try {
-    const raw = readFileSync(path, "utf-8");
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(readFileSync(path, "utf-8"));
     return sourceForConfig(parseConfig(parsed, path), "config_file");
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[pi-sequential-thinking] Failed to parse config ${path}: ${message}`);
     return null;
@@ -245,6 +238,18 @@ export function loadConfigWithSources(configPath: string | undefined): SeqThinkC
   return mergeConfigWithSources(globalConfig, projectConfig);
 }
 
+function resolveSource(
+  flagValue: unknown,
+  envValue: unknown,
+  configValue: unknown,
+  configSource: ConfigSource | undefined,
+): ConfigSource {
+  if (flagValue !== undefined) return "flag";
+  if (envValue !== undefined) return "env";
+  if (configValue !== undefined) return configSource ?? "config_file";
+  return "default";
+}
+
 export function resolveEffectiveConfig(input: ResolveEffectiveConfigInput = {}): EffectiveConfigStatus {
   const flags = input.flags ?? {};
   const env = input.env ?? process.env;
@@ -269,27 +274,9 @@ export function resolveEffectiveConfig(input: ResolveEffectiveConfigInput = {}):
     maxBytes: flagMaxBytes ?? envMaxBytes ?? configMaxBytes ?? DEFAULT_MAX_BYTES,
     maxLines: flagMaxLines ?? envMaxLines ?? configMaxLines ?? DEFAULT_MAX_LINES,
     sources: {
-      storageDir: flagStorageDir
-        ? "flag"
-        : envStorageDir
-          ? "env"
-          : configStorageDir
-            ? (config?.sources.storageDir ?? "config_file")
-            : "default",
-      maxBytes: flagMaxBytes
-        ? "flag"
-        : envMaxBytes
-          ? "env"
-          : configMaxBytes
-            ? (config?.sources.maxBytes ?? "config_file")
-            : "default",
-      maxLines: flagMaxLines
-        ? "flag"
-        : envMaxLines
-          ? "env"
-          : configMaxLines
-            ? (config?.sources.maxLines ?? "config_file")
-            : "default",
+      storageDir: resolveSource(flagStorageDir, envStorageDir, configStorageDir, config?.sources.storageDir),
+      maxBytes: resolveSource(flagMaxBytes, envMaxBytes, configMaxBytes, config?.sources.maxBytes),
+      maxLines: resolveSource(flagMaxLines, envMaxLines, configMaxLines, config?.sources.maxLines),
     },
   };
 }

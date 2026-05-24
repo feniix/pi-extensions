@@ -337,9 +337,8 @@ describe("pickAliasedArg", () => {
   });
 
   it("treats explicit-undefined as absent for both aliases", () => {
-    // Programmatic callers using object spread can produce { foo: undefined, fooBar: 'x' }.
-    // Old sessionIdFromArgs / includeFullThoughtsFromArgs used `value !== undefined` for
-    // presence; preserve that tolerance.
+    // Programmatic callers using object spread can produce { foo: undefined, fooBar: 'x' };
+    // treat that as absent rather than throwing a spurious alias-conflict.
     expect(pickAliasedArg({ foo: undefined, fooBar: "x" }, "foo", "fooBar", identity)).toBe("x");
     expect(pickAliasedArg({ foo: "x", fooBar: undefined }, "foo", "fooBar", identity)).toBe("x");
     expect(pickAliasedArg({ foo: undefined, fooBar: undefined }, "foo", "fooBar", identity)).toBeUndefined();

@@ -62,8 +62,8 @@ export function formatToolOutput(
 ): { text: string; details: McpToolDetails } {
   const rawText = toJsonString(result);
   const truncation = truncateHead(rawText, {
-    maxLines: limits?.maxLines ?? DEFAULT_MAX_LINES,
-    maxBytes: limits?.maxBytes ?? DEFAULT_MAX_BYTES,
+    maxLines: limits.maxLines ?? DEFAULT_MAX_LINES,
+    maxBytes: limits.maxBytes ?? DEFAULT_MAX_BYTES,
   });
 
   let text = truncation.content;

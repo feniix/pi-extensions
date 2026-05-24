@@ -264,34 +264,26 @@ export default function sequentialThinking(pi: ExtensionAPI) {
         : undefined;
   };
 
-  const getEffectiveConfig = (): EffectiveConfigStatus => {
-    const config = loadConfigWithSources(getConfiguredFile());
-    return resolveEffectiveConfig({
-      flags: {
-        storageDir: pi.getFlag("--seq-think-storage-dir"),
-        maxBytes: pi.getFlag("--seq-think-max-bytes"),
-        maxLines: pi.getFlag("--seq-think-max-lines"),
-      },
-      env: process.env,
-      config,
-    });
-  };
+  // Resolve config once at extension init. CLI flags, env vars, and settings
+  // files are all session-constant for this extension, so re-reading them on
+  // every tool invocation is wasted I/O.
+  const effectiveConfig = resolveEffectiveConfig({
+    flags: {
+      storageDir: pi.getFlag("--seq-think-storage-dir"),
+      maxBytes: pi.getFlag("--seq-think-max-bytes"),
+      maxLines: pi.getFlag("--seq-think-max-lines"),
+    },
+    env: process.env,
+    config: loadConfigWithSources(getConfiguredFile()),
+  });
 
-  const initialConfig = getEffectiveConfig();
-  const storage = new ThoughtStorage(initialConfig.storageDir);
+  const storage = new ThoughtStorage(effectiveConfig.storageDir);
   const analyzer = new ThoughtAnalyzer();
 
-  const getMaxLimits = (): { maxBytes: number; maxLines: number } => {
-    const config = getEffectiveConfig();
-    return { maxBytes: config.maxBytes, maxLines: config.maxLines };
-  };
-
-  const effectiveConfigForStatus = (): EffectiveConfigStatus => {
-    const config = getEffectiveConfig();
-    return {
-      ...config,
-      storageDir: config.storageDir ?? join(getHomeDir(), ".mcp_sequential_thinking"),
-    };
+  const maxLimits = { maxBytes: effectiveConfig.maxBytes, maxLines: effectiveConfig.maxLines };
+  const effectiveConfigForStatus: EffectiveConfigStatus = {
+    ...effectiveConfig,
+    storageDir: effectiveConfig.storageDir ?? join(getHomeDir(), ".mcp_sequential_thinking"),
   };
 
   // Handlers return JSON-serializable objects fed to formatToolOutput. The
@@ -300,8 +292,6 @@ export default function sequentialThinking(pi: ExtensionAPI) {
   // return interface (ThinkingStatus, ThinkingHistory, etc.).
   type ToolHandler = (args: Record<string, unknown>) => object;
 
-  // Helper to execute a tool. Calls splitParams once to derive both toolArgs
-  // (handed to the handler) and requestedLimits (used for output truncation).
   const executeTool = (
     toolName: string,
     pendingMessage: string,
@@ -316,7 +306,6 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 
     try {
       const { toolArgs, requestedLimits } = splitParams(params);
-      const maxLimits = getMaxLimits();
       const effectiveLimits = resolveEffectiveLimits(requestedLimits, maxLimits);
       const result = handler(toolArgs);
       const { text, details } = formatToolOutput(toolName, result, effectiveLimits);
@@ -420,7 +409,7 @@ export default function sequentialThinking(pi: ExtensionAPI) {
   }
 
   function getThinkingStatus() {
-    return storage.getStatus({ effectiveConfig: effectiveConfigForStatus() });
+    return storage.getStatus({ effectiveConfig: effectiveConfigForStatus });
   }
 
   function sequentialThink(args: Record<string, unknown>): {
@@ -577,7 +566,7 @@ export default function sequentialThinking(pi: ExtensionAPI) {
         "Use writable=false or sessions[].corrupt=true to diagnose write and parse failures.",
       parameters: getThinkingStatusParams,
       pendingMessage: "Getting thinking status...",
-      handler: () => getThinkingStatus(),
+      handler: getThinkingStatus,
     },
     {
       name: "sequential_think",
@@ -616,5 +605,4 @@ export {
   splitParams,
 } from "./config.js";
 export { formatToolOutput, toJsonString, writeTempFile } from "./output.js";
-// Re-exports for tests and downstream consumers.
 export { isRecord } from "./types.js";
