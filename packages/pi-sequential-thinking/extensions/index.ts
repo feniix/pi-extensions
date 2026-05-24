@@ -294,11 +294,18 @@ export default function sequentialThinking(pi: ExtensionAPI) {
     };
   };
 
-  // Helper to execute a tool
+  // Handlers return JSON-serializable objects fed to formatToolOutput. The
+  // `object` constraint is the minimal honest contract: it rejects primitives
+  // and undefined while staying assignable from every handler's concrete
+  // return interface (ThinkingStatus, ThinkingHistory, etc.).
+  type ToolHandler = (args: Record<string, unknown>) => object;
+
+  // Helper to execute a tool. Calls splitParams once to derive both toolArgs
+  // (handed to the handler) and requestedLimits (used for output truncation).
   const executeTool = (
     toolName: string,
     pendingMessage: string,
-    executeFn: () => unknown,
+    handler: ToolHandler,
     onUpdate: AgentToolUpdateCallback<unknown> | undefined,
     params: Record<string, unknown>,
   ) => {
@@ -308,10 +315,10 @@ export default function sequentialThinking(pi: ExtensionAPI) {
     });
 
     try {
-      const { requestedLimits } = splitParams(params);
+      const { toolArgs, requestedLimits } = splitParams(params);
       const maxLimits = getMaxLimits();
       const effectiveLimits = resolveEffectiveLimits(requestedLimits, maxLimits);
-      const result = executeFn();
+      const result = handler(toolArgs);
       const { text, details } = formatToolOutput(toolName, result, effectiveLimits);
       return { content: [{ type: "text" as const, text }], details, isError: false };
     } catch (error) {
@@ -412,7 +419,7 @@ export default function sequentialThinking(pi: ExtensionAPI) {
     });
   }
 
-  function getThinkingStatus(_args: Record<string, unknown>) {
+  function getThinkingStatus() {
     return storage.getStatus({ effectiveConfig: effectiveConfigForStatus() });
   }
 
@@ -491,8 +498,6 @@ export default function sequentialThinking(pi: ExtensionAPI) {
   // Register Tools
   // =============================================================================
 
-  type ToolHandler = (args: Record<string, unknown>) => unknown;
-
   interface ToolDefinition {
     name: string;
     label: string;
@@ -569,7 +574,7 @@ export default function sequentialThinking(pi: ExtensionAPI) {
         "Use writable=false or sessions[].corrupt=true to diagnose write and parse failures.",
       parameters: getThinkingStatusParams,
       pendingMessage: "Getting thinking status...",
-      handler: getThinkingStatus,
+      handler: () => getThinkingStatus(),
     },
     {
       name: "sequential_think",
@@ -591,9 +596,7 @@ export default function sequentialThinking(pi: ExtensionAPI) {
       description: def.description,
       parameters: def.parameters,
       async execute(_toolCallId, params, _signal, onUpdate, _ctx) {
-        const args = params as Record<string, unknown>;
-        const { toolArgs } = splitParams(args);
-        return executeTool(def.name, def.pendingMessage, () => def.handler(toolArgs), onUpdate, args);
+        return executeTool(def.name, def.pendingMessage, def.handler, onUpdate, params as Record<string, unknown>);
       },
     });
   }
