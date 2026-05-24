@@ -335,6 +335,15 @@ describe("pickAliasedArg", () => {
     };
     expect(() => pickAliasedArg({ flag: "not-bool" }, "flag", "flagAlias", strict)).toThrow(ThoughtValidationError);
   });
+
+  it("treats explicit-undefined as absent for both aliases", () => {
+    // Programmatic callers using object spread can produce { foo: undefined, fooBar: 'x' }.
+    // Old sessionIdFromArgs / includeFullThoughtsFromArgs used `value !== undefined` for
+    // presence; preserve that tolerance.
+    expect(pickAliasedArg({ foo: undefined, fooBar: "x" }, "foo", "fooBar", identity)).toBe("x");
+    expect(pickAliasedArg({ foo: "x", fooBar: undefined }, "foo", "fooBar", identity)).toBe("x");
+    expect(pickAliasedArg({ foo: undefined, fooBar: undefined }, "foo", "fooBar", identity)).toBeUndefined();
+  });
 });
 
 describe("generateUuid", () => {

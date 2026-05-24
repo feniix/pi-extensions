@@ -231,8 +231,11 @@ export function pickAliasedArg<T>(
   camel: string,
   validator: (value: unknown) => T,
 ): T | undefined {
-  const hasSnake = hasOwn(args, snake);
-  const hasCamel = hasOwn(args, camel);
+  // Treat explicit-undefined as absent. Programmatic callers using object
+  // spread routinely produce `{ snake: undefined, camel: 'x' }`; we should
+  // resolve to 'x' rather than throw a spurious alias-conflict.
+  const hasSnake = hasOwn(args, snake) && args[snake] !== undefined;
+  const hasCamel = hasOwn(args, camel) && args[camel] !== undefined;
 
   if (!hasSnake && !hasCamel) return undefined;
 
