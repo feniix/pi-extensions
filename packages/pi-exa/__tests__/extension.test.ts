@@ -367,6 +367,47 @@ describe("pi-exa extension", () => {
     );
   });
 
+  it("forwards additionalQueries for non-deep type:auto in web_search_advanced_exa", async () => {
+    // The SDK's discriminated union marks additionalQueries as deep-only, but
+    // the Exa /search endpoint and the live hosted MCP both accept it for
+    // advanced search with type:auto. Pin the SDK-bypass behavior here so a
+    // future SDK revision can't silently strip it.
+    const configPath = writeTempConfig({
+      enabledTools: [
+        "web_search_exa",
+        "web_fetch_exa",
+        "web_search_advanced_exa",
+        "web_answer_exa",
+        "web_find_similar_exa",
+      ],
+    });
+    mockSearch.mockResolvedValue(defaultSearchResponse);
+
+    const mockPi = createMockPi({ "--exa-config-file": configPath, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    await tool?.execute(
+      "call-1",
+      {
+        query: "rust async runtime tokio",
+        type: "auto",
+        additionalQueries: ["q1", "q2"],
+      },
+      { aborted: false } as AbortSignal,
+      vi.fn(),
+      undefined as never,
+    );
+
+    expect(mockSearch).toHaveBeenCalledWith(
+      "rust async runtime tokio",
+      expect.objectContaining({
+        type: "auto",
+        additionalQueries: ["q1", "q2"],
+      }),
+    );
+  });
+
   it("forwards new top-level search filters in web_search_advanced_exa", async () => {
     const configPath = writeTempConfig({
       enabledTools: [
