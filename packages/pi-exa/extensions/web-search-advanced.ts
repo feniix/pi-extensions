@@ -256,13 +256,14 @@ export async function performAdvancedSearch(
   if (options.type) payload.type = options.type;
   if (options.startPublishedDate) payload.startPublishedDate = options.startPublishedDate;
   if (options.endPublishedDate) payload.endPublishedDate = options.endPublishedDate;
-  if (options.includeDomains) payload.includeDomains = options.includeDomains;
-  if (options.excludeDomains) payload.excludeDomains = options.excludeDomains;
-  if (options.includeText) payload.includeText = options.includeText;
-  if (options.excludeText) payload.excludeText = options.excludeText;
+  if (options.includeDomains && options.includeDomains.length > 0) payload.includeDomains = options.includeDomains;
+  if (options.excludeDomains && options.excludeDomains.length > 0) payload.excludeDomains = options.excludeDomains;
+  if (options.includeText && options.includeText.length > 0) payload.includeText = options.includeText;
+  if (options.excludeText && options.excludeText.length > 0) payload.excludeText = options.excludeText;
   if (options.userLocation) payload.userLocation = options.userLocation;
   if (options.moderation !== undefined) payload.moderation = options.moderation;
-  if (options.additionalQueries) payload.additionalQueries = options.additionalQueries;
+  if (options.additionalQueries && options.additionalQueries.length > 0)
+    payload.additionalQueries = options.additionalQueries;
 
   // See AdvancedSearchPayload comment for why we bypass the SDK type here.
   const result: SearchResponse<AdvancedResultContents> = await exa.search<AdvancedResultContents>(
