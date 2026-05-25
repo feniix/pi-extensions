@@ -152,4 +152,81 @@ describe("portable Exa tools", () => {
       });
     });
   });
+
+  describe("web_fetch_exa", () => {
+    it("returns formatted crawl text and structured metadata for a successful fetch", async () => {
+      mockGetContents.mockResolvedValue(defaultSearchResponse);
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_fetch_exa");
+
+      const result = await executePortableTool(
+        tool,
+        {
+          urls: ["https://example.com/result"],
+          maxCharacters: 1500,
+          highlights: true,
+          summary: { query: "what is this" },
+          maxAgeHours: 24,
+        },
+        { host: "test" },
+      );
+
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toContain("Example Result");
+      expect(result.structuredContent).toMatchObject({
+        tool: "web_fetch_exa",
+        costDollars: { total: 0.005 },
+        searchTime: 1200,
+      });
+      expect(mockGetContents).toHaveBeenCalledWith(
+        ["https://example.com/result"],
+        expect.objectContaining({
+          text: { maxCharacters: 1500 },
+          highlights: true,
+          summary: { query: "what is this" },
+          maxAgeHours: 24,
+        }),
+      );
+    });
+
+    it("returns isError:true with the missing-key message when no API key is resolvable", async () => {
+      const tools = createExaTools({ resolveApiKey: () => undefined });
+      const tool = findTool(tools, "web_fetch_exa");
+
+      const result = await executePortableTool(tool, { urls: ["https://example.com"] }, { host: "test" });
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("Exa API key not configured");
+      expect(result.structuredContent).toMatchObject({ tool: "web_fetch_exa", error: "missing_api_key" });
+      expect(mockGetContents).not.toHaveBeenCalled();
+    });
+
+    it("emits a fetch-specific pending progress update", async () => {
+      mockGetContents.mockResolvedValue(defaultSearchResponse);
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_fetch_exa");
+      const progress = vi.fn();
+
+      await executePortableTool(tool, { urls: ["https://example.com"] }, { host: "test", progress });
+
+      expect(progress).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: "Fetching content via Exa...",
+          structuredContent: expect.objectContaining({ status: "pending" }),
+        }),
+      );
+    });
+
+    it("returns isError:true with the fetch-prefixed message when the SDK throws", async () => {
+      mockGetContents.mockRejectedValue(new Error("403"));
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_fetch_exa");
+
+      const result = await executePortableTool(tool, { urls: ["https://example.com"] }, { host: "test" });
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("Exa fetch error: 403");
+      expect(result.structuredContent).toMatchObject({ tool: "web_fetch_exa", error: "403" });
+    });
+  });
 });
