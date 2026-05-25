@@ -3,7 +3,7 @@
  */
 
 import type { HighlightsContentsOptions, SearchResponse, SearchResult, TextContentsOptions } from "exa-js";
-import { DEEP_SEARCH_TYPES } from "./constants.js";
+import { type AdvancedSearchType, DEEP_SEARCH_TYPES } from "./constants.js";
 import { getExaClient } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatSearchResults, toMetadata } from "./formatters.js";
@@ -41,8 +41,6 @@ function validateCategory(category: string | undefined): SearchCategory | undefi
 
   throw new Error(`Invalid category "${category}". Supported categories: ${SEARCH_CATEGORIES.join(", ")}.`);
 }
-
-type AdvancedSearchType = "auto" | "fast" | "instant" | "keyword" | "neural" | "hybrid";
 
 type AdvancedSearchOptions = {
   numResults?: number;
