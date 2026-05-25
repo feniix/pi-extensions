@@ -56,6 +56,12 @@ describeLive("pi-exa live integration", () => {
 
     expect(result.text.length).toBeGreaterThan(0);
     expect(result.details.tool).toBe("web_search_advanced_exa");
+    // Confirm we hit the real search path and got back real Exa results, not
+    // the empty-results fallback string. costDollars proves the request
+    // reached Exa's billing layer, and the URL match proves results were
+    // serialized into the formatted text.
+    expect(result.details.costDollars).toBeDefined();
+    expect(result.text).toMatch(/https?:\/\//);
   });
 
   it("runs a real deep research request through Exa", { timeout: 60_000 }, async () => {
