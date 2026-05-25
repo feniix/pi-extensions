@@ -307,7 +307,7 @@ export default function exaExtension(pi: ExtensionAPI) {
       name: "web_search_advanced_exa",
       label: "Exa Advanced Search",
       description:
-        "Advanced web search with full Exa API control including category filters, domain restrictions, date ranges, highlights, and summaries.",
+        "Advanced web search with full Exa API control: category filters, domain restrictions, date ranges, text-content filters (includeText/excludeText), location targeting (userLocation), highlights, LLM summaries, freshness controls (maxAgeHours, livecrawlTimeout), and subpage crawling (subpages, subpageTarget).",
       promptSnippet: "Advanced search with category, domain, and date filters.",
       promptGuidelines: [
         "Use web_search_advanced_exa when you need category, domain, or date filters; use web_search_exa for simpler lookups.",
