@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { performWebFetch } from "../extensions/web-fetch.js";
 import { performResearch } from "../extensions/web-research.js";
 import { performWebSearch } from "../extensions/web-search.js";
+import { performAdvancedSearch } from "../extensions/web-search-advanced.js";
 
 const hasManualFlag = process.argv.includes("--exa-live") || process.env.PI_EXA_LIVE === "1";
 const hasApiKey = typeof process.env.EXA_API_KEY === "string" && process.env.EXA_API_KEY.trim().length > 0;
@@ -26,6 +27,41 @@ describeLive("pi-exa live integration", () => {
     expect(result.text.length).toBeGreaterThan(0);
     expect(result.text).toContain("example.com");
     expect(result.details.tool).toBe("web_fetch_exa");
+  });
+
+  it("accepts the post-4.1.0 advanced-search schema fields end-to-end", { timeout: 30_000 }, async () => {
+    // Regression net for the 14 fields added in 4.1.0. Asserts only that Exa
+    // accepts the payload and returns a non-empty result — content shape is
+    // best-effort because Exa rankings drift. The point is to catch the day
+    // Exa renames or drops one of these fields, not to spec their behavior.
+    const result = await performAdvancedSearch(apiKey, "rust async runtime tokio", {
+      numResults: 2,
+      type: "auto",
+      userLocation: "US",
+      includeText: ["rust"],
+      additionalQueries: ["tokio runtime"],
+      moderation: true,
+      enableSummary: true,
+      summaryQuery: "what does this page describe",
+      enableHighlights: true,
+      highlightsMaxCharacters: 480,
+      highlightsQuery: "async executor",
+      contextMaxCharacters: 1000,
+      maxAgeHours: 24,
+      livecrawlTimeout: 4000,
+      subpages: 2,
+      subpageTarget: ["about"],
+      textMaxCharacters: 500,
+    });
+
+    expect(result.text.length).toBeGreaterThan(0);
+    expect(result.details.tool).toBe("web_search_advanced_exa");
+    // Confirm we hit the real search path and got back real Exa results, not
+    // the empty-results fallback string. costDollars proves the request
+    // reached Exa's billing layer, and the URL match proves results were
+    // serialized into the formatted text.
+    expect(result.details.costDollars).toBeDefined();
+    expect(result.text).toMatch(/https?:\/\//);
   });
 
   it("runs a real deep research request through Exa", { timeout: 60_000 }, async () => {

@@ -367,6 +367,221 @@ describe("pi-exa extension", () => {
     );
   });
 
+  it("forwards additionalQueries for non-deep type:auto in web_search_advanced_exa", async () => {
+    // The SDK's discriminated union marks additionalQueries as deep-only, but
+    // the Exa /search endpoint and the live hosted MCP both accept it for
+    // advanced search with type:auto. Pin the SDK-bypass behavior here so a
+    // future SDK revision can't silently strip it.
+    const configPath = writeTempConfig({
+      enabledTools: [
+        "web_search_exa",
+        "web_fetch_exa",
+        "web_search_advanced_exa",
+        "web_answer_exa",
+        "web_find_similar_exa",
+      ],
+    });
+    mockSearch.mockResolvedValue(defaultSearchResponse);
+
+    const mockPi = createMockPi({ "--exa-config-file": configPath, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    await tool?.execute(
+      "call-1",
+      {
+        query: "rust async runtime tokio",
+        type: "auto",
+        additionalQueries: ["q1", "q2"],
+      },
+      { aborted: false } as AbortSignal,
+      vi.fn(),
+      undefined as never,
+    );
+
+    expect(mockSearch).toHaveBeenCalledWith(
+      "rust async runtime tokio",
+      expect.objectContaining({
+        type: "auto",
+        additionalQueries: ["q1", "q2"],
+      }),
+    );
+  });
+
+  it("forwards new top-level search filters in web_search_advanced_exa", async () => {
+    const configPath = writeTempConfig({
+      enabledTools: [
+        "web_search_exa",
+        "web_fetch_exa",
+        "web_search_advanced_exa",
+        "web_answer_exa",
+        "web_find_similar_exa",
+      ],
+    });
+    mockSearch.mockResolvedValue(defaultSearchResponse);
+
+    const mockPi = createMockPi({ "--exa-config-file": configPath, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    await tool?.execute(
+      "call-1",
+      {
+        query: "advanced query",
+        includeText: ["rust"],
+        excludeText: ["legacy"],
+        userLocation: "US",
+        moderation: true,
+        additionalQueries: ["rustlang", "rust language"],
+      },
+      { aborted: false } as AbortSignal,
+      vi.fn(),
+      undefined as never,
+    );
+
+    expect(mockSearch).toHaveBeenCalledWith(
+      "advanced query",
+      expect.objectContaining({
+        includeText: ["rust"],
+        excludeText: ["legacy"],
+        userLocation: "US",
+        moderation: true,
+        additionalQueries: ["rustlang", "rust language"],
+      }),
+    );
+  });
+
+  it("forwards highlights and summary content options in web_search_advanced_exa", async () => {
+    const configPath = writeTempConfig({
+      enabledTools: [
+        "web_search_exa",
+        "web_fetch_exa",
+        "web_search_advanced_exa",
+        "web_answer_exa",
+        "web_find_similar_exa",
+      ],
+    });
+    mockSearch.mockResolvedValue(defaultSearchResponse);
+
+    const mockPi = createMockPi({ "--exa-config-file": configPath, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    await tool?.execute(
+      "call-1",
+      {
+        query: "advanced query",
+        enableHighlights: true,
+        highlightsMaxCharacters: 480,
+        highlightsQuery: "explain async",
+        enableSummary: true,
+        summaryQuery: "summarize as bullets",
+        contextMaxCharacters: 2000,
+      },
+      { aborted: false } as AbortSignal,
+      vi.fn(),
+      undefined as never,
+    );
+
+    const [, opts] = mockSearch.mock.calls[0];
+    expect(opts.contents.highlights).toEqual(expect.objectContaining({ maxCharacters: 480, query: "explain async" }));
+    expect(opts.contents.summary).toEqual({ query: "summarize as bullets" });
+    expect(opts.contents.context).toEqual({ maxCharacters: 2000 });
+  });
+
+  it("enables summary implicitly when only summaryQuery is provided", async () => {
+    const configPath = writeTempConfig({
+      enabledTools: [
+        "web_search_exa",
+        "web_fetch_exa",
+        "web_search_advanced_exa",
+        "web_answer_exa",
+        "web_find_similar_exa",
+      ],
+    });
+    mockSearch.mockResolvedValue(defaultSearchResponse);
+
+    const mockPi = createMockPi({ "--exa-config-file": configPath, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    await tool?.execute(
+      "call-1",
+      { query: "advanced query", summaryQuery: "tl;dr please" },
+      { aborted: false } as AbortSignal,
+      vi.fn(),
+      undefined as never,
+    );
+
+    const [, opts] = mockSearch.mock.calls[0];
+    expect(opts.contents.summary).toEqual({ query: "tl;dr please" });
+  });
+
+  it("omits summary when neither enableSummary nor summaryQuery is set", async () => {
+    const configPath = writeTempConfig({
+      enabledTools: [
+        "web_search_exa",
+        "web_fetch_exa",
+        "web_search_advanced_exa",
+        "web_answer_exa",
+        "web_find_similar_exa",
+      ],
+    });
+    mockSearch.mockResolvedValue(defaultSearchResponse);
+
+    const mockPi = createMockPi({ "--exa-config-file": configPath, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    await tool?.execute(
+      "call-1",
+      { query: "advanced query" },
+      { aborted: false } as AbortSignal,
+      vi.fn(),
+      undefined as never,
+    );
+
+    const [, opts] = mockSearch.mock.calls[0];
+    expect(opts.contents.summary).toBeUndefined();
+  });
+
+  it("forwards crawl freshness and subpage options in web_search_advanced_exa", async () => {
+    const configPath = writeTempConfig({
+      enabledTools: [
+        "web_search_exa",
+        "web_fetch_exa",
+        "web_search_advanced_exa",
+        "web_answer_exa",
+        "web_find_similar_exa",
+      ],
+    });
+    mockSearch.mockResolvedValue(defaultSearchResponse);
+
+    const mockPi = createMockPi({ "--exa-config-file": configPath, "--exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    await tool?.execute(
+      "call-1",
+      {
+        query: "advanced query",
+        maxAgeHours: 0,
+        livecrawlTimeout: 4000,
+        subpages: 3,
+        subpageTarget: ["about", "pricing"],
+      },
+      { aborted: false } as AbortSignal,
+      vi.fn(),
+      undefined as never,
+    );
+
+    const [, opts] = mockSearch.mock.calls[0];
+    expect(opts.contents.maxAgeHours).toBe(0);
+    expect(opts.contents.livecrawlTimeout).toBe(4000);
+    expect(opts.contents.subpages).toBe(3);
+    expect(opts.contents.subpageTarget).toEqual(["about", "pricing"]);
+  });
+
   it("rejects deep search types in web_search_advanced_exa", async () => {
     const configPath = writeTempConfig({
       enabledTools: [

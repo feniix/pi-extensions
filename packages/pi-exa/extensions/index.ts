@@ -307,7 +307,7 @@ export default function exaExtension(pi: ExtensionAPI) {
       name: "web_search_advanced_exa",
       label: "Exa Advanced Search",
       description:
-        "Advanced web search with full Exa API control including category filters, domain restrictions, date ranges, highlights, and summaries.",
+        "Advanced web search with full Exa API control: category filters, domain restrictions, date ranges, text-content filters (includeText/excludeText), location targeting (userLocation), highlights, LLM summaries, freshness controls (maxAgeHours, livecrawlTimeout), and subpage crawling (subpages, subpageTarget).",
       promptSnippet: "Advanced search with category, domain, and date filters.",
       promptGuidelines: [
         "Use web_search_advanced_exa when you need category, domain, or date filters; use web_search_exa for simpler lookups.",
@@ -326,9 +326,23 @@ export default function exaExtension(pi: ExtensionAPI) {
           endPublishedDate: params.endPublishedDate,
           includeDomains: params.includeDomains,
           excludeDomains: params.excludeDomains,
+          includeText: params.includeText,
+          excludeText: params.excludeText,
+          userLocation: params.userLocation,
+          moderation: params.moderation,
+          additionalQueries: params.additionalQueries,
           textMaxCharacters: params.textMaxCharacters,
+          contextMaxCharacters: params.contextMaxCharacters,
           enableHighlights: params.enableHighlights,
           highlightsNumSentences: params.highlightsNumSentences,
+          highlightsMaxCharacters: params.highlightsMaxCharacters,
+          highlightsQuery: params.highlightsQuery,
+          enableSummary: params.enableSummary,
+          summaryQuery: params.summaryQuery,
+          maxAgeHours: params.maxAgeHours,
+          livecrawlTimeout: params.livecrawlTimeout,
+          subpages: params.subpages,
+          subpageTarget: params.subpageTarget,
         }),
     });
   }
