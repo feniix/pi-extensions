@@ -6,10 +6,15 @@
  * must not import from `@earendil-works/pi-coding-agent` or the MCP SDK.
  */
 
-import { definePortableTool, type PortableTool } from "@feniix/bridgekit";
+import { definePortableTool, type PortableTool, type PortableToolResult } from "@feniix/bridgekit";
 import type { Static, TObject } from "typebox";
 import type { ToolPerformResult } from "./formatters.js";
+import { createResearchPlanner, type ResearchPlanner } from "./research-planner.js";
 import {
+  exaResearchResetParams,
+  exaResearchStatusParams,
+  exaResearchStepParams,
+  exaResearchSummaryParams,
   webAnswerParams,
   webFetchParams,
   webFindSimilarParams,
@@ -29,6 +34,30 @@ export interface ExaToolsOptions {
   resolveApiKey?: () => string | undefined;
   /** Host-agnostic gating; tools whose names return false are omitted from the returned array. */
   isToolEnabled?: (name: string) => boolean;
+  /** Planner instance for the four exa_research_* tools. Defaults to a fresh createResearchPlanner(). */
+  planner?: ResearchPlanner;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function localToolResult(toolName: string, result: unknown): PortableToolResult {
+  const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+  const base = { tool: toolName };
+  return {
+    text,
+    structuredContent: isRecord(result) ? { ...base, ...result } : base,
+  };
+}
+
+function localToolError(toolName: string, label: string, error: unknown): PortableToolResult {
+  const message = toErrorMessage(error);
+  return {
+    text: `${label} error: ${message}`,
+    isError: true,
+    structuredContent: { tool: toolName, error: message },
+  };
 }
 
 const MISSING_KEY_TEXT = "Exa API key not configured. Set EXA_API_KEY or use --exa-api-key flag.";
@@ -101,8 +130,83 @@ function exaTool<TParams extends TObject>(
 export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableTool<TObject>[] {
   const resolveApiKey = opts.resolveApiKey ?? (() => undefined);
   const isEnabled = opts.isToolEnabled ?? (() => true);
+  const planner = opts.planner ?? createResearchPlanner();
 
   const tools: PortableTool<TObject>[] = [];
+
+  if (isEnabled("exa_research_step")) {
+    tools.push(
+      definePortableTool({
+        name: "exa_research_step",
+        title: "Exa Research Step",
+        description: "Record one step in a stateful, local Exa research planning session without calling Exa APIs.",
+        parameters: exaResearchStepParams,
+        execute(args) {
+          try {
+            return localToolResult("exa_research_step", planner.recordStep(args));
+          } catch (error) {
+            return localToolError("exa_research_step", "Exa Research Step", error);
+          }
+        },
+      }),
+    );
+  }
+
+  if (isEnabled("exa_research_status")) {
+    tools.push(
+      definePortableTool({
+        name: "exa_research_status",
+        title: "Exa Research Status",
+        description:
+          "Report current local Exa research planning state, criteria coverage, sources, gaps, and next action.",
+        parameters: exaResearchStatusParams,
+        execute() {
+          try {
+            return localToolResult("exa_research_status", planner.getStatus());
+          } catch (error) {
+            return localToolError("exa_research_status", "Exa Research Status", error);
+          }
+        },
+      }),
+    );
+  }
+
+  if (isEnabled("exa_research_summary")) {
+    tools.push(
+      definePortableTool({
+        name: "exa_research_summary",
+        title: "Exa Research Summary",
+        description:
+          "Generate a human-readable Exa research plan, Source Pack, or optional suggested web_research_exa payload.",
+        parameters: exaResearchSummaryParams,
+        execute(args) {
+          try {
+            return localToolResult("exa_research_summary", planner.getSummary(args));
+          } catch (error) {
+            return localToolError("exa_research_summary", "Exa Research Summary", error);
+          }
+        },
+      }),
+    );
+  }
+
+  if (isEnabled("exa_research_reset")) {
+    tools.push(
+      definePortableTool({
+        name: "exa_research_reset",
+        title: "Exa Research Reset",
+        description: "Clear the current in-memory Exa research planning session.",
+        parameters: exaResearchResetParams,
+        execute() {
+          try {
+            return localToolResult("exa_research_reset", planner.reset());
+          } catch (error) {
+            return localToolError("exa_research_reset", "Exa Research Reset", error);
+          }
+        },
+      }),
+    );
+  }
 
   if (isEnabled("web_search_exa")) {
     tools.push(

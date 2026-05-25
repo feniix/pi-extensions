@@ -508,4 +508,96 @@ describe("portable Exa tools", () => {
       expect(tools.find((t) => t.name === "web_research_exa")).toBeUndefined();
     });
   });
+
+  describe("planner tools", () => {
+    const stepInput = {
+      topic: "isolated planner",
+      stage: "framing",
+      note: "Frame an isolated planner test.",
+      thought_number: 1,
+      total_thoughts: 2,
+      next_step_needed: true,
+    };
+
+    it("registers all four planner tools by default and they never call the Exa SDK", async () => {
+      const tools = createExaTools();
+      const stepTool = findTool(tools, "exa_research_step");
+      const statusTool = findTool(tools, "exa_research_status");
+      const summaryTool = findTool(tools, "exa_research_summary");
+      const resetTool = findTool(tools, "exa_research_reset");
+
+      await executePortableTool(stepTool, stepInput, { host: "test" });
+      await executePortableTool(statusTool, {}, { host: "test" });
+      await executePortableTool(summaryTool, { mode: "brief" }, { host: "test" });
+      await executePortableTool(resetTool, {}, { host: "test" });
+
+      expect(mockSearch).not.toHaveBeenCalled();
+      expect(mockGetContents).not.toHaveBeenCalled();
+      expect(mockAnswer).not.toHaveBeenCalled();
+      expect(mockFindSimilar).not.toHaveBeenCalled();
+    });
+
+    it("step records state and surfaces it via JSON text and structuredContent", async () => {
+      const tools = createExaTools();
+      const stepTool = findTool(tools, "exa_research_step");
+
+      const result = await executePortableTool(stepTool, stepInput, { host: "test" });
+
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toContain("isolated planner");
+      expect(result.structuredContent).toMatchObject({ tool: "exa_research_step", topic: "isolated planner" });
+    });
+
+    it("status reflects the most recent step recorded through the same factory's planner", async () => {
+      const tools = createExaTools();
+      const stepTool = findTool(tools, "exa_research_step");
+      const statusTool = findTool(tools, "exa_research_status");
+
+      await executePortableTool(stepTool, stepInput, { host: "test" });
+      const status = await executePortableTool(statusTool, {}, { host: "test" });
+
+      expect(status.text).toContain("isolated planner");
+      expect(status.structuredContent).toMatchObject({ tool: "exa_research_status", topic: "isolated planner" });
+    });
+
+    it("summary returns the execution-plan string for mode='execution_plan'", async () => {
+      const tools = createExaTools();
+      await executePortableTool(findTool(tools, "exa_research_step"), stepInput, { host: "test" });
+
+      const summary = await executePortableTool(
+        findTool(tools, "exa_research_summary"),
+        { mode: "execution_plan" },
+        { host: "test" },
+      );
+
+      expect(summary.isError).toBeUndefined();
+      expect(summary.text).toContain("# Research Execution Plan");
+      expect(summary.text).toContain("isolated planner");
+    });
+
+    it("reset clears planner state and reports an empty status", async () => {
+      const tools = createExaTools();
+      const stepTool = findTool(tools, "exa_research_step");
+      const statusTool = findTool(tools, "exa_research_status");
+      const resetTool = findTool(tools, "exa_research_reset");
+
+      await executePortableTool(stepTool, stepInput, { host: "test" });
+      await executePortableTool(resetTool, {}, { host: "test" });
+      const status = await executePortableTool(statusTool, {}, { host: "test" });
+
+      expect(status.text).not.toContain("isolated planner");
+      expect(status.structuredContent).toMatchObject({ tool: "exa_research_status", stepCount: 0 });
+    });
+
+    it("isolates planner state across separately constructed createExaTools() factories", async () => {
+      const toolsA = createExaTools();
+      const toolsB = createExaTools();
+
+      await executePortableTool(findTool(toolsA, "exa_research_step"), stepInput, { host: "test" });
+      const statusB = await executePortableTool(findTool(toolsB, "exa_research_status"), {}, { host: "test" });
+
+      expect(statusB.text).not.toContain("isolated planner");
+      expect(statusB.structuredContent).toMatchObject({ tool: "exa_research_status", stepCount: 0 });
+    });
+  });
 });
