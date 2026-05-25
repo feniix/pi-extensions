@@ -9,11 +9,18 @@
 import { definePortableTool, type PortableTool } from "@feniix/bridgekit";
 import type { Static, TObject } from "typebox";
 import type { ToolPerformResult } from "./formatters.js";
-import { webAnswerParams, webFetchParams, webFindSimilarParams, webSearchParams } from "./schemas.js";
+import {
+  webAnswerParams,
+  webFetchParams,
+  webFindSimilarParams,
+  webSearchAdvancedParams,
+  webSearchParams,
+} from "./schemas.js";
 import { performAnswer } from "./web-answer.js";
 import { performWebFetch } from "./web-fetch.js";
 import { performFindSimilar } from "./web-find-similar.js";
 import { DEFAULT_NUM_RESULTS, performWebSearch } from "./web-search.js";
+import { performAdvancedSearch } from "./web-search-advanced.js";
 
 export interface ExaToolsOptions {
   /** Resolve the Exa API key at execute time. Return undefined when unconfigured. */
@@ -180,6 +187,50 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
               endPublishedDate: args.endPublishedDate,
               includeDomains: args.includeDomains,
               excludeDomains: args.excludeDomains,
+            }),
+        },
+        resolveApiKey,
+      ),
+    );
+  }
+
+  if (isEnabled("web_search_advanced_exa")) {
+    tools.push(
+      exaTool(
+        {
+          name: "web_search_advanced_exa",
+          title: "Exa Advanced Search",
+          description:
+            "Advanced web search with full Exa API control: category filters, domain restrictions, date ranges, text-content filters (includeText/excludeText), location targeting (userLocation), highlights, LLM summaries, freshness controls (maxAgeHours, livecrawlTimeout), and subpage crawling (subpages, subpageTarget).",
+          parameters: webSearchAdvancedParams,
+          pendingMessage: "Performing advanced search via Exa...",
+          errorPrefix: "Exa advanced search error",
+          perform: (apiKey, args) =>
+            performAdvancedSearch(apiKey, args.query, {
+              numResults: args.numResults,
+              category: args.category,
+              type: args.type,
+              startPublishedDate: args.startPublishedDate,
+              endPublishedDate: args.endPublishedDate,
+              includeDomains: args.includeDomains,
+              excludeDomains: args.excludeDomains,
+              includeText: args.includeText,
+              excludeText: args.excludeText,
+              userLocation: args.userLocation,
+              moderation: args.moderation,
+              additionalQueries: args.additionalQueries,
+              textMaxCharacters: args.textMaxCharacters,
+              contextMaxCharacters: args.contextMaxCharacters,
+              enableHighlights: args.enableHighlights,
+              highlightsNumSentences: args.highlightsNumSentences,
+              highlightsMaxCharacters: args.highlightsMaxCharacters,
+              highlightsQuery: args.highlightsQuery,
+              enableSummary: args.enableSummary,
+              summaryQuery: args.summaryQuery,
+              maxAgeHours: args.maxAgeHours,
+              livecrawlTimeout: args.livecrawlTimeout,
+              subpages: args.subpages,
+              subpageTarget: args.subpageTarget,
             }),
         },
         resolveApiKey,

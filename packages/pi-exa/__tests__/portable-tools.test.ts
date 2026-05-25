@@ -339,4 +339,92 @@ describe("portable Exa tools", () => {
       expect(result.structuredContent).toMatchObject({ tool: "web_find_similar_exa", error: "unreachable" });
     });
   });
+
+  describe("web_search_advanced_exa", () => {
+    it("forwards the full advanced-search option surface and formats results", async () => {
+      mockSearch.mockResolvedValue(defaultSearchResponse);
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_search_advanced_exa");
+
+      const result = await executePortableTool(
+        tool,
+        {
+          query: "rust async runtime",
+          numResults: 5,
+          category: "research paper",
+          type: "auto",
+          startPublishedDate: "2024-01-01",
+          includeDomains: ["arxiv.org"],
+          includeText: ["rust"],
+          excludeText: ["python"],
+          userLocation: "US",
+          moderation: true,
+          additionalQueries: ["tokio runtime"],
+          textMaxCharacters: 1500,
+          contextMaxCharacters: 1000,
+          enableSummary: true,
+          summaryQuery: "what is described",
+          highlightsMaxCharacters: 480,
+          maxAgeHours: 24,
+          livecrawlTimeout: 4000,
+          subpages: 2,
+          subpageTarget: ["about"],
+        },
+        { host: "test" },
+      );
+
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toContain("Example Result");
+      expect(result.structuredContent).toMatchObject({ tool: "web_search_advanced_exa" });
+      expect(mockSearch).toHaveBeenCalledWith(
+        "rust async runtime",
+        expect.objectContaining({
+          numResults: 5,
+          category: "research paper",
+          type: "auto",
+          startPublishedDate: "2024-01-01",
+          includeDomains: ["arxiv.org"],
+          includeText: ["rust"],
+          excludeText: ["python"],
+          userLocation: "US",
+          moderation: true,
+          additionalQueries: ["tokio runtime"],
+          contents: expect.objectContaining({
+            text: { maxCharacters: 1500 },
+            summary: { query: "what is described" },
+            context: { maxCharacters: 1000 },
+            maxAgeHours: 24,
+            livecrawlTimeout: 4000,
+            subpages: 2,
+            subpageTarget: ["about"],
+          }),
+        }),
+      );
+    });
+
+    it("surfaces validation throws as isError:true with the advanced-search prefix", async () => {
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_search_advanced_exa");
+
+      const result = await executePortableTool(
+        tool,
+        { query: "anything", category: "company", excludeDomains: ["blocked.com"] },
+        { host: "test" },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("Exa advanced search error");
+      expect(result.text).toContain("excludeDomains");
+      expect(result.structuredContent).toMatchObject({ tool: "web_search_advanced_exa" });
+      expect(mockSearch).not.toHaveBeenCalled();
+    });
+
+    it("is hidden when isToolEnabled returns false for web_search_advanced_exa", () => {
+      const tools = createExaTools({
+        resolveApiKey: () => "test-key",
+        isToolEnabled: (name) => name !== "web_search_advanced_exa",
+      });
+      expect(tools.find((t) => t.name === "web_search_advanced_exa")).toBeUndefined();
+    });
+  });
 });
