@@ -9,7 +9,8 @@
 import { definePortableTool, type PortableTool } from "@feniix/bridgekit";
 import type { Static, TObject } from "typebox";
 import type { ToolPerformResult } from "./formatters.js";
-import { webFetchParams, webSearchParams } from "./schemas.js";
+import { webAnswerParams, webFetchParams, webSearchParams } from "./schemas.js";
+import { performAnswer } from "./web-answer.js";
 import { performWebFetch } from "./web-fetch.js";
 import { DEFAULT_NUM_RESULTS, performWebSearch } from "./web-search.js";
 
@@ -128,6 +129,29 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
               highlights: args.highlights,
               summary: args.summary,
               maxAgeHours: args.maxAgeHours,
+            }),
+        },
+        resolveApiKey,
+      ),
+    );
+  }
+
+  if (isEnabled("web_answer_exa")) {
+    tools.push(
+      exaTool(
+        {
+          name: "web_answer_exa",
+          title: "Exa Answer",
+          description: "Get a grounded answer with source citations and optional structured output.",
+          parameters: webAnswerParams,
+          pendingMessage: "Fetching answer from Exa...",
+          errorPrefix: "Exa answer error",
+          perform: (apiKey, args) =>
+            performAnswer(apiKey, {
+              query: args.query,
+              systemPrompt: args.systemPrompt,
+              text: args.text,
+              outputSchema: args.outputSchema,
             }),
         },
         resolveApiKey,

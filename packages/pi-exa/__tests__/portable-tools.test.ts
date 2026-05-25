@@ -229,4 +229,66 @@ describe("portable Exa tools", () => {
       expect(result.structuredContent).toMatchObject({ tool: "web_fetch_exa", error: "403" });
     });
   });
+
+  describe("web_answer_exa", () => {
+    it("formats answer text with citations and forwards systemPrompt + outputSchema", async () => {
+      mockAnswer.mockResolvedValue({
+        answer: "Example domain is reserved for documentation.",
+        citations: [{ url: "https://example.com", title: "Example Domain", publishedDate: "2024-01-01T00:00:00Z" }],
+        costDollars: { total: 0.01 },
+      });
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_answer_exa");
+
+      const result = await executePortableTool(
+        tool,
+        {
+          query: "what is example.com",
+          systemPrompt: "Be concise.",
+          text: true,
+          outputSchema: { type: "object" },
+        },
+        { host: "test" },
+      );
+
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toContain("Example domain is reserved");
+      expect(result.text).toContain("https://example.com");
+      expect(result.structuredContent).toMatchObject({
+        tool: "web_answer_exa",
+        costDollars: { total: 0.01 },
+      });
+      expect(mockAnswer).toHaveBeenCalledWith(
+        "what is example.com",
+        expect.objectContaining({
+          systemPrompt: "Be concise.",
+          text: true,
+          outputSchema: { type: "object" },
+        }),
+      );
+    });
+
+    it("returns isError:true with the answer-prefixed message when the SDK throws", async () => {
+      mockAnswer.mockRejectedValue(new Error("rate limited"));
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_answer_exa");
+
+      const result = await executePortableTool(tool, { query: "anything" }, { host: "test" });
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("Exa answer error: rate limited");
+      expect(result.structuredContent).toMatchObject({ tool: "web_answer_exa", error: "rate limited" });
+    });
+
+    it("emits an answer-specific pending progress update", async () => {
+      mockAnswer.mockResolvedValue({ answer: "ok", citations: [], costDollars: { total: 0 } });
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_answer_exa");
+      const progress = vi.fn();
+
+      await executePortableTool(tool, { query: "anything" }, { host: "test", progress });
+
+      expect(progress).toHaveBeenCalledWith(expect.objectContaining({ text: "Fetching answer from Exa..." }));
+    });
+  });
 });
