@@ -2,7 +2,14 @@
  * Exa advanced web search — full API control with category filters, domain restrictions, and date ranges.
  */
 
-import type { HighlightsContentsOptions, SearchResponse, SearchResult, TextContentsOptions } from "exa-js";
+import type {
+  ContextOptions,
+  HighlightsContentsOptions,
+  SearchResponse,
+  SearchResult,
+  SummaryContentsOptions,
+  TextContentsOptions,
+} from "exa-js";
 import { type AdvancedSearchType, DEEP_SEARCH_TYPES } from "./constants.js";
 import { getExaClient } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
@@ -28,6 +35,8 @@ const LINKEDIN_DOMAINS = new Set(["linkedin.com", "www.linkedin.com"]);
 type AdvancedResultContents = {
   text: TextContentsOptions;
   highlights?: HighlightsContentsOptions;
+  summary?: SummaryContentsOptions;
+  context?: ContextOptions;
 };
 
 type AdvancedResult = SearchResult<AdvancedResultContents>;
