@@ -181,7 +181,7 @@ function buildSummary(options: AdvancedSearchOptions): AdvancedSummary | undefin
 
 function buildContents(options: AdvancedSearchOptions, fallbackQuery: string): AdvancedContents {
   const contents: AdvancedContents = {
-    text: { maxCharacters: options.textMaxCharacters || 3000 },
+    text: { maxCharacters: options.textMaxCharacters ?? 3000 },
   };
 
   const highlights = buildHighlights(options, fallbackQuery);
@@ -226,7 +226,7 @@ export async function performAdvancedSearch(
   const exa = getExaClient(apiKey);
 
   const payload: AdvancedSearchPayload = {
-    numResults: options.numResults || 10,
+    numResults: options.numResults ?? 10,
     contents: buildContents(options, query),
   };
   if (category) payload.category = category;
