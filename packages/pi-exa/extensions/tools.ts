@@ -13,12 +13,14 @@ import {
   webAnswerParams,
   webFetchParams,
   webFindSimilarParams,
+  webResearchParams,
   webSearchAdvancedParams,
   webSearchParams,
 } from "./schemas.js";
 import { performAnswer } from "./web-answer.js";
 import { performWebFetch } from "./web-fetch.js";
 import { performFindSimilar } from "./web-find-similar.js";
+import { performResearch } from "./web-research.js";
 import { DEFAULT_NUM_RESULTS, performWebSearch } from "./web-search.js";
 import { performAdvancedSearch } from "./web-search-advanced.js";
 
@@ -187,6 +189,36 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
               endPublishedDate: args.endPublishedDate,
               includeDomains: args.includeDomains,
               excludeDomains: args.excludeDomains,
+            }),
+        },
+        resolveApiKey,
+      ),
+    );
+  }
+
+  if (isEnabled("web_research_exa")) {
+    tools.push(
+      exaTool(
+        {
+          name: "web_research_exa",
+          title: "Exa Deep Research",
+          description: "Deep-reasoning Exa search with synthesized, grounded output for complex research topics.",
+          parameters: webResearchParams,
+          pendingMessage: "Performing deep research via Exa...",
+          errorPrefix: "Exa research error",
+          perform: (apiKey, args) =>
+            performResearch(apiKey, {
+              query: args.query,
+              type: args.type,
+              systemPrompt: args.systemPrompt,
+              textMaxCharacters: args.textMaxCharacters,
+              outputSchema: args.outputSchema,
+              additionalQueries: args.additionalQueries,
+              numResults: args.numResults,
+              includeDomains: args.includeDomains,
+              excludeDomains: args.excludeDomains,
+              startPublishedDate: args.startPublishedDate,
+              endPublishedDate: args.endPublishedDate,
             }),
         },
         resolveApiKey,

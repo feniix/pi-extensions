@@ -427,4 +427,85 @@ describe("portable Exa tools", () => {
       expect(tools.find((t) => t.name === "web_search_advanced_exa")).toBeUndefined();
     });
   });
+
+  describe("web_research_exa", () => {
+    it("forwards deep-search options and returns synthesized text", async () => {
+      mockSearch.mockResolvedValue({
+        requestId: "req-2",
+        costDollars: { total: 0.12 },
+        searchTime: 4500,
+        output: { content: "Synthesized research summary about example.com.", grounding: [] },
+      });
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_research_exa");
+
+      const result = await executePortableTool(
+        tool,
+        {
+          query: "What is example.com?",
+          type: "deep-lite",
+          systemPrompt: "Be concise.",
+          textMaxCharacters: 4000,
+          additionalQueries: ["example domain"],
+          numResults: 3,
+          includeDomains: ["example.com"],
+          startPublishedDate: "2024-01-01",
+        },
+        { host: "test" },
+      );
+
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toContain("Synthesized research summary");
+      expect(result.structuredContent).toMatchObject({
+        tool: "web_research_exa",
+        costDollars: { total: 0.12 },
+        searchTime: 4500,
+      });
+      expect(mockSearch).toHaveBeenCalledWith(
+        "What is example.com?",
+        expect.objectContaining({
+          type: "deep-lite",
+          systemPrompt: "Be concise.",
+          additionalQueries: ["example domain"],
+          numResults: 3,
+          includeDomains: ["example.com"],
+          startPublishedDate: "2024-01-01",
+          contents: expect.objectContaining({ text: { maxCharacters: 4000 } }),
+        }),
+      );
+    });
+
+    it("rejects outputSchema.type other than object|text at the validation layer", async () => {
+      // The TypeBox schema constrains outputSchema.type to "object" | "text".
+      // Under bridgekit the rejection happens at validation time (before
+      // execute), so the result carries the validation shape rather than the
+      // performResearch-throws shape we get on today's Pi adapter. This is a
+      // deliberate improvement: invalid inputs are caught earlier with a
+      // clearer message.
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_research_exa");
+
+      const result = await executePortableTool(
+        tool,
+        { query: "anything", outputSchema: { type: "bogus" as unknown as "object" } },
+        { host: "test" },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("Invalid arguments");
+      expect(result.structuredContent).toMatchObject({
+        kind: "validation",
+        tool: "web_research_exa",
+      });
+      expect(mockSearch).not.toHaveBeenCalled();
+    });
+
+    it("is hidden when isToolEnabled returns false for web_research_exa", () => {
+      const tools = createExaTools({
+        resolveApiKey: () => "test-key",
+        isToolEnabled: (name) => name !== "web_research_exa",
+      });
+      expect(tools.find((t) => t.name === "web_research_exa")).toBeUndefined();
+    });
+  });
 });
