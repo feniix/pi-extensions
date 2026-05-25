@@ -25,10 +25,12 @@ const RESTRICTED_CATEGORIES: readonly SearchCategory[] = ["company", "people"];
 // The "people" category only accepts LinkedIn domains for includeDomains.
 const LINKEDIN_DOMAINS = new Set(["linkedin.com", "www.linkedin.com"]);
 
-type AdvancedResult = SearchResult<{
+type AdvancedContentsShape = {
   text: TextContentsOptions;
   highlights?: HighlightsContentsOptions;
-}>;
+};
+
+type AdvancedResult = SearchResult<AdvancedContentsShape>;
 
 function validateCategory(category: string | undefined): SearchCategory | undefined {
   if (!category) {
@@ -239,19 +241,10 @@ export async function performAdvancedSearch(
   if (options.moderation !== undefined) payload.moderation = options.moderation;
   if (options.additionalQueries) payload.additionalQueries = options.additionalQueries;
 
-  // Cast through `unknown` so we can forward `additionalQueries` without
-  // tripping the SDK's deep-only constraint, while still landing on the
-  // typed `search<T extends ContentsOptions>` overload for the response shape.
-  type AdvancedContentsTyped = {
-    text: TextContentsOptions;
-    highlights?: HighlightsContentsOptions;
-  };
-  type AdvancedSearchOptionsArg = {
-    contents: AdvancedContentsTyped;
-  } & Record<string, unknown>;
-  const result: SearchResponse<AdvancedContentsTyped> = await exa.search<AdvancedContentsTyped>(
+  // See AdvancedSearchPayload comment for why we bypass the SDK type here.
+  const result: SearchResponse<AdvancedContentsShape> = await exa.search<AdvancedContentsShape>(
     query,
-    payload as unknown as AdvancedSearchOptionsArg,
+    payload as unknown as { contents: AdvancedContentsShape } & Record<string, unknown>,
   );
 
   if (!result?.results || result.results.length === 0) {
