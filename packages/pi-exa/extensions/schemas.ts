@@ -3,6 +3,7 @@
  */
 
 import { Type } from "typebox";
+import { ADVANCED_SEARCH_TYPES } from "./constants.js";
 import {
   CRITERION_CATEGORIES,
   CRITERION_STATUSES,
@@ -25,19 +26,7 @@ const outputSchema = Type.Object(
   { additionalProperties: true },
 );
 
-// Canonical values per the live hosted MCP at mcp.exa.ai/mcp are `auto`,
-// `fast`, and `instant`. The legacy `keyword`, `neural`, and `hybrid`
-// values are still accepted by Exa's /search endpoint, so we keep them
-// for backwards compatibility. Hard-removing them would be a breaking
-// change for consumers calling pi-exa with those values today.
-const advancedSearchType = Type.Union([
-  Type.Literal("auto"),
-  Type.Literal("fast"),
-  Type.Literal("instant"),
-  Type.Literal("keyword"),
-  Type.Literal("neural"),
-  Type.Literal("hybrid"),
-]);
+const advancedSearchType = Type.Union(ADVANCED_SEARCH_TYPES.map((value) => Type.Literal(value)));
 
 const researchStage = Type.Union([
   Type.Literal(RESEARCH_STAGES[0]),
