@@ -6,6 +6,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { PortableToolExecutionError } from "@feniix/bridgekit/pi";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSearch = vi.fn();
@@ -598,16 +599,22 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
-    const result = await tool?.execute(
-      "call-1",
-      { query: "advanced query", type: "deep" },
-      { aborted: false } as AbortSignal,
-      vi.fn(),
-      undefined as never,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("does not support deep types");
+    // The TypeBox schema for webSearchAdvancedParams.type accepts only
+    // ADVANCED_SEARCH_TYPES, so bridgekit rejects deep types at the validation
+    // layer. performAdvancedSearch.validateAdvancedType is kept as defense in
+    // depth but is now unreachable on this path.
+    await expect(
+      tool?.execute(
+        "call-1",
+        { query: "advanced query", type: "deep" },
+        { aborted: false } as AbortSignal,
+        vi.fn(),
+        undefined as never,
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Invalid arguments"),
+      details: expect.objectContaining({ kind: "validation", tool: "web_search_advanced_exa" }),
+    });
   });
 
   it("executes web_research_exa and forwards deep search options", async () => {
@@ -788,16 +795,18 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
-    const result = await tool?.execute(
-      "call-1",
-      { query: "advanced query", category: "companey" },
-      { aborted: false } as AbortSignal,
-      vi.fn(),
-      undefined as never,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Invalid category "companey"');
+    await expect(
+      tool?.execute(
+        "call-1",
+        { query: "advanced query", category: "companey" },
+        { aborted: false } as AbortSignal,
+        vi.fn(),
+        undefined as never,
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('Invalid category "companey"'),
+      details: { kind: "domain", tool: "web_search_advanced_exa" },
+    });
   });
 
   it("returns an error when search SDK calls fail", async () => {
@@ -807,10 +816,12 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_search_exa");
-    const result = await tool.execute("call", { query: "test" }, undefined, undefined, undefined as never);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Exa search error: search down");
+    await expect(
+      tool.execute("call", { query: "test" }, undefined, undefined, undefined as never),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Exa search error: search down"),
+      details: { kind: "domain", tool: "web_search_exa", error: "search down" },
+    });
   });
 
   it("returns an error when advanced search SDK calls fail", async () => {
@@ -820,10 +831,12 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
-    const result = await tool.execute("call", { query: "test" }, undefined, undefined, undefined as never);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Exa advanced search error: advanced down");
+    await expect(
+      tool.execute("call", { query: "test" }, undefined, undefined, undefined as never),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Exa advanced search error: advanced down"),
+      details: { kind: "domain", tool: "web_search_advanced_exa", error: "advanced down" },
+    });
   });
 
   it("returns an error when fetch SDK calls fail", async () => {
@@ -833,16 +846,12 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_fetch_exa");
-    const result = await tool.execute(
-      "call",
-      { urls: ["https://example.com"] },
-      undefined,
-      undefined,
-      undefined as never,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Exa fetch error: fetch down");
+    await expect(
+      tool.execute("call", { urls: ["https://example.com"] }, undefined, undefined, undefined as never),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Exa fetch error: fetch down"),
+      details: { kind: "domain", tool: "web_fetch_exa", error: "fetch down" },
+    });
   });
 
   it("returns an error when find-similar SDK calls fail", async () => {
@@ -852,10 +861,12 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_find_similar_exa");
-    const result = await tool.execute("call", { url: "https://example.com" }, undefined, undefined, undefined as never);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Exa similar search error: similar down");
+    await expect(
+      tool.execute("call", { url: "https://example.com" }, undefined, undefined, undefined as never),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Exa similar search error: similar down"),
+      details: { kind: "domain", tool: "web_find_similar_exa", error: "similar down" },
+    });
   });
 
   it("returns an error when research SDK calls fail", async () => {
@@ -865,10 +876,12 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_research_exa");
-    const result = await tool.execute("call", { query: "test" }, undefined, undefined, undefined as never);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Exa research error: research down");
+    await expect(
+      tool.execute("call", { query: "test" }, undefined, undefined, undefined as never),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Exa research error: research down"),
+      details: { kind: "domain", tool: "web_research_exa", error: "research down" },
+    });
   });
 
   it("returns an error when answer SDK calls fail", async () => {
@@ -878,10 +891,12 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_answer_exa");
-    const result = await tool.execute("call", { query: "test" }, undefined, undefined, undefined as never);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Exa answer error: answer down");
+    await expect(
+      tool.execute("call", { query: "test" }, undefined, undefined, undefined as never),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Exa answer error: answer down"),
+      details: { kind: "domain", tool: "web_answer_exa", error: "answer down" },
+    });
   });
 
   it("returns an error when company category is combined with startPublishedDate", async () => {
@@ -889,16 +904,18 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
-    const result = await tool.execute(
-      "call",
-      { query: "acme corp", category: "company", startPublishedDate: "2024-01-01" },
-      undefined,
-      undefined,
-      undefined as never,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Category "company" does not support: startPublishedDate');
+    await expect(
+      tool.execute(
+        "call",
+        { query: "acme corp", category: "company", startPublishedDate: "2024-01-01" },
+        undefined,
+        undefined,
+        undefined as never,
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('Category "company" does not support: startPublishedDate'),
+      details: { kind: "domain", tool: "web_search_advanced_exa" },
+    });
   });
 
   it("returns an error when company category is combined with excludeDomains", async () => {
@@ -906,16 +923,18 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
-    const result = await tool.execute(
-      "call",
-      { query: "acme corp", category: "company", excludeDomains: ["crunchbase.com"] },
-      undefined,
-      undefined,
-      undefined as never,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Category "company" does not support: excludeDomains');
+    await expect(
+      tool.execute(
+        "call",
+        { query: "acme corp", category: "company", excludeDomains: ["crunchbase.com"] },
+        undefined,
+        undefined,
+        undefined as never,
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('Category "company" does not support: excludeDomains'),
+      details: { kind: "domain", tool: "web_search_advanced_exa" },
+    });
   });
 
   it("returns an error when people category is combined with endPublishedDate", async () => {
@@ -923,16 +942,18 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
-    const result = await tool.execute(
-      "call",
-      { query: "John Doe engineer", category: "people", endPublishedDate: "2024-12-31" },
-      undefined,
-      undefined,
-      undefined as never,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Category "people" does not support: endPublishedDate');
+    await expect(
+      tool.execute(
+        "call",
+        { query: "John Doe engineer", category: "people", endPublishedDate: "2024-12-31" },
+        undefined,
+        undefined,
+        undefined as never,
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('Category "people" does not support: endPublishedDate'),
+      details: { kind: "domain", tool: "web_search_advanced_exa" },
+    });
   });
 
   it("returns an error when people category is combined with non-LinkedIn includeDomains", async () => {
@@ -940,17 +961,23 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
-    const result = await tool.execute(
-      "call",
-      { query: "John Doe engineer", category: "people", includeDomains: ["twitter.com", "example.com"] },
-      undefined,
-      undefined,
-      undefined as never,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Category "people" only accepts LinkedIn domains');
-    expect(result.content[0].text).toContain("twitter.com");
+    let caught: unknown;
+    try {
+      await tool.execute(
+        "call",
+        { query: "John Doe engineer", category: "people", includeDomains: ["twitter.com", "example.com"] },
+        undefined,
+        undefined,
+        undefined as never,
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(PortableToolExecutionError);
+    const error = caught as PortableToolExecutionError;
+    expect(error.message).toContain('Category "people" only accepts LinkedIn domains');
+    expect(error.message).toContain("twitter.com");
+    expect(error.details).toMatchObject({ kind: "domain", tool: "web_search_advanced_exa" });
   });
 
   it("allows people category with LinkedIn includeDomains", async () => {
@@ -975,21 +1002,27 @@ describe("pi-exa extension", () => {
     );
   });
 
-  it("returns an error when research receives an invalid outputSchema type", async () => {
+  it("rejects invalid outputSchema.type at the bridgekit validation layer", async () => {
+    // The TypeBox schema constrains outputSchema.type to "object" | "text".
+    // Bridgekit validates pre-execute and throws PortableToolExecutionError
+    // with kind: "validation". This catches the bad value earlier and with a
+    // more structured payload than the previous performResearch throw.
     const mockPi = createMockPi({ "--exa-enable-research": true, "--exa-api-key": "flag-key" });
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_research_exa");
-    const result = await tool.execute(
-      "call",
-      { query: "AI trends", outputSchema: { type: "array", items: { type: "string" } } },
-      undefined,
-      undefined,
-      undefined as never,
-    );
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('outputSchema.type must be either "object" or "text"');
+    await expect(
+      tool.execute(
+        "call",
+        { query: "AI trends", outputSchema: { type: "array", items: { type: "string" } } },
+        undefined,
+        undefined,
+        undefined as never,
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Invalid arguments"),
+      details: expect.objectContaining({ kind: "validation", tool: "web_research_exa" }),
+    });
   });
 
   it("returns cancelled result when signal is aborted", async () => {
@@ -1072,20 +1105,21 @@ describe("pi-exa extension", () => {
     );
   });
 
-  it("returns missing key errors when authentication is absent", async () => {
+  it("throws PortableToolExecutionError with missing-key details when authentication is absent", async () => {
+    // Pre-bridgekit behavior: tool returned {isError:true, ...} as a soft Pi
+    // result. Under bridgekit's contract, isError:true portable results reject
+    // with PortableToolExecutionError so the host sees a native tool failure.
+    // The model-visible text is unchanged.
     const mockPi = createMockPi();
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_search_exa");
     expect(tool).toBeDefined();
-    const result = await tool.execute("call", { query: "test" }, undefined, undefined, undefined as never);
-
-    expect(result).toEqual(
-      expect.objectContaining({
-        isError: true,
-        details: expect.objectContaining({ error: "missing_api_key" }),
-      }),
-    );
-    expect(result.content[0].text).toContain("API key not configured");
+    await expect(
+      tool.execute("call", { query: "test" }, undefined, undefined, undefined as never),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("API key not configured"),
+      details: { kind: "domain", tool: "web_search_exa", error: "missing_api_key" },
+    });
   });
 });
