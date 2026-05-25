@@ -4,6 +4,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  createResearchPlanner,
   getResearchStatus,
   getResearchSummary,
   recordResearchStep,
@@ -41,6 +42,53 @@ describe("research planner schemas", () => {
     expect(literalValues(gapProperties.severity)).toEqual([...GAP_SEVERITIES]);
     expect(literalValues(gapProperties.resolution)).toEqual([...GAP_RESOLUTIONS]);
     expect(literalValues(exaResearchSummaryParams.properties.mode)).toEqual([...SUMMARY_MODES]);
+  });
+});
+
+describe("createResearchPlanner factory", () => {
+  it("isolates state across independently constructed planners", () => {
+    const a = createResearchPlanner();
+    const b = createResearchPlanner();
+
+    a.recordStep({
+      topic: "planner A topic",
+      stage: "framing",
+      note: "first step on planner A",
+      thought_number: 1,
+      total_thoughts: 2,
+      next_step_needed: true,
+    });
+
+    expect(a.getStatus().topic).toBe("planner A topic");
+    expect(a.getStatus().stepCount).toBe(1);
+    expect(b.getStatus().topic).toBeUndefined();
+    expect(b.getStatus().stepCount).toBe(0);
+  });
+
+  it("matches the module-level default planner behavior for a single step", () => {
+    resetResearchPlanner();
+    const planner = createResearchPlanner();
+
+    const factoryResult = planner.recordStep({
+      topic: "same input",
+      stage: "framing",
+      note: "single step",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+    });
+    const moduleResult = recordResearchStep({
+      topic: "same input",
+      stage: "framing",
+      note: "single step",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+    });
+
+    expect(factoryResult.stepCount).toBe(moduleResult.stepCount);
+    expect(factoryResult.progress).toEqual(moduleResult.progress);
+    expect(factoryResult.planFragment).toBe(moduleResult.planFragment);
   });
 });
 
