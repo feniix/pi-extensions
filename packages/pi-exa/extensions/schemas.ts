@@ -219,7 +219,11 @@ export const webSearchAdvancedParams = Type.Object(
     ),
     textMaxCharacters: Type.Optional(Type.Integer({ minimum: 1 })),
     contextMaxCharacters: Type.Optional(
-      Type.Integer({ description: "Maximum characters for the aggregated context string.", minimum: 1 }),
+      Type.Integer({
+        description:
+          "Maximum characters for the aggregated context string. (Note: maps to Exa's deprecated context option; may be removed in a future Exa API release.)",
+        minimum: 1,
+      }),
     ),
     enableHighlights: Type.Optional(Type.Boolean()),
     highlightsNumSentences: Type.Optional(

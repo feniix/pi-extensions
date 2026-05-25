@@ -166,7 +166,7 @@ Params:
 - `moderation`: when `true`, filter unsafe content.
 - `additionalQueries`: alternative query formulations to broaden coverage.
 - `textMaxCharacters`: max chars of page text per result (default 3000).
-- `contextMaxCharacters`: max chars for the aggregated context string.
+- `contextMaxCharacters`: max chars for the aggregated context string. Maps to Exa's deprecated `context` option and may be removed in a future Exa API release.
 - Highlights: `enableHighlights` (gate), `highlightsMaxCharacters` (preferred), `highlightsNumSentences` (legacy fallback), `highlightsQuery` (overrides the search query for highlight ranking). Providing `highlightsQuery` or `highlightsMaxCharacters` implies `enableHighlights: true`; passing `enableHighlights: false` explicitly always disables highlights.
 - Summary: `enableSummary` and/or `summaryQuery` (providing `summaryQuery` implies `enableSummary: true`; passing `enableSummary: false` explicitly always disables the summary).
 - Freshness: `maxAgeHours` (0 = always fresh, -1 = cache-only), `livecrawlTimeout` (ms; capped at 60000 = 60s).
