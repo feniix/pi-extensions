@@ -9,9 +9,10 @@
 import { definePortableTool, type PortableTool } from "@feniix/bridgekit";
 import type { Static, TObject } from "typebox";
 import type { ToolPerformResult } from "./formatters.js";
-import { webAnswerParams, webFetchParams, webSearchParams } from "./schemas.js";
+import { webAnswerParams, webFetchParams, webFindSimilarParams, webSearchParams } from "./schemas.js";
 import { performAnswer } from "./web-answer.js";
 import { performWebFetch } from "./web-fetch.js";
+import { performFindSimilar } from "./web-find-similar.js";
 import { DEFAULT_NUM_RESULTS, performWebSearch } from "./web-search.js";
 
 export interface ExaToolsOptions {
@@ -152,6 +153,33 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
               systemPrompt: args.systemPrompt,
               text: args.text,
               outputSchema: args.outputSchema,
+            }),
+        },
+        resolveApiKey,
+      ),
+    );
+  }
+
+  if (isEnabled("web_find_similar_exa")) {
+    tools.push(
+      exaTool(
+        {
+          name: "web_find_similar_exa",
+          title: "Exa Similar Pages",
+          description: "Find web pages similar to a given URL.",
+          parameters: webFindSimilarParams,
+          pendingMessage: "Finding similar pages via Exa...",
+          errorPrefix: "Exa similar search error",
+          perform: (apiKey, args) =>
+            performFindSimilar(apiKey, {
+              url: args.url,
+              numResults: args.numResults,
+              textMaxCharacters: args.textMaxCharacters,
+              excludeSourceDomain: args.excludeSourceDomain,
+              startPublishedDate: args.startPublishedDate,
+              endPublishedDate: args.endPublishedDate,
+              includeDomains: args.includeDomains,
+              excludeDomains: args.excludeDomains,
             }),
         },
         resolveApiKey,

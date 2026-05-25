@@ -291,4 +291,52 @@ describe("portable Exa tools", () => {
       expect(progress).toHaveBeenCalledWith(expect.objectContaining({ text: "Fetching answer from Exa..." }));
     });
   });
+
+  describe("web_find_similar_exa", () => {
+    it("forwards findSimilar options and formats results", async () => {
+      mockFindSimilar.mockResolvedValue(defaultSearchResponse);
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_find_similar_exa");
+
+      const result = await executePortableTool(
+        tool,
+        {
+          url: "https://seed.example.com",
+          numResults: 4,
+          textMaxCharacters: 1234,
+          excludeSourceDomain: true,
+          includeDomains: ["news.example.com"],
+        },
+        { host: "test" },
+      );
+
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toContain("Example Result");
+      expect(result.structuredContent).toMatchObject({
+        tool: "web_find_similar_exa",
+        costDollars: { total: 0.005 },
+      });
+      expect(mockFindSimilar).toHaveBeenCalledWith(
+        "https://seed.example.com",
+        expect.objectContaining({
+          numResults: 4,
+          excludeSourceDomain: true,
+          includeDomains: ["news.example.com"],
+          contents: expect.objectContaining({ text: { maxCharacters: 1234 } }),
+        }),
+      );
+    });
+
+    it("returns isError:true with the find-similar-prefixed message on SDK failure", async () => {
+      mockFindSimilar.mockRejectedValue(new Error("unreachable"));
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_find_similar_exa");
+
+      const result = await executePortableTool(tool, { url: "https://example.com" }, { host: "test" });
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("Exa similar search error: unreachable");
+      expect(result.structuredContent).toMatchObject({ tool: "web_find_similar_exa", error: "unreachable" });
+    });
+  });
 });
