@@ -200,12 +200,14 @@ export const webSearchAdvancedParams = Type.Object(
     excludeDomains: Type.Optional(Type.Array(Type.String())),
     includeText: Type.Optional(
       Type.Array(Type.String(), {
-        description: "Only return results whose text contains ALL of these strings.",
+        description: "Only return results whose text contains this string. 1 string of up to 5 words (Exa API limit).",
+        maxItems: 1,
       }),
     ),
     excludeText: Type.Optional(
       Type.Array(Type.String(), {
-        description: "Exclude results whose text contains ANY of these strings.",
+        description: "Exclude results whose text contains this string. 1 string of up to 5 words (Exa API limit).",
+        maxItems: 1,
       }),
     ),
     userLocation: Type.Optional(

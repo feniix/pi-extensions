@@ -161,7 +161,7 @@ Params:
 - `type`: canonical `auto | fast | instant`; legacy `keyword | neural | hybrid` still accepted (Exa's `/search` endpoint continues to accept them). Deep types (`deep-reasoning | deep-lite | deep`) are rejected here — use `web_research_exa` for those.
 - Date filters: `startPublishedDate`, `endPublishedDate` (ISO dates).
 - Domain filters: `includeDomains`, `excludeDomains`.
-- Text filters: `includeText` (results must contain ALL strings), `excludeText` (exclude results containing ANY).
+- Text filters: `includeText` (single-element array; only return results whose text contains this string, up to 5 words), `excludeText` (single-element array; exclude results whose text contains this string, up to 5 words). The Exa API accepts at most one string per filter.
 - `userLocation`: two-letter ISO country code (e.g., `US`, `GB`, `DE`).
 - `moderation`: when `true`, filter unsafe content.
 - `additionalQueries`: alternative query formulations to broaden coverage.
