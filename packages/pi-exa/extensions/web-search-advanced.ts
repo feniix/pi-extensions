@@ -165,7 +165,17 @@ type AdvancedSearchPayload = {
 };
 
 function buildHighlights(options: AdvancedSearchOptions, fallbackQuery: string): AdvancedHighlights | undefined {
-  if (!options.enableHighlights) {
+  // Explicit `false` always denies, regardless of other highlights-* options.
+  if (options.enableHighlights === false) {
+    return undefined;
+  }
+  // Mirror summary's "query implies enable" semantics: highlightsQuery or
+  // highlightsMaxCharacters implies enableHighlights.
+  const wantsHighlights =
+    options.enableHighlights === true ||
+    options.highlightsQuery !== undefined ||
+    options.highlightsMaxCharacters !== undefined;
+  if (!wantsHighlights) {
     return undefined;
   }
   const highlights: AdvancedHighlights = {
@@ -181,6 +191,10 @@ function buildHighlights(options: AdvancedSearchOptions, fallbackQuery: string):
 }
 
 function buildSummary(options: AdvancedSearchOptions): AdvancedSummary | undefined {
+  // Explicit `false` always denies, even if summaryQuery is set.
+  if (options.enableSummary === false) {
+    return undefined;
+  }
   // summaryQuery implies enableSummary so callers don't have to set both.
   if (!options.enableSummary && !options.summaryQuery) {
     return undefined;

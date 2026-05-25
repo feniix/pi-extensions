@@ -167,8 +167,8 @@ Params:
 - `additionalQueries`: alternative query formulations to broaden coverage.
 - `textMaxCharacters`: max chars of page text per result (default 3000).
 - `contextMaxCharacters`: max chars for the aggregated context string.
-- Highlights: `enableHighlights` (gate), `highlightsMaxCharacters` (preferred), `highlightsNumSentences` (legacy fallback), `highlightsQuery` (overrides the search query for highlight ranking).
-- Summary: `enableSummary` and/or `summaryQuery` (providing `summaryQuery` implies `enableSummary`).
+- Highlights: `enableHighlights` (gate), `highlightsMaxCharacters` (preferred), `highlightsNumSentences` (legacy fallback), `highlightsQuery` (overrides the search query for highlight ranking). Providing `highlightsQuery` or `highlightsMaxCharacters` implies `enableHighlights: true`; passing `enableHighlights: false` explicitly always disables highlights.
+- Summary: `enableSummary` and/or `summaryQuery` (providing `summaryQuery` implies `enableSummary: true`; passing `enableSummary: false` explicitly always disables the summary).
 - Freshness: `maxAgeHours` (0 = always fresh, -1 = cache-only), `livecrawlTimeout` (ms).
 - Subpages: `subpages` (1-10), `subpageTarget` (keywords used to select which subpages to crawl, e.g. `['about', 'pricing']`).
 
