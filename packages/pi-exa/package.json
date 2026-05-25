@@ -27,13 +27,17 @@
       "./skills"
     ]
   },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": "*"
   },
   "dependencies": {
-    "exa-js": "^2.8.0"
+    "@feniix/bridgekit": "^0.6.0",
+    "exa-js": "^2.8.0",
+    "typebox": "^1.1.31"
   },
   "repository": {
     "type": "git",
@@ -54,9 +58,6 @@
       "optional": true
     },
     "@earendil-works/pi-coding-agent": {
-      "optional": true
-    },
-    "typebox": {
       "optional": true
     }
   }
