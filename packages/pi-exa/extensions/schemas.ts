@@ -245,7 +245,11 @@ export const webSearchAdvancedParams = Type.Object(
       }),
     ),
     livecrawlTimeout: Type.Optional(
-      Type.Integer({ description: "Milliseconds to wait when livecrawling freshening fetches.", minimum: 1 }),
+      Type.Integer({
+        description: "Milliseconds to wait when livecrawling freshening fetches (max 60000).",
+        minimum: 1,
+        maximum: 60_000,
+      }),
     ),
     subpages: Type.Optional(
       Type.Integer({ description: "Number of subpages to crawl per result (1-10).", minimum: 1, maximum: 10 }),
