@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { performAdvancedSearch } from "../extensions/web-search-advanced.js";
 import { performWebFetch } from "../extensions/web-fetch.js";
 import { performResearch } from "../extensions/web-research.js";
 import { performWebSearch } from "../extensions/web-search.js";
+import { performAdvancedSearch } from "../extensions/web-search-advanced.js";
 
 const hasManualFlag = process.argv.includes("--exa-live") || process.env.PI_EXA_LIVE === "1";
 const hasApiKey = typeof process.env.EXA_API_KEY === "string" && process.env.EXA_API_KEY.trim().length > 0;
