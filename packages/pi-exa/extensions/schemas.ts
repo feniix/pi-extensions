@@ -251,9 +251,18 @@ export const webSearchAdvancedParams = Type.Object(
       Type.Integer({ description: "Number of subpages to crawl per result (1-10).", minimum: 1, maximum: 10 }),
     ),
     subpageTarget: Type.Optional(
-      Type.Array(Type.String(), {
-        description: "Keywords used to select which subpages to crawl (e.g., 'about', 'pricing').",
-      }),
+      Type.Union(
+        [
+          Type.String(),
+          Type.Array(Type.String(), {
+            description: "Keywords used to select which subpages to crawl (e.g., 'about', 'pricing').",
+          }),
+        ],
+        {
+          description:
+            "Single keyword or list of keywords used to select which subpages to crawl (e.g., 'about' or ['about', 'pricing']).",
+        },
+      ),
     ),
   },
   { additionalProperties: true },

@@ -77,7 +77,7 @@ type AdvancedSearchOptions = {
   maxAgeHours?: number;
   livecrawlTimeout?: number;
   subpages?: number;
-  subpageTarget?: string[];
+  subpageTarget?: string | string[];
 };
 
 function validateCategoryFilters(category: SearchCategory | undefined, options: AdvancedSearchOptions): void {
@@ -140,7 +140,7 @@ type AdvancedContents = {
   maxAgeHours?: number;
   livecrawlTimeout?: number;
   subpages?: number;
-  subpageTarget?: string[];
+  subpageTarget?: string | string[];
 };
 
 // Local mirror of the SDK's RegularSearchOptions surface, kept narrow so we
