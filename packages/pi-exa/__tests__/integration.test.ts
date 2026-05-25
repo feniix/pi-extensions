@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { performAdvancedSearch } from "../extensions/web-search-advanced.js";
 import { performWebFetch } from "../extensions/web-fetch.js";
 import { performResearch } from "../extensions/web-research.js";
 import { performWebSearch } from "../extensions/web-search.js";
@@ -26,6 +27,35 @@ describeLive("pi-exa live integration", () => {
     expect(result.text.length).toBeGreaterThan(0);
     expect(result.text).toContain("example.com");
     expect(result.details.tool).toBe("web_fetch_exa");
+  });
+
+  it("accepts the post-4.1.0 advanced-search schema fields end-to-end", { timeout: 30_000 }, async () => {
+    // Regression net for the 14 fields added in 4.1.0. Asserts only that Exa
+    // accepts the payload and returns a non-empty result — content shape is
+    // best-effort because Exa rankings drift. The point is to catch the day
+    // Exa renames or drops one of these fields, not to spec their behavior.
+    const result = await performAdvancedSearch(apiKey, "rust async runtime tokio", {
+      numResults: 2,
+      type: "auto",
+      userLocation: "US",
+      includeText: ["rust"],
+      additionalQueries: ["tokio runtime"],
+      moderation: true,
+      enableSummary: true,
+      summaryQuery: "what does this page describe",
+      enableHighlights: true,
+      highlightsMaxCharacters: 480,
+      highlightsQuery: "async executor",
+      contextMaxCharacters: 1000,
+      maxAgeHours: 24,
+      livecrawlTimeout: 4000,
+      subpages: 2,
+      subpageTarget: ["about"],
+      textMaxCharacters: 500,
+    });
+
+    expect(result.text.length).toBeGreaterThan(0);
+    expect(result.details.tool).toBe("web_search_advanced_exa");
   });
 
   it("runs a real deep research request through Exa", { timeout: 60_000 }, async () => {
