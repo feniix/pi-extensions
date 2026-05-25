@@ -42,17 +42,33 @@ function validateCategory(category: string | undefined): SearchCategory | undefi
   throw new Error(`Invalid category "${category}". Supported categories: ${SEARCH_CATEGORIES.join(", ")}.`);
 }
 
+type AdvancedSearchType = "auto" | "fast" | "instant" | "keyword" | "neural" | "hybrid";
+
 type AdvancedSearchOptions = {
   numResults?: number;
   category?: string;
-  type?: "keyword" | "neural" | "auto" | "hybrid" | "fast" | "instant";
+  type?: AdvancedSearchType;
   startPublishedDate?: string;
   endPublishedDate?: string;
   includeDomains?: string[];
   excludeDomains?: string[];
+  includeText?: string[];
+  excludeText?: string[];
+  userLocation?: string;
+  moderation?: boolean;
+  additionalQueries?: string[];
   textMaxCharacters?: number;
+  contextMaxCharacters?: number;
   enableHighlights?: boolean;
   highlightsNumSentences?: number;
+  highlightsMaxCharacters?: number;
+  highlightsQuery?: string;
+  enableSummary?: boolean;
+  summaryQuery?: string;
+  maxAgeHours?: number;
+  livecrawlTimeout?: number;
+  subpages?: number;
+  subpageTarget?: string[];
 };
 
 function validateCategoryFilters(category: SearchCategory | undefined, options: AdvancedSearchOptions): void {
@@ -93,6 +109,111 @@ function validateAdvancedType(type: AdvancedSearchOptions["type"] | undefined): 
   }
 }
 
+type AdvancedHighlights = {
+  query?: string;
+  numSentences?: number;
+  maxCharacters?: number;
+};
+
+type AdvancedSummary = {
+  query?: string;
+};
+
+type AdvancedContext = {
+  maxCharacters?: number;
+};
+
+type AdvancedContents = {
+  text: { maxCharacters: number };
+  highlights?: AdvancedHighlights;
+  summary?: AdvancedSummary;
+  context?: AdvancedContext;
+  maxAgeHours?: number;
+  livecrawlTimeout?: number;
+  subpages?: number;
+  subpageTarget?: string[];
+};
+
+// Local mirror of the SDK's RegularSearchOptions surface, kept narrow so we
+// only forward fields pi-exa supports. The SDK's discriminated union marks
+// `additionalQueries` as deep-search-only, but the live hosted MCP advertises
+// it for advanced search and the Exa /search endpoint accepts it — so we
+// describe the field here and skip the SDK's compile-time gate.
+type AdvancedSearchPayload = {
+  numResults: number;
+  category?: SearchCategory;
+  type?: AdvancedSearchType;
+  startPublishedDate?: string;
+  endPublishedDate?: string;
+  includeDomains?: string[];
+  excludeDomains?: string[];
+  includeText?: string[];
+  excludeText?: string[];
+  userLocation?: string;
+  moderation?: boolean;
+  additionalQueries?: string[];
+  contents: AdvancedContents;
+};
+
+function buildHighlights(options: AdvancedSearchOptions, fallbackQuery: string): AdvancedHighlights | undefined {
+  if (!options.enableHighlights) {
+    return undefined;
+  }
+  const highlights: AdvancedHighlights = {
+    query: options.highlightsQuery ?? fallbackQuery,
+  };
+  // Exa prefers maxCharacters; fall back to legacy numSentences when neither is set.
+  if (options.highlightsMaxCharacters !== undefined) {
+    highlights.maxCharacters = options.highlightsMaxCharacters;
+  } else {
+    highlights.numSentences = options.highlightsNumSentences ?? 3;
+  }
+  return highlights;
+}
+
+function buildSummary(options: AdvancedSearchOptions): AdvancedSummary | undefined {
+  // summaryQuery implies enableSummary so callers don't have to set both.
+  if (!options.enableSummary && !options.summaryQuery) {
+    return undefined;
+  }
+  return options.summaryQuery ? { query: options.summaryQuery } : {};
+}
+
+function buildContents(options: AdvancedSearchOptions, fallbackQuery: string): AdvancedContents {
+  const contents: AdvancedContents = {
+    text: { maxCharacters: options.textMaxCharacters || 3000 },
+  };
+
+  const highlights = buildHighlights(options, fallbackQuery);
+  if (highlights) {
+    contents.highlights = highlights;
+  }
+
+  const summary = buildSummary(options);
+  if (summary) {
+    contents.summary = summary;
+  }
+
+  if (options.contextMaxCharacters !== undefined) {
+    contents.context = { maxCharacters: options.contextMaxCharacters };
+  }
+
+  if (options.maxAgeHours !== undefined) {
+    contents.maxAgeHours = options.maxAgeHours;
+  }
+  if (options.livecrawlTimeout !== undefined) {
+    contents.livecrawlTimeout = options.livecrawlTimeout;
+  }
+  if (options.subpages !== undefined) {
+    contents.subpages = options.subpages;
+  }
+  if (options.subpageTarget !== undefined) {
+    contents.subpageTarget = options.subpageTarget;
+  }
+
+  return contents;
+}
+
 export async function performAdvancedSearch(
   apiKey: string,
   query: string,
@@ -104,52 +225,36 @@ export async function performAdvancedSearch(
 
   const exa = getExaClient(apiKey);
 
-  const searchOptions: {
-    numResults?: number;
-    category?: SearchCategory;
-    type?: "keyword" | "neural" | "auto" | "hybrid" | "fast" | "instant";
-    startPublishedDate?: string;
-    endPublishedDate?: string;
-    includeDomains?: string[];
-    excludeDomains?: string[];
-    contents: {
-      text: {
-        maxCharacters: number;
-      };
-      highlights?: {
-        numSentences?: number;
-        query: string;
-      };
-    };
-  } = {
+  const payload: AdvancedSearchPayload = {
     numResults: options.numResults || 10,
-    category,
-    type: options.type,
-    startPublishedDate: options.startPublishedDate,
-    endPublishedDate: options.endPublishedDate,
-    includeDomains: options.includeDomains,
-    excludeDomains: options.excludeDomains,
-    contents: {
-      text: {
-        maxCharacters: options.textMaxCharacters || 3000,
-      },
-    },
+    contents: buildContents(options, query),
   };
+  if (category) payload.category = category;
+  if (options.type) payload.type = options.type;
+  if (options.startPublishedDate) payload.startPublishedDate = options.startPublishedDate;
+  if (options.endPublishedDate) payload.endPublishedDate = options.endPublishedDate;
+  if (options.includeDomains) payload.includeDomains = options.includeDomains;
+  if (options.excludeDomains) payload.excludeDomains = options.excludeDomains;
+  if (options.includeText) payload.includeText = options.includeText;
+  if (options.excludeText) payload.excludeText = options.excludeText;
+  if (options.userLocation) payload.userLocation = options.userLocation;
+  if (options.moderation !== undefined) payload.moderation = options.moderation;
+  if (options.additionalQueries) payload.additionalQueries = options.additionalQueries;
 
-  if (options.enableHighlights) {
-    searchOptions.contents = {
-      ...searchOptions.contents,
-      highlights: {
-        numSentences: options.highlightsNumSentences || 3,
-        query,
-      },
-    };
-  }
-
-  const result: SearchResponse<{
+  // Cast through `unknown` so we can forward `additionalQueries` without
+  // tripping the SDK's deep-only constraint, while still landing on the
+  // typed `search<T extends ContentsOptions>` overload for the response shape.
+  type AdvancedContentsTyped = {
     text: TextContentsOptions;
     highlights?: HighlightsContentsOptions;
-  }> = await exa.search(query, searchOptions);
+  };
+  type AdvancedSearchOptionsArg = {
+    contents: AdvancedContentsTyped;
+  } & Record<string, unknown>;
+  const result: SearchResponse<AdvancedContentsTyped> = await exa.search<AdvancedContentsTyped>(
+    query,
+    payload as unknown as AdvancedSearchOptionsArg,
+  );
 
   if (!result?.results || result.results.length === 0) {
     return {

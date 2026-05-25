@@ -25,13 +25,18 @@ const outputSchema = Type.Object(
   { additionalProperties: true },
 );
 
+// Canonical values per the live hosted MCP at mcp.exa.ai/mcp are `auto`,
+// `fast`, and `instant`. The legacy `keyword`, `neural`, and `hybrid`
+// values are still accepted by Exa's /search endpoint, so we keep them
+// for backwards compatibility. Hard-removing them would be a breaking
+// change for consumers calling pi-exa with those values today.
 const advancedSearchType = Type.Union([
   Type.Literal("auto"),
   Type.Literal("fast"),
-  Type.Literal("neural"),
-  Type.Literal("keyword"),
-  Type.Literal("hybrid"),
   Type.Literal("instant"),
+  Type.Literal("keyword"),
+  Type.Literal("neural"),
+  Type.Literal("hybrid"),
 ]);
 
 const researchStage = Type.Union([
@@ -197,9 +202,63 @@ export const webSearchAdvancedParams = Type.Object(
     endPublishedDate: Type.Optional(Type.String({ description: "ISO date filter (e.g., 2024-12-31)" })),
     includeDomains: Type.Optional(Type.Array(Type.String())),
     excludeDomains: Type.Optional(Type.Array(Type.String())),
-    textMaxCharacters: Type.Optional(Type.Integer()),
+    includeText: Type.Optional(
+      Type.Array(Type.String(), {
+        description: "Only return results whose text contains ALL of these strings.",
+      }),
+    ),
+    excludeText: Type.Optional(
+      Type.Array(Type.String(), {
+        description: "Exclude results whose text contains ANY of these strings.",
+      }),
+    ),
+    userLocation: Type.Optional(
+      Type.String({ description: "Two-letter ISO country code for the user (e.g., 'US', 'GB', 'DE')." }),
+    ),
+    moderation: Type.Optional(Type.Boolean({ description: "Filter unsafe content when true." })),
+    additionalQueries: Type.Optional(
+      Type.Array(Type.String(), {
+        description: "Alternative query formulations to broaden coverage.",
+      }),
+    ),
+    textMaxCharacters: Type.Optional(Type.Integer({ minimum: 1 })),
+    contextMaxCharacters: Type.Optional(
+      Type.Integer({ description: "Maximum characters for the aggregated context string.", minimum: 1 }),
+    ),
     enableHighlights: Type.Optional(Type.Boolean()),
-    highlightsNumSentences: Type.Optional(Type.Integer()),
+    highlightsNumSentences: Type.Optional(
+      Type.Integer({ description: "Legacy; prefer highlightsMaxCharacters.", minimum: 1 }),
+    ),
+    highlightsMaxCharacters: Type.Optional(
+      Type.Integer({
+        description: "Total highlight characters per URL. Preferred over highlightsNumSentences.",
+        minimum: 1,
+      }),
+    ),
+    highlightsQuery: Type.Optional(
+      Type.String({ description: "Query used to rank highlights; defaults to the main query." }),
+    ),
+    enableSummary: Type.Optional(Type.Boolean({ description: "Generate an LLM summary per result." })),
+    summaryQuery: Type.Optional(
+      Type.String({ description: "Focus query for summary generation. Implies enableSummary." }),
+    ),
+    maxAgeHours: Type.Optional(
+      Type.Integer({
+        description: "Cache max age in hours. 0 = always fetch fresh, -1 = cache-only.",
+        minimum: -1,
+      }),
+    ),
+    livecrawlTimeout: Type.Optional(
+      Type.Integer({ description: "Milliseconds to wait when livecrawling freshening fetches.", minimum: 1 }),
+    ),
+    subpages: Type.Optional(
+      Type.Integer({ description: "Number of subpages to crawl per result (1-10).", minimum: 1, maximum: 10 }),
+    ),
+    subpageTarget: Type.Optional(
+      Type.Array(Type.String(), {
+        description: "Keywords used to select which subpages to crawl (e.g., 'about', 'pricing').",
+      }),
+    ),
   },
   { additionalProperties: true },
 );

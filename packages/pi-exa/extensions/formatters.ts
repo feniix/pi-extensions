@@ -13,7 +13,6 @@ export type OutputSchema = DeepOutputSchema | { type?: "object" | "text" } | Rec
 export interface ExaResponseMetadata {
   costDollars?: CostDollars;
   searchTime?: number;
-  resolvedSearchType?: string;
 }
 
 export interface ToolPerformResult {
@@ -506,14 +505,9 @@ export function formatAnswerResult(response: AnswerResponse, outputSchema?: Outp
   };
 }
 
-export function toMetadata(response: {
-  costDollars?: CostDollars;
-  searchTime?: number;
-  resolvedSearchType?: string;
-}): ExaResponseMetadata {
+export function toMetadata(response: { costDollars?: CostDollars; searchTime?: number }): ExaResponseMetadata {
   return {
     ...(response.costDollars ? { costDollars: response.costDollars } : {}),
     ...(response.searchTime !== undefined ? { searchTime: response.searchTime } : {}),
-    ...(response.resolvedSearchType ? { resolvedSearchType: response.resolvedSearchType } : {}),
   };
 }

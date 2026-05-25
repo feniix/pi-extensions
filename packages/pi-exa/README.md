@@ -12,6 +12,27 @@
 - **web_find_similar_exa**: discover related URLs.
 - **exa_research_step/status/summary/reset**: local, stateful research-planning tools that recommend explicit Exa retrieval calls without executing them.
 
+## Why pi-exa vs the hosted Exa MCP?
+
+The hosted Exa MCP at `https://mcp.exa.ai/mcp` is a fine default for one-shot search and fetch. pi-exa exists for cases the hosted MCP cannot address by design:
+
+- **Tools the hosted MCP does not expose.** `web_answer_exa` (Exa's `/answer` endpoint) and `web_find_similar_exa` (`/findSimilar`) are not advertised by the hosted MCP under any flag. If you need grounded answers with citations or "more like this" discovery, you call them directly through pi-exa.
+- **Local stateful planning.** `exa_research_step / status / summary / reset` keep an in-memory research plan that survives across calls in a single pi session. A stateless remote MCP cannot offer this — there is no per-session memory to update.
+- **Local key custody and allowlists.** Your `EXA_API_KEY` and `enabledTools` allowlist stay on the workstation. The hosted MCP requires sending your key to a third party on every request.
+- **Pre-flight validation.** pi-exa rejects category/filter combinations Exa silently ignores (e.g., `category: "people"` with non-LinkedIn `includeDomains`), so you find out at the call site instead of in a quiet, empty result set.
+- **Forward-compatibility on the `/research` sunset.** Every pi-exa tool routes through Exa's canonical endpoints — `/search`, `/contents`, `/answer`, `/findSimilar`. The hosted MCP's `deep_researcher_start` / `deep_researcher_check` tools route through the deprecated `/research` endpoint. When Exa enforces that sunset, those hosted tools break or lose async semantics; pi-exa's `web_research_exa` (which uses `/search` with `type: "deep-reasoning"`) keeps working.
+
+| Capability                                  | Hosted Exa MCP | pi-exa |
+| ------------------------------------------- | :------------: | :----: |
+| `web_search_exa`                            |       yes      |   yes  |
+| `web_fetch_exa`                             |       yes      |   yes  |
+| `web_search_advanced_exa`                   |     opt-in     |  opt-in|
+| `web_answer_exa` (`/answer`)                |       no       |   yes  |
+| `web_find_similar_exa` (`/findSimilar`)     |       no       |   yes  |
+| Local research planner (`exa_research_*`)   |       no       |   yes  |
+| Local API key custody                       |       no       |   yes  |
+| Routes deep research through `/search`      |       no       |   yes  |
+
 ## Install
 
 ```bash
@@ -124,7 +145,7 @@ Clears the active in-memory planning session.
 
 Params: `query` (required), `numResults`.
 
-Returns: formatted snippets with optional highlights and metadata (`costDollars`, `searchTime`, `resolvedSearchType`).
+Returns: formatted snippets with optional highlights and metadata (`costDollars`, `searchTime`).
 
 ### web_fetch_exa
 
@@ -132,11 +153,30 @@ Params: `urls` (required array), `maxCharacters`, `highlights`, `summary` (`quer
 
 ### web_search_advanced_exa
 
-Params include `query`, `numResults`, `category`, `type` (`auto|neural|...`, no deep types), date filters, domain filters, `textMaxCharacters`, and highlight controls.
+Params:
+
+- `query` (required)
+- `numResults` (1-100, default 10)
+- `category`: one of `company`, `research paper`, `news`, `pdf`, `personal site`, `financial report`, `people`
+- `type`: canonical `auto | fast | instant`; legacy `keyword | neural | hybrid` still accepted (Exa's `/search` endpoint continues to accept them). Deep types (`deep-reasoning | deep-lite | deep`) are rejected here — use `web_research_exa` for those.
+- Date filters: `startPublishedDate`, `endPublishedDate` (ISO dates).
+- Domain filters: `includeDomains`, `excludeDomains`.
+- Text filters: `includeText` (results must contain ALL strings), `excludeText` (exclude results containing ANY).
+- `userLocation`: two-letter ISO country code (e.g., `US`, `GB`, `DE`).
+- `moderation`: when `true`, filter unsafe content.
+- `additionalQueries`: alternative query formulations to broaden coverage.
+- `textMaxCharacters`: max chars of page text per result (default 3000).
+- `contextMaxCharacters`: max chars for the aggregated context string.
+- Highlights: `enableHighlights` (gate), `highlightsMaxCharacters` (preferred), `highlightsNumSentences` (legacy fallback), `highlightsQuery` (overrides the search query for highlight ranking).
+- Summary: `enableSummary` and/or `summaryQuery` (providing `summaryQuery` implies `enableSummary`).
+- Freshness: `maxAgeHours` (0 = always fresh, -1 = cache-only), `livecrawlTimeout` (ms).
+- Subpages: `subpages` (1-10), `subpageTarget` (keywords used to select which subpages to crawl, e.g. `['about', 'pricing']`).
 
 Notes:
 - Deep types are rejected here. Use `web_research_exa` for `deep-reasoning`, `deep-lite`, or `deep`.
 - Invalid categories return an error instead of silently falling back to an unfiltered search.
+- The `company` and `people` categories do not support `startPublishedDate`, `endPublishedDate`, or `excludeDomains`; the `people` category only accepts LinkedIn domains for `includeDomains`. These are enforced pre-flight.
+- `startCrawlDate` / `endCrawlDate` are intentionally not exposed — Exa silently ignores them as of 2026-04-15.
 
 ### web_research_exa
 
