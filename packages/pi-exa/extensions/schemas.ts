@@ -26,7 +26,14 @@ const outputSchema = Type.Object(
   { additionalProperties: true },
 );
 
-const advancedSearchType = Type.Union(ADVANCED_SEARCH_TYPES.map((value) => Type.Literal(value)));
+const advancedSearchType = Type.Union([
+  Type.Literal(ADVANCED_SEARCH_TYPES[0]),
+  Type.Literal(ADVANCED_SEARCH_TYPES[1]),
+  Type.Literal(ADVANCED_SEARCH_TYPES[2]),
+  Type.Literal(ADVANCED_SEARCH_TYPES[3]),
+  Type.Literal(ADVANCED_SEARCH_TYPES[4]),
+  Type.Literal(ADVANCED_SEARCH_TYPES[5]),
+]);
 
 const researchStage = Type.Union([
   Type.Literal(RESEARCH_STAGES[0]),
