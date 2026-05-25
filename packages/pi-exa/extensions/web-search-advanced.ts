@@ -25,12 +25,12 @@ const RESTRICTED_CATEGORIES: readonly SearchCategory[] = ["company", "people"];
 // The "people" category only accepts LinkedIn domains for includeDomains.
 const LINKEDIN_DOMAINS = new Set(["linkedin.com", "www.linkedin.com"]);
 
-type AdvancedContentsShape = {
+type AdvancedResultContents = {
   text: TextContentsOptions;
   highlights?: HighlightsContentsOptions;
 };
 
-type AdvancedResult = SearchResult<AdvancedContentsShape>;
+type AdvancedResult = SearchResult<AdvancedResultContents>;
 
 function validateCategory(category: string | undefined): SearchCategory | undefined {
   if (!category) {
@@ -242,9 +242,9 @@ export async function performAdvancedSearch(
   if (options.additionalQueries) payload.additionalQueries = options.additionalQueries;
 
   // See AdvancedSearchPayload comment for why we bypass the SDK type here.
-  const result: SearchResponse<AdvancedContentsShape> = await exa.search<AdvancedContentsShape>(
+  const result: SearchResponse<AdvancedResultContents> = await exa.search<AdvancedResultContents>(
     query,
-    payload as unknown as { contents: AdvancedContentsShape } & Record<string, unknown>,
+    payload as unknown as { contents: AdvancedResultContents } & Record<string, unknown>,
   );
 
   if (!result?.results || result.results.length === 0) {
