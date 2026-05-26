@@ -17,7 +17,6 @@ import { executePortableTool, type PortableTool, type PortableToolResult } from 
 import { PortableToolExecutionError } from "@feniix/bridgekit/pi";
 import type { TObject } from "typebox";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
-import { type ExaToolName, PI_TOOL_METADATA } from "./tool-guidance.js";
 import { createExaTools, type ExaToolTimeouts } from "./tools.js";
 
 export {
@@ -50,24 +49,24 @@ function toPiResult(result: PortableToolResult): PiToolResult {
   return piResult;
 }
 
-function isExaToolName(name: string): name is ExaToolName {
-  return name in PI_TOOL_METADATA;
-}
-
 function registerExaPiTools(pi: ExtensionAPI, tools: readonly PortableTool<TObject>[]): void {
   for (const tool of tools) {
     // Pi progress callbacks never emit isError: true; portable error results
     // are only surfaced via the final execute() return and are converted to
     // PortableToolExecutionError below. Keeping this invariant means onUpdate
     // never delivers a Pi result with isError set.
-    const metadata = isExaToolName(tool.name) ? PI_TOOL_METADATA[tool.name] : undefined;
+    const piExtras = tool.hostExtras?.pi;
     pi.registerTool({
       name: tool.name,
       label: tool.title,
       description: tool.description,
       parameters: tool.parameters,
-      ...(metadata?.promptSnippet ? { promptSnippet: metadata.promptSnippet } : {}),
-      ...(metadata?.promptGuidelines ? { promptGuidelines: metadata.promptGuidelines } : {}),
+      ...(piExtras?.promptSnippet ? { promptSnippet: piExtras.promptSnippet } : {}),
+      // Bridgekit types promptGuidelines as readonly string[]; pi-coding-agent's
+      // ToolDefinition expects a mutable string[]. Spread a fresh copy at the
+      // boundary so we never hand pi a reference to PLANNER_GUIDELINES (or any
+      // hostExtras-owned array) that pi could mutate.
+      ...(piExtras?.promptGuidelines ? { promptGuidelines: [...piExtras.promptGuidelines] } : {}),
       async execute(_toolCallId, params, signal, onUpdate, _ctx) {
         const result = await executePortableTool(tool, params, {
           host: "pi",

@@ -1,30 +1,20 @@
 /**
  * Host-neutral cross-tool routing guidelines for pi-exa.
  *
- * Single source of truth consumed by:
- *   - the Pi adapter (extensions/index.ts) — per-tool promptGuidelines
- *   - the MCP server (extensions/mcp-server.ts) — server-level instructions
+ * Two exports:
+ *   - `PLANNER_GUIDELINES` is the shared per-tool guidance string for the four
+ *     local `exa_research_*` planner tools; consumed by `tools.ts` and threaded
+ *     onto each planner tool via `hostExtras.pi.promptGuidelines`.
+ *   - `CROSS_TOOL_GUIDELINES` is the server-level decision tree consumed by
+ *     the MCP server (`mcp-server.ts`) as `instructions`. It is intentionally
+ *     duplicated as prose rather than synthesised from per-tool snippets so
+ *     MCP clients see one self-contained routing block.
  *
- * Keeping this in one module guarantees the decision tree exposed to the
- * Pi system prompt and to MCP clients stays in lockstep.
+ * Per-tool `promptSnippet` and `promptGuidelines` for the six Exa-API tools
+ * live on the tool definitions themselves in `tools.ts` via
+ * `hostExtras.pi.*` — bridgekit 0.9.0 threads them through to pi's
+ * `registerTool` call without a sidecar map.
  */
-
-export interface PiToolMetadata {
-  promptSnippet: string;
-  promptGuidelines: string[];
-}
-
-export type ExaToolName =
-  | "web_search_exa"
-  | "web_fetch_exa"
-  | "web_answer_exa"
-  | "web_find_similar_exa"
-  | "web_search_advanced_exa"
-  | "web_research_exa"
-  | "exa_research_step"
-  | "exa_research_status"
-  | "exa_research_summary"
-  | "exa_research_reset";
 
 export const PLANNER_GUIDELINES: readonly string[] = [
   "Use exa_research_step to externalize non-trivial Exa research planning before expensive retrieval.",
@@ -32,78 +22,11 @@ export const PLANNER_GUIDELINES: readonly string[] = [
   "Use exa_research_summary for human-readable plans before requesting payload mode.",
 ];
 
-export const PI_TOOL_METADATA: Record<ExaToolName, PiToolMetadata> = {
-  web_search_exa: {
-    promptSnippet: "Quick web search for lookups, discovery, and current pages.",
-    promptGuidelines: [
-      "Use web_search_exa for quick lookups and finding pages; use web_answer_exa for direct factual questions with citations.",
-      "Use web_search_exa for simple searches; use web_search_advanced_exa when you need category, domain, or date filters.",
-      "Use web_search_exa to discover candidate URLs; use web_fetch_exa to read a known page in full.",
-      "Use web_search_exa for retrieval; use web_research_exa for comparisons, synthesis, and recommendations.",
-    ],
-  },
-  web_fetch_exa: {
-    promptSnippet: "Read known URLs as clean page text with optional summaries.",
-    promptGuidelines: [
-      "Use web_fetch_exa after web_search_exa or web_search_advanced_exa when snippets are not enough.",
-      "Use web_fetch_exa to read a known URL in full; use web_answer_exa when the user only needs a concise cited answer.",
-      "Use web_fetch_exa to inspect returned pages; use web_find_similar_exa when you want more pages like a source URL.",
-    ],
-  },
-  web_search_advanced_exa: {
-    promptSnippet: "Advanced search with category, domain, and date filters.",
-    promptGuidelines: [
-      "Use web_search_advanced_exa when you need category, domain, or date filters; use web_search_exa for simpler lookups.",
-      "Use web_search_advanced_exa for retrieval with constraints; use web_research_exa for deep synthesis and comparisons.",
-      "Use web_search_advanced_exa to find filtered result sets; use web_fetch_exa to read the selected URLs.",
-    ],
-  },
-  web_research_exa: {
-    promptSnippet: "Deep research with grounded synthesis; higher cost and latency.",
-    promptGuidelines: [
-      "Use web_research_exa for conclusions, comparisons, and recommendations; use web_search_exa for simple lookups.",
-      "Use web_research_exa for open-ended synthesis; use web_answer_exa for direct questions needing a concise cited answer.",
-      "Use web_research_exa when a systemPrompt or outputSchema is needed; use web_search_advanced_exa for filtered retrieval only.",
-    ],
-  },
-  web_answer_exa: {
-    promptSnippet: "Grounded answers with citations for direct questions.",
-    promptGuidelines: [
-      "Use web_answer_exa for direct factual questions with sources; use web_research_exa for broader synthesis and comparisons.",
-      "Use web_answer_exa when the user wants a concise answer; use web_search_exa when you first need to discover candidate pages.",
-      "Use web_answer_exa for a cited response; use web_fetch_exa when you need the full source text.",
-    ],
-  },
-  web_find_similar_exa: {
-    promptSnippet: "Find pages similar to a known source URL.",
-    promptGuidelines: [
-      "Use web_find_similar_exa when you have a good page and want more like it; use web_search_exa for keyword-based discovery.",
-      "Use web_find_similar_exa to expand from a source URL; use web_search_advanced_exa when you need explicit category, domain, or date filters.",
-      "Use web_find_similar_exa to discover related pages; use web_fetch_exa to inspect the returned URLs in full.",
-    ],
-  },
-  exa_research_step: {
-    promptSnippet: "Record iterative research-planning state before retrieval.",
-    promptGuidelines: [...PLANNER_GUIDELINES],
-  },
-  exa_research_status: {
-    promptSnippet: "Inspect current research-planning state.",
-    promptGuidelines: [...PLANNER_GUIDELINES],
-  },
-  exa_research_summary: {
-    promptSnippet: "Summarize the accumulated Exa research plan.",
-    promptGuidelines: [...PLANNER_GUIDELINES],
-  },
-  exa_research_reset: {
-    promptSnippet: "Reset local Exa research-planning state.",
-    promptGuidelines: [...PLANNER_GUIDELINES],
-  },
-};
-
 /**
- * Decision-tree text embedded in MCP `instructions`. Synthesized from the
- * per-tool guidelines so MCP clients receive equivalent routing guidance to
- * Pi's system prompt without duplicating individual sentences.
+ * Decision-tree text embedded in MCP `instructions`. Mirrors the per-tool
+ * `hostExtras.pi.promptGuidelines` at server granularity so MCP clients
+ * receive equivalent routing guidance to Pi's system prompt without
+ * duplicating individual sentences.
  */
 export const CROSS_TOOL_GUIDELINES: string = [
   "Use these tools to search the web, fetch URLs, answer factual questions with grounded citations, and plan multi-step research using Exa AI.",

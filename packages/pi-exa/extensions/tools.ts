@@ -6,7 +6,12 @@
  * must not import from `@earendil-works/pi-coding-agent` or the MCP SDK.
  */
 
-import { definePortableTool, type PortableTool, type PortableToolResult } from "@feniix/bridgekit";
+import {
+  definePortableTool,
+  type PortableTool,
+  type PortableToolHostExtras,
+  type PortableToolResult,
+} from "@feniix/bridgekit";
 import type { Static, TObject } from "typebox";
 import type { ToolPerformResult } from "./formatters.js";
 import { createResearchPlanner, type ResearchPlanner } from "./research-planner.js";
@@ -22,6 +27,7 @@ import {
   webSearchAdvancedParams,
   webSearchParams,
 } from "./schemas.js";
+import { PLANNER_GUIDELINES } from "./tool-guidance.js";
 import { performAnswer } from "./web-answer.js";
 import { performWebFetch } from "./web-fetch.js";
 import { performFindSimilar } from "./web-find-similar.js";
@@ -211,6 +217,7 @@ interface ExaToolSpec<TParams extends TObject> {
   parameters: TParams;
   pendingMessage: string;
   errorPrefix: string;
+  hostExtras?: PortableToolHostExtras;
   perform: (apiKey: string, args: Static<TParams>) => Promise<ToolPerformResult>;
 }
 
@@ -224,6 +231,7 @@ function exaTool<TParams extends TObject>(
     title: spec.title,
     description: spec.description,
     parameters: spec.parameters,
+    hostExtras: spec.hostExtras,
     async execute(args, ctx) {
       const apiKey = resolveApiKey();
       if (!apiKey) {
@@ -285,6 +293,12 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
         title: "Exa Research Step",
         description: "Record one step in a stateful, local Exa research planning session without calling Exa APIs.",
         parameters: exaResearchStepParams,
+        hostExtras: {
+          pi: {
+            promptSnippet: "Record iterative research-planning state before retrieval.",
+            promptGuidelines: PLANNER_GUIDELINES,
+          },
+        },
         execute(args) {
           try {
             return localToolResult("exa_research_step", planner.recordStep(args));
@@ -304,6 +318,12 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
         description:
           "Report current local Exa research planning state, criteria coverage, sources, gaps, and next action.",
         parameters: exaResearchStatusParams,
+        hostExtras: {
+          pi: {
+            promptSnippet: "Inspect current research-planning state.",
+            promptGuidelines: PLANNER_GUIDELINES,
+          },
+        },
         execute() {
           try {
             return localToolResult("exa_research_status", planner.getStatus());
@@ -323,6 +343,12 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
         description:
           "Generate a human-readable Exa research plan, Source Pack, or optional suggested web_research_exa payload.",
         parameters: exaResearchSummaryParams,
+        hostExtras: {
+          pi: {
+            promptSnippet: "Summarize the accumulated Exa research plan.",
+            promptGuidelines: PLANNER_GUIDELINES,
+          },
+        },
         execute(args) {
           try {
             return localToolResult("exa_research_summary", planner.getSummary(args));
@@ -341,6 +367,12 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
         title: "Exa Research Reset",
         description: "Clear the current in-memory Exa research planning session.",
         parameters: exaResearchResetParams,
+        hostExtras: {
+          pi: {
+            promptSnippet: "Reset local Exa research-planning state.",
+            promptGuidelines: PLANNER_GUIDELINES,
+          },
+        },
         execute() {
           try {
             return localToolResult("exa_research_reset", planner.reset());
@@ -363,6 +395,17 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
           parameters: webSearchParams,
           pendingMessage: "Searching the web via Exa...",
           errorPrefix: "Exa search error",
+          hostExtras: {
+            pi: {
+              promptSnippet: "Quick web search for lookups, discovery, and current pages.",
+              promptGuidelines: [
+                "Use web_search_exa for quick lookups and finding pages; use web_answer_exa for direct factual questions with citations.",
+                "Use web_search_exa for simple searches; use web_search_advanced_exa when you need category, domain, or date filters.",
+                "Use web_search_exa to discover candidate URLs; use web_fetch_exa to read a known page in full.",
+                "Use web_search_exa for retrieval; use web_research_exa for comparisons, synthesis, and recommendations.",
+              ],
+            },
+          },
           perform: (apiKey, args) => performWebSearch(apiKey, args.query, args.numResults ?? DEFAULT_NUM_RESULTS),
         },
         resolveApiKey,
@@ -382,6 +425,16 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
           parameters: webFetchParams,
           pendingMessage: "Fetching content via Exa...",
           errorPrefix: "Exa fetch error",
+          hostExtras: {
+            pi: {
+              promptSnippet: "Read known URLs as clean page text with optional summaries.",
+              promptGuidelines: [
+                "Use web_fetch_exa after web_search_exa or web_search_advanced_exa when snippets are not enough.",
+                "Use web_fetch_exa to read a known URL in full; use web_answer_exa when the user only needs a concise cited answer.",
+                "Use web_fetch_exa to inspect returned pages; use web_find_similar_exa when you want more pages like a source URL.",
+              ],
+            },
+          },
           perform: (apiKey, args) =>
             performWebFetch(apiKey, args.urls, {
               maxCharacters: args.maxCharacters,
@@ -406,6 +459,16 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
           parameters: webAnswerParams,
           pendingMessage: "Fetching answer from Exa...",
           errorPrefix: "Exa answer error",
+          hostExtras: {
+            pi: {
+              promptSnippet: "Grounded answers with citations for direct questions.",
+              promptGuidelines: [
+                "Use web_answer_exa for direct factual questions with sources; use web_research_exa for broader synthesis and comparisons.",
+                "Use web_answer_exa when the user wants a concise answer; use web_search_exa when you first need to discover candidate pages.",
+                "Use web_answer_exa for a cited response; use web_fetch_exa when you need the full source text.",
+              ],
+            },
+          },
           perform: (apiKey, args) =>
             performAnswer(apiKey, {
               query: args.query,
@@ -430,6 +493,16 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
           parameters: webFindSimilarParams,
           pendingMessage: "Finding similar pages via Exa...",
           errorPrefix: "Exa similar search error",
+          hostExtras: {
+            pi: {
+              promptSnippet: "Find pages similar to a known source URL.",
+              promptGuidelines: [
+                "Use web_find_similar_exa when you have a good page and want more like it; use web_search_exa for keyword-based discovery.",
+                "Use web_find_similar_exa to expand from a source URL; use web_search_advanced_exa when you need explicit category, domain, or date filters.",
+                "Use web_find_similar_exa to discover related pages; use web_fetch_exa to inspect the returned URLs in full.",
+              ],
+            },
+          },
           perform: (apiKey, args) =>
             performFindSimilar(apiKey, {
               url: args.url,
@@ -458,6 +531,16 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
           parameters: webResearchParams,
           pendingMessage: "Performing deep research via Exa...",
           errorPrefix: "Exa research error",
+          hostExtras: {
+            pi: {
+              promptSnippet: "Deep research with grounded synthesis; higher cost and latency.",
+              promptGuidelines: [
+                "Use web_research_exa for conclusions, comparisons, and recommendations; use web_search_exa for simple lookups.",
+                "Use web_research_exa for open-ended synthesis; use web_answer_exa for direct questions needing a concise cited answer.",
+                "Use web_research_exa when a systemPrompt or outputSchema is needed; use web_search_advanced_exa for filtered retrieval only.",
+              ],
+            },
+          },
           perform: (apiKey, args) =>
             performResearch(apiKey, {
               query: args.query,
@@ -490,6 +573,16 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
           parameters: webSearchAdvancedParams,
           pendingMessage: "Performing advanced search via Exa...",
           errorPrefix: "Exa advanced search error",
+          hostExtras: {
+            pi: {
+              promptSnippet: "Advanced search with category, domain, and date filters.",
+              promptGuidelines: [
+                "Use web_search_advanced_exa when you need category, domain, or date filters; use web_search_exa for simpler lookups.",
+                "Use web_search_advanced_exa for retrieval with constraints; use web_research_exa for deep synthesis and comparisons.",
+                "Use web_search_advanced_exa to find filtered result sets; use web_fetch_exa to read the selected URLs.",
+              ],
+            },
+          },
           perform: (apiKey, args) =>
             performAdvancedSearch(apiKey, args.query, {
               numResults: args.numResults,
