@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * MCP stdio server for pi-exa.
  *
@@ -8,12 +7,17 @@
  * than Pi CLI flags. Precedence mirrors the Pi-side `isToolEnabledForConfig`:
  *
  *   1. EXA_ENABLED_TOOLS env (comma-separated allowlist) — overrides
- *      everything else when set.
- *   2. config file's `enabledTools` array — same allowlist semantics.
+ *      everything else when set. An EXA_ENABLED_TOOLS string that parses
+ *      to an empty allowlist (e.g. ",,,") emits a warning and falls
+ *      through to the per-tool toggle defaults.
+ *   2. config file's `enabledTools` array — same allowlist semantics. An
+ *      empty array means "no tools enabled" — matching the Pi adapter.
  *   3. Per-tool env toggles (EXA_ENABLE_ADVANCED, EXA_ENABLE_RESEARCH) and
  *      config file's advancedEnabled / researchEnabled.
  *   4. Default: 8 tools on (4 cheap Exa + 4 planner), 2 hidden
  *      (web_search_advanced_exa, web_research_exa).
+ *
+ * EXA_CONFIG is accepted as a deprecated alias for EXA_CONFIG_FILE.
  *
  * The module stays import-passive: it only starts stdio when invoked as the
  * main module. Tests import createMcpServerOptions and runServer directly.
@@ -24,6 +28,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type CreateMcpServerOptions, runMcpStdioServer as defaultRunMcpStdioServer } from "@feniix/bridgekit/mcp";
 import { type ExaConfig, loadConfig, normalizeString } from "./config.js";
+import { CROSS_TOOL_GUIDELINES } from "./tool-guidance.js";
 import { createExaTools } from "./tools.js";
 
 const ALWAYS_ON_TOOLS = new Set([
@@ -51,11 +56,16 @@ function readPackageVersion(packageJsonUrl: URL): string | undefined {
 }
 
 function packageVersion(): string {
-  return (
+  const version =
     readPackageVersion(new URL("../package.json", import.meta.url)) ??
-    readPackageVersion(new URL("../../package.json", import.meta.url)) ??
-    "0.0.0"
-  );
+    readPackageVersion(new URL("../../package.json", import.meta.url));
+  if (!version) {
+    console.warn(
+      "[pi-exa] Unable to resolve package version from neighboring package.json; falling back to 0.0.0. Verify the installed package layout.",
+    );
+    return "0.0.0";
+  }
+  return version;
 }
 
 function isTruthyEnv(value: string | undefined): boolean {
@@ -77,9 +87,14 @@ export function createMcpToolGater(config: ExaConfig | null = null): (name: stri
   const envAllowlist = normalizeString(process.env.EXA_ENABLED_TOOLS);
   if (envAllowlist) {
     const allow = parseAllowlist(envAllowlist);
-    return (name) => allow.has(name);
+    if (allow.size > 0) {
+      return (name) => allow.has(name);
+    }
+    console.warn(
+      `[pi-exa] EXA_ENABLED_TOOLS=${JSON.stringify(envAllowlist)} parsed to an empty allowlist; falling back to per-tool toggle defaults.`,
+    );
   }
-  if (config?.enabledTools && config.enabledTools.length > 0) {
+  if (config?.enabledTools) {
     const allow = new Set(config.enabledTools);
     return (name) => allow.has(name);
   }
@@ -104,6 +119,9 @@ export function createMcpApiKeyResolver(config: ExaConfig | null): () => string 
 }
 
 export function createMcpServerOptions(): CreateMcpServerOptions {
+  // Note: env-driven gating (EXA_API_KEY, EXA_ENABLED_TOOLS, etc.) is captured
+  // at construction time. Hosts that need to react to runtime env changes
+  // must call createMcpServerOptions() again.
   const config = loadConfig();
   return {
     name: "pi-exa",
@@ -112,8 +130,7 @@ export function createMcpServerOptions(): CreateMcpServerOptions {
       resolveApiKey: createMcpApiKeyResolver(config),
       isToolEnabled: createMcpToolGater(config),
     }),
-    instructions:
-      "Use these tools to search the web, fetch URLs, answer factual questions with grounded citations, and plan multi-step research using Exa AI. The four exa_research_* planner tools are local-only and never call Exa.",
+    instructions: CROSS_TOOL_GUIDELINES,
   };
 }
 

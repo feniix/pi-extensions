@@ -121,6 +121,26 @@ describe("pi-exa MCP server", () => {
     expect(names).toEqual(["web_search_exa", "web_fetch_exa"]);
   });
 
+  it("warns and falls back to defaults when EXA_ENABLED_TOOLS parses to an empty allowlist", () => {
+    process.env.EXA_ENABLED_TOOLS = ",,,";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const names = toolNames(createMcpServerOptions());
+
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "web_search_exa",
+        "web_fetch_exa",
+        "web_answer_exa",
+        "web_find_similar_exa",
+        "exa_research_step",
+      ]),
+    );
+    expect(names).toHaveLength(8);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("EXA_ENABLED_TOOLS"));
+    warn.mockRestore();
+  });
+
   it("constructs a bridgekit MCP server from the options without throwing", () => {
     const server = createMcpServer(createMcpServerOptions());
 

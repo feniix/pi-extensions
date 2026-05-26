@@ -7,6 +7,7 @@
  */
 
 import { executePortableTool } from "@feniix/bridgekit";
+import type { Exa } from "exa-js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSearch = vi.fn();
@@ -14,12 +15,17 @@ const mockGetContents = vi.fn();
 const mockAnswer = vi.fn();
 const mockFindSimilar = vi.fn();
 
+// Structurally typing the mock against the real Exa surface means a future
+// exa-js rename of search/getContents/answer/findSimilar surfaces as a
+// compile error here instead of a silent test bypass.
+type ExaMockShape = Pick<Exa, "search" | "getContents" | "answer" | "findSimilar">;
+
 vi.mock("exa-js", () => ({
-  Exa: class {
-    search = mockSearch;
-    getContents = mockGetContents;
-    answer = mockAnswer;
-    findSimilar = mockFindSimilar;
+  Exa: class implements ExaMockShape {
+    search = mockSearch as unknown as ExaMockShape["search"];
+    getContents = mockGetContents as unknown as ExaMockShape["getContents"];
+    answer = mockAnswer as unknown as ExaMockShape["answer"];
+    findSimilar = mockFindSimilar as unknown as ExaMockShape["findSimilar"];
   },
 }));
 
@@ -485,11 +491,10 @@ describe("portable Exa tools", () => {
       const tools = createExaTools({ resolveApiKey: () => "test-key" });
       const tool = findTool(tools, "web_research_exa");
 
-      const result = await executePortableTool(
-        tool,
-        { query: "anything", outputSchema: { type: "bogus" as unknown as "object" } },
-        { host: "test" },
-      );
+      // Avoid `as unknown as "object"`: define a wider-typed value the schema
+      // would still reject so the cast doesn't lie about the input shape.
+      const badSchema: { type?: string } = { type: "bogus" };
+      const result = await executePortableTool(tool, { query: "anything", outputSchema: badSchema }, { host: "test" });
 
       expect(result.isError).toBe(true);
       expect(result.text).toContain("Invalid arguments");

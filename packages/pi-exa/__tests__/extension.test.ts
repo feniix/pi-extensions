@@ -6,7 +6,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { PortableToolExecutionError } from "@feniix/bridgekit/pi";
+import { isPortableToolExecutionError } from "@feniix/bridgekit/pi";
+import type { Exa } from "exa-js";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSearch = vi.fn();
@@ -15,16 +16,21 @@ const mockAnswer = vi.fn();
 const mockFindSimilar = vi.fn();
 const mockExaConstructor = vi.fn();
 
+// Structurally typing the mock against the real Exa surface means a future
+// exa-js rename of search/getContents/answer/findSimilar surfaces as a
+// compile error here instead of a silent test bypass.
+type ExaMockShape = Pick<Exa, "search" | "getContents" | "answer" | "findSimilar">;
+
 vi.mock("exa-js", () => ({
-  Exa: class {
+  Exa: class implements ExaMockShape {
     constructor(apiKey: string) {
       mockExaConstructor(apiKey);
     }
 
-    search = mockSearch;
-    getContents = mockGetContents;
-    answer = mockAnswer;
-    findSimilar = mockFindSimilar;
+    search = mockSearch as unknown as ExaMockShape["search"];
+    getContents = mockGetContents as unknown as ExaMockShape["getContents"];
+    answer = mockAnswer as unknown as ExaMockShape["answer"];
+    findSimilar = mockFindSimilar as unknown as ExaMockShape["findSimilar"];
   },
 }));
 
@@ -973,11 +979,12 @@ describe("pi-exa extension", () => {
     } catch (error) {
       caught = error;
     }
-    expect(caught).toBeInstanceOf(PortableToolExecutionError);
-    const error = caught as PortableToolExecutionError;
-    expect(error.message).toContain('Category "people" only accepts LinkedIn domains');
-    expect(error.message).toContain("twitter.com");
-    expect(error.details).toMatchObject({ kind: "domain", tool: "web_search_advanced_exa" });
+    if (!isPortableToolExecutionError(caught)) {
+      throw new Error("expected PortableToolExecutionError");
+    }
+    expect(caught.message).toContain('Category "people" only accepts LinkedIn domains');
+    expect(caught.message).toContain("twitter.com");
+    expect(caught.details).toMatchObject({ kind: "domain", tool: "web_search_advanced_exa" });
   });
 
   it("allows people category with LinkedIn includeDomains", async () => {

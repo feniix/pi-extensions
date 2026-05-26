@@ -10,7 +10,7 @@ import type {
   SummaryContentsOptions,
   TextContentsOptions,
 } from "exa-js";
-import { type AdvancedSearchType, DEEP_SEARCH_TYPES } from "./constants.js";
+import type { AdvancedSearchType } from "./constants.js";
 import { getExaClient } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatSearchResults, toMetadata } from "./formatters.js";
@@ -103,18 +103,6 @@ function validateCategoryFilters(category: SearchCategory | undefined, options: 
         `Category "people" only accepts LinkedIn domains for includeDomains. Invalid: ${nonLinkedIn.join(", ")}.`,
       );
     }
-  }
-}
-
-function validateAdvancedType(type: AdvancedSearchOptions["type"] | undefined): void {
-  if (!type) {
-    return;
-  }
-
-  if (DEEP_SEARCH_TYPES.includes(type as (typeof DEEP_SEARCH_TYPES)[number])) {
-    throw new Error(
-      "web_search_advanced_exa does not support deep types. Use web_research_exa for deep-reasoning / deep-lite / deep.",
-    );
   }
 }
 
@@ -242,7 +230,6 @@ export async function performAdvancedSearch(
   query: string,
   options: AdvancedSearchOptions,
 ): Promise<ToolPerformResult> {
-  validateAdvancedType(options.type);
   const category = validateCategory(options.category);
   validateCategoryFilters(category, options);
 
