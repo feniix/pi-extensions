@@ -14,6 +14,8 @@
   ],
   "type": "module",
   "files": [
+    "bin/",
+    "dist/",
     "extensions/",
     "skills/",
     "README.md",
@@ -26,6 +28,24 @@
     "skills": [
       "./skills"
     ]
+  },
+  "bin": {
+    "pi-exa-mcp": "./bin/pi-exa-mcp.js"
+  },
+  "exports": {
+    "./mcp": {
+      "types": "./dist/extensions/mcp-server.d.ts",
+      "import": "./dist/extensions/mcp-server.js"
+    },
+    "./tools": {
+      "types": "./dist/extensions/tools.d.ts",
+      "import": "./dist/extensions/tools.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build:mcp": "tsc --project tsconfig.mcp.json && node -e \"require('node:fs').chmodSync('dist/extensions/mcp-server.js', 0o755)\"",
+    "prepack": "npm run build:mcp"
   },
   "engines": {
     "node": ">=22.19.0"

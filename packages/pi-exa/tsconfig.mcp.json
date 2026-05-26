@@ -1,0 +1,29 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "outDir": "dist",
+    "rootDir": "."
+  },
+  "include": [
+    "extensions/mcp-server.ts",
+    "extensions/tools.ts",
+    "extensions/config.ts",
+    "extensions/constants.ts",
+    "extensions/exa-client.ts",
+    "extensions/formatters.ts",
+    "extensions/research-planner.ts",
+    "extensions/research-planner-types.ts",
+    "extensions/schemas.ts",
+    "extensions/web-answer.ts",
+    "extensions/web-fetch.ts",
+    "extensions/web-find-similar.ts",
+    "extensions/web-research.ts",
+    "extensions/web-search.ts",
+    "extensions/web-search-advanced.ts"
+  ],
+  "exclude": ["__tests__", "dist", "extensions/index.ts"]
+}
