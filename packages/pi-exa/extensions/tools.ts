@@ -177,7 +177,7 @@ function localToolError(toolName: string, label: string, error: unknown): Portab
   return {
     text: `${label} error: ${message}`,
     isError: true,
-    structuredContent: { tool: toolName, error: message },
+    structuredContent: { kind: "domain", tool: toolName, error: message },
   };
 }
 
@@ -187,7 +187,7 @@ function missingApiKeyResult(toolName: string) {
   return {
     text: MISSING_KEY_TEXT,
     isError: true as const,
-    structuredContent: { tool: toolName, error: "missing_api_key" },
+    structuredContent: { kind: "domain", tool: toolName, error: "missing_api_key" },
   };
 }
 
@@ -261,6 +261,7 @@ function exaTool<TParams extends TObject>(
             text: error.message,
             isError: true,
             structuredContent: {
+              kind: "domain",
               tool: spec.name,
               error: "timeout",
               timeoutMs: error.timeoutMs,
@@ -271,7 +272,7 @@ function exaTool<TParams extends TObject>(
         return {
           text: `${spec.errorPrefix}: ${message}`,
           isError: true,
-          structuredContent: { tool: spec.name, error: message },
+          structuredContent: { kind: "domain", tool: spec.name, error: message },
         };
       }
     },
