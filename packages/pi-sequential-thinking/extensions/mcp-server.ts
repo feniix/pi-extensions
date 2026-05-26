@@ -14,7 +14,7 @@
  */
 
 import { readFileSync, realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type CreateMcpServerOptions, runMcpStdioServer } from "@feniix/bridgekit/mcp";
 import { ThoughtAnalyzer } from "./analyzer.js";
@@ -38,8 +38,13 @@ export interface CreateMcpServerOptionsArgs {
 }
 
 function readPackageVersion(): string {
+  // Production: this file is dist/extensions/mcp-server.js, so the package
+  // root is two directories up. The pi-side never calls this function (the
+  // pi entrypoint is extensions/index.ts and bypasses createMcpServerOptions),
+  // so we only need the dist-relative layout to work.
   try {
-    const packagePath = resolve(fileURLToPath(import.meta.url), "..", "..", "package.json");
+    const fileDir = dirname(fileURLToPath(import.meta.url));
+    const packagePath = resolve(fileDir, "..", "..", "package.json");
     const parsed = JSON.parse(readFileSync(packagePath, "utf-8")) as { version?: unknown };
     if (typeof parsed.version === "string" && parsed.version.length > 0) {
       return parsed.version;
