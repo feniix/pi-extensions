@@ -727,4 +727,52 @@ describe("portable Exa tools", () => {
       expect(mockSearch).not.toHaveBeenCalled();
     });
   });
+
+  describe("non-Error rejection handling", () => {
+    // Pre-existing behavior: toErrorMessage used `String(error)` for non-Error
+    // throws, producing the useless `[object Object]` when an SDK rejects with
+    // a plain object that has its own `message` field. The fix tries object
+    // `.message` before falling back to String coercion.
+
+    it("extracts .message from plain-object rejections instead of returning [object Object]", async () => {
+      mockSearch.mockRejectedValue({ message: "rate limited", code: 429 });
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_search_exa");
+
+      const result = await executePortableTool(tool, { query: "anything" }, { host: "test" });
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toBe("Exa search error: rate limited");
+      expect(result.text).not.toContain("[object Object]");
+      expect(result.structuredContent).toMatchObject({
+        tool: "web_search_exa",
+        error: "rate limited",
+      });
+    });
+
+    it("falls back to String() for objects without a string message", async () => {
+      // Object whose `message` is not a string — fall through to String(error).
+      mockSearch.mockRejectedValue({ message: 42, code: "X" });
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_search_exa");
+
+      const result = await executePortableTool(tool, { query: "anything" }, { host: "test" });
+
+      expect(result.isError).toBe(true);
+      // String({message:42,code:"X"}) → "[object Object]"; we accept this for
+      // truly unstructured rejections because there's no better signal to use.
+      expect(result.text).toContain("Exa search error:");
+    });
+
+    it("preserves the string when the SDK rejects with a bare string", async () => {
+      mockSearch.mockRejectedValue("naked-string-rejection");
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_search_exa");
+
+      const result = await executePortableTool(tool, { query: "anything" }, { host: "test" });
+
+      expect(result.text).toBe("Exa search error: naked-string-rejection");
+      expect(result.structuredContent).toMatchObject({ error: "naked-string-rejection" });
+    });
+  });
 });

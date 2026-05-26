@@ -193,7 +193,15 @@ function cancelledResult(toolName: string) {
 }
 
 function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  // Plain-object rejections (e.g., `{ message: "rate limited", code: 429 }`)
+  // would otherwise stringify to "[object Object]" via the fallback below.
+  // Prefer the object's own `.message` field when it's a non-empty string.
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const candidate = (error as { message: unknown }).message;
+    if (typeof candidate === "string" && candidate.length > 0) return candidate;
+  }
+  return String(error);
 }
 
 interface ExaToolSpec<TParams extends TObject> {
