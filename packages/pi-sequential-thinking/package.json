@@ -64,7 +64,7 @@
     }
   },
   "dependencies": {
-    "@feniix/bridgekit": "^0.6.0",
+    "@feniix/bridgekit": "^0.8.0",
     "typebox": "^1.1.31"
   }
 }

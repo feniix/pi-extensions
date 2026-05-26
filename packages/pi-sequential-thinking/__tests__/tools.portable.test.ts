@@ -173,13 +173,17 @@ describe("portable tools - export_session / import_session", () => {
   it("export_session flags isError via TypeBox when file_path is missing", async () => {
     // file_path is required in the schema, so TypeBox rejects before the
     // handler runs. Bridgekit's execute-tool layer surfaces this as
-    // kind:"validation" structured content with path/message error entries.
+    // kind:"validation" structured content; since 0.8 the field is derived
+    // from TypeBox's structured `requiredProperties` rather than the
+    // instancePath, so we get the actual property name back.
     const result = await executePortableTool(findTool("export_session"), {}, { host: "test" });
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({
       kind: "validation",
       tool: "export_session",
-      validationErrors: expect.arrayContaining([expect.objectContaining({ path: expect.any(String) })]),
+      validationErrors: expect.arrayContaining([
+        expect.objectContaining({ field: "file_path", message: expect.stringContaining("file_path") }),
+      ]),
     });
   });
 
@@ -201,7 +205,9 @@ describe("portable tools - export_session / import_session", () => {
     expect(result.structuredContent).toMatchObject({
       kind: "validation",
       tool: "import_session",
-      validationErrors: expect.arrayContaining([expect.objectContaining({ path: expect.any(String) })]),
+      validationErrors: expect.arrayContaining([
+        expect.objectContaining({ field: "file_path", message: expect.stringContaining("file_path") }),
+      ]),
     });
   });
 
