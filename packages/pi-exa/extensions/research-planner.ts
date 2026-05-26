@@ -5,12 +5,9 @@
  * summarize planning state so the model can decide which explicit retrieval
  * tool to call next.
  *
- * Each `createResearchPlanner()` call returns an isolated instance. The
- * module-level `recordResearchStep`/`getResearchStatus`/`getResearchSummary`/
- * `resetResearchPlanner` exports remain as a thin facade over a default
- * instance so existing callers continue to work; new code that needs per-host
- * isolation (the bridgekit MCP server) should construct its own planner via
- * `createResearchPlanner()`.
+ * Each `createResearchPlanner()` call returns an isolated instance. Hosts
+ * needing per-process or per-session isolation construct their own planner
+ * via `createResearchPlanner()`.
  */
 
 import type {
@@ -605,22 +602,4 @@ export function createResearchPlanner(): ResearchPlanner {
   }
 
   return { recordStep, getStatus, getSummary, reset };
-}
-
-const defaultPlanner = createResearchPlanner();
-
-export function recordResearchStep(input: ResearchStepInput): ResearchStepResult {
-  return defaultPlanner.recordStep(input);
-}
-
-export function getResearchStatus(): ResearchStatus {
-  return defaultPlanner.getStatus();
-}
-
-export function getResearchSummary(params: ResearchSummaryParams = {}): string {
-  return defaultPlanner.getSummary(params);
-}
-
-export function resetResearchPlanner(): ResearchStatus {
-  return defaultPlanner.reset();
 }
