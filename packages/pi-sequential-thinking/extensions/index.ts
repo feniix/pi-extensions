@@ -17,21 +17,6 @@ import { ThoughtStorage } from "./storage.js";
 import { createTools } from "./tools.js";
 
 // =============================================================================
-// Pending update messages (pi-only UX text shown while a tool runs)
-// =============================================================================
-
-const PENDING_MESSAGES: Record<string, string> = {
-  process_thought: "Processing thought...",
-  generate_summary: "Generating summary...",
-  clear_history: "Clearing history...",
-  export_session: "Exporting session...",
-  import_session: "Importing session...",
-  get_thinking_history: "Getting thinking history...",
-  get_thinking_status: "Getting thinking status...",
-  sequential_think: "Starting structured thinking process...",
-};
-
-// =============================================================================
 // Extension Entry Point
 // =============================================================================
 
@@ -97,12 +82,7 @@ export default function sequentialThinking(pi: ExtensionAPI) {
 
   const portableTools = createTools({ storage, analyzer, effectiveConfigForStatus });
   for (const tool of portableTools) {
-    pi.registerTool(
-      toPiTool(tool, {
-        pendingMessage: PENDING_MESSAGES[tool.name] ?? `Running ${tool.title}...`,
-        maxLimits,
-      }),
-    );
+    pi.registerTool(toPiTool(tool, { maxLimits }));
   }
 }
 

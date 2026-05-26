@@ -406,6 +406,7 @@ function defineTool<TParams extends TObject>(
     title: tool.title,
     description: tool.description,
     parameters: tool.parameters,
+    hostExtras: tool.hostExtras,
     execute(args) {
       try {
         return toOkResult(tool.execute(args as Record<string, unknown>));
@@ -426,6 +427,7 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
         "into structured steps through stages: Problem Definition, Research, Analysis, Synthesis, Conclusion. " +
         "Accepts snake_case fields and MCP-style camelCase aliases. Content-bearing: stores thought text in local plaintext JSON.",
       parameters: processThoughtParams,
+      hostExtras: { pi: { pendingMessage: "Processing thought..." } },
       execute: (args) => processThoughtHandler(deps, args),
     }),
     defineTool({
@@ -434,6 +436,7 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       description:
         "Generate a summary of one thinking session. Content-bearing: summaries derive from stored thought content.",
       parameters: sessionScopedParams,
+      hostExtras: { pi: { pendingMessage: "Generating summary..." } },
       execute: (args) => generateSummaryHandler(deps, args),
     }),
     defineTool({
@@ -441,6 +444,7 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       title: "Clear Thought History",
       description: "Reset one thinking session by clearing recorded thoughts.",
       parameters: clearHistoryParams,
+      hostExtras: { pi: { pendingMessage: "Clearing history..." } },
       execute: (args) => clearHistoryHandler(deps, args),
     }),
     defineTool({
@@ -449,6 +453,7 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       description:
         "Export one thinking session to a JSON file. Content-bearing: exported files include thought text. Parent directories are created automatically.",
       parameters: exportSessionParams,
+      hostExtras: { pi: { pendingMessage: "Exporting session..." } },
       execute: (args) => exportSessionHandler(deps, args),
     }),
     defineTool({
@@ -457,6 +462,7 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       description:
         "Import a previously exported thinking session from a JSON file. Treats imported thought text as inert content.",
       parameters: importSessionParams,
+      hostExtras: { pi: { pendingMessage: "Importing session..." } },
       execute: (args) => importSessionHandler(deps, args),
     }),
     defineTool({
@@ -465,6 +471,7 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       description:
         "Read recorded thoughts for one session with bounded pagination. Content-bearing: may return full thought text unless include_full_thoughts=false.",
       parameters: getThinkingHistoryParams,
+      hostExtras: { pi: { pendingMessage: "Getting thinking history..." } },
       execute: (args) => getThinkingHistoryHandler(deps, args),
     }),
     defineTool({
@@ -477,6 +484,7 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
         "and a statusCompleteness block indicating whether the listing was truncated or contained corrupt entries. " +
         "Use writable=false or sessions[].corrupt=true to diagnose write and parse failures.",
       parameters: getThinkingStatusParams,
+      hostExtras: { pi: { pendingMessage: "Getting thinking status..." } },
       execute: () => getThinkingStatusHandler(deps),
     }),
     defineTool({
@@ -487,6 +495,7 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
         "Generates one thought per cognitive stage (Problem Definition through Conclusion) and writes them to the selected session. " +
         "Use process_thought instead when you want to record your own thoughts step-by-step.",
       parameters: sequentialThinkParams,
+      hostExtras: { pi: { pendingMessage: "Starting structured thinking process..." } },
       execute: (args) => sequentialThinkHandler(deps, args),
     }),
   ];

@@ -23,7 +23,6 @@ import type { ValidationError } from "./types.js";
 type PiToolDefinition = Parameters<ExtensionAPI["registerTool"]>[0];
 
 export interface PiToolWrapperOptions {
-  pendingMessage: string;
   maxLimits: { maxBytes: number; maxLines: number };
 }
 
@@ -51,10 +50,17 @@ export function toPiTool(tool: PortableTool<TObject>, options: PiToolWrapperOpti
     description: tool.description,
     parameters: tool.parameters,
     async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-      onUpdate?.({
-        content: [{ type: "text" as const, text: options.pendingMessage }],
-        details: { status: "pending" },
-      });
+      // Mirror bridgekit's pi adapter: fire the pre-execute onUpdate only when
+      // the tool declares hostExtras.pi.pendingMessage. Empty string is treated
+      // as unset. See @feniix/bridgekit/dist/src/adapters/pi.js for the
+      // canonical semantic this matches.
+      const pendingMessage = tool.hostExtras?.pi?.pendingMessage;
+      if (pendingMessage !== undefined && pendingMessage !== "") {
+        onUpdate?.({
+          content: [{ type: "text" as const, text: pendingMessage }],
+          details: { status: "pending" },
+        });
+      }
 
       const rawParams = (params ?? {}) as Record<string, unknown>;
       const { toolArgs, requestedLimits } = splitParams(rawParams);
