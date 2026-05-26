@@ -45,9 +45,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function localToolResult(toolName: string, result: unknown): PortableToolResult {
   const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
   const base = { tool: toolName };
+  // base-wins spread guarantees that planner result fields (current or future)
+  // cannot override the canonical `tool` discriminator on structuredContent.
   return {
     text,
-    structuredContent: isRecord(result) ? { ...base, ...result } : base,
+    structuredContent: isRecord(result) ? { ...result, ...base } : base,
   };
 }
 
