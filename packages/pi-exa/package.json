@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-exa",
-  "version": "4.1.0",
+  "version": "5.0.0",
   "description": "Exa API extension for pi — web search, content fetching, and advanced search via Exa AI",
   "keywords": [
     "pi",
@@ -18,6 +18,7 @@
     "dist/",
     "extensions/",
     "skills/",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],
@@ -30,9 +31,13 @@
     ]
   },
   "bin": {
-    "pi-exa-mcp": "./bin/pi-exa-mcp.js"
+    "pi-exa": "./bin/pi-exa.js"
   },
   "exports": {
+    ".": {
+      "types": "./dist/extensions/tools.d.ts",
+      "import": "./dist/extensions/tools.js"
+    },
     "./mcp": {
       "types": "./dist/extensions/mcp-server.d.ts",
       "import": "./dist/extensions/mcp-server.js"
@@ -41,7 +46,15 @@
       "types": "./dist/extensions/tools.d.ts",
       "import": "./dist/extensions/tools.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./extensions/*.js": {
+      "types": "./dist/extensions/*.d.ts",
+      "import": "./dist/extensions/*.js"
+    },
+    "./extensions/*": {
+      "types": "./dist/extensions/*.d.ts",
+      "import": "./dist/extensions/*.js"
+    }
   },
   "scripts": {
     "build:mcp": "tsc --project tsconfig.mcp.json && node -e \"require('node:fs').chmodSync('dist/extensions/mcp-server.js', 0o755)\"",

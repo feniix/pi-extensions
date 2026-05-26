@@ -217,6 +217,67 @@ You can also enable them with an environment variable instead of the CLI flag:
 PI_EXA_LIVE=1 EXA_API_KEY=your-key npx vitest run packages/pi-exa/__tests__/integration.test.ts
 ```
 
+## MCP server
+
+pi-exa also exposes its tool surface as an MCP stdio server, suitable for any MCP-aware host (Claude Desktop, Claude Code, etc.). The server uses the same portable tool implementations as the Pi adapter — only the gating and credential resolution differ.
+
+Run with:
+
+```bash
+npx pi-exa
+```
+
+### Environment configuration
+
+| Variable             | Effect                                                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EXA_API_KEY`        | Exa API key. Required for retrieval tools; planner tools work without it.                                                                                                       |
+| `EXA_ENABLE_ADVANCED`| Truthy (`1` / `true` / `yes`) enables `web_search_advanced_exa`.                                                                                                                |
+| `EXA_ENABLE_RESEARCH`| Truthy enables `web_research_exa`.                                                                                                                                              |
+| `EXA_ENABLED_TOOLS`  | Comma-separated allowlist. Highest precedence. Empty/whitespace-only values emit a warning and fall through to the per-tool toggle defaults.                                    |
+| `EXA_CONFIG_FILE`    | Path to a JSON config file (same shape as the CLI `--exa-config-file`). Use for `apiKey`, `enabledTools`, `advancedEnabled`, `researchEnabled`.                                 |
+| `EXA_CONFIG`         | Deprecated alias for `EXA_CONFIG_FILE`. Still read; prefer `EXA_CONFIG_FILE`.                                                                                                   |
+
+### Precedence
+
+Same rules as the Pi adapter:
+
+1. `EXA_ENABLED_TOOLS` (env) — strict allowlist.
+2. `enabledTools` (config file) — strict allowlist; an empty array means "no tools".
+3. `EXA_ENABLE_ADVANCED` / `EXA_ENABLE_RESEARCH` (env) or `advancedEnabled` / `researchEnabled` (config file).
+4. Default: 8 tools on (4 cheap Exa + 4 planner); `web_search_advanced_exa` and `web_research_exa` hidden.
+
+### Example: Claude Desktop / `claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "pi-exa": {
+      "command": "npx",
+      "args": ["-y", "@feniix/pi-exa"],
+      "env": {
+        "EXA_API_KEY": "your-key",
+        "EXA_ENABLE_ADVANCED": "1"
+      }
+    }
+  }
+}
+```
+
+### Example: generic `mcp.json`
+
+```json
+{
+  "mcpServers": {
+    "pi-exa": {
+      "command": "npx",
+      "args": ["pi-exa"],
+      "env": { "EXA_API_KEY": "your-key" }
+    }
+  }
+}
+```
+
 ## Notes
 
 - `exa_research_*` planning tools are enabled by default when no explicit `enabledTools` allowlist is configured, local-only, and do not require an Exa API key.
