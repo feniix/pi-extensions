@@ -122,6 +122,10 @@ Example:
 - `--exa-enable-research`: enable `web_research_exa`.
 - `--exa-config-file <path>`: load configuration from file.
 - `--exa-config <path>` (deprecated alias for `--exa-config-file`).
+- `--exa-timeout-ms <ms>`: default per-call timeout for Exa-backed tools (built-in 60000).
+- `--exa-research-timeout-ms <ms>`: override for `web_research_exa` (built-in 180000; deep-reasoning runs longer).
+
+> The timeout bounds the JS-side wait. `exa-js` does not yet accept `AbortSignal` ([exa-labs/exa-js#158](https://github.com/exa-labs/exa-js/issues/158)), so the underlying HTTP request continues until Exa resolves it and Exa still bills for the completed call. The timeout error message states this explicitly.
 
 ## Tools
 
@@ -237,6 +241,8 @@ npx pi-exa
 | `EXA_ENABLED_TOOLS`  | Comma-separated allowlist. Highest precedence. Empty/whitespace-only values emit a warning and fall through to the per-tool toggle defaults.                                    |
 | `EXA_CONFIG_FILE`    | Path to a JSON config file (same shape as the CLI `--exa-config-file`). Use for `apiKey`, `enabledTools`, `advancedEnabled`, `researchEnabled`.                                 |
 | `EXA_CONFIG`         | Deprecated alias for `EXA_CONFIG_FILE`. Still read; prefer `EXA_CONFIG_FILE`.                                                                                                   |
+| `EXA_TIMEOUT_MS`     | Default per-call timeout in ms for Exa-backed tools. Built-in 60000. Underlying HTTP request continues until Exa resolves it; see [exa-labs/exa-js#158](https://github.com/exa-labs/exa-js/issues/158). |
+| `EXA_RESEARCH_TIMEOUT_MS` | Override for `web_research_exa` only. Built-in 180000.                                                                                                                     |
 
 ### Precedence
 

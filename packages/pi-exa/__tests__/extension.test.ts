@@ -126,7 +126,7 @@ describe("pi-exa extension", () => {
         "--exa-config",
       ]),
     );
-    expect(flagNames).toHaveLength(5);
+    expect(flagNames).toHaveLength(7);
   });
 
   it("registers default tools by default", () => {
@@ -1127,6 +1127,51 @@ describe("pi-exa extension", () => {
     ).rejects.toMatchObject({
       message: expect.stringContaining("API key not configured"),
       details: { kind: "domain", tool: "web_search_exa", error: "missing_api_key" },
+    });
+  });
+
+  describe("timeout flags", () => {
+    it("registers --exa-timeout-ms and --exa-research-timeout-ms flags", () => {
+      const mockPi = createMockPi();
+      exaExtension(mockPi as unknown as ExtensionAPI);
+
+      const flagNames = mockPi.registerFlag.mock.calls.map(([name]) => name);
+      expect(flagNames).toContain("--exa-timeout-ms");
+      expect(flagNames).toContain("--exa-research-timeout-ms");
+    });
+
+    it("--exa-timeout-ms surfaces the configured timeout when the SDK hangs", async () => {
+      mockSearch.mockReturnValue(new Promise(() => {}));
+      const mockPi = createMockPi({ "--exa-api-key": "flag-key", "--exa-timeout-ms": "75" });
+      exaExtension(mockPi as unknown as ExtensionAPI);
+
+      const tool = getRegisteredTool(mockPi, "web_search_exa");
+      await expect(
+        tool.execute("call", { query: "test" }, undefined, undefined, undefined as never),
+      ).rejects.toMatchObject({
+        message: expect.stringContaining("timed out after 75ms"),
+        details: { kind: "domain", tool: "web_search_exa", error: "timeout", timeoutMs: 75 },
+      });
+    });
+
+    it("--exa-research-timeout-ms specifically overrides the research budget", async () => {
+      mockSearch.mockReturnValue(new Promise(() => {}));
+      const mockPi = createMockPi({
+        "--exa-api-key": "flag-key",
+        "--exa-enable-research": true,
+        "--exa-timeout-ms": "10000",
+        "--exa-research-timeout-ms": "80",
+      });
+      exaExtension(mockPi as unknown as ExtensionAPI);
+
+      const tool = getRegisteredTool(mockPi, "web_research_exa");
+      const start = Date.now();
+      await expect(
+        tool.execute("call", { query: "test" }, undefined, undefined, undefined as never),
+      ).rejects.toMatchObject({
+        details: expect.objectContaining({ error: "timeout", timeoutMs: 80 }),
+      });
+      expect(Date.now() - start).toBeLessThan(500);
     });
   });
 });

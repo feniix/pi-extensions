@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { type CreateMcpServerOptions, runMcpStdioServer as defaultRunMcpStdioServer } from "@feniix/bridgekit/mcp";
 import { type ExaConfig, loadConfig, normalizeString } from "./config.js";
 import { CROSS_TOOL_GUIDELINES } from "./tool-guidance.js";
-import { createExaTools } from "./tools.js";
+import { createExaTools, type ExaToolTimeouts } from "./tools.js";
 
 const ALWAYS_ON_TOOLS = new Set([
   "web_search_exa",
@@ -118,6 +118,29 @@ export function createMcpApiKeyResolver(config: ExaConfig | null): () => string 
   };
 }
 
+function parsePositiveIntEnv(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const n = Number.parseInt(value.trim(), 10);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return n;
+}
+
+/**
+ * Build an ExaToolTimeouts object from EXA_TIMEOUT_MS (generic default) and
+ * EXA_RESEARCH_TIMEOUT_MS (web_research_exa override). Returns undefined when
+ * neither var is set or both fail to parse — letting createExaTools fall
+ * through to its built-in per-tool defaults (60s / 180s).
+ */
+export function createMcpTimeoutsFromEnv(): ExaToolTimeouts | undefined {
+  const def = parsePositiveIntEnv(process.env.EXA_TIMEOUT_MS);
+  const research = parsePositiveIntEnv(process.env.EXA_RESEARCH_TIMEOUT_MS);
+  if (def === undefined && research === undefined) return undefined;
+  const out: ExaToolTimeouts = {};
+  if (def !== undefined) out.default = def;
+  if (research !== undefined) out.web_research_exa = research;
+  return out;
+}
+
 export function createMcpServerOptions(): CreateMcpServerOptions {
   // Note: env-driven gating (EXA_API_KEY, EXA_ENABLED_TOOLS, etc.) is captured
   // at construction time. Hosts that need to react to runtime env changes
@@ -129,6 +152,7 @@ export function createMcpServerOptions(): CreateMcpServerOptions {
     tools: createExaTools({
       resolveApiKey: createMcpApiKeyResolver(config),
       isToolEnabled: createMcpToolGater(config),
+      timeouts: createMcpTimeoutsFromEnv(),
     }),
     instructions: CROSS_TOOL_GUIDELINES,
   };

@@ -18,7 +18,7 @@ import { PortableToolExecutionError } from "@feniix/bridgekit/pi";
 import type { TObject } from "typebox";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
 import { type ExaToolName, PI_TOOL_METADATA } from "./tool-guidance.js";
-import { createExaTools } from "./tools.js";
+import { createExaTools, type ExaToolTimeouts } from "./tools.js";
 
 export {
   getAuthStatusMessage,
@@ -106,6 +106,32 @@ function registerFlags(pi: ExtensionAPI): void {
     description: "Deprecated alias for --exa-config-file.",
     type: "string",
   });
+  pi.registerFlag("--exa-timeout-ms", {
+    description: "Default per-call timeout in ms for Exa-backed tools. Overrides the built-in 60000 default.",
+    type: "string",
+  });
+  pi.registerFlag("--exa-research-timeout-ms", {
+    description:
+      "Per-call timeout in ms for web_research_exa (deep-reasoning legitimately runs longer). Overrides the built-in 180000 default.",
+    type: "string",
+  });
+}
+
+function parsePositiveIntFlag(value: string | boolean | undefined): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const n = Number.parseInt(value.trim(), 10);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return n;
+}
+
+function resolvePiTimeouts(pi: ExtensionAPI): ExaToolTimeouts | undefined {
+  const def = parsePositiveIntFlag(pi.getFlag("--exa-timeout-ms"));
+  const research = parsePositiveIntFlag(pi.getFlag("--exa-research-timeout-ms"));
+  if (def === undefined && research === undefined) return undefined;
+  const out: ExaToolTimeouts = {};
+  if (def !== undefined) out.default = def;
+  if (research !== undefined) out.web_research_exa = research;
+  return out;
 }
 
 // =============================================================================
@@ -119,6 +145,7 @@ export default function exaExtension(pi: ExtensionAPI) {
   const tools = createExaTools({
     resolveApiKey: () => resolveAuth(pi).apiKey || undefined,
     isToolEnabled: (toolName) => isToolEnabledForConfig(pi, resolvedConfig, toolName),
+    timeouts: resolvePiTimeouts(pi),
   });
   registerExaPiTools(pi, tools);
 }

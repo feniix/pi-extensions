@@ -21,7 +21,13 @@ The 5.0 line ports pi-exa onto bridgekit's portable-tool surface and ships a fir
 
 ### Added
 
-- MCP stdio server at `extensions/mcp-server.ts`, exported via `@feniix/pi-exa/mcp` and runnable as `npx pi-exa`. Supports the same env envelope (`EXA_API_KEY`, `EXA_ENABLE_ADVANCED`, `EXA_ENABLE_RESEARCH`, `EXA_ENABLED_TOOLS`, `EXA_CONFIG_FILE`) as the Pi adapter.
+- **Per-call timeouts on Exa-backed tools.** Built-in defaults: 60s for `web_search_exa`, `web_fetch_exa`, `web_answer_exa`, `web_find_similar_exa`, `web_search_advanced_exa`; 180s for `web_research_exa` (deep-reasoning legitimately runs longer). Configurable three ways:
+  - `ExaToolsOptions.timeouts: ExaToolTimeouts` factory option (programmatic; per-tool override + generic `default`).
+  - Pi CLI flags `--exa-timeout-ms` (default for all tools) and `--exa-research-timeout-ms` (override for `web_research_exa`).
+  - MCP env vars `EXA_TIMEOUT_MS` and `EXA_RESEARCH_TIMEOUT_MS` with the same semantics.
+  - Precedence: per-tool override > generic `default` > built-in.
+  - Mid-flight `ctx.signal` abort is now honored too — returns the same soft "Cancelled." shape as the pre-flight signal check. Caveat: `exa-js` does not yet accept `AbortSignal` (see [exa-labs/exa-js#158](https://github.com/exa-labs/exa-js/issues/158)), so the underlying HTTP request keeps running until Exa resolves it; the timeout bounds the JS-side wait, and Exa still bills for the completed call. The timeout error message states this explicitly.
+- MCP stdio server at `extensions/mcp-server.ts`, exported via `@feniix/pi-exa/mcp` and runnable as `npx pi-exa`. Supports the same env envelope (`EXA_API_KEY`, `EXA_ENABLE_ADVANCED`, `EXA_ENABLE_RESEARCH`, `EXA_ENABLED_TOOLS`, `EXA_CONFIG_FILE`, `EXA_TIMEOUT_MS`, `EXA_RESEARCH_TIMEOUT_MS`) as the Pi adapter.
 - Host-neutral portable tool surface at `extensions/tools.ts` (`createExaTools`).
 - Cross-tool routing guidance is now centralised in `extensions/tool-guidance.ts`. The Pi adapter (`promptGuidelines`) and the MCP server (`instructions`) both consume the same source.
 - `webFetchParams.urls` now enforces `maxItems: 50` to mirror existing batch-size discipline elsewhere.

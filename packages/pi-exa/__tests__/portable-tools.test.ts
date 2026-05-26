@@ -605,4 +605,126 @@ describe("portable Exa tools", () => {
       expect(statusB.structuredContent).toMatchObject({ tool: "exa_research_status", stepCount: 0 });
     });
   });
+
+  describe("timeout and mid-flight cancellation", () => {
+    // exa-js does not accept AbortSignal in its public surface (issue
+    // exa-labs/exa-js#158). Until upstream support lands, we race the SDK
+    // promise against ctx.signal and a per-call timer. The underlying HTTP
+    // request continues until exa-js resolves it (and Exa still bills) — the
+    // helper bounds the JS-side wait, nothing else.
+
+    it("fires the per-tool timeout when the SDK call hangs longer than the configured budget", async () => {
+      // Mock search to hang forever — only the timeout can settle it.
+      mockSearch.mockReturnValue(new Promise(() => {}));
+      const tools = createExaTools({
+        resolveApiKey: () => "test-key",
+        timeouts: { default: 50 },
+      });
+      const tool = findTool(tools, "web_search_exa");
+
+      const start = Date.now();
+      const result = await executePortableTool(tool, { query: "anything" }, { host: "test" });
+      const elapsed = Date.now() - start;
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toMatch(/timed out after 50ms/);
+      expect(result.text).toContain("exa-labs/exa-js");
+      expect(result.structuredContent).toMatchObject({
+        tool: "web_search_exa",
+        error: "timeout",
+        timeoutMs: 50,
+      });
+      expect(elapsed).toBeGreaterThanOrEqual(45);
+      expect(elapsed).toBeLessThan(500);
+    });
+
+    it("returns the soft cancelled shape when ctx.signal aborts mid-flight", async () => {
+      mockSearch.mockReturnValue(new Promise(() => {}));
+      const tools = createExaTools({
+        resolveApiKey: () => "test-key",
+        timeouts: { default: 10_000 },
+      });
+      const tool = findTool(tools, "web_search_exa");
+
+      const controller = new AbortController();
+      const resultPromise = executePortableTool(
+        tool,
+        { query: "anything" },
+        {
+          host: "test",
+          signal: controller.signal,
+        },
+      );
+      // Let exaTool pass the pre-flight check and enter the perform await.
+      await new Promise((resolve) => setImmediate(resolve));
+      controller.abort();
+      const result = await resultPromise;
+
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toBe("Cancelled.");
+      expect(result.structuredContent).toMatchObject({
+        tool: "web_search_exa",
+        cancelled: true,
+      });
+    });
+
+    it("uses the per-tool override over the default when both are provided", async () => {
+      mockSearch.mockReturnValue(new Promise(() => {}));
+      const tools = createExaTools({
+        resolveApiKey: () => "test-key",
+        timeouts: { default: 10_000, web_search_exa: 60 },
+      });
+      const tool = findTool(tools, "web_search_exa");
+
+      const start = Date.now();
+      const result = await executePortableTool(tool, { query: "anything" }, { host: "test" });
+      const elapsed = Date.now() - start;
+
+      expect(result.structuredContent).toMatchObject({ timeoutMs: 60 });
+      expect(elapsed).toBeLessThan(500);
+    });
+
+    it("honors per-tool web_research_exa override even when generic default would be shorter", async () => {
+      mockSearch.mockReturnValue(new Promise(() => {}));
+      const tools = createExaTools({
+        resolveApiKey: () => "test-key",
+        isToolEnabled: () => true,
+        timeouts: { default: 30, web_research_exa: 60 },
+      });
+      const tool = findTool(tools, "web_research_exa");
+
+      const start = Date.now();
+      const result = await executePortableTool(tool, { query: "anything" }, { host: "test" });
+      const elapsed = Date.now() - start;
+
+      expect(result.structuredContent).toMatchObject({ tool: "web_research_exa", timeoutMs: 60 });
+      // Tool-specific budget wins, so we wait at least 60ms but never 30ms.
+      expect(elapsed).toBeGreaterThanOrEqual(55);
+      expect(elapsed).toBeLessThan(500);
+    });
+
+    it("the pre-flight signal check still wins when the signal is already aborted at entry", async () => {
+      mockSearch.mockReturnValue(new Promise(() => {}));
+      const tools = createExaTools({
+        resolveApiKey: () => "test-key",
+        timeouts: { default: 50 },
+      });
+      const tool = findTool(tools, "web_search_exa");
+
+      const result = await executePortableTool(
+        tool,
+        { query: "anything" },
+        {
+          host: "test",
+          signal: AbortSignal.abort(),
+        },
+      );
+
+      // Soft cancelled shape from the pre-flight gate — not the timeout error
+      // shape — and the SDK was never called.
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toBe("Cancelled.");
+      expect(mockSearch).not.toHaveBeenCalled();
+    });
+  });
 });

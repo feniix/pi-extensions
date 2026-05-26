@@ -36,6 +36,119 @@ export interface ExaToolsOptions {
   isToolEnabled?: (name: string) => boolean;
   /** Planner instance for the four exa_research_* tools. Defaults to a fresh createResearchPlanner(). */
   planner?: ResearchPlanner;
+  /**
+   * Per-call timeout overrides in ms. Precedence: per-tool entry → `default` →
+   * built-in per-tool default (60_000ms; 180_000ms for web_research_exa).
+   * Resolved at execute time so config can change after construction.
+   *
+   * NB: exa-js does not yet accept AbortSignal (exa-labs/exa-js#158). The
+   * timeout bounds the JS-side wait; the underlying HTTP request continues
+   * until exa-js resolves it and Exa still bills for the call.
+   */
+  timeouts?: ExaToolTimeouts;
+}
+
+/** Per-tool timeout overrides; all entries are optional positive integers (ms). */
+export interface ExaToolTimeouts {
+  default?: number;
+  web_search_exa?: number;
+  web_fetch_exa?: number;
+  web_answer_exa?: number;
+  web_find_similar_exa?: number;
+  web_search_advanced_exa?: number;
+  web_research_exa?: number;
+}
+
+const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_RESEARCH_TIMEOUT_MS = 180_000;
+
+const EXA_JS_SIGNAL_ISSUE = "https://github.com/exa-labs/exa-js/issues/158";
+
+/** Resolve the effective timeout for `toolName` given optional caller overrides. */
+export function resolveExaToolTimeoutMs(toolName: string, timeouts?: ExaToolTimeouts): number {
+  if (timeouts) {
+    const perTool = timeouts[toolName as keyof ExaToolTimeouts];
+    if (typeof perTool === "number" && perTool > 0) return perTool;
+    if (typeof timeouts.default === "number" && timeouts.default > 0) return timeouts.default;
+  }
+  return toolName === "web_research_exa" ? DEFAULT_RESEARCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+}
+
+class ExaTimeoutError extends Error {
+  readonly timeoutMs: number;
+  readonly toolName: string;
+  constructor(timeoutMs: number, toolName: string) {
+    super(
+      `${toolName} timed out after ${timeoutMs}ms. The underlying Exa request continues to bill ` +
+        `until exa-js supports AbortSignal (${EXA_JS_SIGNAL_ISSUE}).`,
+    );
+    this.name = "ExaTimeoutError";
+    this.timeoutMs = timeoutMs;
+    this.toolName = toolName;
+  }
+}
+
+class ExaCancelledError extends Error {
+  constructor() {
+    super("Cancelled.");
+    this.name = "ExaCancelledError";
+  }
+}
+
+/**
+ * Race a promise against an AbortSignal and a per-call timeout.
+ *
+ * - perform resolves first  → resolves with the value
+ * - signal aborts            → rejects with ExaCancelledError
+ * - timeoutMs elapses        → rejects with ExaTimeoutError(timeoutMs, toolName)
+ * - perform rejects          → rejects with the original error
+ *
+ * The underlying perform promise is not cancelled — exa-js does not accept
+ * a signal. The helper bounds the JS-side wait only.
+ */
+function isListenableSignal(signal: AbortSignal | undefined): signal is AbortSignal {
+  // Defensive: extension.test.ts and other call sites construct synthetic
+  // signals like `{ aborted: false } as AbortSignal`. Treat those as
+  // pre-flight-only — addEventListener wouldn't function on them anyway.
+  return Boolean(
+    signal && typeof signal.addEventListener === "function" && typeof signal.removeEventListener === "function",
+  );
+}
+
+function withTimeoutAndAbort<T>(
+  performPromise: Promise<T>,
+  opts: { signal?: AbortSignal; timeoutMs: number; toolName: string },
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const listenable = isListenableSignal(opts.signal);
+    let settled = false;
+    const settle = (action: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (listenable) {
+        opts.signal?.removeEventListener("abort", onAbort);
+      }
+      action();
+    };
+
+    const timer = setTimeout(() => {
+      settle(() => reject(new ExaTimeoutError(opts.timeoutMs, opts.toolName)));
+    }, opts.timeoutMs);
+
+    const onAbort = (): void => {
+      settle(() => reject(new ExaCancelledError()));
+    };
+
+    if (listenable) {
+      opts.signal?.addEventListener("abort", onAbort, { once: true });
+    }
+
+    performPromise.then(
+      (value) => settle(() => resolve(value)),
+      (err) => settle(() => reject(err)),
+    );
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -96,6 +209,7 @@ interface ExaToolSpec<TParams extends TObject> {
 function exaTool<TParams extends TObject>(
   spec: ExaToolSpec<TParams>,
   resolveApiKey: () => string | undefined,
+  resolveTimeoutMs: () => number,
 ): PortableTool<TParams> {
   return definePortableTool({
     name: spec.name,
@@ -114,10 +228,29 @@ function exaTool<TParams extends TObject>(
         text: spec.pendingMessage,
         structuredContent: { status: "pending" },
       });
+      const timeoutMs = resolveTimeoutMs();
       try {
-        const result = await spec.perform(apiKey, args);
+        const result = await withTimeoutAndAbort(spec.perform(apiKey, args), {
+          signal: ctx.signal,
+          timeoutMs,
+          toolName: spec.name,
+        });
         return { text: result.text, structuredContent: result.details };
       } catch (error) {
+        if (error instanceof ExaCancelledError) {
+          return cancelledResult(spec.name);
+        }
+        if (error instanceof ExaTimeoutError) {
+          return {
+            text: error.message,
+            isError: true,
+            structuredContent: {
+              tool: spec.name,
+              error: "timeout",
+              timeoutMs: error.timeoutMs,
+            },
+          };
+        }
         const message = toErrorMessage(error);
         return {
           text: `${spec.errorPrefix}: ${message}`,
@@ -133,6 +266,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
   const resolveApiKey = opts.resolveApiKey ?? (() => undefined);
   const isEnabled = opts.isToolEnabled ?? (() => true);
   const planner = opts.planner ?? createResearchPlanner();
+  const timeoutFor = (toolName: string) => () => resolveExaToolTimeoutMs(toolName, opts.timeouts);
 
   const tools: PortableTool<TObject>[] = [];
 
@@ -224,6 +358,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
           perform: (apiKey, args) => performWebSearch(apiKey, args.query, args.numResults ?? DEFAULT_NUM_RESULTS),
         },
         resolveApiKey,
+        timeoutFor("web_search_exa"),
       ),
     );
   }
@@ -248,6 +383,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             }),
         },
         resolveApiKey,
+        timeoutFor("web_fetch_exa"),
       ),
     );
   }
@@ -271,6 +407,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             }),
         },
         resolveApiKey,
+        timeoutFor("web_answer_exa"),
       ),
     );
   }
@@ -298,6 +435,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             }),
         },
         resolveApiKey,
+        timeoutFor("web_find_similar_exa"),
       ),
     );
   }
@@ -328,6 +466,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             }),
         },
         resolveApiKey,
+        timeoutFor("web_research_exa"),
       ),
     );
   }
@@ -372,6 +511,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             }),
         },
         resolveApiKey,
+        timeoutFor("web_search_advanced_exa"),
       ),
     );
   }
