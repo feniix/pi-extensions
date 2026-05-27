@@ -1,7 +1,14 @@
-#!/usr/bin/env node
-import { readFileSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+/**
+ * MCP stdio server module for pi-code-reasoning.
+ *
+ * Strictly import-passive: exports createMcpServerOptions and runServer
+ * for callers. Stdio is started exclusively by bin/pi-code-reasoning.js
+ * (which uses @feniix/bridgekit/bin-wrapper to import this module and
+ * invoke runServer). Tests import the exports directly without side
+ * effects.
+ */
+
+import { readFileSync } from "node:fs";
 import { type CreateMcpServerOptions, runMcpStdioServer as defaultRunMcpStdioServer } from "@feniix/bridgekit/mcp";
 import { isRecord } from "./config.js";
 import { createCodeReasoningTools } from "./tools.js";
@@ -37,20 +44,4 @@ type RunMcpStdioServer = (options: CreateMcpServerOptions) => Promise<void>;
 
 export async function runServer(runMcpStdioServer: RunMcpStdioServer = defaultRunMcpStdioServer): Promise<void> {
   await runMcpStdioServer(createMcpServerOptions());
-}
-
-function realpathIfPossible(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-}
-
-if (process.argv[1]) {
-  const invokedPath = realpathIfPossible(resolve(process.argv[1]));
-  const modulePath = realpathIfPossible(fileURLToPath(import.meta.url));
-  if (invokedPath === modulePath) {
-    await runServer();
-  }
 }
