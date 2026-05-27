@@ -125,9 +125,13 @@ function formatPortableResultWithLimits(
   isError = false,
 ): PortableToolResult {
   const { text, details } = formatToolOutput(toolName, result, limits);
+  const structuredContent = structuredContentFor(result, details);
+  // Add the bridgekit discriminator so consumers can narrow with
+  // isDomainFailure(result). kind comes first so the spread in
+  // structuredContentFor (which may include user data) can't override it.
   return {
     text,
-    structuredContent: structuredContentFor(result, details),
+    structuredContent: isError ? { kind: "domain", ...structuredContent } : structuredContent,
     isError,
   };
 }
@@ -178,11 +182,14 @@ KEY PARAMETERS:
 - Express uncertainty when present
 - End with a validated conclusion`,
       parameters: codeReasoningParams,
-      execute(args, ctx) {
-        ctx.progress?.({
-          text: "Processing thought...",
-          structuredContent: { status: "pending", tool: CODE_REASONING_TOOLS.reasoning },
-        });
+      // pendingMessage now fires pre-validation via bridgekit's pi adapter.
+      // openWorldHint=false: writes to a local in-memory tracker; idempotentHint=false:
+      // each call appends a thought (timestamps and ordering differ between calls).
+      hostExtras: {
+        pi: { pendingMessage: "Processing thought..." },
+        mcp: { annotations: { destructiveHint: false, idempotentHint: false, openWorldHint: false } },
+      },
+      execute(args) {
         return runFormattedTool(
           CODE_REASONING_TOOLS.reasoning,
           args,
@@ -196,11 +203,11 @@ KEY PARAMETERS:
       title: "Code Reasoning Status",
       description: "Get current status of the code reasoning session: branches, thought count.",
       parameters: statusParams,
-      execute(args, ctx) {
-        ctx.progress?.({
-          text: "Getting status...",
-          structuredContent: { status: "pending", tool: CODE_REASONING_TOOLS.status },
-        });
+      hostExtras: {
+        pi: { pendingMessage: "Getting status..." },
+        mcp: { annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false } },
+      },
+      execute(args) {
         return runFormattedTool(
           CODE_REASONING_TOOLS.status,
           args,
@@ -214,6 +221,11 @@ KEY PARAMETERS:
       title: "Reset Code Reasoning",
       description: "Reset the code reasoning session, clearing all thoughts and branches.",
       parameters: resetParams,
+      // destructiveHint=true: clears the tracker. idempotentHint=true: calling
+      // reset on an already-reset session is a no-op (no observable change).
+      hostExtras: {
+        mcp: { annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false } },
+      },
       execute() {
         tracker.reset();
         return {
