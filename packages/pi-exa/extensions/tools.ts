@@ -226,12 +226,20 @@ function exaTool<TParams extends TObject>(
   resolveApiKey: () => string | undefined,
   resolveTimeoutMs: () => number,
 ): PortableTool<TParams> {
+  // Thread the spec's pendingMessage into hostExtras.pi.pendingMessage so
+  // bridgekit's pi adapter fires it pre-validation via onUpdate. The previous
+  // in-execute ctx.progress?.() emission has been removed: it fired AFTER the
+  // missing-api-key / signal-aborted short-circuits and AFTER TypeBox
+  // validation, so users with bad inputs never saw a pending signal. The
+  // pre-validation hook is strictly better UX.
+  const piExtras = { ...(spec.hostExtras?.pi ?? {}), pendingMessage: spec.pendingMessage };
+  const hostExtras: PortableToolHostExtras = { ...spec.hostExtras, pi: piExtras };
   return definePortableTool({
     name: spec.name,
     title: spec.title,
     description: spec.description,
     parameters: spec.parameters,
-    hostExtras: spec.hostExtras,
+    hostExtras,
     async execute(args, ctx) {
       const apiKey = resolveApiKey();
       if (!apiKey) {
@@ -240,10 +248,6 @@ function exaTool<TParams extends TObject>(
       if (ctx.signal?.aborted) {
         return cancelledResult(spec.name);
       }
-      ctx.progress?.({
-        text: spec.pendingMessage,
-        structuredContent: { status: "pending" },
-      });
       const timeoutMs = resolveTimeoutMs();
       try {
         const result = await withTimeoutAndAbort(spec.perform(apiKey, args), {
@@ -294,11 +298,14 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
         title: "Exa Research Step",
         description: "Record one step in a stateful, local Exa research planning session without calling Exa APIs.",
         parameters: exaResearchStepParams,
+        // Local planner state — each step appends, not idempotent; openWorld=false
+        // because no Exa calls are made.
         hostExtras: {
           pi: {
             promptSnippet: "Record iterative research-planning state before retrieval.",
             promptGuidelines: PLANNER_GUIDELINES,
           },
+          mcp: { annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: false } },
         },
         execute(args) {
           try {
@@ -324,6 +331,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             promptSnippet: "Inspect current research-planning state.",
             promptGuidelines: PLANNER_GUIDELINES,
           },
+          mcp: { annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false } },
         },
         execute() {
           try {
@@ -344,11 +352,14 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
         description:
           "Generate a human-readable Exa research plan, Source Pack, or optional suggested web_research_exa payload.",
         parameters: exaResearchSummaryParams,
+        // Idempotent because the summary is deterministic from the planner
+        // state — no LLM call, no timestamping that varies across calls.
         hostExtras: {
           pi: {
             promptSnippet: "Summarize the accumulated Exa research plan.",
             promptGuidelines: PLANNER_GUIDELINES,
           },
+          mcp: { annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false } },
         },
         execute(args) {
           try {
@@ -368,11 +379,14 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
         title: "Exa Research Reset",
         description: "Clear the current in-memory Exa research planning session.",
         parameters: exaResearchResetParams,
+        // destructive=true (clears state); idempotent=true (resetting an empty
+        // session is a no-op).
         hostExtras: {
           pi: {
             promptSnippet: "Reset local Exa research-planning state.",
             promptGuidelines: PLANNER_GUIDELINES,
           },
+          mcp: { annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false } },
         },
         execute() {
           try {
@@ -406,6 +420,10 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
                 "Use web_search_exa for retrieval; use web_research_exa for comparisons, synthesis, and recommendations.",
               ],
             },
+            // External network call; results may drift between calls
+            // (page rankings, freshness). readOnly relative to Exa's side
+            // since the search itself doesn't modify state.
+            mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
           perform: (apiKey, args) => performWebSearch(apiKey, args.query, args.numResults ?? DEFAULT_NUM_RESULTS),
         },
@@ -435,6 +453,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
                 "Use web_fetch_exa to inspect returned pages; use web_find_similar_exa when you want more pages like a source URL.",
               ],
             },
+            mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
           perform: (apiKey, args) =>
             performWebFetch(apiKey, args.urls, {
@@ -469,6 +488,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
                 "Use web_answer_exa for a cited response; use web_fetch_exa when you need the full source text.",
               ],
             },
+            mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
           perform: (apiKey, args) =>
             performAnswer(apiKey, {
@@ -503,6 +523,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
                 "Use web_find_similar_exa to discover related pages; use web_fetch_exa to inspect the returned URLs in full.",
               ],
             },
+            mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
           perform: (apiKey, args) =>
             performFindSimilar(apiKey, {
@@ -541,6 +562,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
                 "Use web_research_exa when a systemPrompt or outputSchema is needed; use web_search_advanced_exa for filtered retrieval only.",
               ],
             },
+            mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
           perform: (apiKey, args) =>
             performResearch(apiKey, {
@@ -583,6 +605,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
                 "Use web_search_advanced_exa to find filtered result sets; use web_fetch_exa to read the selected URLs.",
               ],
             },
+            mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
           perform: (apiKey, args) =>
             performAdvancedSearch(apiKey, args.query, {

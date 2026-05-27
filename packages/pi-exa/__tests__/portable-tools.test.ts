@@ -126,21 +126,14 @@ describe("portable Exa tools", () => {
       expect(mockSearch).not.toHaveBeenCalled();
     });
 
-    it("emits a single pending progress update before invoking Exa", async () => {
-      mockSearch.mockResolvedValue(defaultSearchResponse);
+    it("declares the pre-execute pendingMessage via hostExtras.pi", () => {
+      // Bridgekit 0.9.0's pi adapter fires hostExtras.pi.pendingMessage as
+      // an onUpdate(...) before TypeBox validation runs. The portable
+      // executePortableTool path no longer emits this signal — that's a
+      // pi-host-level lifecycle hook, not portable execution state.
       const tools = createExaTools({ resolveApiKey: () => "test-key" });
       const tool = findTool(tools, "web_search_exa");
-      const progress = vi.fn();
-
-      await executePortableTool(tool, { query: "test query" }, { host: "test", progress });
-
-      expect(progress).toHaveBeenCalledTimes(1);
-      expect(progress).toHaveBeenCalledWith(
-        expect.objectContaining({
-          text: "Searching the web via Exa...",
-          structuredContent: expect.objectContaining({ status: "pending" }),
-        }),
-      );
+      expect(tool.hostExtras?.pi?.pendingMessage).toBe("Searching the web via Exa...");
     });
 
     it("returns isError:true with the prefixed message when the SDK throws", async () => {
@@ -207,20 +200,10 @@ describe("portable Exa tools", () => {
       expect(mockGetContents).not.toHaveBeenCalled();
     });
 
-    it("emits a fetch-specific pending progress update", async () => {
-      mockGetContents.mockResolvedValue(defaultSearchResponse);
+    it("declares a fetch-specific pendingMessage via hostExtras.pi", () => {
       const tools = createExaTools({ resolveApiKey: () => "test-key" });
       const tool = findTool(tools, "web_fetch_exa");
-      const progress = vi.fn();
-
-      await executePortableTool(tool, { urls: ["https://example.com"] }, { host: "test", progress });
-
-      expect(progress).toHaveBeenCalledWith(
-        expect.objectContaining({
-          text: "Fetching content via Exa...",
-          structuredContent: expect.objectContaining({ status: "pending" }),
-        }),
-      );
+      expect(tool.hostExtras?.pi?.pendingMessage).toBe("Fetching content via Exa...");
     });
 
     it("returns isError:true with the fetch-prefixed message when the SDK throws", async () => {
@@ -286,15 +269,10 @@ describe("portable Exa tools", () => {
       expect(result.structuredContent).toMatchObject({ tool: "web_answer_exa", error: "rate limited" });
     });
 
-    it("emits an answer-specific pending progress update", async () => {
-      mockAnswer.mockResolvedValue({ answer: "ok", citations: [], costDollars: { total: 0 } });
+    it("declares an answer-specific pendingMessage via hostExtras.pi", () => {
       const tools = createExaTools({ resolveApiKey: () => "test-key" });
       const tool = findTool(tools, "web_answer_exa");
-      const progress = vi.fn();
-
-      await executePortableTool(tool, { query: "anything" }, { host: "test", progress });
-
-      expect(progress).toHaveBeenCalledWith(expect.objectContaining({ text: "Fetching answer from Exa..." }));
+      expect(tool.hostExtras?.pi?.pendingMessage).toBe("Fetching answer from Exa...");
     });
   });
 
