@@ -1,97 +1,74 @@
 /**
- * Pi-side adapter for bridgekit portable tools.
+ * Pi-side output policy for sequential-thinking portable tools.
  *
- * This module bridges a host-neutral PortableTool to pi's registerTool
- * signature while preserving the exact return shape the previous inline
- * pi handlers produced: pending update callback, splitParams for
- * piMaxBytes/piMaxLines, formatToolOutput-based truncation with temp-file
- * spillover, and isError:true returned to pi as a tool result rather than
- * thrown via PortableToolExecutionError.
+ * Wraps a portable tool with the pi-only concerns RFC §C and §D scope to
+ * the consumer:
  *
- * We do not use bridgekit's registerPiTools adapter because it throws on
- * isError results; existing pi-side tests for this package assert the
- * returned-isError-result shape.
+ *   - Gap C: `splitParams` for `piMaxBytes` / `piMaxLines` overrides.
+ *   - Gap D: `formatToolOutput` truncation with tempfile spillover.
+ *
+ * The wrapper returns a PortableTool of the same shape, so it composes
+ * with bridgekit 0.9.0's `registerPiTools` adapter — which handles
+ * pendingMessage emission, error-result envelope mapping, and the
+ * `structuredContent → details` flow automatically. No custom Pi
+ * adapter is required here.
+ *
+ * Errors short-circuit truncation: handler-returned `isError: true`
+ * results pass through unchanged (their text and structuredContent are
+ * already the canonical error shape from tools.ts's `toErrorResult`).
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { executePortableTool, type PortableTool } from "@feniix/bridgekit";
+import type { PortableTool } from "@feniix/bridgekit";
 import type { TObject } from "typebox";
 import { resolveEffectiveLimits, splitParams } from "./config.js";
-import { formatToolOutput, type McpToolDetails } from "./output.js";
-import type { ValidationError } from "./types.js";
+import { formatToolOutput } from "./output.js";
 
-type PiToolDefinition = Parameters<ExtensionAPI["registerTool"]>[0];
-
-export interface PiToolWrapperOptions {
+export interface PiOutputWrapperOptions {
   maxLimits: { maxBytes: number; maxLines: number };
 }
 
-function isValidationErrorArray(value: unknown): value is ValidationError[] {
-  return (
-    Array.isArray(value) &&
-    value.every(
-      (entry) =>
-        typeof entry === "object" &&
-        entry !== null &&
-        typeof (entry as Record<string, unknown>).field === "string" &&
-        typeof (entry as Record<string, unknown>).message === "string",
-    )
-  );
-}
-
 /**
- * Wrap a portable tool into a pi tool definition that preserves the
- * pre-bridgekit observable behavior of the sequential-thinking extension.
+ * Return a portable tool whose execute applies pi-side argument shaping
+ * (splitParams) and output truncation (formatToolOutput) on top of the
+ * original portable handler.
+ *
+ * On success the truncation metadata (`truncated`, `truncation`, `tempFile`)
+ * is merged into the original structuredContent so bridgekit's pi adapter
+ * surfaces it under `details` for the pi host. The merge is order-safe:
+ * tool-provided fields take precedence except for the four
+ * formatToolOutput-controlled keys, which authoritatively reflect the
+ * truncation pass that just ran.
  */
-export function toPiTool(tool: PortableTool<TObject>, options: PiToolWrapperOptions): PiToolDefinition {
+export function withPiOutput<TParams extends TObject>(
+  tool: PortableTool<TParams>,
+  options: PiOutputWrapperOptions,
+): PortableTool<TParams> {
+  const originalExecute = tool.execute;
   return {
-    name: tool.name,
-    label: tool.title,
-    description: tool.description,
-    parameters: tool.parameters,
-    async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-      // Mirror bridgekit's pi adapter: fire the pre-execute onUpdate only when
-      // the tool declares hostExtras.pi.pendingMessage. Empty string is treated
-      // as unset. See @feniix/bridgekit/dist/src/adapters/pi.js for the
-      // canonical semantic this matches.
-      const pendingMessage = tool.hostExtras?.pi?.pendingMessage;
-      if (pendingMessage !== undefined && pendingMessage !== "") {
-        onUpdate?.({
-          content: [{ type: "text" as const, text: pendingMessage }],
-          details: { status: "pending" },
-        });
-      }
-
-      const rawParams = (params ?? {}) as Record<string, unknown>;
-      const { toolArgs, requestedLimits } = splitParams(rawParams);
+    ...tool,
+    async execute(args, ctx) {
+      const rawArgs = (args ?? {}) as Record<string, unknown>;
+      const { toolArgs, requestedLimits } = splitParams(rawArgs);
       const effectiveLimits = resolveEffectiveLimits(requestedLimits, options.maxLimits);
 
-      const portableResult = await executePortableTool(tool, toolArgs, { host: "pi", signal });
+      const result = await originalExecute(toolArgs as typeof args, ctx);
 
-      if (portableResult.isError) {
-        const structured = (portableResult.structuredContent ?? {}) as Record<string, unknown>;
-        const errorMessage = typeof structured.error === "string" ? structured.error : portableResult.text;
-        const details: McpToolDetails = {
-          tool: tool.name,
-          truncated: false,
-          error: errorMessage,
-        };
-        if (isValidationErrorArray(structured.validationErrors)) {
-          details.validationErrors = structured.validationErrors;
-        }
-        return {
-          content: [{ type: "text" as const, text: portableResult.text }],
-          isError: true,
-          details,
-        };
+      if (result.isError) {
+        // Error path: pass the canonical error shape through unchanged. The
+        // text already starts with "Sequential Thinking error: ..." and the
+        // structuredContent already carries { kind, tool, error, validationErrors? }.
+        return result;
       }
 
-      const payload = portableResult.structuredContent ?? portableResult.text;
+      // Success path: truncate the JSON-serialised result and merge the
+      // formatter's McpToolDetails (tool, truncated, optional truncation,
+      // optional tempFile) over the tool's structuredContent so pi-side
+      // consumers see both.
+      const payload = result.structuredContent ?? result.text;
       const formatted = formatToolOutput(tool.name, payload, effectiveLimits);
       return {
-        content: [{ type: "text" as const, text: formatted.text }],
-        details: formatted.details,
-        isError: false,
+        text: formatted.text,
+        structuredContent: { ...(result.structuredContent ?? {}), ...formatted.details },
       };
     },
   };

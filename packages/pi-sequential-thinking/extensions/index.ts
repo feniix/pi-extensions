@@ -10,9 +10,10 @@
 
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { type PiToolRegistration, registerPiTools } from "@feniix/bridgekit/pi";
 import { ThoughtAnalyzer } from "./analyzer.js";
 import { type EffectiveConfigStatus, getHomeDir, loadConfigWithSources, resolveEffectiveConfig } from "./config.js";
-import { toPiTool } from "./pi-output.js";
+import { withPiOutput } from "./pi-output.js";
 import { ThoughtStorage } from "./storage.js";
 import { createTools } from "./tools.js";
 
@@ -81,9 +82,12 @@ export default function sequentialThinking(pi: ExtensionAPI) {
   };
 
   const portableTools = createTools({ storage, analyzer, effectiveConfigForStatus });
-  for (const tool of portableTools) {
-    pi.registerTool(toPiTool(tool, { maxLimits }));
-  }
+  const piTools = portableTools.map((tool) => withPiOutput(tool, { maxLimits }));
+  // Bridgekit's PiToolRegistration types promptGuidelines as readonly string[]
+  // while pi-coding-agent's ExtensionAPI accepts mutable string[]. The two are
+  // structurally compatible at runtime (bridgekit only reads); the cast bridges
+  // the contravariance gap. Goes away when one side widens.
+  registerPiTools(pi as unknown as PiToolRegistration, piTools);
 }
 
 export {
