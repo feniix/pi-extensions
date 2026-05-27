@@ -68,7 +68,7 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "dependencies": {
-    "@feniix/bridgekit": "^0.11.0",
+    "@feniix/bridgekit": "^0.12.0",
     "exa-js": "^2.8.0",
     "typebox": "^1.1.31"
   },
