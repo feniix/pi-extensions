@@ -15,7 +15,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { type PiToolRegistration, registerPiTools } from "@feniix/bridgekit/pi";
+import { registerPiTools } from "@feniix/bridgekit/pi";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
 import { createExaTools, type ExaToolTimeouts } from "./tools.js";
 
@@ -93,11 +93,5 @@ export default function exaExtension(pi: ExtensionAPI) {
     isToolEnabled: (toolName) => isToolEnabledForConfig(pi, resolvedConfig, toolName),
     timeouts: resolvePiTimeouts(pi),
   });
-  // Bridgekit's PiToolRegistration types promptGuidelines as `readonly string[]`
-  // while pi-coding-agent's ExtensionAPI accepts mutable `string[]`. The two
-  // are structurally compatible at runtime — bridgekit only ever reads, not
-  // mutates — but TypeScript's contravariance check rejects the assignment
-  // without an explicit cast. This is a type-interop concern with bridgekit
-  // 0.9.0; the cast goes away when one side widens to match.
-  registerPiTools(pi as unknown as PiToolRegistration, tools);
+  registerPiTools(pi, tools);
 }
