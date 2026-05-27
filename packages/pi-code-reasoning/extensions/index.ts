@@ -12,7 +12,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { type PiToolRegistration, registerPiTools } from "@feniix/bridgekit/pi";
+import { registerPiTools } from "@feniix/bridgekit/pi";
 import { loadConfig, normalizeNumber } from "./config.js";
 import { CODE_REASONING_FLAGS, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "./constants.js";
 import { createCodeReasoningTools, type MaxLimits } from "./tools.js";
@@ -97,10 +97,5 @@ function createPiMaxLimitsResolver(pi: ExtensionAPI): () => MaxLimits {
 export default function codeReasoning(pi: ExtensionAPI) {
   registerFlags(pi);
   const tools = createCodeReasoningTools({ getMaxLimits: createPiMaxLimitsResolver(pi) });
-  // Bridgekit's PiToolRegistration types `promptGuidelines` as
-  // `readonly string[]` while pi-coding-agent's ExtensionAPI accepts mutable
-  // `string[]`. The two are structurally compatible at runtime — bridgekit
-  // never mutates — but TypeScript's contravariance check rejects the
-  // assignment without an explicit cast. Goes away when one side widens.
-  registerPiTools(pi as unknown as PiToolRegistration, tools);
+  registerPiTools(pi, tools);
 }
