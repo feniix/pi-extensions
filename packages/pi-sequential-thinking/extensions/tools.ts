@@ -434,7 +434,15 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       // Appends one thought to local storage. Not idempotent (each call
       // creates a distinct timestamped record). Not openWorld (local only).
       hostExtras: {
-        pi: { pendingMessage: "Processing thought..." },
+        pi: {
+          pendingMessage: "Processing thought...",
+          promptSnippet: "Record one thought at a time in a structured thinking session.",
+          promptGuidelines: [
+            "Use process_thought to record one thought at a time; use sequential_think to scaffold a full 3-10 stage sequence in one call.",
+            "Use process_thought when you control each thought's content; use sequential_think when you want pre-filled stage prompts.",
+            "Use process_thought to extend an existing session; use clear_history to start fresh.",
+          ],
+        },
         mcp: {
           annotations: {
             readOnlyHint: false,
@@ -453,7 +461,14 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
         "Generate a summary of one thinking session. Content-bearing: summaries derive from stored thought content.",
       parameters: sessionScopedParams,
       hostExtras: {
-        pi: { pendingMessage: "Generating summary..." },
+        pi: {
+          pendingMessage: "Generating summary...",
+          promptSnippet: "Summarize the thoughts recorded in a session.",
+          promptGuidelines: [
+            "Use generate_summary for an aggregate view (stages, tags, completion); use get_thinking_history when you need the full thought text.",
+            "Use generate_summary for content-derived overview; use get_thinking_status for content-free storage and configuration diagnostics.",
+          ],
+        },
         mcp: { annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false } },
       },
       execute: (args) => generateSummaryHandler(deps, args),
@@ -466,7 +481,14 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       // destructive=true (deletes thought history); idempotent=true (clearing
       // an empty session is observably a no-op for the storage layer).
       hostExtras: {
-        pi: { pendingMessage: "Clearing history..." },
+        pi: {
+          pendingMessage: "Clearing history...",
+          promptSnippet: "Reset a session by clearing all recorded thoughts.",
+          promptGuidelines: [
+            "Use clear_history to start a session fresh; use export_session first if you want to preserve the current thoughts.",
+            "Use clear_history to reset a specific named session via session_id; omit session_id to reset the default session.",
+          ],
+        },
         mcp: { annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false } },
       },
       execute: (args) => clearHistoryHandler(deps, args),
@@ -483,7 +505,14 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       // "destroys agent state". Not idempotent (the exportedAt timestamp
       // differs between calls). Not openWorld (local filesystem).
       hostExtras: {
-        pi: { pendingMessage: "Exporting session..." },
+        pi: {
+          pendingMessage: "Exporting session...",
+          promptSnippet: "Export a session's thoughts to a JSON file.",
+          promptGuidelines: [
+            "Use export_session to write a session's thoughts to a file; use import_session to restore them later.",
+            "Use export_session before clear_history to preserve the current thoughts; use generate_summary when you only need an overview.",
+          ],
+        },
         mcp: { annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: false } },
       },
       execute: (args) => exportSessionHandler(deps, args),
@@ -497,7 +526,14 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       // destructive=true: overwrites the target session's thoughts. Not
       // idempotent (savedAt timestamp differs between calls).
       hostExtras: {
-        pi: { pendingMessage: "Importing session..." },
+        pi: {
+          pendingMessage: "Importing session...",
+          promptSnippet: "Restore thoughts from a previously exported JSON file.",
+          promptGuidelines: [
+            "Use import_session to load thoughts from a JSON file; use export_session to create such a file.",
+            "Use import_session to overwrite the target session's thoughts; specify session_id to pick a non-default target.",
+          ],
+        },
         mcp: { annotations: { destructiveHint: true, idempotentHint: false, openWorldHint: false } },
       },
       execute: (args) => importSessionHandler(deps, args),
@@ -509,7 +545,15 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
         "Read recorded thoughts for one session with bounded pagination. Content-bearing: may return full thought text unless include_full_thoughts=false.",
       parameters: getThinkingHistoryParams,
       hostExtras: {
-        pi: { pendingMessage: "Getting thinking history..." },
+        pi: {
+          pendingMessage: "Getting thinking history...",
+          promptSnippet: "Read recorded thoughts with pagination and optional snippet mode.",
+          promptGuidelines: [
+            "Use get_thinking_history to read full thought content; use get_thinking_status when you only need storage and configuration diagnostics.",
+            "Use get_thinking_history with include_full_thoughts=false for compact 120-char snippets; default true returns the complete text.",
+            "Use get_thinking_history for raw thoughts; use generate_summary for an aggregate stages/tags/completion view.",
+          ],
+        },
         mcp: { annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false } },
       },
       execute: (args) => getThinkingHistoryHandler(deps, args),
@@ -525,7 +569,14 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
         "Use writable=false or sessions[].corrupt=true to diagnose write and parse failures.",
       parameters: getThinkingStatusParams,
       hostExtras: {
-        pi: { pendingMessage: "Getting thinking status..." },
+        pi: {
+          pendingMessage: "Getting thinking status...",
+          promptSnippet: "Read content-free storage and configuration diagnostics.",
+          promptGuidelines: [
+            "Use get_thinking_status for storage health and config diagnostics; use get_thinking_history when you need the actual thought content.",
+            "Use get_thinking_status to detect corrupt sessions, non-writable storage, or config source labels; not for reading thought text.",
+          ],
+        },
         mcp: { annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false } },
       },
       execute: () => getThinkingStatusHandler(deps),
@@ -541,7 +592,14 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       // Scaffolds 3-10 thoughts into storage; each call appends fresh,
       // timestamped records — not idempotent. Not destructive (appends only).
       hostExtras: {
-        pi: { pendingMessage: "Starting structured thinking process..." },
+        pi: {
+          pendingMessage: "Starting structured thinking process...",
+          promptSnippet: "Scaffold a complete staged thinking sequence in one call.",
+          promptGuidelines: [
+            "Use sequential_think to generate 3-10 stage prompts at once; use process_thought when you want to record your own thoughts step-by-step.",
+            "Use sequential_think when starting fresh on a topic; use process_thought to extend an existing session with your own content.",
+          ],
+        },
         mcp: {
           annotations: {
             readOnlyHint: false,

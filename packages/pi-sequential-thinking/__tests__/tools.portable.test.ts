@@ -333,3 +333,57 @@ describe("portable tools - sequential_think", () => {
     });
   });
 });
+
+describe("portable tools - hostExtras.pi prompt metadata", () => {
+  const allToolNames = [
+    "process_thought",
+    "generate_summary",
+    "clear_history",
+    "export_session",
+    "import_session",
+    "get_thinking_history",
+    "get_thinking_status",
+    "sequential_think",
+  ] as const;
+
+  it("declares a one-line promptSnippet (<100 chars, no newlines) on every tool", () => {
+    for (const name of allToolNames) {
+      const tool = findTool(name);
+      const snippet = tool.hostExtras?.pi?.promptSnippet;
+      expect(snippet, `${name}.hostExtras.pi.promptSnippet missing`).toBeDefined();
+      expect(typeof snippet).toBe("string");
+      const value = snippet as string;
+      expect(value.length, `${name} promptSnippet length > 0`).toBeGreaterThan(0);
+      expect(value.length, `${name} promptSnippet length < 100`).toBeLessThan(100);
+      expect(value, `${name} promptSnippet no newlines`).not.toContain("\n");
+    }
+  });
+
+  it("declares a non-empty promptGuidelines array of strings on every tool", () => {
+    for (const name of allToolNames) {
+      const tool = findTool(name);
+      const guidelines = tool.hostExtras?.pi?.promptGuidelines;
+      expect(Array.isArray(guidelines), `${name}.hostExtras.pi.promptGuidelines is array`).toBe(true);
+      const arr = guidelines as readonly string[];
+      expect(arr.length, `${name} promptGuidelines length > 0`).toBeGreaterThan(0);
+      for (const entry of arr) {
+        expect(typeof entry).toBe("string");
+        expect(entry.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("cross-references process_thought and sequential_think in each other's guidelines", () => {
+    const processGuidelines = (findTool("process_thought").hostExtras?.pi?.promptGuidelines ?? []).join(" ");
+    const sequentialGuidelines = (findTool("sequential_think").hostExtras?.pi?.promptGuidelines ?? []).join(" ");
+    expect(processGuidelines, "process_thought references sequential_think").toContain("sequential_think");
+    expect(sequentialGuidelines, "sequential_think references process_thought").toContain("process_thought");
+  });
+
+  it("cross-references get_thinking_history and get_thinking_status in each other's guidelines", () => {
+    const historyGuidelines = (findTool("get_thinking_history").hostExtras?.pi?.promptGuidelines ?? []).join(" ");
+    const statusGuidelines = (findTool("get_thinking_status").hostExtras?.pi?.promptGuidelines ?? []).join(" ");
+    expect(historyGuidelines, "get_thinking_history references get_thinking_status").toContain("get_thinking_status");
+    expect(statusGuidelines, "get_thinking_status references get_thinking_history").toContain("get_thinking_history");
+  });
+});
