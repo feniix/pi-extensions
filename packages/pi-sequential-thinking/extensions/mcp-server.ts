@@ -1,6 +1,5 @@
-#!/usr/bin/env node
 /**
- * MCP stdio server entrypoint for pi-sequential-thinking.
+ * MCP stdio server module for pi-sequential-thinking.
  *
  * Reuses the host-neutral createTools() factory from ./tools.ts. The same
  * eight sequential-thinking tools exposed through the pi extension are
@@ -11,9 +10,15 @@
  * flags are pi-only and have no effect here. Output truncation
  * (formatToolOutput) is also pi-only — MCP returns full structured
  * tool output to the client and lets the consuming model decide.
+ *
+ * This module is strictly import-passive: it exports
+ * createMcpServerOptions and runServer for callers. Stdio is started
+ * exclusively by bin/pi-sequential-thinking-mcp.js (which uses
+ * @feniix/bridgekit/bin-wrapper to import this module and invoke
+ * runServer). Tests import the exports directly without side effects.
  */
 
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type CreateMcpServerOptions, runMcpStdioServer } from "@feniix/bridgekit/mcp";
@@ -83,22 +88,4 @@ export function createMcpServerOptions(args: CreateMcpServerOptionsArgs = {}): C
 
 export async function runServer(): Promise<void> {
   await runMcpStdioServer(createMcpServerOptions());
-}
-
-function realpathIfPossible(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return path;
-  }
-}
-
-function isMainModule(): boolean {
-  const entrypoint = process.argv[1];
-  if (!entrypoint) return false;
-  return realpathIfPossible(resolve(entrypoint)) === realpathIfPossible(fileURLToPath(import.meta.url));
-}
-
-if (isMainModule()) {
-  await runServer();
 }
