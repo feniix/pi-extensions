@@ -3,11 +3,16 @@
  *
  * Provides tools for reflective problem-solving through sequential thinking.
  * Supports branching (exploring alternatives) and revision (correcting earlier thoughts).
+ *
+ * Pi-side wiring uses bridgekit 0.9.0's registerPiTools adapter directly.
+ * Error semantics default to `errorHandling: "return"`, so portable
+ * `isError: true` results and TypeBox validation failures surface as
+ * `{ content, details, isError: true }` rather than thrown exceptions.
+ * This matches bridgekit's MCP adapter.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { executePortableTool, type PortableTool, type PortableToolResult } from "@feniix/bridgekit";
-import type { TSchema } from "typebox";
+import { type PiToolRegistration, registerPiTools } from "@feniix/bridgekit/pi";
 import { loadConfig, normalizeNumber } from "./config.js";
 import { CODE_REASONING_FLAGS, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "./constants.js";
 import { createCodeReasoningTools, type MaxLimits } from "./tools.js";
@@ -60,51 +65,6 @@ function resolveConfigFlag(pi: ExtensionAPI): string | undefined {
   return undefined;
 }
 
-type PiContent = { type: "text"; text: string };
-
-type PiToolResult = {
-  content: PiContent[];
-  details: Record<string, unknown>;
-  isError?: true;
-};
-
-function toPiDetails(result: PortableToolResult): Record<string, unknown> {
-  return result.structuredContent ?? result.details ?? {};
-}
-
-function toPiResult(result: PortableToolResult): PiToolResult {
-  const piResult = {
-    content: [{ type: "text" as const, text: result.text }],
-    details: toPiDetails(result),
-  };
-
-  if (result.isError) {
-    return { ...piResult, isError: true };
-  }
-  return piResult;
-}
-
-function registerCodeReasoningPiTools(pi: ExtensionAPI, tools: readonly PortableTool<TSchema>[]): void {
-  for (const tool of tools) {
-    pi.registerTool({
-      name: tool.name,
-      label: tool.title,
-      description: tool.description,
-      parameters: tool.parameters,
-      async execute(_toolCallId, params, signal, onUpdate, _ctx) {
-        const result = await executePortableTool(tool, params, {
-          host: "pi",
-          signal,
-          progress(update) {
-            onUpdate?.(toPiResult(update));
-          },
-        });
-        return toPiResult(result);
-      },
-    });
-  }
-}
-
 function createPiMaxLimitsResolver(pi: ExtensionAPI): () => MaxLimits {
   let cachedLimits: MaxLimits | undefined;
 
@@ -136,5 +96,11 @@ function createPiMaxLimitsResolver(pi: ExtensionAPI): () => MaxLimits {
 
 export default function codeReasoning(pi: ExtensionAPI) {
   registerFlags(pi);
-  registerCodeReasoningPiTools(pi, createCodeReasoningTools({ getMaxLimits: createPiMaxLimitsResolver(pi) }));
+  const tools = createCodeReasoningTools({ getMaxLimits: createPiMaxLimitsResolver(pi) });
+  // Bridgekit's PiToolRegistration types `promptGuidelines` as
+  // `readonly string[]` while pi-coding-agent's ExtensionAPI accepts mutable
+  // `string[]`. The two are structurally compatible at runtime — bridgekit
+  // never mutates — but TypeScript's contravariance check rejects the
+  // assignment without an explicit cast. Goes away when one side widens.
+  registerPiTools(pi as unknown as PiToolRegistration, tools);
 }
