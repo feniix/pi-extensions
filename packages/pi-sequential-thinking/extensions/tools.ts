@@ -227,7 +227,11 @@ const sequentialThinkParams = Type.Object(
 function toErrorResult(toolName: string, error: unknown): PortableToolResult {
   const message = error instanceof Error ? error.message : String(error);
   const validationErrors = error instanceof ThoughtValidationError ? error.errors : undefined;
+  // Bridgekit 0.9.0 discriminator: handler-thrown errors carry kind: "domain"
+  // so consumers can narrow with isDomainFailure(). TypeBox-rejected inputs
+  // are handled by bridgekit upstream and arrive with kind: "validation".
   const structuredContent: Record<string, unknown> = {
+    kind: "domain",
     tool: toolName,
     error: message,
   };
@@ -427,7 +431,19 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
         "into structured steps through stages: Problem Definition, Research, Analysis, Synthesis, Conclusion. " +
         "Accepts snake_case fields and MCP-style camelCase aliases. Content-bearing: stores thought text in local plaintext JSON.",
       parameters: processThoughtParams,
-      hostExtras: { pi: { pendingMessage: "Processing thought..." } },
+      // Appends one thought to local storage. Not idempotent (each call
+      // creates a distinct timestamped record). Not openWorld (local only).
+      hostExtras: {
+        pi: { pendingMessage: "Processing thought..." },
+        mcp: {
+          annotations: {
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: false,
+          },
+        },
+      },
       execute: (args) => processThoughtHandler(deps, args),
     }),
     defineTool({
@@ -436,7 +452,10 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       description:
         "Generate a summary of one thinking session. Content-bearing: summaries derive from stored thought content.",
       parameters: sessionScopedParams,
-      hostExtras: { pi: { pendingMessage: "Generating summary..." } },
+      hostExtras: {
+        pi: { pendingMessage: "Generating summary..." },
+        mcp: { annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false } },
+      },
       execute: (args) => generateSummaryHandler(deps, args),
     }),
     defineTool({
@@ -444,7 +463,12 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       title: "Clear Thought History",
       description: "Reset one thinking session by clearing recorded thoughts.",
       parameters: clearHistoryParams,
-      hostExtras: { pi: { pendingMessage: "Clearing history..." } },
+      // destructive=true (deletes thought history); idempotent=true (clearing
+      // an empty session is observably a no-op for the storage layer).
+      hostExtras: {
+        pi: { pendingMessage: "Clearing history..." },
+        mcp: { annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false } },
+      },
       execute: (args) => clearHistoryHandler(deps, args),
     }),
     defineTool({
@@ -453,7 +477,15 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       description:
         "Export one thinking session to a JSON file. Content-bearing: exported files include thought text. Parent directories are created automatically.",
       parameters: exportSessionParams,
-      hostExtras: { pi: { pendingMessage: "Exporting session..." } },
+      // Writes to a user-specified path. readOnly=false (writes a file);
+      // destructive is intentionally unset — overwriting a user-named file
+      // is a "side effect on user storage" rather than the MCP-sense
+      // "destroys agent state". Not idempotent (the exportedAt timestamp
+      // differs between calls). Not openWorld (local filesystem).
+      hostExtras: {
+        pi: { pendingMessage: "Exporting session..." },
+        mcp: { annotations: { readOnlyHint: false, idempotentHint: false, openWorldHint: false } },
+      },
       execute: (args) => exportSessionHandler(deps, args),
     }),
     defineTool({
@@ -462,7 +494,12 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       description:
         "Import a previously exported thinking session from a JSON file. Treats imported thought text as inert content.",
       parameters: importSessionParams,
-      hostExtras: { pi: { pendingMessage: "Importing session..." } },
+      // destructive=true: overwrites the target session's thoughts. Not
+      // idempotent (savedAt timestamp differs between calls).
+      hostExtras: {
+        pi: { pendingMessage: "Importing session..." },
+        mcp: { annotations: { destructiveHint: true, idempotentHint: false, openWorldHint: false } },
+      },
       execute: (args) => importSessionHandler(deps, args),
     }),
     defineTool({
@@ -471,7 +508,10 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
       description:
         "Read recorded thoughts for one session with bounded pagination. Content-bearing: may return full thought text unless include_full_thoughts=false.",
       parameters: getThinkingHistoryParams,
-      hostExtras: { pi: { pendingMessage: "Getting thinking history..." } },
+      hostExtras: {
+        pi: { pendingMessage: "Getting thinking history..." },
+        mcp: { annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false } },
+      },
       execute: (args) => getThinkingHistoryHandler(deps, args),
     }),
     defineTool({
@@ -484,7 +524,10 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
         "and a statusCompleteness block indicating whether the listing was truncated or contained corrupt entries. " +
         "Use writable=false or sessions[].corrupt=true to diagnose write and parse failures.",
       parameters: getThinkingStatusParams,
-      hostExtras: { pi: { pendingMessage: "Getting thinking status..." } },
+      hostExtras: {
+        pi: { pendingMessage: "Getting thinking status..." },
+        mcp: { annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false } },
+      },
       execute: () => getThinkingStatusHandler(deps),
     }),
     defineTool({
@@ -495,7 +538,19 @@ export function createTools(deps: SequentialThinkingDeps): PortableTool<TObject>
         "Generates one thought per cognitive stage (Problem Definition through Conclusion) and writes them to the selected session. " +
         "Use process_thought instead when you want to record your own thoughts step-by-step.",
       parameters: sequentialThinkParams,
-      hostExtras: { pi: { pendingMessage: "Starting structured thinking process..." } },
+      // Scaffolds 3-10 thoughts into storage; each call appends fresh,
+      // timestamped records — not idempotent. Not destructive (appends only).
+      hostExtras: {
+        pi: { pendingMessage: "Starting structured thinking process..." },
+        mcp: {
+          annotations: {
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: false,
+          },
+        },
+      },
       execute: (args) => sequentialThinkHandler(deps, args),
     }),
   ];
