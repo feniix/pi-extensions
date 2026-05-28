@@ -1,7 +1,7 @@
 {
   "name": "@feniix/pi-sequential-thinking",
   "version": "4.1.0",
-  "description": "Sequential Thinking MCP extension for pi — structured progressive thinking through defined stages",
+  "description": "Sequential Thinking extension for pi — structured progressive thinking through defined stages, also runnable as an MCP stdio server",
   "keywords": [
     "pi",
     "pi-package",
@@ -11,10 +11,16 @@
     "sequential-thinking",
     "mcp",
     "model-context-protocol",
-    "structured-thinking"
+    "structured-thinking",
+    "bridgekit"
   ],
   "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "files": [
+    "bin/",
+    "dist/",
     "extensions/",
     "README.md",
     "LICENSE"
@@ -24,10 +30,16 @@
       "./extensions/index.ts"
     ]
   },
+  "bin": {
+    "pi-sequential-thinking-mcp": "./bin/pi-sequential-thinking-mcp.js"
+  },
+  "scripts": {
+    "build:mcp": "tsc --project tsconfig.mcp.json && chmod +x dist/extensions/mcp-server.js",
+    "prepack": "npm run build:mcp"
+  },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": "*"
   },
   "repository": {
     "type": "git",
@@ -49,9 +61,10 @@
     },
     "@earendil-works/pi-coding-agent": {
       "optional": true
-    },
-    "typebox": {
-      "optional": true
     }
+  },
+  "dependencies": {
+    "@feniix/bridgekit": "^0.13.0",
+    "typebox": "^1.1.31"
   }
 }

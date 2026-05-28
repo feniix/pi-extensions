@@ -17,8 +17,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "./types.js";
+
+// Inlined so the MCP stdio entrypoint does not transitively load
+// @earendil-works/pi-coding-agent — that dependency is an optional peer
+// supplied by pi at runtime and is not present in a standalone npm
+// install of the MCP bin. The values mirror pi-coding-agent's
+// historical defaults (50 KiB / 2000 lines).
+const DEFAULT_MAX_BYTES = 51200;
+const DEFAULT_MAX_LINES = 2000;
 
 export type ConfigSource = "flag" | "env" | "project_settings" | "global_settings" | "config_file" | "default";
 
