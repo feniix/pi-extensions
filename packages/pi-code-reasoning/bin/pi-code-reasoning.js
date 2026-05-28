@@ -1,27 +1,14 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { spawnSync } from "node:child_process";
+import { runBinWrapper } from "@feniix/bridgekit/bin-wrapper";
 
-const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const serverPath = join(packageRoot, "dist", "extensions", "mcp-server.js");
-
-if (!existsSync(serverPath)) {
-  const build = spawnSync("npm", ["run", "build:mcp", "--silent"], {
-    cwd: packageRoot,
-    stdio: "inherit",
-    shell: process.platform === "win32",
-    timeout: 60_000,
-  });
-
-  if (build.status !== 0 || !existsSync(serverPath)) {
-    console.error(
-      "[pi-code-reasoning] Failed to build the local MCP server. Run `npm run build:mcp --workspace packages/pi-code-reasoning` and try again.",
-    );
-    process.exit(build.status && build.status !== 0 ? build.status : 1);
-  }
-}
-
-const { runServer } = await import(pathToFileURL(serverPath).href);
-await runServer();
+await runBinWrapper({
+  metaUrl: import.meta.url,
+  mcpEntry: "dist/extensions/mcp-server.js",
+  buildScript: "build:mcp",
+  logPrefix: "pi-code-reasoning",
+  // Route the build subprocess's stdout to /dev/null so any output (npm
+  // warnings, postinstall scripts, etc.) cannot contaminate the parent
+  // process's MCP JSON-RPC framing on stdout. stderr stays inherited so
+  // build diagnostics remain visible.
+  buildStdio: ["ignore", "inherit", "inherit"],
+});
