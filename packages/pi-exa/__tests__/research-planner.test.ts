@@ -3,12 +3,7 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  getResearchStatus,
-  getResearchSummary,
-  recordResearchStep,
-  resetResearchPlanner,
-} from "../extensions/research-planner.js";
+import { createResearchPlanner, type ResearchPlanner } from "../extensions/research-planner.js";
 import {
   CRITERION_CATEGORIES,
   CRITERION_STATUSES,
@@ -44,13 +39,56 @@ describe("research planner schemas", () => {
   });
 });
 
+describe("createResearchPlanner factory", () => {
+  it("isolates state across independently constructed planners", () => {
+    const a = createResearchPlanner();
+    const b = createResearchPlanner();
+
+    a.recordStep({
+      topic: "planner A topic",
+      stage: "framing",
+      note: "first step on planner A",
+      thought_number: 1,
+      total_thoughts: 2,
+      next_step_needed: true,
+    });
+
+    expect(a.getStatus().topic).toBe("planner A topic");
+    expect(a.getStatus().stepCount).toBe(1);
+    expect(b.getStatus().topic).toBeUndefined();
+    expect(b.getStatus().stepCount).toBe(0);
+  });
+
+  it("produces equivalent results for the same single-step input across separate planners", () => {
+    const plannerA = createResearchPlanner();
+    const plannerB = createResearchPlanner();
+
+    const input = {
+      topic: "same input",
+      stage: "framing" as const,
+      note: "single step",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+    };
+    const resultA = plannerA.recordStep(input);
+    const resultB = plannerB.recordStep(input);
+
+    expect(resultA.stepCount).toBe(resultB.stepCount);
+    expect(resultA.progress).toEqual(resultB.progress);
+    expect(resultA.planFragment).toBe(resultB.planFragment);
+  });
+});
+
 describe("research planner state", () => {
+  let planner: ResearchPlanner;
+
   beforeEach(() => {
-    resetResearchPlanner();
+    planner = createResearchPlanner();
   });
 
   it("records steps, progress, and topic mismatch warnings", () => {
-    const first = recordResearchStep({
+    const first = planner.recordStep({
       topic: "computer vision jump analysis",
       stage: "framing",
       note: "Frame the research objective and baseline assumptions.",
@@ -65,7 +103,7 @@ describe("research planner state", () => {
     expect(first.progress.percent).toBe(20);
     expect(first.recommendedNextAction?.action).toBe("web_search_exa");
 
-    const second = recordResearchStep({
+    const second = planner.recordStep({
       topic: "enterprise AI market sizing",
       stage: "framing",
       note: "This is a different topic.",
@@ -77,14 +115,14 @@ describe("research planner state", () => {
     expect(second.warnings).toContain(
       'Topic mismatch: active topic is "computer vision jump analysis"; received "enterprise AI market sizing". Call exa_research_reset before starting a new topic. Step was not recorded.',
     );
-    const status = getResearchStatus();
+    const status = planner.getStatus();
     expect(status.topic).toBe("computer vision jump analysis");
     expect(status.stepCount).toBe(1);
     expect(status.activeStage).toBe("framing");
   });
 
   it("advances generated IDs after explicit IDs", () => {
-    recordResearchStep({
+    planner.recordStep({
       topic: "id generation",
       stage: "framing",
       note: "Record explicit IDs.",
@@ -95,7 +133,7 @@ describe("research planner state", () => {
       sources: [{ id: "S1", title: "Explicit source" }],
       gaps: [{ id: "G1", description: "Explicit gap" }],
     });
-    recordResearchStep({
+    planner.recordStep({
       topic: "id generation",
       stage: "criteria_discovery",
       note: "Record generated IDs.",
@@ -107,14 +145,14 @@ describe("research planner state", () => {
       gaps: [{ description: "Generated gap" }],
     });
 
-    const status = getResearchStatus();
+    const status = planner.getStatus();
     expect(status.criteria.map((criterion) => criterion.id)).toEqual(["C1", "C2"]);
     expect(status.sources.map((source) => source.id)).toEqual(["S1", "S2"]);
     expect(status.openGaps.map((gap) => gap.id)).toEqual(["G1", "G2"]);
   });
 
   it("keeps same-title sources with different URLs separate", () => {
-    recordResearchStep({
+    planner.recordStep({
       topic: "source identity",
       stage: "cheap_discovery",
       note: "Record generic page titles from different URLs.",
@@ -127,13 +165,13 @@ describe("research planner state", () => {
       ],
     });
 
-    const status = getResearchStatus();
+    const status = planner.getStatus();
     expect(status.sources).toHaveLength(2);
     expect(status.sources.map((source) => source.url)).toEqual(["https://example.com/a", "https://example.com/b"]);
   });
 
   it("preserves stable source IDs when merging by URL", () => {
-    recordResearchStep({
+    planner.recordStep({
       topic: "source id stability",
       stage: "source_retrieval",
       note: "Record initial source and evidence.",
@@ -144,7 +182,7 @@ describe("research planner state", () => {
       criteria: [{ id: "C1", label: "Evidence", status: "supported", evidenceRefs: ["S1"] }],
     });
 
-    recordResearchStep({
+    planner.recordStep({
       topic: "source id stability",
       stage: "source_retrieval",
       note: "Record the same URL with a conflicting explicit ID.",
@@ -162,7 +200,7 @@ describe("research planner state", () => {
       ],
     });
 
-    const status = getResearchStatus();
+    const status = planner.getStatus();
     expect(status.sources).toHaveLength(1);
     expect(status.sources[0].id).toBe("S1");
     expect(status.sources[0].title).toBe("Updated");
@@ -171,7 +209,7 @@ describe("research planner state", () => {
   });
 
   it("warns instead of rewriting conflicting stable IDs", () => {
-    recordResearchStep({
+    planner.recordStep({
       topic: "conflict handling",
       stage: "source_retrieval",
       note: "Record initial stable IDs.",
@@ -185,7 +223,7 @@ describe("research planner state", () => {
       gaps: [{ id: "G1", description: "Original gap" }],
     });
 
-    const result = recordResearchStep({
+    const result = planner.recordStep({
       topic: "conflict handling",
       stage: "coverage_analysis",
       note: "Try conflicting stable IDs.",
@@ -207,14 +245,14 @@ describe("research planner state", () => {
       'Gap G1 already exists as "Original gap"; conflicting description "Different gap" was ignored.',
     );
 
-    const status = getResearchStatus();
+    const status = planner.getStatus();
     expect(status.criteria[0].label).toBe("Original criterion");
     expect(status.sources[0].url).toBe("https://example.com/a");
     expect(status.openGaps[0].description).toBe("Original gap");
   });
 
   it("aggregates criteria and validates evidence references", () => {
-    recordResearchStep({
+    planner.recordStep({
       topic: "computer vision jump analysis",
       stage: "source_retrieval",
       note: "Fetched the validation paper and mapped it to criteria.",
@@ -251,7 +289,7 @@ describe("research planner state", () => {
       ],
     });
 
-    const status = getResearchStatus();
+    const status = planner.getStatus();
     expect(status.criteria).toHaveLength(2);
     expect(status.criteriaCoverage.supported).toBe(1);
     expect(status.criteriaCoverage.unresolvedEvidence).toBe(1);
@@ -259,7 +297,7 @@ describe("research planner state", () => {
   });
 
   it("does not count malformed tool evidence as supported coverage", () => {
-    recordResearchStep({
+    planner.recordStep({
       topic: "evidence validation",
       stage: "coverage_analysis",
       note: "Record malformed evidence refs.",
@@ -273,7 +311,7 @@ describe("research planner state", () => {
       ],
     });
 
-    const status = getResearchStatus();
+    const status = planner.getStatus();
     expect(status.criteriaCoverage.supported).toBe(0);
     expect(status.criteriaCoverage.unresolvedEvidence).toBe(3);
     expect(status.criteria[0].evidenceIssues).toContain("Unresolved evidence ref: tool:");
@@ -282,7 +320,7 @@ describe("research planner state", () => {
   });
 
   it("updates existing records without exposing mutable state", () => {
-    recordResearchStep({
+    planner.recordStep({
       topic: "record updates",
       stage: "framing",
       note: "Initial records.",
@@ -293,7 +331,7 @@ describe("research planner state", () => {
       sources: [{ id: "S1", title: "Source", usedFor: ["C1"] }],
       gaps: [{ id: "G1", description: "Gap", severity: "important" }],
     });
-    recordResearchStep({
+    planner.recordStep({
       topic: "record updates",
       stage: "coverage_analysis",
       note: "Update records.",
@@ -307,7 +345,7 @@ describe("research planner state", () => {
       gaps: [{ id: "G1", description: "Gap", severity: "minor" }],
     });
 
-    const status = getResearchStatus();
+    const status = planner.getStatus();
     expect(status.criteria).toHaveLength(1);
     expect(status.sources).toHaveLength(1);
     expect(status.openGaps).toHaveLength(1);
@@ -316,11 +354,11 @@ describe("research planner state", () => {
     expect(status.openGaps[0].severity).toBe("minor");
 
     status.criteria[0].evidenceRefs.push("mutated");
-    expect(getResearchStatus().criteria[0].evidenceRefs).not.toContain("mutated");
+    expect(planner.getStatus().criteria[0].evidenceRefs).not.toContain("mutated");
   });
 
   it("labels unverified sources as not directly inspected in source packs", () => {
-    recordResearchStep({
+    planner.recordStep({
       topic: "paper retrieval policy",
       stage: "cheap_discovery",
       note: "Discovered candidate source snippets.",
@@ -354,19 +392,19 @@ describe("research planner state", () => {
       ],
     });
 
-    const sourcePack = getResearchSummary({ mode: "source_pack" });
+    const sourcePack = planner.getSummary({ mode: "source_pack" });
     expect(sourcePack).toContain("Snippet-only paper");
     expect(sourcePack).toContain("not directly inspected");
     expect(sourcePack).toContain("Fetched paper");
     expect(sourcePack).toContain("Unverified fetched paper");
     expect(sourcePack).toContain("Fetched source is missing retrieval evidence");
-    const status = getResearchStatus();
+    const status = planner.getStatus();
     expect(status.sourcePackSummary.fetched).toBe(1);
     expect(status.sourcePackSummary.notDirectlyInspected).toBe(2);
   });
 
   it("warns without recording invalid branch, revision, and sequence references", () => {
-    const invalidFirst = recordResearchStep({
+    const invalidFirst = planner.recordStep({
       topic: "invalid first",
       stage: "framing",
       note: "Invalid first step.",
@@ -378,10 +416,10 @@ describe("research planner state", () => {
     });
 
     expect(invalidFirst.warnings).toContain("Revision references unknown step 99.");
-    expect(getResearchStatus().topic).toBeUndefined();
-    expect(getResearchStatus().stepCount).toBe(0);
+    expect(planner.getStatus().topic).toBeUndefined();
+    expect(planner.getStatus().stepCount).toBe(0);
 
-    recordResearchStep({
+    planner.recordStep({
       topic: "invalid references",
       stage: "framing",
       note: "Initial step.",
@@ -390,7 +428,7 @@ describe("research planner state", () => {
       next_step_needed: true,
     });
 
-    const result = recordResearchStep({
+    const result = planner.recordStep({
       topic: "invalid references",
       stage: "criteria_discovery",
       note: "Invalid duplicate and references.",
@@ -406,9 +444,9 @@ describe("research planner state", () => {
     expect(result.warnings).toContain("Duplicate thought_number 1; step was not recorded.");
     expect(result.warnings).toContain("Revision references unknown step 99.");
     expect(result.warnings).toContain("Branch references unknown step 99.");
-    expect(getResearchStatus().stepCount).toBe(1);
+    expect(planner.getStatus().stepCount).toBe(1);
 
-    const uniqueInvalid = recordResearchStep({
+    const uniqueInvalid = planner.recordStep({
       topic: "invalid references",
       stage: "criteria_discovery",
       note: "Invalid references with a unique thought number.",
@@ -424,10 +462,10 @@ describe("research planner state", () => {
     expect(uniqueInvalid.warnings).toContain("Revision steps cannot also define branch metadata.");
     expect(uniqueInvalid.warnings).toContain("Revision references unknown step 99.");
     expect(uniqueInvalid.warnings).toContain("Branch references unknown step 99.");
-    expect(getResearchStatus().stepCount).toBe(1);
-    expect(getResearchStatus().branches).not.toContain("still-bad");
+    expect(planner.getStatus().stepCount).toBe(1);
+    expect(planner.getStatus().branches).not.toContain("still-bad");
 
-    const missingBranchId = recordResearchStep({
+    const missingBranchId = planner.recordStep({
       topic: "invalid references",
       stage: "criteria_discovery",
       note: "Missing branch ID.",
@@ -437,9 +475,9 @@ describe("research planner state", () => {
       branch_from_step: 1,
     });
     expect(missingBranchId.warnings).toContain("branch_from_step requires branch_id.");
-    expect(getResearchStatus().stepCount).toBe(1);
+    expect(planner.getStatus().stepCount).toBe(1);
 
-    const outOfOrder = recordResearchStep({
+    const outOfOrder = planner.recordStep({
       topic: "invalid references",
       stage: "criteria_discovery",
       note: "Step three.",
@@ -449,7 +487,7 @@ describe("research planner state", () => {
     });
     expect(outOfOrder.stepCount).toBe(2);
 
-    const regressed = recordResearchStep({
+    const regressed = planner.recordStep({
       topic: "invalid references",
       stage: "criteria_discovery",
       note: "Regressed thought number.",
@@ -460,11 +498,11 @@ describe("research planner state", () => {
     expect(regressed.warnings).toContain(
       "Out-of-order thought_number 2; last recorded thought_number is 3. Step was not recorded.",
     );
-    expect(getResearchStatus().stepCount).toBe(2);
+    expect(planner.getStatus().stepCount).toBe(2);
   });
 
   it("tracks gaps, branches, and revisions", () => {
-    recordResearchStep({
+    planner.recordStep({
       topic: "strategy comparison",
       stage: "framing",
       note: "Initial strategy.",
@@ -472,7 +510,7 @@ describe("research planner state", () => {
       total_thoughts: 3,
       next_step_needed: true,
     });
-    recordResearchStep({
+    planner.recordStep({
       topic: "strategy comparison",
       stage: "criteria_discovery",
       note: "Criteria pass.",
@@ -481,7 +519,7 @@ describe("research planner state", () => {
       next_step_needed: true,
       gaps: [{ id: "G1", description: "Need geography", severity: "blocking", resolution: "ask_user" }],
     });
-    recordResearchStep({
+    planner.recordStep({
       topic: "strategy comparison",
       stage: "coverage_analysis",
       note: "Revision to initial framing.",
@@ -491,7 +529,7 @@ describe("research planner state", () => {
       is_revision: true,
       revises_step: 1,
     });
-    recordResearchStep({
+    planner.recordStep({
       topic: "strategy comparison",
       stage: "coverage_analysis",
       note: "Paper-first branch.",
@@ -502,7 +540,7 @@ describe("research planner state", () => {
       branch_id: "paper-first",
     });
 
-    const status = getResearchStatus();
+    const status = planner.getStatus();
     expect(status.branches).toContain("paper-first");
     expect(status.clarificationWarranted).toBe(true);
     expect(status.openGaps[0].description).toBe("Need geography");
@@ -510,7 +548,7 @@ describe("research planner state", () => {
   });
 
   it("does not expose stored step objects through record results", () => {
-    const result = recordResearchStep({
+    const result = planner.recordStep({
       topic: "step immutability",
       stage: "framing",
       note: "Initial step.",
@@ -524,14 +562,14 @@ describe("research planner state", () => {
     result.step.nextAction = "finalize";
     result.step.warnings.push("mutated");
 
-    const status = getResearchStatus();
+    const status = planner.getStatus();
     expect(status.progress.current).toBe(1);
     expect(status.recommendedNextAction?.action).toBe("web_search_exa");
     expect(status.warnings).not.toContain("mutated");
   });
 
   it("generates human-readable execution plans and labeled payloads without executing retrieval", () => {
-    recordResearchStep({
+    planner.recordStep({
       topic: "computer vision jump analysis",
       stage: "deep_research_plan",
       note: "Plan should compare pose-estimation methods against validation targets.",
@@ -552,12 +590,12 @@ describe("research planner state", () => {
       nextActionReason: "The plan is ready for explicit deep synthesis.",
     });
 
-    const executionPlan = getResearchSummary({ mode: "execution_plan" });
+    const executionPlan = planner.getSummary({ mode: "execution_plan" });
     expect(executionPlan.startsWith("# Research Execution Plan")).toBe(true);
     expect(executionPlan).toContain("computer vision jump analysis");
     expect(executionPlan).not.toContain('"query"');
 
-    const payload = getResearchSummary({ mode: "payload" });
+    const payload = planner.getSummary({ mode: "payload" });
     expect(payload).toContain("# Research Execution Plan");
     expect(payload).toContain("## Implementation payload");
     expect(payload).toContain('"query"');
@@ -565,7 +603,7 @@ describe("research planner state", () => {
   });
 
   it("resets all planner state", () => {
-    recordResearchStep({
+    planner.recordStep({
       topic: "reset me",
       stage: "framing",
       note: "Temporary state.",
@@ -577,7 +615,7 @@ describe("research planner state", () => {
       gaps: [{ id: "G5", description: "Temporary gap", severity: "blocking", resolution: "ask_user" }],
       assumptions: ["temporary assumption"],
     });
-    recordResearchStep({
+    planner.recordStep({
       topic: "reset me",
       stage: "coverage_analysis",
       note: "Temporary branch.",
@@ -588,9 +626,9 @@ describe("research planner state", () => {
       branch_id: "temporary",
     });
 
-    resetResearchPlanner();
+    planner.reset();
 
-    const status = getResearchStatus();
+    const status = planner.getStatus();
     expect(status.stepCount).toBe(0);
     expect(status.topic).toBeUndefined();
     expect(status.criteria).toEqual([]);
@@ -600,7 +638,7 @@ describe("research planner state", () => {
     expect(status.branches).toEqual([]);
     expect(status.clarificationWarranted).toBe(false);
 
-    recordResearchStep({
+    planner.recordStep({
       topic: "after reset",
       stage: "framing",
       note: "IDs restart.",
@@ -611,7 +649,7 @@ describe("research planner state", () => {
       sources: [{ title: "Fresh source" }],
       gaps: [{ description: "Fresh gap" }],
     });
-    const fresh = getResearchStatus();
+    const fresh = planner.getStatus();
     expect(fresh.criteria[0].id).toBe("C1");
     expect(fresh.sources[0].id).toBe("S1");
     expect(fresh.openGaps[0].id).toBe("G1");

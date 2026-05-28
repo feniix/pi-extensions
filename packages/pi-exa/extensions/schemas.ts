@@ -165,8 +165,11 @@ export const webSearchParams = Type.Object(
 
 export const webFetchParams = Type.Object(
   {
+    // Cap matches webSearchParams.numResults discipline so callers cannot
+    // submit unbounded batches that would inflate cost or latency.
     urls: Type.Array(Type.String({ description: "URLs to read. Batch multiple URLs in one call." }), {
-      description: "URLs to read",
+      description: "URLs to read (max 50 per call).",
+      maxItems: 50,
     }),
     maxCharacters: Type.Optional(
       Type.Integer({ description: "Maximum characters to extract per page (default: 3000)", minimum: 1 }),
