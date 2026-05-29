@@ -39,11 +39,7 @@ Run the MCP server directly with `npx`:
 npx -y @feniix/pi-sequential-thinking
 ```
 
-If your MCP host requires an explicit binary name, use the packaged bin:
-
-```bash
-npx -y --package @feniix/pi-sequential-thinking pi-sequential-thinking-mcp
-```
+This works because the package exposes a single binary, `pi-sequential-thinking-mcp`, which `npx` can infer from the package name.
 
 Example MCP client configuration:
 
@@ -52,7 +48,7 @@ Example MCP client configuration:
   "mcpServers": {
     "sequential-thinking": {
       "command": "npx",
-      "args": ["-y", "--package", "@feniix/pi-sequential-thinking", "pi-sequential-thinking-mcp"]
+      "args": ["-y", "@feniix/pi-sequential-thinking"]
     }
   }
 }
@@ -65,7 +61,7 @@ Optional MCP environment configuration:
   "mcpServers": {
     "sequential-thinking": {
       "command": "npx",
-      "args": ["-y", "--package", "@feniix/pi-sequential-thinking", "pi-sequential-thinking-mcp"],
+      "args": ["-y", "@feniix/pi-sequential-thinking"],
       "env": {
         "MCP_STORAGE_DIR": "~/.my-thinking-sessions",
         "SEQ_THINK_CONFIG_FILE": "~/.config/pi-sequential-thinking.json"
@@ -73,6 +69,12 @@ Optional MCP environment configuration:
     }
   }
 }
+```
+
+If your MCP host cannot infer package binaries reliably, use the explicit binary form instead:
+
+```bash
+npx -y --package @feniix/pi-sequential-thinking pi-sequential-thinking-mcp
 ```
 
 MCP uses environment variables, the optional `SEQ_THINK_CONFIG_FILE` JSON file, and pi settings files described below. Pi-only CLI flags such as `--seq-think-storage-dir` are not read by the MCP stdio server.
