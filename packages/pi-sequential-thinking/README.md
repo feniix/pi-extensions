@@ -1,6 +1,6 @@
 # @feniix/pi-sequential-thinking
 
-[Sequential Thinking](https://github.com/arben-adm/mcp-sequential-thinking) extension for [pi](https://pi.dev/) — structured progressive thinking through defined cognitive stages.
+[Sequential Thinking](https://github.com/arben-adm/mcp-sequential-thinking) extension for [pi](https://pi.dev/) and MCP — structured progressive thinking through defined cognitive stages.
 
 ## Features
 
@@ -13,8 +13,9 @@
 - **Export/Import Session** (`export_session`, `import_session`): Move session JSON files with validation and receipts.
 - **MCP-Compatible Aliases**: Accept snake_case fields and camelCase aliases such as `thoughtNumber` and `totalThoughts`.
 - **Dynamic Depth**: If `thought_number` exceeds `total_thoughts`, the incoming thought is normalized to the larger total.
-- **Configurable Output Limits**: Client-side byte and line truncation.
-- **Native TypeScript**: No MCP server transport or child process dependencies.
+- **Configurable Output Limits**: Client-side byte and line truncation for pi.
+- **Pi + MCP Adapters**: The same portable tools run as a pi extension or stdio MCP server.
+- **Native TypeScript**: No dependency on the original MCP server implementation; the MCP server is packaged with this module.
 
 ## Install
 
@@ -27,6 +28,54 @@ Ephemeral (one-off) use:
 ```bash
 pi -e npm:@feniix/pi-sequential-thinking
 ```
+
+## MCP Usage
+
+This package also exposes the same tool surface as a stdio MCP server for MCP-aware hosts such as Claude Desktop, Claude Code, and other `mcp.json` clients.
+
+Run the MCP server directly with `npx`:
+
+```bash
+npx -y @feniix/pi-sequential-thinking
+```
+
+If your MCP host requires an explicit binary name, use the packaged bin:
+
+```bash
+npx -y --package @feniix/pi-sequential-thinking pi-sequential-thinking-mcp
+```
+
+Example MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "--package", "@feniix/pi-sequential-thinking", "pi-sequential-thinking-mcp"]
+    }
+  }
+}
+```
+
+Optional MCP environment configuration:
+
+```json
+{
+  "mcpServers": {
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "--package", "@feniix/pi-sequential-thinking", "pi-sequential-thinking-mcp"],
+      "env": {
+        "MCP_STORAGE_DIR": "~/.my-thinking-sessions",
+        "SEQ_THINK_CONFIG_FILE": "~/.config/pi-sequential-thinking.json"
+      }
+    }
+  }
+}
+```
+
+MCP uses environment variables, the optional `SEQ_THINK_CONFIG_FILE` JSON file, and pi settings files described below. Pi-only CLI flags such as `--seq-think-storage-dir` are not read by the MCP stdio server.
 
 ## Configuration
 
@@ -54,6 +103,8 @@ export SEQ_THINK_MAX_BYTES=102400
 export SEQ_THINK_MAX_LINES=5000
 ```
 
+`MCP_STORAGE_DIR` affects both pi and MCP storage. `SEQ_THINK_MAX_BYTES` and `SEQ_THINK_MAX_LINES` configure pi-side output truncation; the MCP server returns full structured tool output and leaves display truncation to the host.
+
 ### Settings File
 
 Use pi's standard settings locations:
@@ -73,19 +124,31 @@ Under the `pi-sequential-thinking` key:
 }
 ```
 
+A standalone config file referenced by `--seq-think-config-file` or `SEQ_THINK_CONFIG_FILE` uses the same values at the top level:
+
+```json
+{
+  "storageDir": "~/.my-thinking-sessions",
+  "maxBytes": 51200,
+  "maxLines": 2000
+}
+```
+
 > Best practice: use `settings.json` for non-secret defaults only.
 > If you want a separate private override file, use `--seq-think-config-file` or `SEQ_THINK_CONFIG_FILE` to point to a custom JSON config file.
 > Legacy aliases `--seq-think-config` and `SEQ_THINK_CONFIG` are still accepted but deprecated.
 
-### CLI Flags
+### Pi CLI Flags
 
 ```bash
 pi --seq-think-storage-dir=/tmp/thoughts --seq-think-max-bytes=102400
 ```
 
+These flags apply to the pi extension runtime only. For MCP clients, configure the server through `env`, `SEQ_THINK_CONFIG_FILE`, or the settings files above.
+
 ### Effective Configuration Precedence
 
-Per-field precedence is:
+For the pi extension, per-field precedence is:
 
 1. CLI flags
 2. Environment variables
@@ -93,10 +156,12 @@ Per-field precedence is:
 4. Global settings (`~/.pi/agent/settings.json`)
 5. Built-in defaults
 
+For the MCP stdio server, CLI flags are not read, so precedence starts with environment variables.
+
 Custom config file discovery uses:
 
-1. `--seq-think-config-file`
-2. deprecated `--seq-think-config`
+1. `--seq-think-config-file` (pi only)
+2. deprecated `--seq-think-config` (pi only)
 3. `SEQ_THINK_CONFIG_FILE`
 4. deprecated `SEQ_THINK_CONFIG`
 5. settings files listed above
@@ -201,15 +266,15 @@ Compatibility helper that generates a staged sequence for a topic and writes it 
 | `num_thoughts` | integer | no | Number of generated stages, 3–10; default `5` |
 | `session_id` / `sessionId` | string | no | Session to write |
 
-## CLI Flags
+## Pi CLI Flags
 
 | Flag | Env Variable | Default | Description |
 |------|-------------|---------|-------------|
 | `--seq-think-storage-dir` | `MCP_STORAGE_DIR` | `~/.mcp_sequential_thinking` | Storage directory for sessions |
 | `--seq-think-config-file` | `SEQ_THINK_CONFIG_FILE` | — | Custom JSON config file path |
 | `--seq-think-config` | `SEQ_THINK_CONFIG` | — | Deprecated alias for the config file path |
-| `--seq-think-max-bytes` | `SEQ_THINK_MAX_BYTES` | `51200` | Max output bytes |
-| `--seq-think-max-lines` | `SEQ_THINK_MAX_LINES` | `2000` | Max output lines |
+| `--seq-think-max-bytes` | `SEQ_THINK_MAX_BYTES` | `51200` | Max pi output bytes |
+| `--seq-think-max-lines` | `SEQ_THINK_MAX_LINES` | `2000` | Max pi output lines |
 
 ## Thinking Stages
 
