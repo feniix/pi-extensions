@@ -13,30 +13,21 @@ Use this reference whenever a specdocs skill needs to fetch issues, publish a PR
 If `.claude/tracker.md` does not exist:
 
 1. Tell the user: `No tracker config found. I'll create .claude/tracker.md.`
-2. Ask whether the project uses **GitHub** (default) or **Linear**
-3. If GitHub, write:
+2. Create `.claude/tracker.md` with YAML frontmatter fences:
 
 ```yaml
+---
 tracker: github
+---
 ```
 
-4. If Linear, ask for the team key (for example `SPA` or `ENG`) and write:
-
-```yaml
-tracker: linear
-linear-team: SPA
-```
-
-5. Continue the workflow after the config is written
+3. Continue the workflow after the config is written
 
 ## Tracker references
 
-Each skill keeps its tracker-specific fetch/publish instructions in its local `references/` directory:
+Each skill keeps GitHub fetch/publish instructions in its local `references/tracker-github.md` file.
 
-- `references/tracker-github.md`
-- `references/tracker-linear.md`
-
-Load the matching reference only when you actually need tracker operations.
+Load that reference only when you actually need tracker operations.
 
 ## Publishing principle
 

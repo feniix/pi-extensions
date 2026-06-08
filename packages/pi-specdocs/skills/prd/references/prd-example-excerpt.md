@@ -41,6 +41,7 @@ Both playbooks use `connection: local` — Ansible runs directly on the target m
 The timing is right because the `migrate-to-bun` branch has already converted every script to TypeScript. Ansible is the last piece.
 
 **Calibration notes:**
+- Uses GitHub issue references (`#78`) because GitHub is the only supported tracker for now
 - Opens with quantified context (9 roles, ~130 tasks, 18 templates, ~280 lines) — a reader can gauge scope immediately
 - Each pain point is specific and evidenced, not vague ("13 manual cleanup tasks", "407 lines")
 - Ends with why now — timing tied to a concrete event (branch migration completed)

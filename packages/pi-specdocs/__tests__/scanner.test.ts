@@ -2,7 +2,22 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { extractFrontmatterField, formatSummary, listMatchingFiles, scanWorkspace } from "../extensions/index.js";
+import {
+  extractFrontmatterField,
+  formatConfig,
+  formatSummary,
+  listMatchingFiles,
+  scanWorkspace,
+} from "../extensions/index.js";
+
+describe("tracker config", () => {
+  it("treats non-github tracker config as unsupported and defaults to github", () => {
+    const summary = formatConfig({ tracker: "jira" });
+
+    expect(summary).toContain("unsupported tracker 'jira'");
+    expect(summary).toContain("Tracker: github");
+  });
+});
 
 describe("scanner", () => {
   it("returns empty for non-existent directory", () => {

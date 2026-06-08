@@ -12,7 +12,7 @@ title: "[Title]"
 prd: PRD-NNN
 status: Draft
 owner: "[Name]"
-issue: "[issue-ref or N/A]"  # use #N for GitHub or TEAM-N for Linear
+issue: "[issue-ref or N/A]"  # use #N for GitHub
 date: YYYY-MM-DD
 version: "1.0"
 ---

@@ -1,6 +1,6 @@
 ---
 name: prd
-description: "Draft Product Requirements Documents for features, issues, and scoped work using a structured template with measurable goals, acceptance criteria, design decisions, and concrete file breakdowns. Use whenever the user asks to write a PRD, scope a feature, turn a GitHub or Linear issue into requirements, formalize a plan before implementation, break work into implementable requirements, or spec out what should be built even if they do not explicitly ask for a 'PRD'."
+description: "Draft Product Requirements Documents for features, issues, and scoped work using a structured template with measurable goals, acceptance criteria, design decisions, and concrete file breakdowns. Use whenever the user asks to write a PRD, scope a feature, turn a GitHub issue into requirements, formalize a plan before implementation, break work into implementable requirements, or spec out what should be built even if they do not explicitly ask for a 'PRD'."
 ---
 
 # PRD Creation
@@ -16,7 +16,7 @@ Draft a structured Product Requirements Document that is specific enough to guid
 Load local references only when needed:
 - `references/prd-template.md` for the canonical section structure
 - `references/prd-example-excerpt.md` for tone and depth calibration
-- `references/tracker-github.md` or `references/tracker-linear.md` for tracker operations
+- `references/tracker-github.md` for tracker operations
 - `references/notion-sync.md` only if Notion sync is enabled and the user wants sync
 
 ## Inputs
@@ -29,8 +29,8 @@ Use the richest available input source in this order:
 4. direct clarifying questions for anything still missing
 
 Treat the input as one of:
-- **Issue identifier** such as `#42` or `ENG-42`
-- **Issue URL** from GitHub or Linear
+- **Issue identifier** such as `#42`
+- **Issue URL** from GitHub
 - **Free-text feature description**
 - **No explicit input** and rely on interactive discovery
 
@@ -53,9 +53,9 @@ If the user has already provided enough context, do not ask redundant questions.
 ### 2. Fetch issue context when relevant
 
 If a source or related issue exists:
-- detect the tracker using `../shared/references/tracker-setup.md`
-- load the matching local tracker reference
-- fetch the issue body and, for the source issue, also fetch comments and linked discussion when the tracker supports it
+- detect GitHub tracker setup using `../shared/references/tracker-setup.md`
+- load `references/tracker-github.md`
+- fetch the issue body and, for the source issue, also fetch comments
 
 Use issue data to enrich the PRD, not to blindly copy text.
 
@@ -101,6 +101,8 @@ After saving:
 - for manual user guidance, the equivalent pi slash commands are `/specdocs-validate` and `/specdocs-format docs/prd/PRD-NNN-slug.md`
 - do not treat `specdocs-validate` or `specdocs-format` as bash executables or check PATH for them; they are pi extension capabilities
 - report the final file path and any validation/formatting follow-up you performed
+
+Recognized PRD statuses are `Draft`, `Grooming`, `Approved`, `Implemented`, `Deferred`, `Superseded`, and `Archived`. New PRDs should normally start as `Draft` unless the user explicitly asks for another lifecycle state.
 
 ### 6. Publish intentionally
 

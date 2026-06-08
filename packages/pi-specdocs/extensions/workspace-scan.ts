@@ -28,34 +28,21 @@ export function readConfig(cwd: string): TrackerConfig {
   return parseFrontmatter(configPath) ?? {};
 }
 
-function resolveTracker(config: TrackerConfig): { tracker: "github" | "linear"; warning?: string } {
+function resolveTracker(config: TrackerConfig): { tracker: "github"; warning?: string } {
   const tracker = config.tracker || "github";
-  if (tracker === "github" || tracker === "linear") {
+  if (tracker === "github") {
     return { tracker };
   }
 
   return {
     tracker: "github",
-    warning: `[specdocs] WARNING: unknown tracker '${tracker}' in ${CONFIG_PATH} — defaulting to github`,
+    warning: `[specdocs] WARNING: unsupported tracker '${tracker}' in ${CONFIG_PATH} — defaulting to github`,
   };
 }
 
-function formatTrackerInfo(tracker: "github" | "linear", config: TrackerConfig): { info: string; warnings: string[] } {
-  const warnings: string[] = [];
-  let info = `Tracker: ${tracker}`;
-
-  if (tracker === "linear") {
-    const team = config["linear-team"] || "";
-    if (team) {
-      info += ` (team: ${team})`;
-    } else {
-      warnings.push(`[specdocs] WARNING: tracker=linear but linear-team is not set in ${CONFIG_PATH}`);
-    }
-  } else if (Object.keys(config).length === 0) {
-    info += " (default)";
-  }
-
-  return { info, warnings };
+function formatTrackerInfo(tracker: "github", config: TrackerConfig): { info: string; warnings: string[] } {
+  const info = Object.keys(config).length === 0 ? `Tracker: ${tracker} (default)` : `Tracker: ${tracker}`;
+  return { info, warnings: [] };
 }
 
 function getNotionConfigInfo(config: TrackerConfig): { info: string; warnings: string[] } {

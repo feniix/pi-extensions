@@ -15,7 +15,7 @@ If the database URL for the document type being synced is not configured, skip t
 
 Run Notion sync **after** both:
 1. The document has been saved locally (to `docs/prd/` or `docs/adr/`)
-2. The document has been published to the tracker (GitHub/Linear)
+2. The document has been published to GitHub when tracker publication was requested
 
 Notion sync is the final step. If it fails, the local file and tracker publication are unaffected.
 

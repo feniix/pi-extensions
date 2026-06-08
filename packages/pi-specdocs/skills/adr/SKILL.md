@@ -16,7 +16,7 @@ Create Architecture Decision Records that explain the context, options, recommen
 
 Load local references only when needed:
 - `references/adr-template.md` for the final MADR 4.0 structure
-- `references/tracker-github.md` or `references/tracker-linear.md` for tracker-specific actions
+- `references/tracker-github.md` for tracker-specific actions
 - `references/notion-sync.md` only if Notion sync is enabled and the user wants sync
 
 ## Inputs
@@ -131,6 +131,17 @@ After saving:
 
 Always report the file path, summarize the recommendation, and mention any validation/formatting follow-up you performed.
 
+## ADR statuses
+
+| Status | Meaning |
+|--------|---------|
+| **Proposed** | Decision drafted, awaiting team review |
+| **Accepted** | Team agreed — this is the approach |
+| **Rejected** | Team considered and declined this option |
+| **Deferred** | Decision postponed until more context is available |
+| **Deprecated** | No longer relevant because context changed |
+| **Superseded** | Replaced by a newer ADR; link to the replacement |
+
 ### 6. Cross-reference carefully
 
 After the ADR is saved:
@@ -144,10 +155,9 @@ Do not silently mutate other documents unless the workflow explicitly requires i
 
 If the user wants issue links, publication, or tracker context:
 - read `../shared/references/tracker-setup.md`
-- detect the active tracker
-- load the matching tracker reference from `references/`
+- load `references/tracker-github.md`
 
-Default to GitHub if no tracker config exists and the user does not choose otherwise.
+Default to GitHub if no tracker config exists.
 
 ## Pre-save checklist
 

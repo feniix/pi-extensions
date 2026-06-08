@@ -10,7 +10,7 @@ Structured spec documentation workflow for [pi](https://pi.dev/) — PRDs, ADRs,
 - **Architect Prompt** (`/architect`): End-to-end initiative planning — assess feasibility, decompose into workstreams, produce artifacts
 - **Refine Prompt** (`/refine`): Deep review of PRDs/ADRs for risks, bugs, ambiguities, errors, and inconsistencies
 - **Session Hook**: Automatically scans `docs/` on session start and displays a summary of existing spec documents
-- **Validation Command** (`specdocs-validate`): Checks spec docs for typed frontmatter validity, required sections/tables, numbering, duplicate IDs, and plan filename issues
+- **Validation Command** (`specdocs-validate`): Checks spec docs for typed frontmatter validity, required sections/tables, numbering, duplicate IDs, PRD cross-references, stale drafts, and plan filename issues
 - **Formatting Command** (`specdocs-format <path>`): Normalizes supported spec documents in-process without external tools while preserving common GFM constructs
 
 ## Install
@@ -25,11 +25,29 @@ Ephemeral (one-off) use:
 pi -e npm:@feniix/pi-specdocs
 ```
 
+## Configuration
+
+Tracker-aware skills read `.claude/tracker.md` from the project root. Use YAML frontmatter fences:
+
+```yaml
+---
+tracker: github              # GitHub is the only supported tracker for now
+notion-sync: false           # optional, default false
+notion-prd-database: "https://www.notion.so/..."
+notion-adr-database: "https://www.notion.so/..."
+---
+```
+
+| Tracker / sync | Requires |
+|----------------|----------|
+| GitHub (default) | `gh` CLI authenticated |
+| Notion sync | Notion MCP server connected and database URLs configured |
+
 ## Skills (auto-trigger)
 
 ### `prd`
 
-Triggers when you ask to write a PRD, scope a feature, write requirements, or break down a GitHub issue. Produces a 14-section PRD stored at `docs/prd/PRD-NNN-slug.md` and optionally posted to GitHub.
+Triggers when you ask to write a PRD, scope a feature, write requirements, or break down a GitHub issue. Produces a 14-section PRD stored at `docs/prd/PRD-NNN-slug.md` and optionally published to GitHub.
 
 ### `adr`
 
@@ -57,6 +75,14 @@ Deep review of a PRD or ADR. Validates against the codebase, researches external
 | ADRs | `docs/adr/` | `ADR-NNNN-slug.md` (4-digit) |
 | Plans | `docs/architecture/` | `plan-slug.md` |
 
+## Lifecycle Statuses
+
+| Type | Valid statuses |
+|------|----------------|
+| PRD | `Draft`, `Grooming`, `Approved`, `Implemented`, `Deferred`, `Superseded`, `Archived` |
+| ADR | `Proposed`, `Accepted`, `Rejected`, `Deferred`, `Deprecated`, `Superseded` |
+| Plan | `Draft`, `Implemented`, `Archived` |
+
 ## Commands
 
 These are **pi slash commands**, not shell executables on PATH. Invoke them inside pi as `/specdocs-validate` and `/specdocs-format <path>`.
@@ -66,7 +92,7 @@ These are **pi slash commands**, not shell executables on PATH. Invoke them insi
   - accepts plain paths, `@path/file.md` references, multiple paths, and simple `*` globs such as `@docs/adr/ADR-*.md`
   - validates typed frontmatter, required headings, and required table shapes
   - plan docs also warn on missing recommended sections such as `Risks and Mitigations` and `Open Questions`
-  - duplicate PRD/ADR numbers and invalid direct-child plan filenames are surfaced in workspace validation
+  - duplicate PRD/ADR numbers, numbering gaps, missing PRD cross-references, stale PRD drafts, and invalid direct-child plan filenames are surfaced in workspace validation
   - normalizes frontmatter fences and section spacing
   - normalizes GFM table spacing/alignment
   - preserves thematic breaks, task lists, and other common GFM syntax
@@ -81,7 +107,7 @@ These tools are available to the LLM during a pi session and are the preferred e
   - supports plain paths, `@path/file.md`, multiple files, and simple `*` globs
   - validates typed frontmatter, required headings, and required table shapes
   - plan docs also warn on missing recommended sections such as `Risks and Mitigations` and `Open Questions`
-  - duplicate PRD/ADR numbers and invalid direct-child plan filenames are surfaced in workspace validation
+  - duplicate PRD/ADR numbers, numbering gaps, missing PRD cross-references, stale PRD drafts, and invalid direct-child plan filenames are surfaced in workspace validation
   - normalizes frontmatter fences and section spacing
   - normalizes GFM table spacing/alignment
   - preserves thematic breaks, task lists, and other common GFM syntax
@@ -96,9 +122,10 @@ Skills prefer MCP tools when available, with fallback to built-in alternatives:
 
 | Purpose | Preferred | Fallback |
 |---------|-----------|----------|
-| Codebase exploration | serena | Read, Grep, Glob |
-| External research | exa, ref | WebSearch, WebFetch |
-| GitHub | gh CLI | gh CLI |
+| Codebase exploration | built-in `read`/`bash` plus repo search | Repository-local docs |
+| External research | exa, ref | Repository-local docs |
+| GitHub tracker | `gh` CLI | Manual issue links |
+| Notion sync | Notion MCP | Skip sync; local artifact remains authoritative |
 
 ## Session Hook
 
@@ -124,7 +151,8 @@ Latest recorded local measurement in this repo:
 ## Requirements
 
 - pi v0.51.0 or later
-- `gh` CLI (for GitHub integration)
+- `gh` CLI authenticated for GitHub tracker integration
+- Notion MCP server for optional Notion sync
 
 ## Uninstall
 
