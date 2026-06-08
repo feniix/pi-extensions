@@ -6,8 +6,16 @@ import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { parseFrontmatterResult } from "./frontmatter.js";
 
-const PRD_VALID_STATUSES = ["Draft", "Implemented", "Superseded", "Archived"] as const;
-const ADR_VALID_STATUSES = ["Proposed", "Accepted", "Deprecated", "Superseded"] as const;
+const PRD_VALID_STATUSES = [
+  "Draft",
+  "Grooming",
+  "Approved",
+  "Implemented",
+  "Deferred",
+  "Superseded",
+  "Archived",
+] as const;
+const ADR_VALID_STATUSES = ["Proposed", "Accepted", "Rejected", "Deferred", "Deprecated", "Superseded"] as const;
 const PLAN_VALID_STATUSES = ["Draft", "Implemented", "Archived"] as const;
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;

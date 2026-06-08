@@ -41,7 +41,7 @@ export default function specdocs(pi: ExtensionAPI) {
     name: "specdocs_validate",
     label: "Specdocs Validate",
     description:
-      "Validate PRD, ADR, and plan documents in the workspace for frontmatter, structure, numbering, and cross-reference issues.",
+      "Validate PRD, ADR, and plan documents in the workspace for frontmatter, structure, numbering, cross-reference, and stale-draft issues.",
     promptSnippet: "Validate spec documents after writing or editing PRDs, ADRs, and plans.",
     promptGuidelines: [
       "Use specdocs_validate after creating or editing PRDs, ADRs, or plans to catch structural and numbering issues.",
@@ -122,7 +122,7 @@ export default function specdocs(pi: ExtensionAPI) {
 
   pi.registerCommand("specdocs-validate", {
     description:
-      "(specdocs plugin) Validate all spec documents for frontmatter completeness, naming conventions, and cross-references",
+      "(specdocs plugin) Validate all spec documents for frontmatter completeness, naming conventions, cross-references, and stale drafts",
     handler: async (_args, ctx) => {
       await runValidation(ctx);
     },

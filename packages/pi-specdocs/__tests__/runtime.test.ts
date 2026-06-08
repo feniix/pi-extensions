@@ -193,6 +193,123 @@ describe("pi-specdocs runtime", () => {
     expect(message).toContain("docs/adr/ADR-0003-second.md");
   });
 
+  it("warns on leading numbering gaps during workspace validation", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-leading-gap-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    mkdirSync(join(base, "docs", "adr"), { recursive: true });
+
+    writeFileSync(
+      join(base, "docs", "prd", "PRD-003-late-start.md"),
+      '---\nprd: PRD-003\ntitle: "Late Start"\nstatus: Approved\nowner: Alice\ndate: 2025-01-01\nissue: 1\nversion: 1\n---\n',
+    );
+    writeFileSync(
+      join(base, "docs", "adr", "ADR-0003-late-start.md"),
+      '---\nadr: ADR-0003\ntitle: "Late ADR"\nstatus: Accepted\ndate: 2025-01-01\nprd: PRD-003\n---\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-validate");
+    const notify = vi.fn();
+
+    await handler?.({}, { cwd: base, ui: { notify } });
+
+    const [message] = notify.mock.calls.at(-1) ?? [];
+    expect(message).toContain("Numbering gap: PRD-001 is missing");
+    expect(message).toContain("Numbering gap: PRD-002 is missing");
+    expect(message).toContain("Numbering gap: ADR-0001 is missing");
+    expect(message).toContain("Numbering gap: ADR-0002 is missing");
+  });
+
+  it("reports missing PRD cross-references from ADRs and plans", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-cross-ref-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    mkdirSync(join(base, "docs", "adr"), { recursive: true });
+    mkdirSync(join(base, "docs", "architecture"), { recursive: true });
+
+    writeFileSync(
+      join(base, "docs", "prd", "PRD-001-real.md"),
+      '---\nprd: PRD-001\ntitle: "Real"\nstatus: Implemented\nowner: Alice\ndate: 2025-01-01\nissue: 1\nversion: 1\n---\n',
+    );
+    writeFileSync(
+      join(base, "docs", "adr", "ADR-0001-orphan.md"),
+      '---\nadr: ADR-0001\ntitle: "Orphan ADR"\nstatus: Proposed\ndate: 2025-01-01\nprd: PRD-999-missing\n---\n',
+    );
+    writeFileSync(
+      join(base, "docs", "architecture", "plan-orphan.md"),
+      '---\ntitle: "Orphan Plan"\nprd: "PRD-998-missing"\ndate: 2025-01-01\nauthor: Alice\nstatus: Draft\n---\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-validate");
+    const notify = vi.fn();
+
+    await handler?.({}, { cwd: base, ui: { notify } });
+
+    const [message, level] = notify.mock.calls.at(-1) ?? [];
+    expect(level).toBe("error");
+    expect(message).toContain('docs/adr/ADR-0001-orphan.md: references PRD "PRD-999-missing" which does not exist');
+    expect(message).toContain(
+      'docs/architecture/plan-orphan.md: references PRD "PRD-998-missing" which does not exist',
+    );
+  });
+
+  it("skips N/A and accepts existing PRD cross-references", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-cross-ref-valid-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    mkdirSync(join(base, "docs", "adr"), { recursive: true });
+    mkdirSync(join(base, "docs", "architecture"), { recursive: true });
+
+    writeFileSync(
+      join(base, "docs", "prd", "PRD-001-real.md"),
+      '---\nprd: PRD-001\ntitle: "Real"\nstatus: Implemented\nowner: Alice\ndate: 2025-01-01\nissue: 1\nversion: 1\n---\n',
+    );
+    writeFileSync(
+      join(base, "docs", "adr", "ADR-0001-foundational.md"),
+      '---\nadr: ADR-0001\ntitle: "Foundational"\nstatus: Proposed\ndate: 2025-01-01\nprd: N/A\n---\n',
+    );
+    writeFileSync(
+      join(base, "docs", "architecture", "plan-real.md"),
+      '---\ntitle: "Real Plan"\nprd: "PRD-001-real"\ndate: 2025-01-01\nauthor: Alice\nstatus: Draft\n---\n',
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-validate");
+    const notify = vi.fn();
+
+    await handler?.({}, { cwd: base, ui: { notify } });
+
+    const [message] = notify.mock.calls.at(-1) ?? [];
+    expect(message).not.toContain("references PRD");
+  });
+
+  it("warns about PRDs stuck in Draft for more than 30 days", async () => {
+    const base = mkdtempSync(join(tmpdir(), "pi-specdocs-stale-draft-"));
+    mkdirSync(join(base, "docs", "prd"), { recursive: true });
+    const oldDate = new Date();
+    oldDate.setDate(oldDate.getDate() - 60);
+    const date = oldDate.toISOString().slice(0, 10);
+
+    writeFileSync(
+      join(base, "docs", "prd", "PRD-001-stale.md"),
+      `---\nprd: PRD-001\ntitle: "Stale"\nstatus: Draft\nowner: Alice\ndate: ${date}\nissue: 1\nversion: 1\n---\n`,
+    );
+
+    const mockPi = createMockPi();
+    specdocs(mockPi as unknown as ExtensionAPI);
+    const handler = getCommandHandler(mockPi, "specdocs-validate");
+    const notify = vi.fn();
+
+    await handler?.({}, { cwd: base, ui: { notify } });
+
+    const [message, level] = notify.mock.calls.at(-1) ?? [];
+    expect(level).toBe("warning");
+    expect(message).toContain('docs/prd/PRD-001-stale.md: status is "Draft"');
+    expect(message).toContain("60 days ago");
+  });
+
   it("groups workspace validation warnings by file path", async () => {
     const base = mkdtempSync(join(tmpdir(), "pi-specdocs-grouped-"));
     mkdirSync(join(base, "docs", "prd"), { recursive: true });

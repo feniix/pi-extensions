@@ -22,7 +22,7 @@ prd: PRD-001
 status: Draft
 owner: Test User
 date: 2026-04-14
-issue: "SPA-99"
+issue: "#99"
 version: "1.0"
 ---
 
@@ -200,6 +200,26 @@ describe("validate PRD", () => {
     }
   });
 
+  it.each([
+    "Draft",
+    "Grooming",
+    "Approved",
+    "Implemented",
+    "Deferred",
+    "Superseded",
+    "Archived",
+  ])("accepts PRD status %s", (status) => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const content = VALID_PRD.replace("status: Draft", `status: ${status}`);
+      const path = writeTempDoc(join(dir, "docs", "prd"), "PRD-001-test.md", content);
+      const warnings = validateFrontmatter(path);
+      expect(warnings.filter((w) => w.includes("Unknown status"))).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
   it("reports missing frontmatter", () => {
     const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
     try {
@@ -289,6 +309,25 @@ describe("validate ADR", () => {
       const path = writeTempDoc(join(dir, "docs", "adr"), "ADR-0001-test.md", content);
       const warnings = validateFrontmatter(path);
       expect(warnings.some((w) => w.includes("Active"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  it.each([
+    "Proposed",
+    "Accepted",
+    "Rejected",
+    "Deferred",
+    "Deprecated",
+    "Superseded",
+  ])("accepts ADR status %s", (status) => {
+    const dir = mkdtempSync(join(tmpdir(), "spec-test-"));
+    try {
+      const content = VALID_ADR.replace("status: Proposed", `status: ${status}`);
+      const path = writeTempDoc(join(dir, "docs", "adr"), "ADR-0001-test.md", content);
+      const warnings = validateFrontmatter(path);
+      expect(warnings.filter((w) => w.includes("Unknown status"))).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true });
     }

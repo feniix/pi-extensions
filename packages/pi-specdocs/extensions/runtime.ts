@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkStringify from "remark-stringify";
 import { unified } from "unified";
-import { parseFrontmatterResult } from "./frontmatter.js";
+import { extractFrontmatterField, parseFrontmatterResult } from "./frontmatter.js";
 import {
   ADR_FILENAME_PATTERN,
   isAdr,
@@ -17,6 +17,8 @@ import {
   validateSpecFile,
 } from "./spec-validation.js";
 import { ADR_DIR, listMatchingFiles, PLAN_DIR, PRD_DIR } from "./workspace-scan.js";
+
+const STALE_DRAFT_THRESHOLD_DAYS = 30;
 
 const formatProcessor = unified()
   .use(remarkParse)
@@ -59,10 +61,14 @@ export async function handleDocLint(
   const architectureFilenameIssues = validationFiles
     ? collectArchitectureFilenameIssues(validationFiles, filePath, ctx.cwd)
     : [];
+  const crossReferenceIssues = validationFiles ? collectCrossReferenceIssues(validationFiles, filePath, ctx.cwd) : [];
+  const staleDraftIssues = validationFiles ? collectStaleDraftIssues(validationFiles, filePath, ctx.cwd) : [];
   const messages = [
     ...warnings,
     ...duplicateIssues.map((issue) => issue.message),
     ...architectureFilenameIssues.map((issue) => issue.message),
+    ...crossReferenceIssues.map((issue) => issue.message),
+    ...staleDraftIssues.map((issue) => issue.message),
   ];
 
   if (messages.length > 0) {
@@ -212,6 +218,113 @@ function collectArchitectureFilenameIssues(
   return filterIssuesForChangedFile(issues, changedFilePath, cwd);
 }
 
+function prdRefMatches(prdFilename: string, prdRef: string): boolean {
+  return prdFilename === `${prdRef}.md` || prdFilename.startsWith(`${prdRef}-`);
+}
+
+function canonicalPrdRef(prdRef: string): string {
+  const match = prdRef.match(/^PRD-\d{3}/);
+  return match ? match[0] : prdRef;
+}
+
+function collectPrdReferenceIssues(
+  directory: string,
+  displayDir: string,
+  filenames: string[],
+  prdFilenames: string[],
+): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  for (const filename of filenames) {
+    const filepath = join(directory, filename);
+    const prdRef = extractFrontmatterField(filepath, "prd");
+    if (!prdRef || prdRef === "N/A") {
+      continue;
+    }
+
+    const canonical = canonicalPrdRef(prdRef);
+    const matched = prdFilenames.some((prdFilename) => prdRefMatches(prdFilename, canonical));
+    if (!matched) {
+      const displayPath = `${displayDir}/${filename}`;
+      issues.push({
+        type: "error",
+        filePath: displayPath,
+        message: `✗ ${displayPath}: references PRD "${prdRef}" which does not exist`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+function collectCrossReferenceIssues(
+  files: ValidationFiles,
+  changedFilePath?: string,
+  cwd?: string,
+): ValidationIssue[] {
+  const issues = [
+    ...collectPrdReferenceIssues(files.adrDir, ADR_DIR, files.adrFiles, files.prdFiles),
+    ...collectPrdReferenceIssues(files.planDir, PLAN_DIR, files.planFiles, files.prdFiles),
+  ];
+  return filterIssuesForChangedFile(issues, changedFilePath, cwd);
+}
+
+function parseIsoDate(dateStr: string): Date | null {
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, yearStr, monthStr, dayStr] = match;
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10) - 1;
+  const day = parseInt(dayStr, 10);
+  const date = new Date(year, month, day);
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+function collectStaleDraftIssues(files: ValidationFiles, changedFilePath?: string, cwd?: string): ValidationIssue[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const threshold = new Date(today);
+  threshold.setDate(threshold.getDate() - STALE_DRAFT_THRESHOLD_DAYS);
+
+  const issues: ValidationIssue[] = [];
+  for (const filename of files.prdFiles) {
+    const filepath = join(files.prdDir, filename);
+    const status = extractFrontmatterField(filepath, "status");
+    const dateStr = extractFrontmatterField(filepath, "date");
+    if (status !== "Draft" || !dateStr) {
+      continue;
+    }
+
+    const docDate = parseIsoDate(dateStr);
+    if (!docDate || docDate >= threshold) {
+      continue;
+    }
+
+    const daysAgo = Math.round((today.getTime() - docDate.getTime()) / (1000 * 60 * 60 * 24));
+    const displayPath = `${PRD_DIR}/${filename}`;
+    issues.push({
+      type: "warning",
+      filePath: displayPath,
+      message: `⚠ ${displayPath}: status is "Draft" (since ${dateStr}, ${daysAgo} days ago)`,
+    });
+  }
+
+  return filterIssuesForChangedFile(issues, changedFilePath, cwd);
+}
+
 function listMarkdownFiles(directory: string): string[] {
   if (!existsSync(directory)) {
     return [];
@@ -252,6 +365,16 @@ function extractDocumentNumbers(files: string[], pattern: RegExp): number[] {
 function collectNumberingGapIssues(files: string[], pattern: RegExp, prefix: string, width: number): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const numbers = extractDocumentNumbers(files, pattern);
+  if (numbers.length === 0) {
+    return issues;
+  }
+
+  for (let gap = 1; gap < numbers[0]; gap++) {
+    issues.push({
+      type: "warning",
+      message: `⚠ Numbering gap: ${prefix}-${String(gap).padStart(width, "0")} is missing`,
+    });
+  }
 
   for (let i = 0; i < numbers.length - 1; i++) {
     for (let gap = numbers[i] + 1; gap < numbers[i + 1]; gap++) {
@@ -329,8 +452,10 @@ export function getValidationResult(cwd: string): { message: string; level: "err
     ...collectFilenameIssues(files.adrDir, ADR_DIR, ADR_FILENAME_PATTERN, "ADR-NNNN-*.md"),
     ...collectFilenameIssues(files.planDir, PLAN_DIR, PLAN_FILENAME_PATTERN, "plan-*.md"),
     ...collectDuplicateValidationIssues(files),
+    ...collectCrossReferenceIssues(files),
     ...collectNumberingGapIssues(files.prdFiles, /^PRD-(\d{3})-.*\.md$/, "PRD", 3),
     ...collectNumberingGapIssues(files.adrFiles, /^ADR-(\d{4})-.*\.md$/, "ADR", 4),
+    ...collectStaleDraftIssues(files),
   ];
   return formatValidationIssues(issues);
 }
