@@ -600,6 +600,16 @@ describe("research planner state", () => {
     expect(payload).toContain("## Implementation payload");
     expect(payload).toContain('"query"');
     expect(payload).toContain("This payload is a suggestion only; no Exa retrieval call was executed.");
+
+    // Issue #115: the planner's auto-suggested payload must include an
+    // explicit outputSchema so that a user (or LLM) who copies the
+    // suggested JSON straight into web_research_exa does not hit the
+    // canned "no synthesized output" fallback. The planner should be
+    // self-documenting about the synthesis step it is suggesting.
+    const jsonBlock = payload.match(/```json\n([\s\S]*?)\n```/);
+    expect(jsonBlock, "payload should embed a JSON block").not.toBeNull();
+    const suggested = JSON.parse(jsonBlock![1]) as { outputSchema?: unknown };
+    expect(suggested.outputSchema).toEqual({ type: "text" });
   });
 
   it("resets all planner state", () => {

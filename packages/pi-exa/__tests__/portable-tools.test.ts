@@ -454,9 +454,130 @@ describe("portable Exa tools", () => {
           numResults: 3,
           includeDomains: ["example.com"],
           startPublishedDate: "2024-01-01",
+          // Issue #115: omitting outputSchema must default to text-mode
+          // synthesis so the backend actually runs synthesis and returns
+          // an `output` field. The Exa API only synthesizes when an
+          // outputSchema is provided; without a default, callers always
+          // hit the canned "no synthesized output" fallback.
+          outputSchema: { type: "text" },
           contents: expect.objectContaining({ text: { maxCharacters: 4000 } }),
         }),
       );
+    });
+
+    it("defaults outputSchema to text-mode synthesis when the caller omits it (issue #115)", async () => {
+      // Regression pin for issue #115: web_research_exa returned the
+      // canned "no synthesized output was returned" message for every
+      // call because the implementation passed `undefined` to
+      // exa.search(...), and the backend only returns an `output` field
+      // when an outputSchema is provided. The fix is to default to
+      // text-mode synthesis when the caller doesn't pass an explicit
+      // outputSchema.
+      mockSearch.mockResolvedValue({
+        requestId: "req-default-text",
+        output: { content: "Synthesized prose answer.", grounding: [] },
+      });
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_research_exa");
+
+      await executePortableTool(tool, { query: "default behavior test" }, { host: "test" });
+
+      expect(mockSearch).toHaveBeenCalledWith(
+        "default behavior test",
+        expect.objectContaining({
+          outputSchema: { type: "text" },
+        }),
+      );
+    });
+
+    it("passes explicit object-mode outputSchema through unchanged and renders parsedOutput", async () => {
+      // The default-to-text fix must not override an explicit object
+      // schema the caller passes. Object mode is the LLM's escape hatch
+      // for structured extraction, and the formatter should still set
+      // `details.parsedOutput` so the caller can consume the structured
+      // result without re-parsing `result.text`.
+      mockSearch.mockResolvedValue({
+        requestId: "req-obj",
+        output: {
+          content: { summary: "Structured answer", risks: ["risk-1", "risk-2"] },
+          grounding: [{ field: "summary", citations: [{ url: "https://example.com", title: "src" }], confidence: "high" }],
+        },
+      });
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_research_exa");
+
+      const explicitSchema = {
+        type: "object" as const,
+        properties: {
+          summary: { type: "string" },
+          risks: { type: "array", items: { type: "string" } },
+        },
+        required: ["summary"],
+      };
+
+      const result = await executePortableTool(
+        tool,
+        { query: "structured please", outputSchema: explicitSchema },
+        { host: "test" },
+      );
+
+      expect(mockSearch).toHaveBeenCalledWith(
+        "structured please",
+        expect.objectContaining({ outputSchema: explicitSchema }),
+      );
+      expect(result.structuredContent).toMatchObject({
+        tool: "web_research_exa",
+        parsedOutput: { summary: "Structured answer", risks: ["risk-1", "risk-2"] },
+      });
+    });
+
+    it("surfaces diagnostic context when the response omits output (issue #115 fallback)", async () => {
+      // When the backend returns no `output` field, the tool must
+      // surface *why* (synthesis was not requested) and *what shape* it
+      // got, not the generic "try a different query" message. This pins
+      // the diagnostic contract: requestId, resultsCount, what schema
+      // was sent, and the top-level response keys (which lack `output`
+      // is the proof of the contract issue).
+      mockSearch.mockResolvedValue({
+        requestId: "req-no-output",
+        resolvedSearchType: "deep",
+        results: [
+          { title: "Hit 1", url: "https://example.com/1" },
+          { title: "Hit 2", url: "https://example.com/2" },
+        ],
+        searchTime: 1234,
+        costDollars: { total: 0.015 },
+        // No `output` key — matches the bug scenario from issue #115.
+      });
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_research_exa");
+
+      const result = await executePortableTool(
+        tool,
+        { query: "synthesis will not run" },
+        { host: "test" },
+      );
+
+      // Not flagged as an error — this is a contract gotcha, not a
+      // transport failure. The model gets a readable text and structured
+      // details to act on.
+      expect(result.isError).toBeFalsy();
+      // User-facing text must be honest: synthesis was not requested.
+      expect(result.text).toMatch(/synthesis was not requested/i);
+      expect(result.text).toMatch(/outputSchema/);
+      // Diagnostic details pin the failure shape.
+      expect(result.structuredContent).toMatchObject({
+        tool: "web_research_exa",
+        kind: "domain",
+        error: "no_synthesized_output",
+        requestId: "req-no-output",
+        resultsCount: 2,
+        outputSchemaSent: { type: "text" },
+        // The proof: the response had no `output` key.
+        responseKeys: ["requestId", "resolvedSearchType", "results", "searchTime", "costDollars"],
+        costDollars: { total: 0.015 },
+        searchTime: 1234,
+      });
     });
 
     it("rejects outputSchema.type other than object|text at the validation layer", async () => {
