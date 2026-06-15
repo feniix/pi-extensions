@@ -25,9 +25,22 @@ interface ResearchParams {
   endPublishedDate?: string;
 }
 
-function parseOutputSchema(outputSchema: Record<string, unknown> | undefined): DeepOutputSchema | undefined {
+function parseOutputSchema(outputSchema: Record<string, unknown> | undefined): DeepOutputSchema {
+  // The Exa /search endpoint only returns an `output` field when an
+  // outputSchema is provided (see Exa Search API Reference, the
+  // canonical guide: "When provided, the response includes `output`").
+  // Without a default, every call without an explicit outputSchema
+  // would return no synthesis and the canned "no synthesized output"
+  // fallback would fire — see issue #115.
+  //
+  // Default to text-mode synthesis: it is the lowest-friction mode
+  // (no schema design required), matches every skill example in this
+  // package except `financial-report-search`, and is what the user's
+  // manual workaround in the bug report uses. Callers that want
+  // structured output pass `outputSchema: { type: "object", properties: {...} }`
+  // explicitly; the override is preserved verbatim.
   if (!outputSchema || !Object.hasOwn(outputSchema, "type")) {
-    return undefined;
+    return { type: "text" } as DeepOutputSchema;
   }
 
   const schemaType = outputSchema.type;
@@ -65,10 +78,31 @@ export async function performResearch(apiKey: string, params: ResearchParams): P
   });
 
   if (!response?.output) {
+    // Synthesize an honest diagnostic. The response shape proves the
+    // contract issue: top-level keys include requestId/results/etc.
+    // but no `output` key. That is the documented behavior of /search
+    // when no outputSchema was sent — not a backend failure.
+    const responseRecord = response as Record<string, unknown> | null | undefined;
+    const results = responseRecord?.results;
+    const resultsCount = Array.isArray(results) ? (results as unknown[]).length : 0;
+    const responseKeys = responseRecord ? Object.keys(responseRecord) : [];
+    const requestId = typeof responseRecord?.requestId === "string" ? (responseRecord.requestId as string) : "unknown";
+    const text =
+      `Deep search completed but no synthesized output was returned. ` +
+      `Synthesis was not requested by the Exa API in this call (requestId: ${requestId}, ` +
+      `results returned: ${resultsCount}). Pass outputSchema explicitly to receive synthesis: ` +
+      `\`{ "type": "text" }\` for prose or \`{ "type": "object", "properties": {...} }\` for structured output ` +
+      `(max 10 properties, max depth 2).`;
     return {
-      text: "Deep search completed, but no synthesized output was returned. Try a different query or simpler filters.",
+      text,
       details: {
         tool: "web_research_exa",
+        kind: "domain",
+        error: "no_synthesized_output",
+        requestId,
+        resultsCount,
+        outputSchemaSent: outputSchema,
+        responseKeys,
         ...toMetadata(response),
       },
     };

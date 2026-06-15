@@ -17,7 +17,11 @@ import {
   SUMMARY_MODES,
 } from "./research-planner-types.js";
 
-const outputSchemaType = Type.Union([Type.Literal("object"), Type.Literal("text")]);
+const outputSchemaType = Type.Union([Type.Literal("object"), Type.Literal("text")], {
+  description:
+    'Output mode for deep search synthesis. "text" returns the synthesis as prose (the default for web_research_exa). ' +
+    '"object" returns a JSON object matching `properties` (max 10 properties, max depth 2).',
+});
 
 const outputSchema = Type.Object(
   {

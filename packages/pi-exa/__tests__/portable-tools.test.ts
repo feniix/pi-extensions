@@ -500,7 +500,9 @@ describe("portable Exa tools", () => {
         requestId: "req-obj",
         output: {
           content: { summary: "Structured answer", risks: ["risk-1", "risk-2"] },
-          grounding: [{ field: "summary", citations: [{ url: "https://example.com", title: "src" }], confidence: "high" }],
+          grounding: [
+            { field: "summary", citations: [{ url: "https://example.com", title: "src" }], confidence: "high" },
+          ],
         },
       });
       const tools = createExaTools({ resolveApiKey: () => "test-key" });
@@ -552,11 +554,7 @@ describe("portable Exa tools", () => {
       const tools = createExaTools({ resolveApiKey: () => "test-key" });
       const tool = findTool(tools, "web_research_exa");
 
-      const result = await executePortableTool(
-        tool,
-        { query: "synthesis will not run" },
-        { host: "test" },
-      );
+      const result = await executePortableTool(tool, { query: "synthesis will not run" }, { host: "test" });
 
       // Not flagged as an error — this is a contract gotcha, not a
       // transport failure. The model gets a readable text and structured

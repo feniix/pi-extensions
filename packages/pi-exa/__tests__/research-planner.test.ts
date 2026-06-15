@@ -608,7 +608,10 @@ describe("research planner state", () => {
     // self-documenting about the synthesis step it is suggesting.
     const jsonBlock = payload.match(/```json\n([\s\S]*?)\n```/);
     expect(jsonBlock, "payload should embed a JSON block").not.toBeNull();
-    const suggested = JSON.parse(jsonBlock![1]) as { outputSchema?: unknown };
+    if (jsonBlock === null) {
+      return; // unreachable: the expect above already failed
+    }
+    const suggested = JSON.parse(jsonBlock[1]) as { outputSchema?: unknown };
     expect(suggested.outputSchema).toEqual({ type: "text" });
   });
 
