@@ -10,6 +10,7 @@
  * via `createResearchPlanner()`.
  */
 
+import { DEFAULT_RESEARCH_OUTPUT_SCHEMA } from "./constants.js";
 import type {
   CriteriaCoverage,
   RecommendedNextAction,
@@ -198,13 +199,9 @@ function payload(status: ResearchStatus): string {
   const suggestedPayload = {
     query: queryParts.join("; ") || "Research the recorded topic.",
     systemPrompt,
-    // Make the synthesis step explicit in the auto-suggested payload
-    // (issue #115). web_research_exa defaults to text-mode synthesis,
-    // but spelling it out here means a reader of the suggested payload
-    // can see that synthesis will happen and how the output will be
-    // shaped. Callers can still override with { type: "object", ... }
-    // for structured extraction.
-    outputSchema: { type: "text" },
+    // Keep copied planner payloads synthesis-ready; Exa requires
+    // outputSchema for output (issue #115).
+    outputSchema: DEFAULT_RESEARCH_OUTPUT_SCHEMA,
     additionalQueries: status.criteria.slice(0, 5).map((criterion) => criterion.label),
     numResults: Math.min(20, Math.max(5, status.criteria.length + status.sources.length)),
   };

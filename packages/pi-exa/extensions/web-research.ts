@@ -3,7 +3,7 @@
  */
 
 import type { DeepOutputSchema, DeepSearchOutput } from "exa-js";
-import { DEEP_SEARCH_TYPES } from "./constants.js";
+import { DEEP_SEARCH_TYPES, DEFAULT_RESEARCH_OUTPUT_SCHEMA } from "./constants.js";
 import { getExaClient } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatResearchOutput, toMetadata } from "./formatters.js";
@@ -26,21 +26,11 @@ interface ResearchParams {
 }
 
 function parseOutputSchema(outputSchema: Record<string, unknown> | undefined): DeepOutputSchema {
-  // The Exa /search endpoint only returns an `output` field when an
-  // outputSchema is provided (see Exa Search API Reference, the
-  // canonical guide: "When provided, the response includes `output`").
-  // Without a default, every call without an explicit outputSchema
-  // would return no synthesis and the canned "no synthesized output"
-  // fallback would fire — see issue #115.
-  //
-  // Default to text-mode synthesis: it is the lowest-friction mode
-  // (no schema design required), matches every skill example in this
-  // package except `financial-report-search`, and is what the user's
-  // manual workaround in the bug report uses. Callers that want
-  // structured output pass `outputSchema: { type: "object", properties: {...} }`
-  // explicitly; the override is preserved verbatim.
+  // Exa /search only returns an `output` field when an outputSchema is
+  // provided; default to text so omitted schemas still request synthesis
+  // (issue #115). Explicit object-mode schemas pass through unchanged.
   if (!outputSchema || !Object.hasOwn(outputSchema, "type")) {
-    return { type: "text" } as DeepOutputSchema;
+    return DEFAULT_RESEARCH_OUTPUT_SCHEMA as unknown as DeepOutputSchema;
   }
 
   const schemaType = outputSchema.type;
@@ -78,20 +68,12 @@ export async function performResearch(apiKey: string, params: ResearchParams): P
   });
 
   if (!response?.output) {
-    // Synthesize an honest diagnostic. The response shape proves the
-    // contract issue: top-level keys include requestId/results/etc.
-    // but no `output` key. That is the documented behavior of /search
-    // when no outputSchema was sent — not a backend failure.
-    //
-    // With the new default-to-text fix, an outputSchema is always
-    // sent, so the previous "synthesis was not requested" wording is
-    // misleading. Say what actually happened: a schema was sent, the
-    // backend returned results, but no `output` field.
-    const responseRecord = response as Record<string, unknown> | null | undefined;
-    const results = responseRecord?.results;
-    const resultsCount = Array.isArray(results) ? (results as unknown[]).length : 0;
-    const responseKeys = responseRecord ? Object.keys(responseRecord) : [];
-    const requestId = typeof responseRecord?.requestId === "string" ? (responseRecord.requestId as string) : "unknown";
+    // Even with the default outputSchema, surface a non-error diagnostic
+    // when Exa returns results but omits `output` so the operator and
+    // the model-visible text both know what happened.
+    const resultsCount = Array.isArray(response?.results) ? response.results.length : 0;
+    const responseKeys = response ? Object.keys(response) : [];
+    const requestId = typeof response?.requestId === "string" ? response.requestId : "unknown";
     const text =
       `Deep search completed but no synthesized output was returned. ` +
       `An outputSchema was sent to the Exa API (requestId: ${requestId}, ` +
@@ -109,10 +91,8 @@ export async function performResearch(apiKey: string, params: ResearchParams): P
         outputSchemaSent: outputSchema,
         responseKeys,
         // Guard the metadata spread: toMetadata dereferences
-        // response.costDollars and response.searchTime, and a null/
-        // undefined response would throw before the diagnostic can
-        // be returned. (Pre-existing crash; surfaced by the new
-        // diagnostic details block.)
+        // response.costDollars and response.searchTime, and a nullish
+        // response would throw before the diagnostic can be returned.
         ...(response ? toMetadata(response) : {}),
       },
     };
