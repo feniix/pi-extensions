@@ -4,6 +4,23 @@ All notable changes to `@feniix/pi-exa` are recorded in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.0.1] - 2026-06-15
+
+### Fixed
+
+- **`web_research_exa` returned the canned "no synthesized output was returned" message for every call** (issue #115). The Exa `/search` endpoint only returns an `output` field when an `outputSchema` is provided (per the [Search API Reference for Coding Agents](https://docs.exa.ai/reference/search-api-guide-for-coding-agents): *"When provided, the response includes `output`."*). The previous tool had no default for `outputSchema` and passed `undefined` to `exa.search(...)`, so synthesis was never requested and the canned fallback fired for every deep-type call. The tool now defaults to text-mode synthesis (`{ "type": "text" }`) when the caller omits `outputSchema` or passes a schema without a `type` field. Explicit object-mode `outputSchema` is passed through unchanged and the formatter still surfaces `details.parsedOutput` so callers can consume structured output without re-parsing `result.text`.
+
+### Added
+
+- **Diagnostic context in the `web_research_exa` fallback path.** When the response omits the `output` field, the fallback `details` now include `requestId`, `resultsCount`, `outputSchemaSent`, `responseKeys`, and `kind: "domain"` + `error: "no_synthesized_output"`. The user-facing `text` honestly explains that synthesis was not requested (not that it "failed") and names the two override options. This catches the next silent regression and gives operators a `requestId` to reference in support tickets.
+- **`outputSchema: { "type": "text" }` in `exa_research_summary` mode `payload`.** The planner's auto-suggested `web_research_exa` invocation now spells out the synthesis step explicitly, so a user (or LLM) who copies the suggested JSON verbatim does not silently hit the fallback. Aligns with the workaround already documented in `skills/exa-research-planner/SKILL.md` and the four other skills that pass `outputSchema: { "type": "text" }` explicitly.
+- **Discoverability for object-mode synthesis.** The TypeBox `outputSchema` schema now carries a description that documents the default, the override, and the 10-property / depth-2 constraint. The `web_research_exa` tool description and `promptGuidelines` likewise document the default and how to override it. The misleading third `promptGuidelines` bullet ("...when a systemPrompt or outputSchema is needed...") was replaced with explicit default/override guidance.
+
+### Changed
+
+- **`web_answer_exa` description clarified** to state that it returns a plain string by default (a `/answer` endpoint default, not a tool behavior change) and that passing `outputSchema` switches to structured output. No runtime change.
+- **`web_research_exa` `promptSnippet`** shortened and updated to mention structured output ("Deep research; higher cost/latency. Use `outputSchema: { type: 'object' }` for structured output.") while preserving the cost/latency signal that the cross-tool routing test asserts on.
+
 ## [5.0.0] - 2026-05-25
 
 The 5.0 line ports pi-exa onto bridgekit's portable-tool surface and ships a first-class MCP stdio server. The user-visible tool semantics are unchanged for the Pi host, but the error contract, package layout, and runtime requirements all shift.

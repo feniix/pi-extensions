@@ -189,7 +189,7 @@ Params include:
 - `query` (required)
 - `type`: `deep-reasoning | deep-lite | deep`
 - `systemPrompt`
-- `outputSchema` (`type` may be `"object"` or `"text"`, default `"object"`)
+- `outputSchema` (`type` may be `"object"` or `"text"`, default `"text"`; object mode is capped at 10 properties / depth 2 and gives per-field grounding). The default is required for synthesis to run — Exa's `/search` endpoint only returns an `output` field when an `outputSchema` is provided (see issue #115 and the [Search API Reference for Coding Agents](https://docs.exa.ai/reference/search-api-guide-for-coding-agents)).
 - optional `additionalQueries`, filters, `numResults`, and `textMaxCharacters`
 
 ### web_answer_exa
