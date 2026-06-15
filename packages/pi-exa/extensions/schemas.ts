@@ -19,8 +19,8 @@ import {
 
 const outputSchemaType = Type.Union([Type.Literal("object"), Type.Literal("text")], {
   description:
-    'Output mode for deep search synthesis. "text" returns the synthesis as prose (the default for web_research_exa). ' +
-    '"object" returns a JSON object matching `properties` (max 10 properties, max depth 2).',
+    'Output mode. "text" returns prose; "object" returns a JSON object matching `properties` (max 10 properties, max depth 2). ' +
+    "Tool-specific default behavior is documented in each tool's description.",
 });
 
 const outputSchema = Type.Object(

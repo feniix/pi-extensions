@@ -490,6 +490,35 @@ describe("portable Exa tools", () => {
       );
     });
 
+    it("defaults to text-mode when outputSchema is an object without a type field", async () => {
+      // The schema layer accepts { properties: {...} } without a top-level
+      // type (Type.Object + additionalProperties: true). parseOutputSchema
+      // must treat that as "no type provided" and default to text mode,
+      // matching the omitted-outputSchema path.
+      mockSearch.mockResolvedValue({
+        requestId: "req-no-type",
+        output: { content: "Defaulted to text.", grounding: [] },
+      });
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_research_exa");
+
+      await executePortableTool(
+        tool,
+        {
+          query: "no-type test",
+          outputSchema: { properties: { summary: { type: "string" } } } as never,
+        },
+        { host: "test" },
+      );
+
+      expect(mockSearch).toHaveBeenCalledWith(
+        "no-type test",
+        expect.objectContaining({
+          outputSchema: { type: "text" },
+        }),
+      );
+    });
+
     it("passes explicit object-mode outputSchema through unchanged and renders parsedOutput", async () => {
       // The default-to-text fix must not override an explicit object
       // schema the caller passes. Object mode is the LLM's escape hatch
@@ -535,11 +564,12 @@ describe("portable Exa tools", () => {
 
     it("surfaces diagnostic context when the response omits output (issue #115 fallback)", async () => {
       // When the backend returns no `output` field, the tool must
-      // surface *why* (synthesis was not requested) and *what shape* it
-      // got, not the generic "try a different query" message. This pins
-      // the diagnostic contract: requestId, resultsCount, what schema
-      // was sent, and the top-level response keys (which lack `output`
-      // is the proof of the contract issue).
+      // surface *why* (synthesis was expected but the response lacked
+      // the field) and *what shape* it got, not the generic "try a
+      // different query" message. This pins the diagnostic contract:
+      // requestId, resultsCount, what schema was sent, and the
+      // top-level response keys (which lack `output` is the proof of
+      // the contract issue).
       mockSearch.mockResolvedValue({
         requestId: "req-no-output",
         resolvedSearchType: "deep",
@@ -560,21 +590,55 @@ describe("portable Exa tools", () => {
       // transport failure. The model gets a readable text and structured
       // details to act on.
       expect(result.isError).toBeFalsy();
-      // User-facing text must be honest: synthesis was not requested.
-      expect(result.text).toMatch(/synthesis was not requested/i);
+      // User-facing text is honest about what happened: a schema was
+      // sent, the response lacked the field.
+      expect(result.text).toMatch(/outputSchema was sent/i);
       expect(result.text).toMatch(/outputSchema/);
       // Diagnostic details pin the failure shape.
-      expect(result.structuredContent).toMatchObject({
+      const details = result.structuredContent as Record<string, unknown>;
+      expect(details).toMatchObject({
         tool: "web_research_exa",
         kind: "domain",
         error: "no_synthesized_output",
         requestId: "req-no-output",
         resultsCount: 2,
         outputSchemaSent: { type: "text" },
-        // The proof: the response had no `output` key.
-        responseKeys: ["requestId", "resolvedSearchType", "results", "searchTime", "costDollars"],
         costDollars: { total: 0.015 },
         searchTime: 1234,
+      });
+      // responseKeys is the diagnostic surface: assert semantically (the
+      // useful keys are present, `output` is absent) rather than pinning
+      // exact insertion order — Object.keys order is stable per the
+      // JS spec, but the value of the diagnostic is the set membership.
+      const responseKeys = details.responseKeys as string[];
+      expect(responseKeys).toEqual(expect.arrayContaining(["requestId", "results", "searchTime", "costDollars"]));
+      expect(responseKeys).not.toContain("output");
+    });
+
+    it("surfaces diagnostic context even when exa.search resolves to null or undefined", async () => {
+      // Defensive coverage: if the SDK ever resolves to a nullish
+      // response (unusual but documented in the exa-js types as
+      // possible during cancellation/timeout edges), the diagnostic
+      // path must not throw. Without the null guard, toMetadata would
+      // dereference response.costDollars on a null value and the
+      // fallback would crash before the model-visible diagnostic is
+      // returned.
+      mockSearch.mockResolvedValueOnce(null);
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_research_exa");
+
+      const result = await executePortableTool(tool, { query: "null response test" }, { host: "test" });
+
+      expect(result.isError).toBeFalsy();
+      const details = result.structuredContent as Record<string, unknown>;
+      expect(details).toMatchObject({
+        tool: "web_research_exa",
+        kind: "domain",
+        error: "no_synthesized_output",
+        requestId: "unknown",
+        resultsCount: 0,
+        outputSchemaSent: { type: "text" },
+        responseKeys: [],
       });
     });
 

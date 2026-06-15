@@ -82,6 +82,11 @@ export async function performResearch(apiKey: string, params: ResearchParams): P
     // contract issue: top-level keys include requestId/results/etc.
     // but no `output` key. That is the documented behavior of /search
     // when no outputSchema was sent — not a backend failure.
+    //
+    // With the new default-to-text fix, an outputSchema is always
+    // sent, so the previous "synthesis was not requested" wording is
+    // misleading. Say what actually happened: a schema was sent, the
+    // backend returned results, but no `output` field.
     const responseRecord = response as Record<string, unknown> | null | undefined;
     const results = responseRecord?.results;
     const resultsCount = Array.isArray(results) ? (results as unknown[]).length : 0;
@@ -89,10 +94,10 @@ export async function performResearch(apiKey: string, params: ResearchParams): P
     const requestId = typeof responseRecord?.requestId === "string" ? (responseRecord.requestId as string) : "unknown";
     const text =
       `Deep search completed but no synthesized output was returned. ` +
-      `Synthesis was not requested by the Exa API in this call (requestId: ${requestId}, ` +
-      `results returned: ${resultsCount}). Pass outputSchema explicitly to receive synthesis: ` +
-      `\`{ "type": "text" }\` for prose or \`{ "type": "object", "properties": {...} }\` for structured output ` +
-      `(max 10 properties, max depth 2).`;
+      `An outputSchema was sent to the Exa API (requestId: ${requestId}, ` +
+      `results returned: ${resultsCount}, outputSchema: ${JSON.stringify(outputSchema)}), ` +
+      `but the response did not include an \`output\` field. ` +
+      `Try a different query, simplify filters, or check Exa's status page.`;
     return {
       text,
       details: {
@@ -103,7 +108,12 @@ export async function performResearch(apiKey: string, params: ResearchParams): P
         resultsCount,
         outputSchemaSent: outputSchema,
         responseKeys,
-        ...toMetadata(response),
+        // Guard the metadata spread: toMetadata dereferences
+        // response.costDollars and response.searchTime, and a null/
+        // undefined response would throw before the diagnostic can
+        // be returned. (Pre-existing crash; surfaced by the new
+        // diagnostic details block.)
+        ...(response ? toMetadata(response) : {}),
       },
     };
   }
