@@ -3,7 +3,7 @@
  */
 
 import type { DeepOutputSchema, DeepSearchOutput } from "exa-js";
-import { DEEP_SEARCH_TYPES } from "./constants.js";
+import { DEEP_SEARCH_TYPES, DEFAULT_RESEARCH_OUTPUT_SCHEMA } from "./constants.js";
 import { getExaClient } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatResearchOutput, toMetadata } from "./formatters.js";
@@ -25,9 +25,12 @@ interface ResearchParams {
   endPublishedDate?: string;
 }
 
-function parseOutputSchema(outputSchema: Record<string, unknown> | undefined): DeepOutputSchema | undefined {
+function parseOutputSchema(outputSchema: Record<string, unknown> | undefined): DeepOutputSchema {
+  // Exa /search only returns an `output` field when an outputSchema is
+  // provided; default to text so omitted schemas still request synthesis
+  // (issue #115). Explicit object-mode schemas pass through unchanged.
   if (!outputSchema || !Object.hasOwn(outputSchema, "type")) {
-    return undefined;
+    return DEFAULT_RESEARCH_OUTPUT_SCHEMA as unknown as DeepOutputSchema;
   }
 
   const schemaType = outputSchema.type;
@@ -65,11 +68,32 @@ export async function performResearch(apiKey: string, params: ResearchParams): P
   });
 
   if (!response?.output) {
+    // Even with the default outputSchema, surface a non-error diagnostic
+    // when Exa returns results but omits `output` so the operator and
+    // the model-visible text both know what happened.
+    const resultsCount = Array.isArray(response?.results) ? response.results.length : 0;
+    const responseKeys = response ? Object.keys(response) : [];
+    const requestId = typeof response?.requestId === "string" ? response.requestId : "unknown";
+    const text =
+      `Deep search completed but no synthesized output was returned. ` +
+      `An outputSchema was sent to the Exa API (requestId: ${requestId}, ` +
+      `results returned: ${resultsCount}, outputSchema: ${JSON.stringify(outputSchema)}), ` +
+      `but the response did not include an \`output\` field. ` +
+      `Try a different query, simplify filters, or check Exa's status page.`;
     return {
-      text: "Deep search completed, but no synthesized output was returned. Try a different query or simpler filters.",
+      text,
       details: {
         tool: "web_research_exa",
-        ...toMetadata(response),
+        kind: "domain",
+        error: "no_synthesized_output",
+        requestId,
+        resultsCount,
+        outputSchemaSent: outputSchema,
+        responseKeys,
+        // Guard the metadata spread: toMetadata dereferences
+        // response.costDollars and response.searchTime, and a nullish
+        // response would throw before the diagnostic can be returned.
+        ...(response ? toMetadata(response) : {}),
       },
     };
   }

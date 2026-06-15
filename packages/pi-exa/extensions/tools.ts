@@ -475,7 +475,9 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
         {
           name: "web_answer_exa",
           title: "Exa Answer",
-          description: "Get a grounded answer with source citations and optional structured output.",
+          description:
+            "Get a grounded answer with source citations. Returns the answer as a plain string by default; " +
+            "pass `outputSchema` to receive structured output instead.",
           parameters: webAnswerParams,
           pendingMessage: "Fetching answer from Exa...",
           errorPrefix: "Exa answer error",
@@ -549,17 +551,22 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
         {
           name: "web_research_exa",
           title: "Exa Deep Research",
-          description: "Deep-reasoning Exa search with synthesized, grounded output for complex research topics.",
+          description:
+            "Deep-reasoning Exa search with synthesized, grounded output for complex research topics. " +
+            'Returns the synthesis as plain text by default; pass `outputSchema: { "type": "object", "properties": {...} }` ' +
+            "to receive structured output (max 10 properties, max depth 2).",
           parameters: webResearchParams,
           pendingMessage: "Performing deep research via Exa...",
           errorPrefix: "Exa research error",
           hostExtras: {
             pi: {
-              promptSnippet: "Deep research with grounded synthesis; higher cost and latency.",
+              promptSnippet:
+                "Deep research; higher cost/latency. Use outputSchema: { type: 'object' } for structured output.",
               promptGuidelines: [
                 "Use web_research_exa for conclusions, comparisons, and recommendations; use web_search_exa for simple lookups.",
                 "Use web_research_exa for open-ended synthesis; use web_answer_exa for direct questions needing a concise cited answer.",
-                "Use web_research_exa when a systemPrompt or outputSchema is needed; use web_search_advanced_exa for filtered retrieval only.",
+                "web_research_exa defaults to text-mode synthesis for prose; use web_answer_exa when the question is direct and a short answer suffices.",
+                "web_research_exa accepts `outputSchema: { type: 'object', properties: {...} }` for structured extraction (max 10 properties, max depth 2); use web_search_advanced_exa for filtered retrieval when no synthesis is needed.",
               ],
             },
             mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },

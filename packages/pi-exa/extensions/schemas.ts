@@ -17,7 +17,11 @@ import {
   SUMMARY_MODES,
 } from "./research-planner-types.js";
 
-const outputSchemaType = Type.Union([Type.Literal("object"), Type.Literal("text")]);
+const outputSchemaType = Type.Union([Type.Literal("object"), Type.Literal("text")], {
+  description:
+    'Output mode. "text" returns prose; "object" returns a JSON object matching `properties` (max 10 properties, max depth 2). ' +
+    "Tool-specific default behavior is documented in each tool's description.",
+});
 
 const outputSchema = Type.Object(
   {
