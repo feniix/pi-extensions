@@ -18,6 +18,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPiTools } from "@feniix/bridgekit/pi";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
 import { createExaTools, type ExaToolTimeouts } from "./tools.js";
+import { getExaRenderers } from "./tui-renderers.js";
 
 export {
   getAuthStatusMessage,
@@ -92,6 +93,21 @@ export default function exaExtension(pi: ExtensionAPI) {
     resolveApiKey: () => resolveAuth(pi).apiKey || undefined,
     isToolEnabled: (toolName) => isToolEnabledForConfig(pi, resolvedConfig, toolName),
     timeouts: resolvePiTimeouts(pi),
+  }).map((tool) => {
+    const renderers = getExaRenderers(tool.name);
+    if (!renderers.renderCall && !renderers.renderResult) {
+      return tool;
+    }
+    return {
+      ...tool,
+      hostExtras: {
+        ...tool.hostExtras,
+        pi: {
+          ...tool.hostExtras?.pi,
+          ...renderers,
+        },
+      },
+    };
   });
   registerPiTools(pi, tools);
 }
