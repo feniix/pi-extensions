@@ -1,9 +1,10 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execGh, execGit, getDefaultBranch, getGitContext, getWorktreeContext, isGitRepo } from "../extensions/git.js";
+import { bumpVersionTool, commitTool, getLatestTagTool, repoInfoTool } from "../extensions/index.js";
 
 describe("pi-devtools git integration", () => {
   let tempDir: string;
@@ -73,6 +74,43 @@ describe("pi-devtools git integration", () => {
   });
 
   describe("worktree context", () => {
+    it("scopes workflow, tag analysis, and version-file mutations to a linked worktree cwd", () => {
+      const linkedDir = join(tmpdir(), `pi-devtools-active-${Date.now()}`);
+      try {
+        execSync(`git worktree add -b feature/active ${JSON.stringify(linkedDir)}`, { cwd: tempDir, stdio: "pipe" });
+        execSync("git -c tag.gpgSign=false tag v1.0.0", { cwd: tempDir, stdio: "pipe" });
+        writeFileSync(join(tempDir, "version.json"), '{"version":"1.0.0"}\n');
+        writeFileSync(join(linkedDir, "version.json"), '{"version":"2.0.0"}\n');
+        writeFileSync(join(linkedDir, "linked-only.txt"), "linked worktree");
+
+        const commit = commitTool("test: linked cwd", ["linked-only.txt"], true, linkedDir);
+        const version = bumpVersionTool("2.1.0", "version.json", linkedDir);
+        const info = repoInfoTool(linkedDir);
+        const tag = getLatestTagTool(linkedDir);
+
+        expect(commit.isError).toBeUndefined();
+        expect(version.isError).toBeUndefined();
+        expect(info.details).toEqual(
+          expect.objectContaining({
+            branch: "feature/active",
+            worktreeRoot: realpathSync(linkedDir),
+            isLinkedWorktree: true,
+          }),
+        );
+        expect(tag.details).toEqual(expect.objectContaining({ tag: "v1.0.0", commitsSince: 1 }));
+        expect(JSON.parse(readFileSync(join(linkedDir, "version.json"), "utf-8")).version).toBe("2.1.0");
+        expect(JSON.parse(readFileSync(join(tempDir, "version.json"), "utf-8")).version).toBe("1.0.0");
+        expect(execGit("git log -1 --format=%s", linkedDir)).toBe("test: linked cwd");
+        expect(execGit("git log -1 --format=%s", tempDir)).toBe("initial commit");
+      } finally {
+        try {
+          execSync(`git worktree remove --force ${JSON.stringify(linkedDir)}`, { cwd: tempDir, stdio: "pipe" });
+        } catch {
+          rmSync(linkedDir, { recursive: true, force: true });
+        }
+      }
+    });
+
     it("discovers canonical primary and linked topology, including a detached linked HEAD and spaces", () => {
       const linkedDir = join(tmpdir(), `pi devtools linked ${Date.now()}`);
       try {

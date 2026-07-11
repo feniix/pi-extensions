@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getGitContext } from "./git.js";
+import { getGitContext, getWorktreeContext } from "./git.js";
 import { checkCiTool, createPrTool, mergePrTool } from "./pull-request-tools.js";
 import {
   analyzeCommitsTool,
@@ -52,9 +52,15 @@ export const toolDefinitions = [
     label: "Create Branch",
     description: "Create a new git branch and optionally switch to it",
     parameters: createBranchParams,
-    execute: async (_toolCallId: string, params: unknown) => {
+    execute: async (
+      _toolCallId: string,
+      params: unknown,
+      _signal: unknown,
+      _onUpdate: unknown,
+      ctx: { cwd: string },
+    ) => {
       const { branchName, switchBranch = true } = params as { branchName: string; switchBranch?: boolean };
-      return createBranchTool(branchName, switchBranch);
+      return createBranchTool(branchName, switchBranch, ctx.cwd);
     },
   },
   {
@@ -62,9 +68,15 @@ export const toolDefinitions = [
     label: "Git Commit",
     description: "Stage files and create a commit with conventional format",
     parameters: commitParams,
-    execute: async (_toolCallId: string, params: unknown) => {
+    execute: async (
+      _toolCallId: string,
+      params: unknown,
+      _signal: unknown,
+      _onUpdate: unknown,
+      ctx: { cwd: string },
+    ) => {
       const { message, files, noVerify = false } = params as { message: string; files?: string[]; noVerify?: boolean };
-      return commitTool(message, files, noVerify);
+      return commitTool(message, files, noVerify, ctx.cwd);
     },
   },
   {
@@ -72,9 +84,15 @@ export const toolDefinitions = [
     label: "Git Push",
     description: "Push branch to remote with upstream tracking",
     parameters: pushParams,
-    execute: async (_toolCallId: string, params: unknown) => {
+    execute: async (
+      _toolCallId: string,
+      params: unknown,
+      _signal: unknown,
+      _onUpdate: unknown,
+      ctx: { cwd: string },
+    ) => {
       const { branch, setUpstream = true } = params as { branch?: string; setUpstream?: boolean };
-      return pushTool(branch, setUpstream);
+      return pushTool(branch, setUpstream, ctx.cwd);
     },
   },
   {
@@ -82,9 +100,15 @@ export const toolDefinitions = [
     label: "Create PR",
     description: "Create a GitHub pull request",
     parameters: createPrParams,
-    execute: async (_toolCallId: string, params: unknown) => {
+    execute: async (
+      _toolCallId: string,
+      params: unknown,
+      _signal: unknown,
+      _onUpdate: unknown,
+      ctx: { cwd: string },
+    ) => {
       const typed = params as { title: string; body?: string; base?: string; draft?: boolean; assignees?: string[] };
-      return createPrTool(typed.title, typed.body, typed.base, typed.draft, typed.assignees);
+      return createPrTool(typed.title, typed.body, typed.base, typed.draft, typed.assignees, ctx.cwd);
     },
   },
   {
@@ -92,7 +116,13 @@ export const toolDefinitions = [
     label: "Merge PR",
     description: "Merge a pull request (optionally delete source branch)",
     parameters: mergePrParams,
-    execute: async (_toolCallId: string, params: unknown) => {
+    execute: async (
+      _toolCallId: string,
+      params: unknown,
+      _signal: unknown,
+      _onUpdate: unknown,
+      ctx: { cwd: string },
+    ) => {
       const typed = params as {
         prNumber?: number;
         squash?: boolean;
@@ -106,6 +136,7 @@ export const toolDefinitions = [
         typed.deleteBranch ?? true,
         typed.commitTitle,
         typed.commitMessage,
+        ctx.cwd,
       );
     },
   },
@@ -114,14 +145,27 @@ export const toolDefinitions = [
     label: "Squash Merge PR",
     description: "Squash-merge a pull request (optionally delete source branch)",
     parameters: mergePrParams,
-    execute: async (_toolCallId: string, params: unknown) => {
+    execute: async (
+      _toolCallId: string,
+      params: unknown,
+      _signal: unknown,
+      _onUpdate: unknown,
+      ctx: { cwd: string },
+    ) => {
       const typed = params as {
         prNumber?: number;
         deleteBranch?: boolean;
         commitTitle?: string;
         commitMessage?: string;
       };
-      return mergePrTool(typed.prNumber, true, typed.deleteBranch ?? true, typed.commitTitle, typed.commitMessage);
+      return mergePrTool(
+        typed.prNumber,
+        true,
+        typed.deleteBranch ?? true,
+        typed.commitTitle,
+        typed.commitMessage,
+        ctx.cwd,
+      );
     },
   },
   {
@@ -129,9 +173,15 @@ export const toolDefinitions = [
     label: "Check CI",
     description: "Check GitHub Actions CI status for a PR or branch",
     parameters: checkCiParams,
-    execute: async (_toolCallId: string, params: unknown) => {
+    execute: async (
+      _toolCallId: string,
+      params: unknown,
+      _signal: unknown,
+      _onUpdate: unknown,
+      ctx: { cwd: string },
+    ) => {
       const { prNumber, branch } = params as { prNumber?: number; branch?: string };
-      return checkCiTool(prNumber, branch);
+      return checkCiTool(prNumber, branch, ctx.cwd);
     },
   },
   {
@@ -139,30 +189,54 @@ export const toolDefinitions = [
     label: "Repo Info",
     description: "Get current branch, default branch, and git status",
     parameters: emptyParams,
-    execute: async () => repoInfoTool(),
+    execute: async (
+      _toolCallId: string,
+      _params: unknown,
+      _signal: unknown,
+      _onUpdate: unknown,
+      ctx: { cwd: string },
+    ) => repoInfoTool(ctx.cwd),
   },
   {
     name: "devtools_get_latest_tag",
     label: "Latest Tag",
     description: "Get the latest version tag from git",
     parameters: emptyParams,
-    execute: async () => getLatestTagTool(),
+    execute: async (
+      _toolCallId: string,
+      _params: unknown,
+      _signal: unknown,
+      _onUpdate: unknown,
+      ctx: { cwd: string },
+    ) => getLatestTagTool(ctx.cwd),
   },
   {
     name: "devtools_analyze_commits",
     label: "Analyze Commits",
     description: "Analyze commits since last tag to determine version bump type",
     parameters: emptyParams,
-    execute: async () => analyzeCommitsTool(),
+    execute: async (
+      _toolCallId: string,
+      _params: unknown,
+      _signal: unknown,
+      _onUpdate: unknown,
+      ctx: { cwd: string },
+    ) => analyzeCommitsTool(ctx.cwd),
   },
   {
     name: "devtools_bump_version",
     label: "Bump Version",
     description: "Update version in package.json",
     parameters: bumpVersionParams,
-    execute: async (_toolCallId: string, params: unknown) => {
+    execute: async (
+      _toolCallId: string,
+      params: unknown,
+      _signal: unknown,
+      _onUpdate: unknown,
+      ctx: { cwd: string },
+    ) => {
       const { newVersion, file = "package.json" } = params as { newVersion: string; file?: string };
-      return bumpVersionTool(newVersion, file);
+      return bumpVersionTool(newVersion, file, ctx.cwd);
     },
   },
   {
@@ -170,18 +244,25 @@ export const toolDefinitions = [
     label: "Create Release",
     description: "Create a GitHub release with changelog",
     parameters: createReleaseParams,
-    execute: async (_toolCallId: string, params: unknown) => {
+    execute: async (
+      _toolCallId: string,
+      params: unknown,
+      _signal: unknown,
+      _onUpdate: unknown,
+      ctx: { cwd: string },
+    ) => {
       const typed = params as { tag: string; title: string; body?: string; draft?: boolean; prerelease?: boolean };
-      return createReleaseTool(typed.tag, typed.title, typed.body, typed.draft, typed.prerelease);
+      return createReleaseTool(typed.tag, typed.title, typed.body, typed.draft, typed.prerelease, ctx.cwd);
     },
   },
 ] as const;
 
 export default function devtoolsExtension(pi: ExtensionAPI) {
-  pi.on("session_start", async () => {
-    const context = getGitContext();
+  pi.on("session_start", async (_event, ctx) => {
+    const context = getGitContext(ctx.cwd);
     if (context) {
-      console.log(context);
+      const worktree = getWorktreeContext(ctx.cwd);
+      console.log(`${context} | Worktree: ${worktree.worktreeRoot} | Linked: ${worktree.isLinkedWorktree}`);
     }
   });
 

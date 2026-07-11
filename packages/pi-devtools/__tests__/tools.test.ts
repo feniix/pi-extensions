@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   analyzeCommitsTool,
@@ -11,6 +15,7 @@ import {
   mergePrTool,
   pushTool,
   repoInfoTool,
+  toolDefinitions,
 } from "../extensions/index.js";
 
 // Mock the git.ts module
@@ -18,15 +23,113 @@ vi.mock("../extensions/git.js", () => ({
   execGit: vi.fn(),
   execGh: vi.fn(),
   getDefaultBranch: vi.fn().mockReturnValue("main"),
+  getGitContext: vi.fn().mockReturnValue("[devtools] Branch: feature-branch"),
+  getWorktreeContext: vi.fn().mockReturnValue({
+    worktreeRoot: "/repo",
+    privateGitDir: "/repo/.git",
+    gitDir: "/repo/.git",
+    commonGitDir: "/repo/.git",
+    isLinkedWorktree: false,
+    head: { commit: "abc123", branch: "refs/heads/feature-branch", detached: false },
+    worktrees: [],
+    activeWorktree: { worktreeRoot: "/repo", head: "abc123", detached: false, locked: false, prunable: false },
+    activeWorktreeIndex: 0,
+  }),
 }));
 
-import { execGh, execGit } from "../extensions/git.js";
+import { execGh, execGit, getGitContext, getWorktreeContext } from "../extensions/git.js";
 
 describe("pi-devtools", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(execGit).mockReset();
     vi.mocked(execGh).mockReset();
+  });
+
+  describe("registered tool cwd propagation", () => {
+    const sentinelCwd = "/tmp/sentinel-worktree";
+    const paramsByTool: Record<string, Record<string, unknown>> = {
+      devtools_create_branch: { branchName: "sentinel-branch" },
+      devtools_commit: { message: "test: sentinel" },
+      devtools_push: { branch: "feature-branch" },
+      devtools_create_pr: { title: "Sentinel PR", base: "main" },
+      devtools_merge_pr: { prNumber: 12, deleteBranch: false },
+      devtools_squash_merge_pr: { prNumber: 12, deleteBranch: false },
+      devtools_check_ci: { prNumber: 12 },
+      devtools_get_repo_info: {},
+      devtools_get_latest_tag: {},
+      devtools_analyze_commits: {},
+      devtools_create_release: { tag: "v1.0.0", title: "Release" },
+    };
+
+    it("passes the invoking context cwd through every command-backed registered tool", async () => {
+      vi.mocked(execGit).mockImplementation((command: string) => {
+        if (command === "git branch --show-current") return "feature-branch";
+        if (command === "git diff --cached --name-only") return "file.ts";
+        if (command === "git rev-parse HEAD") return "abc123head";
+        return "";
+      });
+      vi.mocked(execGh).mockImplementation((command: string) => {
+        if (command.startsWith("gh pr view")) {
+          return JSON.stringify({ title: "Sentinel", url: "https://example.test/pr/12", state: "OPEN" });
+        }
+        if (command.startsWith("gh pr checks")) return "[]";
+        return "https://example.test/result";
+      });
+
+      for (const [name, params] of Object.entries(paramsByTool)) {
+        vi.mocked(execGit).mockClear();
+        vi.mocked(execGh).mockClear();
+        const tool = toolDefinitions.find((candidate) => candidate.name === name);
+        await (tool?.execute as (...args: unknown[]) => Promise<unknown>)("call-id", params, undefined, undefined, {
+          cwd: sentinelCwd,
+        });
+
+        const commandCalls = [...vi.mocked(execGit).mock.calls, ...vi.mocked(execGh).mock.calls];
+        expect(commandCalls.length, name).toBeGreaterThan(0);
+        expect(
+          commandCalls.every((call) => call[1] === sentinelCwd),
+          name,
+        ).toBe(true);
+      }
+    });
+
+    it("resolves a registered version-file mutation from the invoking cwd", async () => {
+      const cwd = mkdtempSync(join(tmpdir(), "pi-devtools-version-"));
+      try {
+        writeFileSync(join(cwd, "custom.json"), '{"version":"1.0.0"}\n');
+        const tool = toolDefinitions.find(({ name }) => name === "devtools_bump_version");
+        await (tool?.execute as (...args: unknown[]) => Promise<unknown>)(
+          "call-id",
+          { newVersion: "1.1.0", file: "custom.json" },
+          undefined,
+          undefined,
+          { cwd },
+        );
+
+        expect(JSON.parse(readFileSync(join(cwd, "custom.json"), "utf-8")).version).toBe("1.1.0");
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    });
+
+    it("uses the session event cwd for Git and worktree context", async () => {
+      const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+      const pi = {
+        registerTool: vi.fn(),
+        on: vi.fn((event: string, handler: (...args: unknown[]) => Promise<void>) => handlers.set(event, handler)),
+      } as unknown as ExtensionAPI;
+      const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+      const { default: extension } = await import("../extensions/index.js");
+      extension(pi);
+
+      await handlers.get("session_start")?.({}, { cwd: sentinelCwd });
+
+      expect(getGitContext).toHaveBeenCalledWith(sentinelCwd);
+      expect(getWorktreeContext).toHaveBeenCalledWith(sentinelCwd);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining("Worktree: /repo"));
+      log.mockRestore();
+    });
   });
 
   describe("bumpVersion", () => {
@@ -165,6 +268,23 @@ describe("pi-devtools", () => {
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("Push failed");
+    });
+  });
+
+  describe("detached HEAD branch safeguards", () => {
+    it.each([
+      ["push", () => pushTool()],
+      ["create PR", () => createPrTool("Detached PR")],
+      ["implicit PR lookup", () => mergePrTool()],
+      ["implicit branch CI", () => checkCiTool()],
+    ])("stops %s before a remote mutation", (_label, invoke) => {
+      vi.mocked(execGit).mockReturnValue("");
+
+      const result = invoke();
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("detached HEAD");
+      expect(execGh).not.toHaveBeenCalled();
     });
   });
 
@@ -339,7 +459,7 @@ describe("pi-devtools", () => {
 
       const result = checkCiTool(123);
 
-      expect(vi.mocked(execGh)).toHaveBeenCalledWith("gh pr checks 123 --json name,state,link,workflow");
+      expect(vi.mocked(execGh)).toHaveBeenCalledWith("gh pr checks 123 --json name,state,link,workflow", undefined);
       expect(result.content[0].text).toContain("CI Status");
       expect(result.content[0].text).toContain("Build: SUCCESS");
       expect(result.details.checks).toBeDefined();
@@ -378,7 +498,7 @@ describe("pi-devtools", () => {
 
   describe("repoInfoTool", () => {
     it("returns repo info successfully", () => {
-      vi.mocked(execGit).mockReturnValueOnce("feature-branch").mockReturnValueOnce("").mockReturnValueOnce("");
+      vi.mocked(execGit).mockReturnValueOnce("");
 
       const result = repoInfoTool();
 
@@ -386,23 +506,36 @@ describe("pi-devtools", () => {
       expect(result.details.branch).toBe("feature-branch");
     });
 
-    it("handles detached HEAD", () => {
-      vi.mocked(execGit).mockImplementation((cmd: string) => {
-        if (cmd === "git branch --show-current") {
-          throw new Error("Not on a branch");
-        }
-        throw new Error("Unexpected command");
+    it("returns repository information on detached HEAD", async () => {
+      const { getWorktreeContext } = await import("../extensions/git.js");
+      vi.mocked(getWorktreeContext).mockReturnValueOnce({
+        worktreeRoot: "/repo",
+        privateGitDir: "/repo/.git",
+        gitDir: "/repo/.git",
+        commonGitDir: "/repo/.git",
+        isLinkedWorktree: false,
+        head: { commit: "abcdef1234567890", detached: true },
+        worktrees: [],
+        activeWorktree: {
+          worktreeRoot: "/repo",
+          head: "abcdef1234567890",
+          detached: true,
+          locked: false,
+          prunable: false,
+        },
+        activeWorktreeIndex: 0,
       });
+      vi.mocked(execGit).mockReturnValueOnce("");
 
       const result = repoInfoTool();
 
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("Not on a branch");
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain("Detached HEAD at abcdef123456");
+      expect(result.details.head).toEqual({ commit: "abcdef1234567890", detached: true });
     });
 
     it("parses staged files", () => {
-      // Call sequence: git branch --show-current, git status --porcelain
-      vi.mocked(execGit).mockReturnValueOnce("feature-branch").mockReturnValueOnce("A  file1.js\nMM file2.ts");
+      vi.mocked(execGit).mockReturnValueOnce("A  file1.js\nMM file2.ts");
 
       const result = repoInfoTool();
 
@@ -411,7 +544,7 @@ describe("pi-devtools", () => {
     });
 
     it("parses untracked files", () => {
-      vi.mocked(execGit).mockReturnValueOnce("feature-branch").mockReturnValueOnce("?? untracked.txt");
+      vi.mocked(execGit).mockReturnValueOnce("?? untracked.txt");
 
       const result = repoInfoTool();
 
@@ -419,7 +552,7 @@ describe("pi-devtools", () => {
     });
 
     it("reports hasChanges correctly", () => {
-      vi.mocked(execGit).mockReturnValueOnce("feature-branch").mockReturnValueOnce("").mockReturnValueOnce("");
+      vi.mocked(execGit).mockReturnValueOnce("");
 
       const result = repoInfoTool();
 
@@ -529,7 +662,8 @@ describe("pi-devtools", () => {
   });
 
   describe("createReleaseTool", () => {
-    it("creates release successfully", () => {
+    it("creates release successfully and targets active HEAD", () => {
+      vi.mocked(execGit).mockReturnValue("abc123head");
       vi.mocked(execGh).mockReturnValue("https://github.com/owner/repo/releases/tag/v1.0.0");
 
       const result = createReleaseTool("v1.0.0", "Version 1.0.0", "Release notes");
@@ -538,9 +672,21 @@ describe("pi-devtools", () => {
       expect(result.details.tag).toBe("v1.0.0");
       const ghCall = vi.mocked(execGh).mock.calls[0][0] as string;
       expect(ghCall).toContain("--notes 'Release notes'");
+      expect(ghCall).toContain("--target 'abc123head'");
+    });
+
+    it("preserves draft and prerelease options while targeting active HEAD", () => {
+      vi.mocked(execGit).mockReturnValue("abc123head");
+      vi.mocked(execGh).mockReturnValue("https://github.com/owner/repo/releases/tag/v2.0.0");
+
+      createReleaseTool("v2.0.0", "Version 2.0.0", "Notes", true, true, "/active");
+
+      expect(execGit).toHaveBeenCalledWith("git rev-parse HEAD", "/active");
+      expect(execGh).toHaveBeenCalledWith(expect.stringContaining("--draft --prerelease"), "/active");
     });
 
     it("creates release with explicit empty notes when body is omitted", () => {
+      vi.mocked(execGit).mockReturnValue("abc123head");
       vi.mocked(execGh).mockReturnValue("https://github.com/owner/repo/releases/tag/v1.0.0");
 
       const result = createReleaseTool("v1.0.0", "Version 1.0.0");

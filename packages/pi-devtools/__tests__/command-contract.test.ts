@@ -78,7 +78,7 @@ function toolByName(name: (typeof toolDefinitions)[number]["name"]): (typeof too
 }
 
 async function executeTool(name: (typeof toolDefinitions)[number]["name"], params: Record<string, unknown> = {}) {
-  return toolByName(name).execute("contract-test", params);
+  return toolByName(name).execute("contract-test", params, undefined, undefined, { cwd: process.cwd() });
 }
 
 describe("pi-devtools generated CLI command contract", () => {

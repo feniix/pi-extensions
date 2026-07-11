@@ -24,10 +24,14 @@ export function createPrTool(
   base?: string,
   draft = false,
   assignees?: string[],
+  cwd?: string,
 ): ToolResult {
   try {
-    const targetBase = base || getDefaultBranch();
-    const headBranch = execGit("git branch --show-current");
+    const targetBase = base || getDefaultBranch(cwd);
+    const headBranch = execGit("git branch --show-current", cwd);
+    if (!headBranch) {
+      return errorResult("Not on a branch (detached HEAD state)", "detached_head");
+    }
 
     let command = `gh pr create --title ${shellQuote(title)} --base ${shellQuote(targetBase)} --head ${shellQuote(headBranch)}`;
     command += ` --body ${shellQuote(body ?? "")}`;
@@ -38,7 +42,7 @@ export function createPrTool(
       command += ` --assignee ${shellQuote(assignees.join(","))}`;
     }
 
-    const prUrl = execGh(command);
+    const prUrl = execGh(command, cwd);
     return successResult(`Created PR: ${prUrl}\n\nTitle: ${title}\nBase: ${targetBase} <-- ${headBranch}`, {
       prUrl,
       title,
@@ -50,9 +54,12 @@ export function createPrTool(
   }
 }
 
-function detectCurrentPrNumber(): number | undefined {
-  const branch = execGit("git branch --show-current");
-  const prs = execGh(`gh pr list --head ${shellQuote(branch)} --state open --json number,title`);
+function detectCurrentPrNumber(cwd?: string): number | undefined {
+  const branch = execGit("git branch --show-current", cwd);
+  if (!branch) {
+    throw new Error("Not on a branch (detached HEAD state)");
+  }
+  const prs = execGh(`gh pr list --head ${shellQuote(branch)} --state open --json number,title`, cwd);
   if (!prs) {
     return undefined;
   }
@@ -62,8 +69,8 @@ function detectCurrentPrNumber(): number | undefined {
   return typeof prNumber === "number" ? prNumber : undefined;
 }
 
-function getPullRequestInfo(prNumber: number): PullRequestInfo {
-  return JSON.parse(execGh(`gh pr view ${prNumber} --json title,url,state`)) as PullRequestInfo;
+function getPullRequestInfo(prNumber: number, cwd?: string): PullRequestInfo {
+  return JSON.parse(execGh(`gh pr view ${prNumber} --json title,url,state`, cwd)) as PullRequestInfo;
 }
 
 function buildMergeCommand(
@@ -112,31 +119,35 @@ export function mergePrTool(
   deleteBranch = true,
   commitTitle?: string,
   commitMessage?: string,
+  cwd?: string,
 ): ToolResult {
   try {
-    const num = prNumber ?? detectCurrentPrNumber();
+    const num = prNumber ?? detectCurrentPrNumber(cwd);
     if (!num) {
       return errorResult("No PR number provided and could not detect current PR.", "no_pr_found");
     }
 
-    const prData = getPullRequestInfo(num);
+    const prData = getPullRequestInfo(num, cwd);
     if (prData.state !== "OPEN") {
       return errorResult(`PR #${num} is not open (state: ${prData.state})`, "pr_not_open", { state: prData.state });
     }
 
-    execGh(buildMergeCommand(num, squash, deleteBranch, commitTitle, commitMessage));
+    execGh(buildMergeCommand(num, squash, deleteBranch, commitTitle, commitMessage), cwd);
     return formatMergeResult(num, squash, deleteBranch, prData);
   } catch (error) {
     return errorResult("Failed to merge PR", error);
   }
 }
 
-function getCiCheckCommand(prNumber?: number, branch?: string): string {
+function getCiCheckCommand(prNumber?: number, branch?: string, cwd?: string): string {
   if (prNumber) {
     return `gh pr checks ${prNumber} --json name,state,link,workflow`;
   }
 
-  const targetBranch = branch ?? execGit("git branch --show-current");
+  const targetBranch = branch ?? execGit("git branch --show-current", cwd);
+  if (!targetBranch) {
+    throw new Error("Not on a branch (detached HEAD state)");
+  }
   return `gh run list --branch ${shellQuote(targetBranch)} --limit 5 --json workflowName,status,conclusion,url`;
 }
 
@@ -147,9 +158,9 @@ function formatCiCheck(check: CiCheck): string {
   return `- ${name}: ${status}${link ? ` (${link})` : ""}`;
 }
 
-export function checkCiTool(prNumber?: number, branch?: string): ToolResult {
+export function checkCiTool(prNumber?: number, branch?: string, cwd?: string): ToolResult {
   try {
-    const checks = execGh(getCiCheckCommand(prNumber, branch));
+    const checks = execGh(getCiCheckCommand(prNumber, branch, cwd), cwd);
     if (!checks) {
       return successResult("No CI runs found for this PR/branch.", { checks: [] });
     }
