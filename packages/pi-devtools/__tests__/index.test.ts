@@ -56,6 +56,10 @@ describe("pi-devtools", () => {
       for (const resource of resources) {
         expect(resource).toContain("remoteCleanup");
         expect(resource).toContain("localCleanup");
+        expect(resource.indexOf("mergeStatus")).toBeLessThan(resource.indexOf("remoteCleanup"));
+        expect(resource).toMatch(/pending[\s\S]*queued|queued[\s\S]*pending/i);
+        expect(resource).toMatch(/pending[\s\S]*cleanup (?:was )?skipped/i);
+        expect(resource).toMatch(/only (?:when|for)[\s\S]*merged[\s\S]*incomplete cleanup/i);
         expect(resource).toMatch(/retained local branch/i);
         expect(resource).toMatch(/merge (?:still |remains )?successful|successful merge/i);
         expect(resource).not.toMatch(/checkout (?:the )?(?:main|default|main\/default) branch/i);
@@ -89,10 +93,15 @@ describe("pi-devtools", () => {
       const readme = readResource("README.md");
       const toolsSection = readme.match(/## Tools\n([\s\S]*?)\n## Skills/)?.[1] ?? "";
       const documentedTools = [...toolsSection.matchAll(/`(devtools_[a-z0-9_]+)`/g)].map((match) => match[1]);
-      const registeredTools = new Set<string>(toolDefinitions.map(({ name }) => name));
+      const registeredToolNames = toolDefinitions.map(({ name }) => name);
+      const documentedToolSet = new Set(documentedTools);
+      const registeredToolSet = new Set<string>(registeredToolNames);
 
       expect(documentedTools.length).toBeGreaterThan(0);
-      expect(documentedTools.filter((name) => !registeredTools.has(name))).toEqual([]);
+      expect(documentedToolSet.size).toBe(documentedTools.length);
+      expect(registeredToolSet.size).toBe(registeredToolNames.length);
+      expect(documentedTools.filter((name) => !registeredToolSet.has(name))).toEqual([]);
+      expect(registeredToolNames.filter((name) => !documentedToolSet.has(name))).toEqual([]);
     });
   });
 

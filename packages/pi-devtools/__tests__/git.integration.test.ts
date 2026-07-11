@@ -18,7 +18,7 @@ marker=${JSON.stringify(markerPath)}
 oid=$(git rev-parse ${JSON.stringify(`refs/heads/${headRefName}`)})
 if [ "$1 $2" = "pr view" ]; then
   if [ -f "$marker" ]; then state=MERGED; mergedAt='"2026-07-11T12:00:00Z"'; rm -f "$marker"; else state=OPEN; mergedAt=null; fi
-  printf '{"title":"Integration PR","url":"https://example.test/base/repo/pull/1","state":"%s","mergedAt":%s,"headRefName":"${headRefName}","headRefOid":"%s","headRepository":{"name":"repo","nameWithOwner":"base/repo","url":"https://example.test/base/repo"},"headRepositoryOwner":{"login":"base"},"isCrossRepository":false}\\n' "$state" "$mergedAt" "$oid"
+  printf '{"title":"Integration PR","url":"https://example.test/base/repo/pull/1","state":"%s","mergedAt":%s,"headRefName":"${headRefName}","headRefOid":"%s","headRepository":{"id":"R_integration","name":"repo","nameWithOwner":"base/repo"},"headRepositoryOwner":{"login":"base"},"isCrossRepository":false}\\n' "$state" "$mergedAt" "$oid"
   exit 0
 fi
 if [ "$1 $2" = "repo view" ]; then printf '%s\\n' '{"nameWithOwner":"base/repo","url":"https://example.test/base/repo"}'; exit 0; fi

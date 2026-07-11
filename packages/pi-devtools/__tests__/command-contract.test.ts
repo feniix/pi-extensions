@@ -121,9 +121,9 @@ describe("pi-devtools generated CLI command contract", () => {
           headRefName: "feature/devtools-command-contract",
           headRefOid: "abc123",
           headRepository: {
+            id: "R_commandContract",
             name: "repo",
             nameWithOwner: "owner/repo",
-            url: "https://github.com/owner/repo",
           },
           headRepositoryOwner: { login: "owner" },
           isCrossRepository: false,

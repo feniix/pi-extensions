@@ -9,9 +9,9 @@ type PullRequestInfo = {
   headRefName?: string;
   headRefOid?: string;
   headRepository?: {
+    id?: string;
     name?: string;
     nameWithOwner?: string;
-    url?: string;
   } | null;
   headRepositoryOwner?: {
     login?: string;
@@ -168,6 +168,30 @@ function validatedRepositoryHost(urlValue: string | undefined, repository: strin
   }
 }
 
+function validatedPullRequestHost(urlValue: string | undefined): string | undefined {
+  if (!urlValue) return undefined;
+  try {
+    const url = new URL(urlValue);
+    const path = url.pathname.split("/").filter(Boolean);
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      !url.hostname ||
+      url.search ||
+      url.hash ||
+      path.length !== 4 ||
+      path[2] !== "pull" ||
+      !/^\d+$/.test(path[3])
+    ) {
+      return undefined;
+    }
+    return url.hostname;
+  } catch {
+    return undefined;
+  }
+}
+
 function cleanupRemoteHead(
   prData: PullRequestInfo,
   activeRepository: RepositoryInfo | undefined,
@@ -182,16 +206,16 @@ function cleanupRemoteHead(
   if (!prData.headRefOid) return { status: "skipped", reason: "missing_head_ref_oid_metadata", ref };
   if (activeRepositoryError) return { status: "skipped", reason: "active_repository_lookup_failed", ref };
 
-  const headHost = validatedRepositoryHost(prData.headRepository?.url, repository);
+  const prHost = validatedPullRequestHost(prData.url);
   const activeHost = validatedRepositoryHost(activeRepository?.url, activeRepository?.nameWithOwner);
-  if (!headHost) return { status: "skipped", reason: "missing_or_invalid_head_repository_url", ref };
+  if (!prHost) return { status: "skipped", reason: "missing_or_invalid_pr_url", ref };
   if (!activeHost) return { status: "skipped", reason: "missing_or_invalid_active_repository_url", ref };
-  if (headHost.toLowerCase() !== activeHost.toLowerCase()) {
+  if (prHost.toLowerCase() !== activeHost.toLowerCase()) {
     return { status: "skipped", reason: "repository_hostname_mismatch", ref };
   }
 
   const encodedRef = encodeURIComponent(`heads/${headRefName}`);
-  const hostnameArg = `--hostname ${shellQuote(headHost)}`;
+  const hostnameArg = `--hostname ${shellQuote(prHost)}`;
   try {
     const currentRef = JSON.parse(
       execGh(`gh api ${hostnameArg} ${shellQuote(`repos/${repository}/git/ref/${encodedRef}`)}`, cwd),
@@ -251,11 +275,11 @@ function cleanupLocalHead(
   if (headRepository.toLowerCase() !== activeRepository.nameWithOwner.toLowerCase()) {
     return { status: "skipped", branch, reason: "repository_identity_mismatch" };
   }
-  const headHost = validatedRepositoryHost(prData.headRepository?.url, headRepository);
+  const prHost = validatedPullRequestHost(prData.url);
   const activeHost = validatedRepositoryHost(activeRepository.url, activeRepository.nameWithOwner);
-  if (!headHost) return { status: "skipped", branch, reason: "missing_head_repository_url_metadata" };
-  if (!activeHost) return { status: "skipped", branch, reason: "missing_active_repository_metadata" };
-  if (headHost.toLowerCase() !== activeHost.toLowerCase()) {
+  if (!prHost) return { status: "skipped", branch, reason: "missing_or_invalid_pr_url" };
+  if (!activeHost) return { status: "skipped", branch, reason: "missing_or_invalid_active_repository_url" };
+  if (prHost.toLowerCase() !== activeHost.toLowerCase()) {
     return { status: "skipped", branch, reason: "repository_hostname_mismatch" };
   }
   if (!prData.headRefOid) return { status: "skipped", branch, reason: "missing_head_ref_oid_metadata" };

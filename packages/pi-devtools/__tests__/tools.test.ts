@@ -374,7 +374,7 @@ describe("pi-devtools", () => {
       state: "OPEN",
       headRefName: "feature/topic",
       headRefOid: "abc123",
-      headRepository: { name: "repo", nameWithOwner: "base/repo", url: "https://github.com/base/repo" },
+      headRepository: { id: "R_realOutput", name: "repo", nameWithOwner: "base/repo" },
       headRepositoryOwner: { login: "base" },
       isCrossRepository: false,
     };
@@ -738,9 +738,9 @@ describe("pi-devtools", () => {
         ...sameRepoPr,
         url: "https://github.enterprise.test/base/repo/pull/123",
         headRepository: {
+          id: "R_enterprise",
           name: "repo",
           nameWithOwner: "base/repo",
-          url: "https://github.enterprise.test/base/repo",
         },
       });
       const implementation = vi.mocked(execGh).getMockImplementation();
@@ -763,13 +763,92 @@ describe("pi-devtools", () => {
       expect(apiCommands.join("\n")).not.toContain("github.com");
     });
 
+    it.each([
+      ["missing", undefined],
+      ["non-HTTPS", "http://github.com/base/repo/pull/123"],
+      ["credential-bearing", "https://user@github.com/base/repo/pull/123"],
+      ["non-PR-shaped", "https://github.com/base/repo/issues/123"],
+    ])("skips both cleanups for a %s authoritative PR URL", (_case, url) => {
+      mockMergeCommands({ ...sameRepoPr, url });
+
+      const result = mergePrTool(123);
+
+      expect(result.details.remoteCleanup).toEqual({
+        status: "skipped",
+        reason: "missing_or_invalid_pr_url",
+        ref: "refs/heads/feature/topic",
+      });
+      expect(result.details.localCleanup).toEqual({
+        status: "skipped",
+        branch: "feature/topic",
+        reason: "missing_or_invalid_pr_url",
+      });
+      expect(execGh).not.toHaveBeenCalledWith(expect.stringContaining("gh api"), expect.anything());
+      expect(getWorktreeContext).not.toHaveBeenCalled();
+      expect(execGit).not.toHaveBeenCalled();
+    });
+
+    it("skips both cleanups when the PR and active repository hostnames mismatch", () => {
+      mockMergeCommands();
+      const implementation = vi.mocked(execGh).getMockImplementation();
+      vi.mocked(execGh).mockImplementation((command, cwd) => {
+        if (command === "gh repo view --json nameWithOwner,url") {
+          return JSON.stringify({ nameWithOwner: "base/repo", url: "https://enterprise.test/base/repo" });
+        }
+        return implementation?.(command, cwd) ?? "";
+      });
+
+      const result = mergePrTool(123);
+
+      expect(result.details.remoteCleanup).toEqual({
+        status: "skipped",
+        reason: "repository_hostname_mismatch",
+        ref: "refs/heads/feature/topic",
+      });
+      expect(result.details.localCleanup).toEqual({
+        status: "skipped",
+        branch: "feature/topic",
+        reason: "repository_hostname_mismatch",
+      });
+      expect(execGh).not.toHaveBeenCalledWith(expect.stringContaining("gh api"), expect.anything());
+      expect(getWorktreeContext).not.toHaveBeenCalled();
+      expect(execGit).not.toHaveBeenCalled();
+    });
+
+    it("skips both cleanups for an invalid active repository URL", () => {
+      mockMergeCommands();
+      const implementation = vi.mocked(execGh).getMockImplementation();
+      vi.mocked(execGh).mockImplementation((command, cwd) => {
+        if (command === "gh repo view --json nameWithOwner,url") {
+          return JSON.stringify({ nameWithOwner: "base/repo", url: "ssh://github.com/base/repo" });
+        }
+        return implementation?.(command, cwd) ?? "";
+      });
+
+      const result = mergePrTool(123);
+
+      expect(result.details.remoteCleanup).toEqual({
+        status: "skipped",
+        reason: "missing_or_invalid_active_repository_url",
+        ref: "refs/heads/feature/topic",
+      });
+      expect(result.details.localCleanup).toEqual({
+        status: "skipped",
+        branch: "feature/topic",
+        reason: "missing_or_invalid_active_repository_url",
+      });
+      expect(execGh).not.toHaveBeenCalledWith(expect.stringContaining("gh api"), expect.anything());
+      expect(getWorktreeContext).not.toHaveBeenCalled();
+      expect(execGit).not.toHaveBeenCalled();
+    });
+
     it("targets a fork exactly and reports authorization failure without local or base-repository retries", () => {
       mockMergeCommands({
         ...sameRepoPr,
         headRepository: {
+          id: "R_fork",
           name: "repo-fork",
           nameWithOwner: "contributor/repo-fork",
-          url: "https://github.com/contributor/repo-fork",
         },
         headRepositoryOwner: { login: "contributor" },
         isCrossRepository: true,
@@ -830,9 +909,9 @@ describe("pi-devtools", () => {
     });
 
     it.each([
-      ["nameWithOwner", { url: "https://github.com/base/repo" }],
-      ["URL", { nameWithOwner: "base/repo" }],
-    ])("skips cleanup when active repository %s metadata is absent", (_field, activeInfo) => {
+      ["nameWithOwner", { url: "https://github.com/base/repo" }, "missing_active_repository_metadata"],
+      ["URL", { nameWithOwner: "base/repo" }, "missing_or_invalid_active_repository_url"],
+    ])("skips cleanup when active repository %s metadata is absent", (_field, activeInfo, localReason) => {
       mockMergeCommands();
       const implementation = vi.mocked(execGh).getMockImplementation();
       vi.mocked(execGh).mockImplementation((command, cwd) => {
@@ -845,9 +924,7 @@ describe("pi-devtools", () => {
       expect(result.details.remoteCleanup).toEqual(
         expect.objectContaining({ status: "skipped", reason: "missing_or_invalid_active_repository_url" }),
       );
-      expect(result.details.localCleanup).toEqual(
-        expect.objectContaining({ status: "skipped", reason: "missing_active_repository_metadata" }),
-      );
+      expect(result.details.localCleanup).toEqual(expect.objectContaining({ status: "skipped", reason: localReason }));
       expect(getWorktreeContext).not.toHaveBeenCalled();
       expect(execGit).not.toHaveBeenCalled();
     });
@@ -856,9 +933,9 @@ describe("pi-devtools", () => {
       mockMergeCommands({
         ...sameRepoPr,
         headRepository: {
+          id: "R_mismatch",
           name: "repo-fork",
           nameWithOwner: "contributor/repo-fork",
-          url: "https://github.com/contributor/repo-fork",
         },
       });
 

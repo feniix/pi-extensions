@@ -39,7 +39,7 @@ The extension observes worktree topology for safety, but it will never create, r
 | `devtools_commit` | Stage files and create a commit with conventional format |
 | `devtools_push` | Push branch to remote with upstream tracking |
 | `devtools_create_pr` | Create a GitHub pull request |
-| `devtools_get_repo_info` | Get active worktree, linked/detached context, default branch, status, and remote info |
+| `devtools_get_repo_info` | Get active worktree, linked/detached context, default branch, and status |
 
 ### Merge Tools
 
