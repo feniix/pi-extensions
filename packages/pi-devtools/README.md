@@ -5,7 +5,7 @@ Devtools extension for [pi](https://pi.dev/) — branch and PR workflow, release
 ## Features
 
 - **Git Workflow Tools**: Create branches, commit, push, create PRs
-- **Merge Commands**: Merge or squash-merge PRs with branch cleanup
+- **Merge Commands**: Merge or squash-merge PRs with observable, worktree-safe branch cleanup
 - **Release Automation**: Analyze commits, bump versions, generate changelogs, create releases
 - **CI Status Checking**: Check GitHub Actions status before merging or releasing
 
@@ -21,6 +21,14 @@ Ephemeral (one-off) use:
 pi -e npm:@feniix/pi-devtools
 ```
 
+## Active Working Directory and Worktrees
+
+Every tool runs Git, GitHub CLI, and repository-relative file operations in Pi's active working directory (active cwd), not the extension process directory. `devtools_get_repo_info` reports the active worktree root, linked worktree context, detached HEAD state, Git directories, and all parsed worktree records.
+
+When merge cleanup is requested, remote and local cleanup are attempted and reported separately. Occupied branches are retained when checked out by the active or another linked worktree, including locked or conservatively retained prunable records. A retained branch or cleanup failure does not change a successful merge into a failed merge.
+
+The extension observes worktree topology for safety, but it will never create, remove, unlock, or prune worktrees. It also does not switch to or update the default branch after a merge.
+
 ## Tools
 
 ### Branch & PR Tools
@@ -31,14 +39,14 @@ pi -e npm:@feniix/pi-devtools
 | `devtools_commit` | Stage files and create a commit with conventional format |
 | `devtools_push` | Push branch to remote with upstream tracking |
 | `devtools_create_pr` | Create a GitHub pull request |
-| `devtools_get_repo_info` | Get current branch, default branch, and remote info |
+| `devtools_get_repo_info` | Get active worktree, linked/detached context, default branch, status, and remote info |
 
 ### Merge Tools
 
 | Tool | Description |
 |------|-------------|
-| `devtools_merge_pr` | Merge a PR with optional branch deletion |
-| `devtools_squash_merge_pr` | Squash-merge a PR with optional branch deletion |
+| `devtools_merge_pr` | Merge a PR with optional best-effort remote and local branch cleanup |
+| `devtools_squash_merge_pr` | Squash-merge a PR with optional best-effort remote and local branch cleanup |
 | `devtools_check_pr_status` | Check CI status for a PR |
 | `devtools_check_ci` | Check CI status for the current branch |
 

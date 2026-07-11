@@ -26,11 +26,15 @@ describe("pi-devtools", () => {
     });
   });
 
+  const readResource = (path: string) => readFileSync(join(__dirname, "..", path), "utf-8");
+
   describe("skills", () => {
     it("should have brpr skill", () => {
       const skill = readFileSync(join(__dirname, "../skills/brpr/SKILL.md"), "utf-8");
       expect(skill).toContain("brpr");
       expect(skill).toContain("Branch, Push, and PR Workflow");
+      expect(skill).toMatch(/active working directory/i);
+      expect(skill).toMatch(/linked worktree/i);
     });
 
     it("should have release skill", () => {
@@ -44,6 +48,41 @@ describe("pi-devtools", () => {
       expect(skill).toContain("merge");
       expect(skill).toContain("Merge or squash-merge a pull request");
     });
+
+    it("documents separate merge cleanup outcomes without unsafe post-merge commands", () => {
+      const resources = ["skills/merge/SKILL.md", "prompts/md.md", "prompts/smd.md"].map(readResource);
+
+      for (const resource of resources) {
+        expect(resource).toContain("remoteCleanup");
+        expect(resource).toContain("localCleanup");
+        expect(resource).toMatch(/retained local branch/i);
+        expect(resource).toMatch(/merge (?:still |remains )?successful|successful merge/i);
+        expect(resource).not.toMatch(/checkout (?:the )?(?:main|default|main\/default) branch/i);
+        expect(resource).not.toMatch(/pull to update/i);
+        expect(resource).not.toMatch(/confirm the branch was deleted/i);
+      }
+    });
+
+    it("keeps release safety gates without prescribing a default-branch checkout", () => {
+      const skill = readResource("skills/release/SKILL.md");
+
+      expect(skill).toMatch(/default branch/i);
+      expect(skill).toMatch(/working tree is clean/i);
+      expect(skill).toMatch(/another worktree/i);
+      expect(skill).not.toMatch(/checkout (?:the )?(?:main|default) branch/i);
+    });
+  });
+
+  describe("documentation", () => {
+    it("documents active-cwd and non-mutating worktree behavior", () => {
+      const readme = readResource("README.md");
+
+      expect(readme).toMatch(/Pi(?:'s)? active (?:working directory|cwd)/i);
+      expect(readme).toMatch(/linked worktree/i);
+      expect(readme).toMatch(/detached HEAD/i);
+      expect(readme).toMatch(/occupied branches? (?:are|is) retained/i);
+      expect(readme).toMatch(/never create, remove, unlock, or prune worktrees/i);
+    });
   });
 
   describe("tools", () => {
@@ -56,9 +95,11 @@ describe("pi-devtools", () => {
 
     it("should register PR tools", () => {
       const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
+      const parameters = readResource("extensions/tool-params.ts");
       expect(extension).toContain("devtools_create_pr");
       expect(extension).toContain("devtools_merge_pr");
       expect(extension).toContain("devtools_squash_merge_pr");
+      expect(parameters).toMatch(/request best-effort remote and local cleanup/i);
     });
 
     it("should register release tools", () => {
@@ -77,6 +118,8 @@ describe("pi-devtools", () => {
     it("should register repo info tool", () => {
       const extension = readFileSync(join(__dirname, "../extensions/index.ts"), "utf-8");
       expect(extension).toContain("devtools_get_repo_info");
+      expect(extension).toMatch(/active worktree/i);
+      expect(extension).toMatch(/best-effort remote and local branch cleanup/i);
     });
   });
 });

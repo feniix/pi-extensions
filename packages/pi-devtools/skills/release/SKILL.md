@@ -11,6 +11,8 @@ Automates release: analyze commits, bump version, generate changelog, commit, pu
 ## Tool Restrictions (Critical)
 
 Use ONLY these tools:
+- `devtools_get_repo_info` - Verify the active worktree branch and status
+- `devtools_check_ci` - Check CI status on the default branch
 - `devtools_get_latest_tag` - Get current version
 - `devtools_analyze_commits` - Analyze commits for version bump
 - `devtools_bump_version` - Update package.json
@@ -20,12 +22,12 @@ Use ONLY these tools:
 
 ## Preconditions
 
-Verify these before starting:
-1. On main/default branch (`devtools_get_repo_info`)
-2. Working tree is clean (no uncommitted changes)
-3. CI is passing on main
+Verify these before starting in Pi's active working directory:
+1. The active worktree is on the repository's default branch (`devtools_get_repo_info`)
+2. The active working tree is clean (no uncommitted changes)
+3. CI is passing on the default branch (`devtools_check_ci`)
 
-If any fail, stop and explain.
+The default branch may already be checked out in another worktree. If the active worktree is not on it, stop and explain which worktree context is active; do not switch branches or modify the other worktree. If any precondition fails, stop and explain.
 
 ## Process
 

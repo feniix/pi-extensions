@@ -39,9 +39,12 @@ Default mapping from branch types to prefixes and conventional commit types. Bot
 
 ### Step 1: Check Current State
 
-Call `devtools_get_repo_info` to understand current state:
-- Are we on a feature branch or main/default?
-- Are there uncommitted changes?
+Call `devtools_get_repo_info` to understand Pi's active working directory and worktree state:
+- Which active worktree and branch (or detached HEAD) are in use?
+- Is this a linked worktree?
+- Are there uncommitted changes in this working tree?
+
+All workflow tools operate in that active working directory; do not infer state from another linked worktree.
 
 If on detached HEAD, abort with: "You're in detached HEAD state. Please checkout a branch first."
 

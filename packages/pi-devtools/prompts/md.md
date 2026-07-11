@@ -1,11 +1,11 @@
 ---
-description: "(devtools plugin) Merge a PR and delete the source branch."
+description: "(devtools plugin) Merge a PR and report best-effort source-branch cleanup."
 argument-hint: "[PR number]"
 ---
 
 # /md
 
-Merge the current pull request using a standard merge commit (preserves all commit history) and delete the source branch.
+Merge the current pull request using a standard merge commit (preserves all commit history) and request best-effort source-branch cleanup.
 
 **Usage**: `/md [PR number]`
 
@@ -14,7 +14,7 @@ Merge the current pull request using a standard merge commit (preserves all comm
 Use ONLY these tools:
 - `devtools_get_repo_info` - Get current branch/PR info
 - `devtools_check_ci` - Check CI status before merging
-- `devtools_merge_pr` - Merge and delete branch
+- `devtools_merge_pr` - Merge and report separate remote/local cleanup outcomes
 
 ## Preconditions
 
@@ -47,12 +47,8 @@ Call `devtools_merge_pr` with:
 - `squash`: false
 - `deleteBranch`: true
 
-The merge creates a merge commit preserving the full branch history. The branch is deleted after merge (both remote and local).
+The merge creates a merge commit preserving the full branch history. If the merge itself fails (e.g., conflicts, branch protection), show the error and suggest next steps.
 
-If the merge fails (e.g., conflicts, branch protection), show the error and suggest next steps.
+### Step 4: Report Merge and Cleanup
 
-### Step 4: Cleanup
-
-After the merge succeeds, checkout main/default branch and pull to update.
-
-Report the merged PR URL and confirm the branch was deleted.
+Inspect and report `remoteCleanup` and `localCleanup` separately. Report `localCleanup.worktrees` paths and states when there is a retained local branch, and use `cleanupComplete` to identify partial cleanup. A retained local branch, skipped cleanup, or cleanup failure means the merge remains successful; report the incomplete cleanup after the merged PR URL instead of calling the merge failed. Do not switch to or update the default branch, which may be occupied by another worktree.

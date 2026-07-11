@@ -114,7 +114,7 @@ export const toolDefinitions = [
   {
     name: "devtools_merge_pr",
     label: "Merge PR",
-    description: "Merge a pull request (optionally delete source branch)",
+    description: "Merge a pull request with optional best-effort remote and local branch cleanup",
     parameters: mergePrParams,
     execute: async (
       _toolCallId: string,
@@ -143,7 +143,7 @@ export const toolDefinitions = [
   {
     name: "devtools_squash_merge_pr",
     label: "Squash Merge PR",
-    description: "Squash-merge a pull request (optionally delete source branch)",
+    description: "Squash-merge a pull request with optional best-effort remote and local branch cleanup",
     parameters: mergePrParams,
     execute: async (
       _toolCallId: string,
@@ -187,7 +187,7 @@ export const toolDefinitions = [
   {
     name: "devtools_get_repo_info",
     label: "Repo Info",
-    description: "Get current branch, default branch, and git status",
+    description: "Get active worktree, linked/detached context, default branch, and git status",
     parameters: emptyParams,
     execute: async (
       _toolCallId: string,
