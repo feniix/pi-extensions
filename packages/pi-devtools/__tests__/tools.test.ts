@@ -44,6 +44,27 @@ describe("pi-devtools", () => {
     vi.clearAllMocks();
     vi.mocked(execGit).mockReset();
     vi.mocked(execGh).mockReset();
+    vi.mocked(getWorktreeContext)
+      .mockReset()
+      .mockReturnValue({
+        worktreeRoot: "/repo",
+        privateGitDir: "/repo/.git",
+        gitDir: "/repo/.git",
+        commonGitDir: "/repo/.git",
+        isLinkedWorktree: false,
+        head: { commit: "base", branch: "refs/heads/feature-branch", detached: false },
+        worktrees: [],
+        activeWorktree: {
+          worktreeRoot: "/repo",
+          head: "base",
+          branch: "refs/heads/feature-branch",
+          detached: false,
+          locked: false,
+          prunable: false,
+          isActive: true,
+        },
+        activeWorktreeIndex: 0,
+      });
   });
 
   describe("registered tool cwd propagation", () => {
@@ -347,67 +368,352 @@ describe("pi-devtools", () => {
   });
 
   describe("mergePrTool", () => {
-    it("merges PR by number", () => {
-      vi.mocked(execGh)
-        .mockReturnValueOnce(JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "OPEN" }))
-        .mockReturnValueOnce("");
+    const sameRepoPr = {
+      title: "Test PR",
+      url: "https://github.com/base/repo/pull/123",
+      state: "OPEN",
+      headRefName: "feature/topic",
+      headRepository: { name: "repo", nameWithOwner: "base/repo" },
+      headRepositoryOwner: { login: "base" },
+      isCrossRepository: false,
+    };
+
+    function mockMergeCommands(pr: Record<string, unknown> = sameRepoPr) {
+      vi.mocked(execGh).mockImplementation((command: string) => {
+        if (command.startsWith("gh pr view")) return JSON.stringify(pr);
+        if (command === "gh repo view --json nameWithOwner") return JSON.stringify({ nameWithOwner: "base/repo" });
+        return "";
+      });
+      vi.mocked(execGit).mockReturnValue("");
+    }
+
+    it("reports cleanup as not requested and performs no cleanup when deleteBranch is false", () => {
+      mockMergeCommands();
+
+      const result = mergePrTool(123, false, false);
+
+      expect(result.isError).toBeUndefined();
+      expect(result).toEqual(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            remoteCleanup: { status: "not_requested" },
+            localCleanup: { status: "not_requested" },
+            deletedBranch: false,
+          }),
+        }),
+      );
+      expect(execGh).not.toHaveBeenCalledWith(expect.stringContaining("gh api"), expect.anything());
+      expect(execGit).not.toHaveBeenCalledWith(expect.stringContaining("branch --delete"), expect.anything());
+    });
+
+    it("merges without combined deletion and records independent successful cleanup", () => {
+      mockMergeCommands();
+
+      const result = mergePrTool(123);
+      const commands = vi.mocked(execGh).mock.calls.map(([command]) => command);
+
+      expect(commands.find((command) => command.startsWith("gh pr merge"))).not.toContain("--delete-branch");
+      expect(result.details).toEqual(
+        expect.objectContaining({
+          remoteCleanup: {
+            status: "deleted",
+            repository: "base/repo",
+            ref: "refs/heads/feature/topic",
+          },
+          localCleanup: { status: "deleted", branch: "feature/topic" },
+          deletedBranch: true,
+        }),
+      );
+    });
+
+    it("retains a source branch occupied by the active worktree and reports its path and state", () => {
+      mockMergeCommands();
+      vi.mocked(getWorktreeContext).mockReturnValue({
+        worktreeRoot: "/repo",
+        privateGitDir: "/repo/.git",
+        gitDir: "/repo/.git",
+        commonGitDir: "/repo/.git",
+        isLinkedWorktree: false,
+        head: { commit: "abc", branch: "refs/heads/feature/topic", detached: false },
+        worktrees: [
+          {
+            worktreeRoot: "/repo",
+            head: "abc",
+            branch: "refs/heads/feature/topic",
+            detached: false,
+            locked: false,
+            prunable: false,
+            isActive: true,
+          },
+        ],
+        activeWorktree: {
+          worktreeRoot: "/repo",
+          head: "abc",
+          branch: "refs/heads/feature/topic",
+          detached: false,
+          locked: false,
+          prunable: false,
+          isActive: true,
+        },
+        activeWorktreeIndex: 0,
+      });
 
       const result = mergePrTool(123);
 
-      expect(result.content[0].text).toContain("Merged PR");
-      expect(result.details.prNumber).toBe(123);
-      expect(result.details.mergeType).toBe("merged");
+      expect(result.isError).toBeUndefined();
+      expect(result.details.localCleanup).toEqual({
+        status: "retained",
+        branch: "feature/topic",
+        reason: "branch_occupied_by_worktree",
+        worktrees: [expect.objectContaining({ path: "/repo", state: "current", isActive: true })],
+      });
+      expect(execGit).not.toHaveBeenCalledWith(expect.stringContaining("branch --delete"), expect.anything());
     });
 
-    it("squash merges PR", () => {
-      vi.mocked(execGh)
-        .mockReturnValueOnce(JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "OPEN" }))
-        .mockReturnValueOnce("");
+    it("retains a branch claimed by another locked linked worktree", () => {
+      mockMergeCommands();
+      vi.mocked(getWorktreeContext).mockReturnValue({
+        worktreeRoot: "/repo",
+        privateGitDir: "/repo/.git",
+        gitDir: "/repo/.git",
+        commonGitDir: "/repo/.git",
+        isLinkedWorktree: false,
+        head: { commit: "base", branch: "refs/heads/main", detached: false },
+        worktrees: [
+          {
+            worktreeRoot: "/repo",
+            head: "base",
+            branch: "refs/heads/main",
+            detached: false,
+            locked: false,
+            prunable: false,
+            isActive: true,
+          },
+          {
+            worktreeRoot: "/linked topic",
+            head: "abc",
+            branch: "refs/heads/feature/topic",
+            detached: false,
+            locked: true,
+            lockedReason: "in use",
+            prunable: false,
+            isActive: false,
+          },
+        ],
+        activeWorktree: {
+          worktreeRoot: "/repo",
+          head: "base",
+          branch: "refs/heads/main",
+          detached: false,
+          locked: false,
+          prunable: false,
+          isActive: true,
+        },
+        activeWorktreeIndex: 0,
+      });
 
-      const result = mergePrTool(123, true);
+      const result = mergePrTool(123);
+
+      expect(result.details.localCleanup).toEqual({
+        status: "retained",
+        branch: "feature/topic",
+        reason: "branch_occupied_by_worktree",
+        worktrees: [
+          expect.objectContaining({ path: "/linked topic", state: "locked", locked: true, lockedReason: "in use" }),
+        ],
+      });
+    });
+
+    it("conservatively retains a branch named by a prunable record without pruning it", () => {
+      mockMergeCommands();
+      const context = getWorktreeContext();
+      vi.mocked(getWorktreeContext).mockReturnValue({
+        ...context,
+        worktrees: [
+          {
+            worktreeRoot: "/missing-worktree",
+            head: "abc",
+            branch: "refs/heads/feature/topic",
+            detached: false,
+            locked: false,
+            prunable: true,
+            prunableReason: "gitdir file points to non-existent location",
+            isActive: false,
+          },
+        ],
+      });
+
+      const result = mergePrTool(123);
+
+      expect(result.details.localCleanup).toEqual({
+        status: "retained",
+        branch: "feature/topic",
+        reason: "branch_occupied_by_worktree",
+        worktrees: [expect.objectContaining({ path: "/missing-worktree", state: "prunable", prunable: true })],
+      });
+      expect(execGit).not.toHaveBeenCalledWith(
+        expect.stringMatching(/worktree (prune|remove|unlock)/),
+        expect.anything(),
+      );
+    });
+
+    it("keeps merge success and exposes remote cleanup failure while continuing local cleanup", () => {
+      mockMergeCommands();
+      vi.mocked(execGh).mockImplementation((command: string) => {
+        if (command.startsWith("gh pr view")) return JSON.stringify(sameRepoPr);
+        if (command === "gh repo view --json nameWithOwner") return JSON.stringify({ nameWithOwner: "base/repo" });
+        if (command.startsWith("gh api")) throw new Error("HTTP 403: Resource not accessible");
+        return "";
+      });
+
+      const result = mergePrTool(123);
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain("Remote cleanup failed");
+      expect(result.details.remoteCleanup).toEqual(
+        expect.objectContaining({ status: "failed", error: "HTTP 403: Resource not accessible" }),
+      );
+      expect(result.details.localCleanup).toEqual({ status: "deleted", branch: "feature/topic" });
+      expect(result.details.deletedBranch).toBe(false);
+    });
+
+    it("deletes only the encoded authoritative same-repository head ref", () => {
+      mockMergeCommands({ ...sameRepoPr, headRefName: "feature/slash #1" });
+
+      mergePrTool(123);
+
+      const apiCalls = vi.mocked(execGh).mock.calls.filter(([command]) => command.startsWith("gh api"));
+      expect(apiCalls).toEqual([
+        ["gh api --method DELETE 'repos/base/repo/git/refs/heads%2Ffeature%2Fslash%20%231'", undefined],
+      ]);
+      expect(
+        vi
+          .mocked(execGh)
+          .mock.calls.map(([command]) => command)
+          .join("\n"),
+      ).not.toContain("origin");
+    });
+
+    it("targets a fork exactly and reports authorization failure without local or base-repository retries", () => {
+      mockMergeCommands({
+        ...sameRepoPr,
+        headRepository: { name: "repo-fork", nameWithOwner: "contributor/repo-fork" },
+        headRepositoryOwner: { login: "contributor" },
+        isCrossRepository: true,
+      });
+      vi.mocked(execGh).mockImplementation((command: string) => {
+        if (command.startsWith("gh pr view")) {
+          return JSON.stringify({
+            ...sameRepoPr,
+            headRepository: { name: "repo-fork", nameWithOwner: "contributor/repo-fork" },
+            headRepositoryOwner: { login: "contributor" },
+            isCrossRepository: true,
+          });
+        }
+        if (command === "gh repo view --json nameWithOwner") return JSON.stringify({ nameWithOwner: "base/repo" });
+        if (command.startsWith("gh api")) throw new Error("HTTP 404: Not Found");
+        return "";
+      });
+
+      const result = mergePrTool(123);
+      const allCommands = vi
+        .mocked(execGh)
+        .mock.calls.map(([command]) => command)
+        .join("\n");
+
+      expect(result.isError).toBeUndefined();
+      expect(result.details.remoteCleanup).toEqual(
+        expect.objectContaining({
+          status: "failed",
+          repository: "contributor/repo-fork",
+          error: "HTTP 404: Not Found",
+        }),
+      );
+      expect(result.details.localCleanup).toEqual({
+        status: "skipped",
+        branch: "feature/topic",
+        reason: "cross_repository_head",
+      });
+      expect(allCommands).toContain("repos/contributor/repo-fork/git/refs/heads%2Ffeature%2Ftopic");
+      expect(allCommands).not.toContain("repos/base/repo/git/refs");
+      expect(execGit).not.toHaveBeenCalled();
+    });
+
+    it("skips both cleanups when deleted head-repository metadata is missing", () => {
+      mockMergeCommands({
+        ...sameRepoPr,
+        headRepository: null,
+        headRepositoryOwner: null,
+      });
+
+      const result = mergePrTool(123);
+
+      expect(result.isError).toBeUndefined();
+      expect(result.details.remoteCleanup).toEqual({
+        status: "skipped",
+        reason: "missing_head_repository_metadata",
+        ref: "refs/heads/feature/topic",
+      });
+      expect(result.details.localCleanup).toEqual({
+        status: "skipped",
+        branch: "feature/topic",
+        reason: "missing_head_repository_metadata",
+      });
+      expect(execGh).not.toHaveBeenCalledWith(expect.stringContaining("gh api"), expect.anything());
+      expect(execGit).not.toHaveBeenCalled();
+    });
+
+    it("observes successful local deletion only after the git delete command succeeds", () => {
+      mockMergeCommands();
+
+      const result = mergePrTool(123, true, true, "Custom Title", "Custom Message");
+      const mergeCall = vi.mocked(execGh).mock.calls.find(([command]) => command.startsWith("gh pr merge"))?.[0];
 
       expect(result.details.mergeType).toBe("squash-merged");
-    });
-
-    it("squash merges with commit title using GitHub CLI subject flag", () => {
-      vi.mocked(execGh)
-        .mockReturnValueOnce(JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "OPEN" }))
-        .mockReturnValueOnce("");
-
-      mergePrTool(123, true, true, "Custom Title");
-
-      const mergeCall = vi.mocked(execGh).mock.calls[1][0] as string;
       expect(mergeCall).toContain("--subject 'Custom Title'");
-      expect(mergeCall).not.toContain("--title");
+      expect(mergeCall).toContain("--body 'Custom Message'");
+      expect(execGit).toHaveBeenCalledWith("git branch --delete -- 'feature/topic'", undefined);
+      expect(result.details.localCleanup).toEqual({ status: "deleted", branch: "feature/topic" });
     });
 
-    it("squash merges with commit message", () => {
-      vi.mocked(execGh)
-        .mockReturnValueOnce(JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "OPEN" }))
-        .mockReturnValueOnce("");
+    it("reports local deletion failure without changing merge success", () => {
+      mockMergeCommands();
+      vi.mocked(execGit).mockImplementation(() => {
+        throw new Error("branch is not fully merged");
+      });
 
-      mergePrTool(123, true, true, undefined, "Custom Message");
+      const result = mergePrTool(123);
 
-      const mergeCall = vi.mocked(execGh).mock.calls[1][0] as string;
-      expect(mergeCall).toContain("--body");
+      expect(result.isError).toBeUndefined();
+      expect(result.details.localCleanup).toEqual({
+        status: "failed",
+        branch: "feature/topic",
+        error: "branch is not fully merged",
+      });
     });
 
-    it("merges without deleting branch", () => {
-      vi.mocked(execGh)
-        .mockReturnValueOnce(JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "OPEN" }))
-        .mockReturnValueOnce("");
+    it("exposes an active repository lookup error as failed local cleanup", () => {
+      mockMergeCommands();
+      vi.mocked(execGh).mockImplementation((command: string) => {
+        if (command.startsWith("gh pr view")) return JSON.stringify(sameRepoPr);
+        if (command === "gh repo view --json nameWithOwner") throw new Error("repository lookup denied");
+        return "";
+      });
 
-      mergePrTool(123, false, false);
+      const result = mergePrTool(123);
 
-      // Get the merge command (second call)
-      const mergeCall = vi.mocked(execGh).mock.calls[1][0] as string;
-      expect(mergeCall).not.toContain("--delete-branch");
+      expect(result.isError).toBeUndefined();
+      expect(result.details.remoteCleanup).toEqual(expect.objectContaining({ status: "deleted" }));
+      expect(result.details.localCleanup).toEqual({
+        status: "failed",
+        branch: "feature/topic",
+        error: "repository lookup denied",
+      });
+      expect(execGit).not.toHaveBeenCalled();
     });
 
     it("handles closed PR", () => {
-      vi.mocked(execGh).mockReturnValue(
-        JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "CLOSED" }),
-      );
+      mockMergeCommands({ ...sameRepoPr, state: "CLOSED" });
 
       const result = mergePrTool(123);
 
@@ -416,13 +722,17 @@ describe("pi-devtools", () => {
     });
 
     it("detects PR from current branch", () => {
-      vi.mocked(execGit).mockReturnValue("feature-branch");
-      vi.mocked(execGh)
-        .mockReturnValueOnce(JSON.stringify([{ number: 456, title: "Feature PR" }]))
-        .mockReturnValueOnce(JSON.stringify({ title: "Feature PR", url: "https://github.com/456", state: "OPEN" }))
-        .mockReturnValueOnce("");
+      vi.mocked(execGit).mockImplementation((command: string) =>
+        command === "git branch --show-current" ? "feature" : "",
+      );
+      vi.mocked(execGh).mockImplementation((command: string) => {
+        if (command.startsWith("gh pr list")) return JSON.stringify([{ number: 456 }]);
+        if (command.startsWith("gh pr view")) return JSON.stringify(sameRepoPr);
+        if (command === "gh repo view --json nameWithOwner") return JSON.stringify({ nameWithOwner: "base/repo" });
+        return "";
+      });
 
-      const result = mergePrTool();
+      const result = mergePrTool(undefined, false, false);
 
       expect(result.details.prNumber).toBe(456);
     });
@@ -437,17 +747,21 @@ describe("pi-devtools", () => {
       expect(result.content[0].text).toContain("No PR number provided");
     });
 
-    it("handles merge error", () => {
-      vi.mocked(execGh)
-        .mockReturnValueOnce(JSON.stringify({ title: "Test PR", url: "https://github.com/123", state: "OPEN" }))
-        .mockImplementation(() => {
-          throw new Error("Merge conflict");
-        });
+    it("handles merge error before cleanup", () => {
+      mockMergeCommands();
+      vi.mocked(execGh).mockImplementation((command: string) => {
+        if (command.startsWith("gh pr view")) return JSON.stringify(sameRepoPr);
+        if (command === "gh repo view --json nameWithOwner") return JSON.stringify({ nameWithOwner: "base/repo" });
+        if (command.startsWith("gh pr merge")) throw new Error("Merge conflict");
+        return "";
+      });
 
       const result = mergePrTool(123);
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("Failed to merge PR");
+      expect(execGh).not.toHaveBeenCalledWith(expect.stringContaining("gh api"), expect.anything());
+      expect(execGit).not.toHaveBeenCalled();
     });
   });
 

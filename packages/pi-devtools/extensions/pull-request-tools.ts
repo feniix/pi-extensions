@@ -1,11 +1,47 @@
-import { execGh, execGit, getDefaultBranch } from "./git.js";
+import { execGh, execGit, type GitWorktreeRecord, getDefaultBranch, getWorktreeContext } from "./git.js";
 import { errorResult, shellQuote, successResult, type ToolResult } from "./shared.js";
 
 type PullRequestInfo = {
   title?: string;
   url?: string;
   state?: string;
+  headRefName?: string;
+  headRepository?: {
+    name?: string;
+    nameWithOwner?: string;
+  } | null;
+  headRepositoryOwner?: {
+    login?: string;
+  } | null;
+  isCrossRepository?: boolean;
 };
+
+type RepositoryInfo = {
+  nameWithOwner?: string;
+};
+
+type RemoteCleanup =
+  | { status: "not_requested" }
+  | { status: "deleted"; repository: string; ref: string }
+  | { status: "skipped"; reason: string; ref?: string }
+  | { status: "failed"; repository: string; ref: string; error: string };
+
+type RetainingWorktree = {
+  path: string;
+  state: "current" | "linked" | "locked" | "prunable";
+  isActive: boolean;
+  locked: boolean;
+  prunable: boolean;
+  lockedReason?: string;
+  prunableReason?: string;
+};
+
+type LocalCleanup =
+  | { status: "not_requested" }
+  | { status: "deleted"; branch: string }
+  | { status: "retained"; branch: string; reason: "branch_occupied_by_worktree"; worktrees: RetainingWorktree[] }
+  | { status: "skipped"; branch?: string; reason: string }
+  | { status: "failed"; branch: string; error: string };
 
 type CiCheck = {
   name?: string;
@@ -70,16 +106,19 @@ function detectCurrentPrNumber(cwd?: string): number | undefined {
 }
 
 function getPullRequestInfo(prNumber: number, cwd?: string): PullRequestInfo {
-  return JSON.parse(execGh(`gh pr view ${prNumber} --json title,url,state`, cwd)) as PullRequestInfo;
+  const fields = "title,url,state,headRefName,headRepository,headRepositoryOwner,isCrossRepository";
+  return JSON.parse(execGh(`gh pr view ${prNumber} --json ${fields}`, cwd)) as PullRequestInfo;
 }
 
-function buildMergeCommand(
-  prNumber: number,
-  squash: boolean,
-  deleteBranch: boolean,
-  commitTitle?: string,
-  commitMessage?: string,
-): string {
+function getActiveRepositoryInfo(cwd?: string): { info?: RepositoryInfo; error?: string } {
+  try {
+    return { info: JSON.parse(execGh("gh repo view --json nameWithOwner", cwd)) as RepositoryInfo };
+  } catch (error) {
+    return { error: errorMessage(error) };
+  }
+}
+
+function buildMergeCommand(prNumber: number, squash: boolean, commitTitle?: string, commitMessage?: string): string {
   const commandParts = [`gh pr merge ${prNumber}`, squash ? "--squash" : "--merge"];
 
   if (squash && commitTitle) {
@@ -88,28 +127,146 @@ function buildMergeCommand(
   if (squash && commitMessage) {
     commandParts.push(`--body ${shellQuote(commitMessage)}`);
   }
-  if (deleteBranch) {
-    commandParts.push("--delete-branch");
-  }
 
   return commandParts.join(" ");
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function authoritativeHeadRepository(prData: PullRequestInfo): string | undefined {
+  if (!prData.headRepository) return undefined;
+  if (prData.headRepository.nameWithOwner) return prData.headRepository.nameWithOwner;
+
+  const owner = prData.headRepositoryOwner?.login;
+  const name = prData.headRepository.name;
+  return owner && name ? `${owner}/${name}` : undefined;
+}
+
+function cleanupRemoteHead(prData: PullRequestInfo, cwd?: string): RemoteCleanup {
+  const headRefName = prData.headRefName;
+  if (!headRefName) {
+    return { status: "skipped", reason: "missing_head_ref_metadata" };
+  }
+  const ref = `refs/heads/${headRefName}`;
+
+  const repository = authoritativeHeadRepository(prData);
+  if (!repository) {
+    return { status: "skipped", reason: "missing_head_repository_metadata", ref };
+  }
+
+  const encodedRef = encodeURIComponent(`heads/${headRefName}`);
+  try {
+    execGh(`gh api --method DELETE ${shellQuote(`repos/${repository}/git/refs/${encodedRef}`)}`, cwd);
+    return { status: "deleted", repository, ref };
+  } catch (error) {
+    return { status: "failed", repository, ref, error: errorMessage(error) };
+  }
+}
+
+function retainingWorktree(record: GitWorktreeRecord): RetainingWorktree {
+  let state: RetainingWorktree["state"] = record.isActive ? "current" : "linked";
+  if (record.locked) state = "locked";
+  if (record.prunable) state = "prunable";
+
+  return {
+    path: record.worktreeRoot,
+    state,
+    isActive: record.isActive ?? false,
+    locked: record.locked,
+    prunable: record.prunable,
+    ...(record.lockedReason === undefined ? {} : { lockedReason: record.lockedReason }),
+    ...(record.prunableReason === undefined ? {} : { prunableReason: record.prunableReason }),
+  };
+}
+
+function cleanupLocalHead(
+  prData: PullRequestInfo,
+  activeRepository: RepositoryInfo | undefined,
+  activeRepositoryError: string | undefined,
+  cwd?: string,
+): LocalCleanup {
+  const branch = prData.headRefName;
+  if (!branch) return { status: "skipped", reason: "missing_head_ref_metadata" };
+
+  const headRepository = authoritativeHeadRepository(prData);
+  if (!headRepository) {
+    return { status: "skipped", branch, reason: "missing_head_repository_metadata" };
+  }
+  if (activeRepositoryError) {
+    return { status: "failed", branch, error: activeRepositoryError };
+  }
+  if (!activeRepository?.nameWithOwner) {
+    return { status: "skipped", branch, reason: "missing_active_repository_metadata" };
+  }
+  if (prData.isCrossRepository === undefined) {
+    return { status: "skipped", branch, reason: "missing_cross_repository_metadata" };
+  }
+  if (
+    prData.isCrossRepository ||
+    headRepository.toLocaleLowerCase() !== activeRepository.nameWithOwner.toLocaleLowerCase()
+  ) {
+    return { status: "skipped", branch, reason: "cross_repository_head" };
+  }
+
+  try {
+    const branchRef = `refs/heads/${branch}`;
+    const occupied = getWorktreeContext(cwd).worktrees.filter((record) => record.branch === branchRef);
+    if (occupied.length > 0) {
+      return {
+        status: "retained",
+        branch,
+        reason: "branch_occupied_by_worktree",
+        worktrees: occupied.map(retainingWorktree),
+      };
+    }
+
+    execGit(`git branch --delete -- ${shellQuote(branch)}`, cwd);
+    return { status: "deleted", branch };
+  } catch (error) {
+    return { status: "failed", branch, error: errorMessage(error) };
+  }
+}
+
+function cleanupLabel(kind: "Remote" | "Local", cleanup: RemoteCleanup | LocalCleanup): string {
+  switch (cleanup.status) {
+    case "not_requested":
+      return `${kind} cleanup: not requested`;
+    case "deleted":
+      return `${kind} cleanup: deleted`;
+    case "retained":
+      return `${kind} cleanup: retained by ${cleanup.worktrees.map(({ path, state }) => `${path} (${state})`).join(", ")}`;
+    case "skipped":
+      return `${kind} cleanup: skipped (${cleanup.reason})`;
+    case "failed":
+      return `${kind} cleanup failed: ${cleanup.error}`;
+  }
 }
 
 function formatMergeResult(
   prNumber: number,
   squash: boolean,
-  deleteBranch: boolean,
   prData: PullRequestInfo,
+  remoteCleanup: RemoteCleanup,
+  localCleanup: LocalCleanup,
 ): ToolResult {
   const mergeType = squash ? "squash-merged" : "merged";
   const mergeLabel = `${mergeType.charAt(0).toUpperCase() + mergeType.slice(1)} PR #${prNumber}`;
   const titleSuffix = prData.title ? `: ${prData.title}` : "";
   const urlSuffix = prData.url ? `\n${prData.url}` : "";
+  const cleanupText = `\n${cleanupLabel("Remote", remoteCleanup)}\n${cleanupLabel("Local", localCleanup)}`;
+  const deletedBranch = remoteCleanup.status === "deleted" && localCleanup.status === "deleted";
 
-  return successResult(`${mergeLabel}${titleSuffix}${urlSuffix}`, {
+  return successResult(`${mergeLabel}${titleSuffix}${urlSuffix}${cleanupText}`, {
     prNumber,
     mergeType,
-    deletedBranch: deleteBranch,
+    remoteCleanup,
+    localCleanup,
+    deletedBranch,
+    cleanupComplete:
+      (remoteCleanup.status === "not_requested" && localCleanup.status === "not_requested") || deletedBranch,
+    cleanupSummary: `remote ${remoteCleanup.status}; local ${localCleanup.status}`,
   });
 }
 
@@ -132,8 +289,14 @@ export function mergePrTool(
       return errorResult(`PR #${num} is not open (state: ${prData.state})`, "pr_not_open", { state: prData.state });
     }
 
-    execGh(buildMergeCommand(num, squash, deleteBranch, commitTitle, commitMessage), cwd);
-    return formatMergeResult(num, squash, deleteBranch, prData);
+    const activeRepository = deleteBranch ? getActiveRepositoryInfo(cwd) : {};
+    execGh(buildMergeCommand(num, squash, commitTitle, commitMessage), cwd);
+
+    const remoteCleanup: RemoteCleanup = deleteBranch ? cleanupRemoteHead(prData, cwd) : { status: "not_requested" };
+    const localCleanup: LocalCleanup = deleteBranch
+      ? cleanupLocalHead(prData, activeRepository.info, activeRepository.error, cwd)
+      : { status: "not_requested" };
+    return formatMergeResult(num, squash, prData, remoteCleanup, localCleanup);
   } catch (error) {
     return errorResult("Failed to merge PR", error);
   }
