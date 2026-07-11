@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { execGh, execGit, getDefaultBranch, getGitContext } from "../extensions/git.js";
+import { execGh, execGit, getDefaultBranch, getGitContext, getWorktreeContext, isGitRepo } from "../extensions/git.js";
 
 describe("pi-devtools git integration", () => {
   let tempDir: string;
@@ -56,13 +56,66 @@ describe("pi-devtools git integration", () => {
   });
 
   describe("session git context", () => {
-    it("builds context inside a git repository", () => {
-      const originalCwd = process.cwd();
-      process.chdir(tempDir);
+    it("builds context for an explicit repository cwd without changing process cwd", () => {
+      expect(getGitContext(tempDir)).toContain("Branch: main");
+    });
+
+    it("does not fall back to the process cwd for a non-repository cwd", () => {
+      const nonGitDir = mkdtempSync(join(tmpdir(), "pi-devtools-non-git-"));
       try {
-        expect(getGitContext()).toContain("Branch: main");
+        expect(isGitRepo(nonGitDir)).toBe(false);
+        expect(getGitContext(nonGitDir)).toBe("");
+        expect(() => getWorktreeContext(nonGitDir)).toThrow("Git error");
       } finally {
-        process.chdir(originalCwd);
+        rmSync(nonGitDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("worktree context", () => {
+    it("discovers canonical primary and linked topology, including a detached linked HEAD and spaces", () => {
+      const linkedDir = join(tmpdir(), `pi devtools linked ${Date.now()}`);
+      try {
+        execSync(`git worktree add -b feature/worktree ${JSON.stringify(linkedDir)}`, { cwd: tempDir, stdio: "pipe" });
+
+        const linkedRoot = execGit("git rev-parse --path-format=absolute --show-toplevel", linkedDir);
+        const primary = getWorktreeContext(tempDir);
+        expect(primary.worktreeRoot).toBe(execGit("git rev-parse --path-format=absolute --show-toplevel", tempDir));
+        expect(primary.privateGitDir).toBe(primary.commonGitDir);
+        expect(primary.gitDir).toBe(primary.privateGitDir);
+        expect(primary.isLinkedWorktree).toBe(false);
+        expect(primary.head).toEqual(expect.objectContaining({ branch: "refs/heads/main", detached: false }));
+        expect(primary.worktrees.some((record) => record.worktreeRoot === linkedRoot)).toBe(true);
+
+        execSync("git checkout --detach", { cwd: linkedDir, stdio: "pipe" });
+        execSync("git worktree lock --reason 'integration lock reason' .", { cwd: linkedDir, stdio: "pipe" });
+        const linked = getWorktreeContext(linkedDir);
+        expect(linked.worktreeRoot).toBe(linkedRoot);
+        expect(linked.privateGitDir).not.toBe(linked.commonGitDir);
+        expect(linked.privateGitDir).toContain("/worktrees/");
+        expect(linked.isLinkedWorktree).toBe(true);
+        expect(linked.head).toEqual(expect.objectContaining({ detached: true }));
+        expect(linked.head.branch).toBeUndefined();
+        expect(linked.activeWorktree).toEqual(
+          expect.objectContaining({
+            worktreeRoot: linkedRoot,
+            detached: true,
+            locked: true,
+            lockedReason: "integration lock reason",
+            isActive: true,
+          }),
+        );
+      } finally {
+        try {
+          execSync("git worktree unlock .", { cwd: linkedDir, stdio: "pipe" });
+        } catch {
+          // The fixture may not have reached the lock step.
+        }
+        try {
+          execSync(`git worktree remove --force ${JSON.stringify(linkedDir)}`, { cwd: tempDir, stdio: "pipe" });
+        } catch {
+          rmSync(linkedDir, { recursive: true, force: true });
+        }
       }
     });
   });
