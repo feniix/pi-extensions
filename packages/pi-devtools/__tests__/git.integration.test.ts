@@ -10,18 +10,22 @@ function withFakeMergeGh<T>(headRefName: string, run: () => T): T {
   const originalPath = process.env.PATH;
   const fakeBinDir = mkdtempSync(join(tmpdir(), "pi-devtools-merge-gh-"));
   const ghPath = join(fakeBinDir, "gh");
-  const pr = JSON.stringify({
-    title: "Integration PR",
-    url: "https://example.test/base/repo/pull/1",
-    state: "OPEN",
-    headRefName,
-    headRepository: { name: "repo", nameWithOwner: "base/repo" },
-    headRepositoryOwner: { login: "base" },
-    isCrossRepository: false,
-  });
+  const markerPath = join(fakeBinDir, "merged");
   writeFileSync(
     ghPath,
-    `#!/bin/sh\nif [ "$1 $2" = "pr view" ]; then printf '%s\\n' '${pr}'; exit 0; fi\nif [ "$1 $2" = "repo view" ]; then printf '%s\\n' '{"nameWithOwner":"base/repo"}'; exit 0; fi\nif [ "$1 $2" = "pr merge" ]; then exit 0; fi\nif [ "$1" = "api" ]; then exit 0; fi\nexit 2\n`,
+    `#!/bin/sh
+marker=${JSON.stringify(markerPath)}
+oid=$(git rev-parse ${JSON.stringify(`refs/heads/${headRefName}`)})
+if [ "$1 $2" = "pr view" ]; then
+  if [ -f "$marker" ]; then state=MERGED; mergedAt='"2026-07-11T12:00:00Z"'; rm -f "$marker"; else state=OPEN; mergedAt=null; fi
+  printf '{"title":"Integration PR","url":"https://example.test/base/repo/pull/1","state":"%s","mergedAt":%s,"headRefName":"${headRefName}","headRefOid":"%s","headRepository":{"name":"repo","nameWithOwner":"base/repo","url":"https://example.test/base/repo"},"headRepositoryOwner":{"login":"base"},"isCrossRepository":false}\\n' "$state" "$mergedAt" "$oid"
+  exit 0
+fi
+if [ "$1 $2" = "repo view" ]; then printf '%s\\n' '{"nameWithOwner":"base/repo","url":"https://example.test/base/repo"}'; exit 0; fi
+if [ "$1 $2" = "pr merge" ]; then touch "$marker"; exit 0; fi
+if [ "$1" = "api" ]; then printf '{"object":{"sha":"%s"}}\\n' "$oid"; exit 0; fi
+exit 2
+`,
     { encoding: "utf-8", mode: 0o755 },
   );
   process.env.PATH = `${fakeBinDir}:${originalPath ?? ""}`;

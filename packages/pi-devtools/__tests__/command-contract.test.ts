@@ -106,21 +106,39 @@ describe("pi-devtools generated CLI command contract", () => {
     }
 
     const generatedCommands: string[] = [];
+    let mergeIssued = false;
     vi.mocked(execGh).mockImplementation((command: string) => {
       generatedCommands.push(command);
       if (command.startsWith("gh pr list")) return JSON.stringify([{ number: 123 }]);
       if (command.startsWith("gh pr view")) {
+        const state = mergeIssued ? "MERGED" : "OPEN";
+        if (mergeIssued) mergeIssued = false;
         return JSON.stringify({
           title: "Test PR",
           url: "https://github.com/owner/repo/pull/123",
-          state: "OPEN",
+          state,
+          mergedAt: state === "MERGED" ? "2026-07-11T12:00:00Z" : null,
           headRefName: "feature/devtools-command-contract",
-          headRepository: { name: "repo", nameWithOwner: "owner/repo" },
+          headRefOid: "abc123",
+          headRepository: {
+            name: "repo",
+            nameWithOwner: "owner/repo",
+            url: "https://github.com/owner/repo",
+          },
           headRepositoryOwner: { login: "owner" },
           isCrossRepository: false,
         });
       }
-      if (command === "gh repo view --json nameWithOwner") return JSON.stringify({ nameWithOwner: "owner/repo" });
+      if (command.startsWith("gh pr merge")) {
+        mergeIssued = true;
+        return "";
+      }
+      if (command === "gh repo view --json nameWithOwner,url") {
+        return JSON.stringify({ nameWithOwner: "owner/repo", url: "https://github.com/owner/repo" });
+      }
+      if (command.startsWith("gh api") && !command.includes("--method DELETE")) {
+        return JSON.stringify({ object: { sha: "abc123" } });
+      }
       if (command.startsWith("gh pr create")) return "https://github.com/owner/repo/pull/124";
       if (command.startsWith("gh release create")) return "https://github.com/owner/repo/releases/tag/v1.2.3";
       if (command.startsWith("gh pr checks")) return JSON.stringify([]);
@@ -167,12 +185,15 @@ describe("pi-devtools generated CLI command contract", () => {
       generatedCommands.some(
         (command) =>
           command ===
-          "gh pr view 123 --json title,url,state,headRefName,headRepository,headRepositoryOwner,isCrossRepository",
+          "gh pr view 123 --json title,url,state,mergedAt,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository",
       ),
     ).toBe(true);
-    expect(generatedCommands).toContain("gh repo view --json nameWithOwner");
+    expect(generatedCommands).toContain("gh repo view --json nameWithOwner,url");
     expect(generatedCommands).toContain(
-      "gh api --method DELETE 'repos/owner/repo/git/refs/heads%2Ffeature%2Fdevtools-command-contract'",
+      "gh api --hostname 'github.com' 'repos/owner/repo/git/ref/heads%2Ffeature%2Fdevtools-command-contract'",
+    );
+    expect(generatedCommands).toContain(
+      "gh api --hostname 'github.com' --method DELETE 'repos/owner/repo/git/refs/heads%2Ffeature%2Fdevtools-command-contract'",
     );
     expect(
       generatedCommands

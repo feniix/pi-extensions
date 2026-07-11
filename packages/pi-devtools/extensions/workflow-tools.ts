@@ -118,33 +118,32 @@ export function repoInfoTool(cwd?: string): ToolResult {
     const branch = worktree.head.branch?.replace(/^refs\/heads\//, "");
     const defaultBranch = getDefaultBranch(cwd);
     const status = parseRepoStatus(execGit("git status --porcelain", cwd));
-    return successResult(
-      formatRepoInfo(
-        branch,
-        defaultBranch,
-        status,
-        worktree.worktreeRoot,
-        worktree.isLinkedWorktree,
-        worktree.head.commit,
-      ),
-      {
-        branch,
-        defaultBranch,
-        hasChanges: hasRepoChanges(status),
-        staged: status.staged,
-        modified: status.modified,
-        untracked: status.untracked,
-        worktreeRoot: worktree.worktreeRoot,
-        privateGitDir: worktree.privateGitDir,
-        gitDir: worktree.gitDir,
-        commonGitDir: worktree.commonGitDir,
-        isLinkedWorktree: worktree.isLinkedWorktree,
-        head: worktree.head,
-        worktrees: worktree.worktrees,
-        activeWorktree: worktree.activeWorktree,
-        activeWorktreeIndex: worktree.activeWorktreeIndex,
-      },
+    const details = {
+      branch,
+      defaultBranch,
+      hasChanges: hasRepoChanges(status),
+      staged: status.staged,
+      modified: status.modified,
+      untracked: status.untracked,
+      worktreeRoot: worktree.worktreeRoot,
+      privateGitDir: worktree.privateGitDir,
+      gitDir: worktree.gitDir,
+      commonGitDir: worktree.commonGitDir,
+      isLinkedWorktree: worktree.isLinkedWorktree,
+      head: worktree.head,
+      worktrees: worktree.worktrees,
+      activeWorktree: worktree.activeWorktree,
+      activeWorktreeIndex: worktree.activeWorktreeIndex,
+    };
+    const humanReadable = formatRepoInfo(
+      branch,
+      defaultBranch,
+      status,
+      worktree.worktreeRoot,
+      worktree.isLinkedWorktree,
+      worktree.head.commit,
     );
+    return successResult(`${humanReadable}\n\nRepository context: ${JSON.stringify(details)}`, details);
   } catch (error) {
     return errorResult("Failed to get repo info", error);
   }

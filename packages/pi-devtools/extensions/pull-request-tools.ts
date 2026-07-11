@@ -5,10 +5,13 @@ type PullRequestInfo = {
   title?: string;
   url?: string;
   state?: string;
+  mergedAt?: string | null;
   headRefName?: string;
+  headRefOid?: string;
   headRepository?: {
     name?: string;
     nameWithOwner?: string;
+    url?: string;
   } | null;
   headRepositoryOwner?: {
     login?: string;
@@ -18,6 +21,7 @@ type PullRequestInfo = {
 
 type RepositoryInfo = {
   nameWithOwner?: string;
+  url?: string;
 };
 
 type RemoteCleanup =
@@ -39,7 +43,7 @@ type RetainingWorktree = {
 type LocalCleanup =
   | { status: "not_requested" }
   | { status: "deleted"; branch: string }
-  | { status: "retained"; branch: string; reason: "branch_occupied_by_worktree"; worktrees: RetainingWorktree[] }
+  | { status: "retained"; branch: string; reason: string; worktrees?: RetainingWorktree[] }
   | { status: "skipped"; branch?: string; reason: string }
   | { status: "failed"; branch: string; error: string };
 
@@ -106,13 +110,13 @@ function detectCurrentPrNumber(cwd?: string): number | undefined {
 }
 
 function getPullRequestInfo(prNumber: number, cwd?: string): PullRequestInfo {
-  const fields = "title,url,state,headRefName,headRepository,headRepositoryOwner,isCrossRepository";
+  const fields = "title,url,state,mergedAt,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository";
   return JSON.parse(execGh(`gh pr view ${prNumber} --json ${fields}`, cwd)) as PullRequestInfo;
 }
 
 function getActiveRepositoryInfo(cwd?: string): { info?: RepositoryInfo; error?: string } {
   try {
-    return { info: JSON.parse(execGh("gh repo view --json nameWithOwner", cwd)) as RepositoryInfo };
+    return { info: JSON.parse(execGh("gh repo view --json nameWithOwner,url", cwd)) as RepositoryInfo };
   } catch (error) {
     return { error: errorMessage(error) };
   }
@@ -144,21 +148,59 @@ function authoritativeHeadRepository(prData: PullRequestInfo): string | undefine
   return owner && name ? `${owner}/${name}` : undefined;
 }
 
-function cleanupRemoteHead(prData: PullRequestInfo, cwd?: string): RemoteCleanup {
-  const headRefName = prData.headRefName;
-  if (!headRefName) {
-    return { status: "skipped", reason: "missing_head_ref_metadata" };
+function validatedRepositoryHost(urlValue: string | undefined, repository: string | undefined): string | undefined {
+  if (!urlValue || !repository) return undefined;
+  try {
+    const url = new URL(urlValue);
+    const urlRepository = url.pathname.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "");
+    if (
+      url.protocol !== "https:" ||
+      url.username ||
+      url.password ||
+      !url.hostname ||
+      urlRepository.toLowerCase() !== repository.toLowerCase()
+    ) {
+      return undefined;
+    }
+    return url.hostname;
+  } catch {
+    return undefined;
   }
-  const ref = `refs/heads/${headRefName}`;
+}
 
+function cleanupRemoteHead(
+  prData: PullRequestInfo,
+  activeRepository: RepositoryInfo | undefined,
+  activeRepositoryError: string | undefined,
+  cwd?: string,
+): RemoteCleanup {
+  const headRefName = prData.headRefName;
+  if (!headRefName) return { status: "skipped", reason: "missing_head_ref_metadata" };
+  const ref = `refs/heads/${headRefName}`;
   const repository = authoritativeHeadRepository(prData);
-  if (!repository) {
-    return { status: "skipped", reason: "missing_head_repository_metadata", ref };
+  if (!repository) return { status: "skipped", reason: "missing_head_repository_metadata", ref };
+  if (!prData.headRefOid) return { status: "skipped", reason: "missing_head_ref_oid_metadata", ref };
+  if (activeRepositoryError) return { status: "skipped", reason: "active_repository_lookup_failed", ref };
+
+  const headHost = validatedRepositoryHost(prData.headRepository?.url, repository);
+  const activeHost = validatedRepositoryHost(activeRepository?.url, activeRepository?.nameWithOwner);
+  if (!headHost) return { status: "skipped", reason: "missing_or_invalid_head_repository_url", ref };
+  if (!activeHost) return { status: "skipped", reason: "missing_or_invalid_active_repository_url", ref };
+  if (headHost.toLowerCase() !== activeHost.toLowerCase()) {
+    return { status: "skipped", reason: "repository_hostname_mismatch", ref };
   }
 
   const encodedRef = encodeURIComponent(`heads/${headRefName}`);
+  const hostnameArg = `--hostname ${shellQuote(headHost)}`;
   try {
-    execGh(`gh api --method DELETE ${shellQuote(`repos/${repository}/git/refs/${encodedRef}`)}`, cwd);
+    const currentRef = JSON.parse(
+      execGh(`gh api ${hostnameArg} ${shellQuote(`repos/${repository}/git/ref/${encodedRef}`)}`, cwd),
+    ) as { object?: { sha?: string } };
+    if (!currentRef.object?.sha) return { status: "skipped", reason: "missing_remote_ref_oid", ref };
+    if (currentRef.object.sha !== prData.headRefOid) {
+      return { status: "skipped", reason: "remote_ref_oid_mismatch", ref };
+    }
+    execGh(`gh api ${hostnameArg} --method DELETE ${shellQuote(`repos/${repository}/git/refs/${encodedRef}`)}`, cwd);
     return { status: "deleted", repository, ref };
   } catch (error) {
     return { status: "failed", repository, ref, error: errorMessage(error) };
@@ -207,8 +249,16 @@ function cleanupLocalHead(
     return { status: "skipped", branch, reason: "missing_active_repository_metadata" };
   }
   if (headRepository.toLowerCase() !== activeRepository.nameWithOwner.toLowerCase()) {
-    return { status: "skipped", branch, reason: "cross_repository_head" };
+    return { status: "skipped", branch, reason: "repository_identity_mismatch" };
   }
+  const headHost = validatedRepositoryHost(prData.headRepository?.url, headRepository);
+  const activeHost = validatedRepositoryHost(activeRepository.url, activeRepository.nameWithOwner);
+  if (!headHost) return { status: "skipped", branch, reason: "missing_head_repository_url_metadata" };
+  if (!activeHost) return { status: "skipped", branch, reason: "missing_active_repository_metadata" };
+  if (headHost.toLowerCase() !== activeHost.toLowerCase()) {
+    return { status: "skipped", branch, reason: "repository_hostname_mismatch" };
+  }
+  if (!prData.headRefOid) return { status: "skipped", branch, reason: "missing_head_ref_oid_metadata" };
 
   try {
     const branchRef = `refs/heads/${branch}`;
@@ -222,6 +272,10 @@ function cleanupLocalHead(
       };
     }
 
+    const localOid = execGit(`git rev-parse --verify ${shellQuote(`${branchRef}^{commit}`)}`, cwd);
+    if (localOid !== prData.headRefOid) {
+      return { status: "retained", branch, reason: "local_ref_oid_mismatch" };
+    }
     execGit(`git branch --delete -- ${shellQuote(branch)}`, cwd);
     return { status: "deleted", branch };
   } catch (error) {
@@ -236,7 +290,9 @@ function cleanupLabel(kind: "Remote" | "Local", cleanup: RemoteCleanup | LocalCl
     case "deleted":
       return `${kind} cleanup: deleted`;
     case "retained":
-      return `${kind} cleanup: retained by ${cleanup.worktrees.map(({ path, state }) => `${path} (${state})`).join(", ")}`;
+      return cleanup.worktrees
+        ? `${kind} cleanup: retained by ${cleanup.worktrees.map(({ path, state }) => `${path} (${state})`).join(", ")}`
+        : `${kind} cleanup: retained (${cleanup.reason})`;
     case "skipped":
       return `${kind} cleanup: skipped (${cleanup.reason})`;
     case "failed":
@@ -257,17 +313,51 @@ function formatMergeResult(
   const urlSuffix = prData.url ? `\n${prData.url}` : "";
   const cleanupText = `\n${cleanupLabel("Remote", remoteCleanup)}\n${cleanupLabel("Local", localCleanup)}`;
   const deletedBranch = remoteCleanup.status === "deleted" && localCleanup.status === "deleted";
-
-  return successResult(`${mergeLabel}${titleSuffix}${urlSuffix}${cleanupText}`, {
-    prNumber,
-    mergeType,
+  const cleanupComplete =
+    (remoteCleanup.status === "not_requested" && localCleanup.status === "not_requested") || deletedBranch;
+  const mergeContract = {
+    mergeStatus: "merged",
+    state: prData.state ?? null,
     remoteCleanup,
     localCleanup,
-    deletedBranch,
-    cleanupComplete:
-      (remoteCleanup.status === "not_requested" && localCleanup.status === "not_requested") || deletedBranch,
-    cleanupSummary: `remote ${remoteCleanup.status}; local ${localCleanup.status}`,
-  });
+    cleanupComplete,
+  };
+
+  return successResult(
+    `${mergeLabel}${titleSuffix}${urlSuffix}${cleanupText}\nMerge contract: ${JSON.stringify(mergeContract)}`,
+    {
+      prNumber,
+      ...mergeContract,
+      mergedAt: prData.mergedAt,
+      mergeType,
+      deletedBranch,
+      cleanupSummary: `remote ${remoteCleanup.status}; local ${localCleanup.status}`,
+    },
+  );
+}
+
+function formatPendingMergeResult(prNumber: number, prData: PullRequestInfo): ToolResult {
+  const titleSuffix = prData.title ? `: ${prData.title}` : "";
+  const urlSuffix = prData.url ? `\n${prData.url}` : "";
+  const remoteCleanup: RemoteCleanup = { status: "skipped", reason: "merge_not_confirmed" };
+  const localCleanup: LocalCleanup = { status: "skipped", reason: "merge_not_confirmed" };
+  const mergeContract = {
+    mergeStatus: "pending",
+    state: prData.state ?? null,
+    remoteCleanup,
+    localCleanup,
+    cleanupComplete: false,
+  };
+  return successResult(
+    `Merge command accepted for PR #${prNumber}${titleSuffix}, but the authoritative PR state is ${prData.state ?? "unknown"}; merge is pending and cleanup was not run.${urlSuffix}\nMerge contract: ${JSON.stringify(mergeContract)}`,
+    {
+      prNumber,
+      ...mergeContract,
+      mergedAt: prData.mergedAt,
+      deletedBranch: false,
+      cleanupSummary: "remote skipped; local skipped",
+    },
+  );
 }
 
 export function mergePrTool(
@@ -291,17 +381,19 @@ export function mergePrTool(
 
     execGh(buildMergeCommand(num, squash, commitTitle, commitMessage), cwd);
 
-    const remoteCleanup: RemoteCleanup = deleteBranch ? cleanupRemoteHead(prData, cwd) : { status: "not_requested" };
-    const needsActiveRepository =
-      deleteBranch &&
-      prData.isCrossRepository === false &&
-      prData.headRefName !== undefined &&
-      authoritativeHeadRepository(prData) !== undefined;
-    const activeRepository = needsActiveRepository ? getActiveRepositoryInfo(cwd) : {};
-    const localCleanup: LocalCleanup = deleteBranch
-      ? cleanupLocalHead(prData, activeRepository.info, activeRepository.error, cwd)
+    const mergedPrData = getPullRequestInfo(num, cwd);
+    if (mergedPrData.state !== "MERGED") {
+      return formatPendingMergeResult(num, mergedPrData);
+    }
+
+    const activeRepository = deleteBranch ? getActiveRepositoryInfo(cwd) : {};
+    const remoteCleanup: RemoteCleanup = deleteBranch
+      ? cleanupRemoteHead(mergedPrData, activeRepository.info, activeRepository.error, cwd)
       : { status: "not_requested" };
-    return formatMergeResult(num, squash, prData, remoteCleanup, localCleanup);
+    const localCleanup: LocalCleanup = deleteBranch
+      ? cleanupLocalHead(mergedPrData, activeRepository.info, activeRepository.error, cwd)
+      : { status: "not_requested" };
+    return formatMergeResult(num, squash, mergedPrData, remoteCleanup, localCleanup);
   } catch (error) {
     return errorResult("Failed to merge PR", error);
   }

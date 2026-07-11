@@ -47,8 +47,7 @@ The extension observes worktree topology for safety, but it will never create, r
 |------|-------------|
 | `devtools_merge_pr` | Merge a PR with optional best-effort remote and local branch cleanup |
 | `devtools_squash_merge_pr` | Squash-merge a PR with optional best-effort remote and local branch cleanup |
-| `devtools_check_pr_status` | Check CI status for a PR |
-| `devtools_check_ci` | Check CI status for the current branch |
+| `devtools_check_ci` | Check CI status for a PR or the current branch |
 
 ### Release Tools
 

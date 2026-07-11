@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { toolDefinitions } from "../extensions/index.js";
 
 describe("pi-devtools", () => {
   describe("package", () => {
@@ -82,6 +83,16 @@ describe("pi-devtools", () => {
       expect(readme).toMatch(/detached HEAD/i);
       expect(readme).toMatch(/occupied branches? (?:are|is) retained/i);
       expect(readme).toMatch(/never create, remove, unlock, or prune worktrees/i);
+    });
+
+    it("lists only registered devtools tools in README Tools tables", () => {
+      const readme = readResource("README.md");
+      const toolsSection = readme.match(/## Tools\n([\s\S]*?)\n## Skills/)?.[1] ?? "";
+      const documentedTools = [...toolsSection.matchAll(/`(devtools_[a-z0-9_]+)`/g)].map((match) => match[1]);
+      const registeredTools = new Set<string>(toolDefinitions.map(({ name }) => name));
+
+      expect(documentedTools.length).toBeGreaterThan(0);
+      expect(documentedTools.filter((name) => !registeredTools.has(name))).toEqual([]);
     });
   });
 
