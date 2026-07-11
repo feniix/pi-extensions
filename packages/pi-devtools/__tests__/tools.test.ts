@@ -636,6 +636,7 @@ describe("pi-devtools", () => {
       });
       expect(allCommands).toContain("repos/contributor/repo-fork/git/refs/heads%2Ffeature%2Ftopic");
       expect(allCommands).not.toContain("repos/base/repo/git/refs");
+      expect(allCommands).not.toContain("gh repo view");
       expect(execGit).not.toHaveBeenCalled();
     });
 
@@ -660,6 +661,7 @@ describe("pi-devtools", () => {
         reason: "missing_head_repository_metadata",
       });
       expect(execGh).not.toHaveBeenCalledWith(expect.stringContaining("gh api"), expect.anything());
+      expect(execGh).not.toHaveBeenCalledWith("gh repo view --json nameWithOwner", expect.anything());
       expect(execGit).not.toHaveBeenCalled();
     });
 
@@ -761,6 +763,7 @@ describe("pi-devtools", () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("Failed to merge PR");
       expect(execGh).not.toHaveBeenCalledWith(expect.stringContaining("gh api"), expect.anything());
+      expect(execGh).not.toHaveBeenCalledWith("gh repo view --json nameWithOwner", expect.anything());
       expect(execGit).not.toHaveBeenCalled();
     });
   });

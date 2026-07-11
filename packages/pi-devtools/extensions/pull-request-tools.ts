@@ -194,19 +194,19 @@ function cleanupLocalHead(
   if (!headRepository) {
     return { status: "skipped", branch, reason: "missing_head_repository_metadata" };
   }
+  if (prData.isCrossRepository === undefined) {
+    return { status: "skipped", branch, reason: "missing_cross_repository_metadata" };
+  }
+  if (prData.isCrossRepository) {
+    return { status: "skipped", branch, reason: "cross_repository_head" };
+  }
   if (activeRepositoryError) {
     return { status: "failed", branch, error: activeRepositoryError };
   }
   if (!activeRepository?.nameWithOwner) {
     return { status: "skipped", branch, reason: "missing_active_repository_metadata" };
   }
-  if (prData.isCrossRepository === undefined) {
-    return { status: "skipped", branch, reason: "missing_cross_repository_metadata" };
-  }
-  if (
-    prData.isCrossRepository ||
-    headRepository.toLocaleLowerCase() !== activeRepository.nameWithOwner.toLocaleLowerCase()
-  ) {
+  if (headRepository.toLowerCase() !== activeRepository.nameWithOwner.toLowerCase()) {
     return { status: "skipped", branch, reason: "cross_repository_head" };
   }
 
@@ -289,10 +289,15 @@ export function mergePrTool(
       return errorResult(`PR #${num} is not open (state: ${prData.state})`, "pr_not_open", { state: prData.state });
     }
 
-    const activeRepository = deleteBranch ? getActiveRepositoryInfo(cwd) : {};
     execGh(buildMergeCommand(num, squash, commitTitle, commitMessage), cwd);
 
     const remoteCleanup: RemoteCleanup = deleteBranch ? cleanupRemoteHead(prData, cwd) : { status: "not_requested" };
+    const needsActiveRepository =
+      deleteBranch &&
+      prData.isCrossRepository === false &&
+      prData.headRefName !== undefined &&
+      authoritativeHeadRepository(prData) !== undefined;
+    const activeRepository = needsActiveRepository ? getActiveRepositoryInfo(cwd) : {};
     const localCleanup: LocalCleanup = deleteBranch
       ? cleanupLocalHead(prData, activeRepository.info, activeRepository.error, cwd)
       : { status: "not_requested" };
