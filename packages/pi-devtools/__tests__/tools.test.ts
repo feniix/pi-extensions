@@ -115,6 +115,15 @@ describe("pi-devtools", () => {
       }
     });
 
+    it("keeps the legacy two-argument executor contract", async () => {
+      vi.mocked(execGit).mockReturnValue("");
+
+      const result = await toolDefinitions[0].execute("call-id", { branchName: "legacy-branch" });
+
+      expect(result.isError).toBeUndefined();
+      expect(execGit).toHaveBeenCalledWith("git checkout -b 'legacy-branch'", undefined);
+    });
+
     it("resolves a registered version-file mutation from the invoking cwd", async () => {
       const cwd = mkdtempSync(join(tmpdir(), "pi-devtools-version-"));
       try {
@@ -432,6 +441,33 @@ describe("pi-devtools", () => {
       );
       expect(execGh).not.toHaveBeenCalledWith(expect.stringContaining("gh api"), expect.anything());
       expect(getWorktreeContext).not.toHaveBeenCalled();
+      expect(execGit).not.toHaveBeenCalled();
+    });
+
+    it("reports unknown status instead of merge failure when confirmation lookup fails", () => {
+      let viewCount = 0;
+      vi.mocked(execGh).mockImplementation((command: string) => {
+        if (command.startsWith("gh pr view")) {
+          viewCount += 1;
+          if (viewCount === 1) return JSON.stringify(sameRepoPr);
+          throw new Error("confirmation unavailable");
+        }
+        return "";
+      });
+
+      const result = mergePrTool(123);
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain("could not be confirmed");
+      expect(result.details).toEqual(
+        expect.objectContaining({
+          mergeStatus: "unknown",
+          remoteCleanup: { status: "skipped", reason: "merge_confirmation_failed" },
+          localCleanup: { status: "skipped", reason: "merge_confirmation_failed" },
+          confirmationError: "confirmation unavailable",
+        }),
+      );
+      expect(execGh).not.toHaveBeenCalledWith(expect.stringContaining("gh api"), expect.anything());
       expect(execGit).not.toHaveBeenCalled();
     });
 

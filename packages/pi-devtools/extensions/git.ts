@@ -2,7 +2,7 @@
  * Git and GitHub CLI execution utilities
  */
 
-import { execSync } from "node:child_process";
+import { type ExecSyncOptionsWithStringEncoding, execSync } from "node:child_process";
 
 export interface GitWorktreeRecord {
   /** Canonical absolute path reported by Git for this worktree. */
@@ -214,13 +214,32 @@ export function getWorktreeContext(cwd?: string): GitWorktreeContext {
   };
 }
 
+const REPOSITORY_ROUTING_ENV_VARS = [
+  "GH_REPO",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_COMMON_DIR",
+  "GIT_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_NAMESPACE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_WORK_TREE",
+] as const;
+
+function commandOptions(cwd?: string): ExecSyncOptionsWithStringEncoding {
+  const env = cwd === undefined ? undefined : { ...process.env };
+  if (env) {
+    for (const name of REPOSITORY_ROUTING_ENV_VARS) delete env[name];
+  }
+  return {
+    ...(cwd === undefined ? {} : { cwd, env }),
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
+  };
+}
+
 export function execGit(command: string, cwd?: string): string {
   try {
-    return execSync(command, {
-      ...(cwd === undefined ? {} : { cwd }),
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
+    return execSync(command, commandOptions(cwd)).trim();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Git error: ${message}`);
@@ -229,11 +248,7 @@ export function execGit(command: string, cwd?: string): string {
 
 export function execGh(command: string, cwd?: string): string {
   try {
-    return execSync(command, {
-      ...(cwd === undefined ? {} : { cwd }),
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
+    return execSync(command, commandOptions(cwd)).trim();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`gh error: ${message}`);

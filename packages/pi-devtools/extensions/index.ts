@@ -55,12 +55,12 @@ export const toolDefinitions = [
     execute: async (
       _toolCallId: string,
       params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      ctx: { cwd: string },
+      _signal?: unknown,
+      _onUpdate?: unknown,
+      ctx?: { cwd: string },
     ) => {
       const { branchName, switchBranch = true } = params as { branchName: string; switchBranch?: boolean };
-      return createBranchTool(branchName, switchBranch, ctx.cwd);
+      return createBranchTool(branchName, switchBranch, ctx?.cwd);
     },
   },
   {
@@ -71,12 +71,12 @@ export const toolDefinitions = [
     execute: async (
       _toolCallId: string,
       params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      ctx: { cwd: string },
+      _signal?: unknown,
+      _onUpdate?: unknown,
+      ctx?: { cwd: string },
     ) => {
       const { message, files, noVerify = false } = params as { message: string; files?: string[]; noVerify?: boolean };
-      return commitTool(message, files, noVerify, ctx.cwd);
+      return commitTool(message, files, noVerify, ctx?.cwd);
     },
   },
   {
@@ -87,12 +87,12 @@ export const toolDefinitions = [
     execute: async (
       _toolCallId: string,
       params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      ctx: { cwd: string },
+      _signal?: unknown,
+      _onUpdate?: unknown,
+      ctx?: { cwd: string },
     ) => {
       const { branch, setUpstream = true } = params as { branch?: string; setUpstream?: boolean };
-      return pushTool(branch, setUpstream, ctx.cwd);
+      return pushTool(branch, setUpstream, ctx?.cwd);
     },
   },
   {
@@ -103,12 +103,12 @@ export const toolDefinitions = [
     execute: async (
       _toolCallId: string,
       params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      ctx: { cwd: string },
+      _signal?: unknown,
+      _onUpdate?: unknown,
+      ctx?: { cwd: string },
     ) => {
       const typed = params as { title: string; body?: string; base?: string; draft?: boolean; assignees?: string[] };
-      return createPrTool(typed.title, typed.body, typed.base, typed.draft, typed.assignees, ctx.cwd);
+      return createPrTool(typed.title, typed.body, typed.base, typed.draft, typed.assignees, ctx?.cwd);
     },
   },
   {
@@ -119,9 +119,9 @@ export const toolDefinitions = [
     execute: async (
       _toolCallId: string,
       params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      ctx: { cwd: string },
+      _signal?: unknown,
+      _onUpdate?: unknown,
+      ctx?: { cwd: string },
     ) => {
       const typed = params as {
         prNumber?: number;
@@ -136,7 +136,7 @@ export const toolDefinitions = [
         typed.deleteBranch ?? true,
         typed.commitTitle,
         typed.commitMessage,
-        ctx.cwd,
+        ctx?.cwd,
       );
     },
   },
@@ -148,9 +148,9 @@ export const toolDefinitions = [
     execute: async (
       _toolCallId: string,
       params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      ctx: { cwd: string },
+      _signal?: unknown,
+      _onUpdate?: unknown,
+      ctx?: { cwd: string },
     ) => {
       const typed = params as {
         prNumber?: number;
@@ -164,7 +164,7 @@ export const toolDefinitions = [
         typed.deleteBranch ?? true,
         typed.commitTitle,
         typed.commitMessage,
-        ctx.cwd,
+        ctx?.cwd,
       );
     },
   },
@@ -176,12 +176,12 @@ export const toolDefinitions = [
     execute: async (
       _toolCallId: string,
       params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      ctx: { cwd: string },
+      _signal?: unknown,
+      _onUpdate?: unknown,
+      ctx?: { cwd: string },
     ) => {
       const { prNumber, branch } = params as { prNumber?: number; branch?: string };
-      return checkCiTool(prNumber, branch, ctx.cwd);
+      return checkCiTool(prNumber, branch, ctx?.cwd);
     },
   },
   {
@@ -192,10 +192,10 @@ export const toolDefinitions = [
     execute: async (
       _toolCallId: string,
       _params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      ctx: { cwd: string },
-    ) => repoInfoTool(ctx.cwd),
+      _signal?: unknown,
+      _onUpdate?: unknown,
+      ctx?: { cwd: string },
+    ) => repoInfoTool(ctx?.cwd),
   },
   {
     name: "devtools_get_latest_tag",
@@ -205,10 +205,10 @@ export const toolDefinitions = [
     execute: async (
       _toolCallId: string,
       _params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      ctx: { cwd: string },
-    ) => getLatestTagTool(ctx.cwd),
+      _signal?: unknown,
+      _onUpdate?: unknown,
+      ctx?: { cwd: string },
+    ) => getLatestTagTool(ctx?.cwd),
   },
   {
     name: "devtools_analyze_commits",
@@ -218,10 +218,10 @@ export const toolDefinitions = [
     execute: async (
       _toolCallId: string,
       _params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      ctx: { cwd: string },
-    ) => analyzeCommitsTool(ctx.cwd),
+      _signal?: unknown,
+      _onUpdate?: unknown,
+      ctx?: { cwd: string },
+    ) => analyzeCommitsTool(ctx?.cwd),
   },
   {
     name: "devtools_bump_version",
@@ -231,12 +231,12 @@ export const toolDefinitions = [
     execute: async (
       _toolCallId: string,
       params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      ctx: { cwd: string },
+      _signal?: unknown,
+      _onUpdate?: unknown,
+      ctx?: { cwd: string },
     ) => {
       const { newVersion, file = "package.json" } = params as { newVersion: string; file?: string };
-      return bumpVersionTool(newVersion, file, ctx.cwd);
+      return bumpVersionTool(newVersion, file, ctx?.cwd);
     },
   },
   {
@@ -247,12 +247,12 @@ export const toolDefinitions = [
     execute: async (
       _toolCallId: string,
       params: unknown,
-      _signal: unknown,
-      _onUpdate: unknown,
-      ctx: { cwd: string },
+      _signal?: unknown,
+      _onUpdate?: unknown,
+      ctx?: { cwd: string },
     ) => {
       const typed = params as { tag: string; title: string; body?: string; draft?: boolean; prerelease?: boolean };
-      return createReleaseTool(typed.tag, typed.title, typed.body, typed.draft, typed.prerelease, ctx.cwd);
+      return createReleaseTool(typed.tag, typed.title, typed.body, typed.draft, typed.prerelease, ctx?.cwd);
     },
   },
 ] as const;

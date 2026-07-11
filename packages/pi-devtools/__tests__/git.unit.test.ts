@@ -43,6 +43,35 @@ describe("pi-devtools git unit helpers", () => {
     expect(execSyncMock).toHaveBeenNthCalledWith(2, "gh pr view", expect.objectContaining({ cwd: "/tmp/active git" }));
   });
 
+  it("removes inherited repository-routing variables when cwd is explicit", () => {
+    const originalGitDir = process.env.GIT_DIR;
+    const originalGitWorkTree = process.env.GIT_WORK_TREE;
+    const originalGhRepo = process.env.GH_REPO;
+    process.env.GIT_DIR = "/tmp/other.git";
+    process.env.GIT_WORK_TREE = "/tmp/other-worktree";
+    process.env.GH_REPO = "other/repo";
+
+    try {
+      execSyncMock.mockReturnValue("ok\n");
+      execGit("git status", "/tmp/active");
+      execGh("gh pr view", "/tmp/active");
+
+      for (const [, options] of execSyncMock.mock.calls) {
+        const env = (options as { env?: NodeJS.ProcessEnv }).env;
+        expect(env).not.toHaveProperty("GIT_DIR");
+        expect(env).not.toHaveProperty("GIT_WORK_TREE");
+        expect(env).not.toHaveProperty("GH_REPO");
+      }
+    } finally {
+      if (originalGitDir === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = originalGitDir;
+      if (originalGitWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+      else process.env.GIT_WORK_TREE = originalGitWorkTree;
+      if (originalGhRepo === undefined) delete process.env.GH_REPO;
+      else process.env.GH_REPO = originalGhRepo;
+    }
+  });
+
   it("detects whether the supplied cwd is inside a git repository", () => {
     execSyncMock.mockReturnValueOnce("true\n");
     expect(isGitRepo("/tmp/repository")).toBe(true);

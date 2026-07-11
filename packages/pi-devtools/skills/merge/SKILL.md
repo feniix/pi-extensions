@@ -50,6 +50,7 @@ Call the appropriate tool with:
 
 Branch first on `mergeStatus` before interpreting any cleanup fields:
 - When `mergeStatus` is `pending`, the merge is queued or auto-merge is pending. Explicitly report that it is pending and that cleanup was skipped; do not report the PR as merged or describe cleanup as incomplete after a successful merge.
+- When `mergeStatus` is `unknown`, the merge command was accepted but its result could not be confirmed. Report the uncertainty and skipped cleanup, and do not retry the merge automatically.
 - Only when `mergeStatus` is `merged`, report the successful merge and then inspect `remoteCleanup` and `localCleanup` separately. `remoteCleanup` reports whether the remote head ref was deleted, skipped, or failed. `localCleanup` reports whether the local branch was deleted, retained by one or more worktrees, skipped, or failed. When it is `retained`, report each retaining worktree path and state. Use `cleanupComplete` to summarize whether all requested cleanup completed.
 
 Only for `mergeStatus: merged`, a retained local branch, skipped cleanup, or cleanup failure is incomplete cleanup after a successful merge, not a merge failure. Clearly report any recommended manual follow-up. Do not switch to or update the default branch after merging; it may be checked out in another worktree.
@@ -99,6 +100,6 @@ User: Can I merge this PR?
 
 - Always check CI status before merging
 - Default to squash merge for cleaner history
-- Always branch first on `mergeStatus`; report `pending` as queued/auto-merge pending with cleanup skipped
+- Always branch first on `mergeStatus`; report `pending` as queued/auto-merge pending and `unknown` as unconfirmed, both with cleanup skipped
 - Only for `mergeStatus: merged`, inspect and report `remoteCleanup` and `localCleanup` separately and describe partial cleanup without misreporting the successful merge as failed
 - If the merge itself fails, show the error and suggest solutions (e.g., resolve conflicts)

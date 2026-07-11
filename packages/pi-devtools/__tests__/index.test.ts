@@ -59,6 +59,10 @@ describe("pi-devtools", () => {
         expect(resource.indexOf("mergeStatus")).toBeLessThan(resource.indexOf("remoteCleanup"));
         expect(resource).toMatch(/pending[\s\S]*queued|queued[\s\S]*pending/i);
         expect(resource).toMatch(/pending[\s\S]*cleanup (?:was )?skipped/i);
+        expect(resource).toMatch(
+          /unknown[\s\S]*(?:could not be confirmed|unconfirmed)[\s\S]*cleanup (?:was )?skipped/i,
+        );
+        expect(resource).toMatch(/unknown[\s\S]*(?:do not|must not)[\s\S]*retr(?:y|ied)/i);
         expect(resource).toMatch(/only (?:when|for)[\s\S]*merged[\s\S]*incomplete cleanup/i);
         expect(resource).toMatch(/retained local branch/i);
         expect(resource).toMatch(/merge (?:still |remains )?successful|successful merge/i);

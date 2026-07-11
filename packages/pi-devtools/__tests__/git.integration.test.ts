@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -71,6 +71,21 @@ describe("pi-devtools git integration", () => {
 
     it("throws error for invalid command", () => {
       expect(() => execGit("git invalid-command")).toThrow("Git error");
+    });
+
+    it("ignores an inherited GIT_DIR when an explicit cwd is supplied", () => {
+      const otherRepo = mkdtempSync(join(tmpdir(), "pi-devtools-other-repo-"));
+      const originalGitDir = process.env.GIT_DIR;
+      try {
+        execSync("git init -b main", { cwd: otherRepo, stdio: "pipe" });
+        process.env.GIT_DIR = join(otherRepo, ".git");
+
+        expect(execGit("git rev-parse --show-toplevel", tempDir)).toBe(realpathSync(tempDir));
+      } finally {
+        if (originalGitDir === undefined) delete process.env.GIT_DIR;
+        else process.env.GIT_DIR = originalGitDir;
+        rmSync(otherRepo, { recursive: true, force: true });
+      }
     });
 
     it("throws error when not in a git repo", () => {
@@ -315,7 +330,42 @@ describe("pi-devtools git integration", () => {
     });
   });
 
+  describe("version-file path isolation", () => {
+    it("rejects absolute and symlinked files outside the active cwd", () => {
+      const outsideDir = mkdtempSync(join(tmpdir(), "pi-devtools-outside-version-"));
+      const outsideFile = join(outsideDir, "version.json");
+      const linkedFile = join(tempDir, "linked-version.json");
+      writeFileSync(outsideFile, '{"version":"9.0.0"}\n');
+      symlinkSync(outsideFile, linkedFile);
+
+      try {
+        const absoluteResult = bumpVersionTool("9.1.0", outsideFile, tempDir);
+        const symlinkResult = bumpVersionTool("9.1.0", "linked-version.json", tempDir);
+
+        expect(absoluteResult).toEqual(expect.objectContaining({ isError: true }));
+        expect(absoluteResult.details.error).toBe("path_outside_worktree");
+        expect(symlinkResult).toEqual(expect.objectContaining({ isError: true }));
+        expect(symlinkResult.details.error).toBe("path_outside_worktree");
+        expect(JSON.parse(readFileSync(outsideFile, "utf-8")).version).toBe("9.0.0");
+      } finally {
+        rmSync(linkedFile, { force: true });
+        rmSync(outsideDir, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe("mergePrTool worktree-safe cleanup integration", () => {
+    it("deletes an unoccupied local branch before reporting it deleted", () => {
+      const branch = "feature/unoccupied-cleanup";
+      execSync(`git branch ${branch}`, { cwd: tempDir, stdio: "pipe" });
+
+      const result = withFakeMergeGh(branch, () => mergePrTool(1, false, true, undefined, undefined, tempDir));
+
+      expect(result.isError).toBeUndefined();
+      expect(result.details.localCleanup).toEqual({ status: "deleted", branch });
+      expect(() => execGit(`git show-ref --verify refs/heads/${branch}`, tempDir)).toThrow("Git error");
+    });
+
     it("retains a branch occupied by the active linked worktree", () => {
       const linkedDir = join(tmpdir(), `pi-devtools-merge-active-${Date.now()}`);
       try {

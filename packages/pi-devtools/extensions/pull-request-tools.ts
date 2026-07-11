@@ -360,6 +360,31 @@ function formatMergeResult(
   );
 }
 
+function formatUnknownMergeResult(prNumber: number, prData: PullRequestInfo, error: unknown): ToolResult {
+  const confirmationError = errorMessage(error);
+  const remoteCleanup: RemoteCleanup = { status: "skipped", reason: "merge_confirmation_failed" };
+  const localCleanup: LocalCleanup = { status: "skipped", reason: "merge_confirmation_failed" };
+  const mergeContract = {
+    mergeStatus: "unknown",
+    state: null,
+    remoteCleanup,
+    localCleanup,
+    cleanupComplete: false,
+  };
+  return successResult(
+    `Merge command was accepted for PR #${prNumber}, but the resulting PR state could not be confirmed; cleanup was not run.\nMerge contract: ${JSON.stringify(mergeContract)}`,
+    {
+      prNumber,
+      ...mergeContract,
+      title: prData.title,
+      url: prData.url,
+      confirmationError,
+      deletedBranch: false,
+      cleanupSummary: "remote skipped; local skipped",
+    },
+  );
+}
+
 function formatPendingMergeResult(prNumber: number, prData: PullRequestInfo): ToolResult {
   const titleSuffix = prData.title ? `: ${prData.title}` : "";
   const urlSuffix = prData.url ? `\n${prData.url}` : "";
@@ -405,7 +430,12 @@ export function mergePrTool(
 
     execGh(buildMergeCommand(num, squash, commitTitle, commitMessage), cwd);
 
-    const mergedPrData = getPullRequestInfo(num, cwd);
+    let mergedPrData: PullRequestInfo;
+    try {
+      mergedPrData = getPullRequestInfo(num, cwd);
+    } catch (error) {
+      return formatUnknownMergeResult(num, prData, error);
+    }
     if (mergedPrData.state !== "MERGED") {
       return formatPendingMergeResult(num, mergedPrData);
     }

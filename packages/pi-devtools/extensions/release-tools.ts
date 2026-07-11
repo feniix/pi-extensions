@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { execGh, execGit } from "./git.js";
 import { errorResult, shellQuote, successResult, type ToolResult } from "./shared.js";
 
@@ -117,21 +117,47 @@ export function analyzeCommitsTool(cwd?: string): ToolResult {
   }
 }
 
+function isWithinDirectory(directory: string, target: string): boolean {
+  const relativePath = relative(directory, target);
+  return (
+    relativePath === "" || (!isAbsolute(relativePath) && relativePath !== ".." && !relativePath.startsWith(`..${sep}`))
+  );
+}
+
 export function bumpVersionTool(newVersion: string, file = "package.json", cwd?: string): ToolResult {
   try {
-    const resolvedFile = resolve(cwd ?? process.cwd(), file);
+    const workingDirectory = realpathSync(cwd ?? process.cwd());
+    if (isAbsolute(file)) {
+      return errorResult(
+        `Version file must be relative to the active working directory: ${file}`,
+        "path_outside_worktree",
+      );
+    }
+
+    const resolvedFile = resolve(workingDirectory, file);
+    if (!isWithinDirectory(workingDirectory, resolvedFile)) {
+      return errorResult(`Version file is outside the active working directory: ${file}`, "path_outside_worktree");
+    }
     if (!existsSync(resolvedFile)) {
       return errorResult(`File not found: ${file}`, "file_not_found");
     }
 
-    const pkg = JSON.parse(readFileSync(resolvedFile, "utf-8"));
+    const canonicalFile = realpathSync(resolvedFile);
+    if (!isWithinDirectory(workingDirectory, canonicalFile)) {
+      return errorResult(
+        `Version file resolves outside the active working directory: ${file}`,
+        "path_outside_worktree",
+      );
+    }
+
+    const pkg = JSON.parse(readFileSync(canonicalFile, "utf-8"));
     if (typeof pkg.version !== "string") {
       return errorResult(`No version field found in ${file}`, "no_version_field");
     }
 
     const oldVersion = pkg.version;
     pkg.version = newVersion;
-    writeFileSync(resolvedFile, `${JSON.stringify(pkg, null, 2)}\n`, "utf-8");
+    writeFileSync(canonicalFile, `${JSON.stringify(pkg, null, 2)}\n`, "utf-8");
 
     return successResult(`Updated ${file}: ${oldVersion} → ${newVersion}`, { oldVersion, newVersion, file });
   } catch (error) {

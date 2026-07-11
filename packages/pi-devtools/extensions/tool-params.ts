@@ -43,7 +43,9 @@ export const emptyParams = Type.Object({});
 
 export const bumpVersionParams = Type.Object({
   newVersion: Type.String({ description: "New version (e.g., 1.2.3)" }),
-  file: Type.Optional(Type.String({ description: "File to update (default: package.json)" })),
+  file: Type.Optional(
+    Type.String({ description: "File relative to the active working directory (default: package.json)" }),
+  ),
 });
 
 export const createReleaseParams = Type.Object({
