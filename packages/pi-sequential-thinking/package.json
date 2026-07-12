@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-sequential-thinking",
-  "version": "5.0.2",
+  "version": "5.0.3",
   "description": "Sequential Thinking extension for pi — structured progressive thinking through defined stages, also runnable as an MCP stdio server",
   "keywords": [
     "pi",
