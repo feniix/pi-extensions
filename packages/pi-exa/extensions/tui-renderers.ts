@@ -68,6 +68,9 @@ function makeSearchCollapsed(text: string): string {
 function makeFetchCollapsed(text: string): string {
   const titleMatch = text.match(/^#\s*(.+)$/m);
   const urlMatch = text.match(/^URL:\s*(.+)$/m);
+  if (!titleMatch && !urlMatch) {
+    return `${formatCollapsed(text)}\nctrl+o → expand`;
+  }
   const title = titleMatch?.[1] ?? "(no title)";
   const url = urlMatch?.[1] ?? "";
   let out = `# ${title}`;

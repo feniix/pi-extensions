@@ -145,6 +145,31 @@ describe("pi-exa extension", () => {
     expect(toolNames).not.toContain("web_research_exa");
   });
 
+  it("attaches renderers to Exa API tools while preserving Pi metadata", () => {
+    const mockPi = createMockPi({
+      "--exa-enable-advanced": true,
+      "--exa-enable-research": true,
+    });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    for (const toolName of [
+      "web_search_exa",
+      "web_fetch_exa",
+      "web_answer_exa",
+      "web_find_similar_exa",
+      "web_research_exa",
+      "web_search_advanced_exa",
+    ]) {
+      const tool = getRegisteredTool(mockPi, toolName);
+      expect(tool?.renderCall).toBeTypeOf("function");
+      expect(tool?.renderResult).toBeTypeOf("function");
+    }
+
+    expect(getRegisteredTool(mockPi, "web_search_exa")?.promptGuidelines).toBeDefined();
+    expect(getRegisteredTool(mockPi, "exa_research_step")?.renderCall).toBeUndefined();
+    expect(getRegisteredTool(mockPi, "exa_research_step")?.renderResult).toBeUndefined();
+  });
+
   it("executes research planning tools without an Exa API key", async () => {
     const mockPi = createMockPi();
     exaExtension(mockPi as unknown as ExtensionAPI);
