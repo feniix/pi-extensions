@@ -4,6 +4,25 @@ All notable changes to `@feniix/pi-exa` are recorded in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [5.1.0] - 2026-07-12
+
+### Added
+
+- **TUI renderers for all six Exa tools in pi's interactive mode.** `web_search_exa`, `web_fetch_exa`, `web_answer_exa`, `web_find_similar_exa`, `web_research_exa`, and `web_search_advanced_exa` now render compact, collapsible cards instead of raw JSON — a one-line call summary (query/URL/filters) and a collapsed result view (titles + URLs for searches, title + URL for fetches, a short excerpt for answer/research) that expands with `ctrl+o`. The renderers live in `extensions/tui-renderers.ts`, are attached via `hostExtras.pi` in the extension entry point, and are only loaded by the pi host — the MCP server build excludes them and the package `exports` map them to `null`, so MCP consumers never need `@earendil-works/pi-tui`.
+- **`@earendil-works/pi-tui` as an optional peer dependency.** Declared `optional` in `peerDependenciesMeta`; only the pi host path requires it.
+
+### Security
+
+- **Terminal escape-sequence injection in the TUI renderers (CWE-150).** Exa result text is built from web-page content (titles, URLs, bodies), which can carry ANSI/OSC escape sequences. The custom renderers replaced pi's default renderer, which strips such sequences (`stripAnsi` + `sanitizeBinaryOutput`), so without neutralization a malicious page could inject escapes to spoof the terminal review surface. The renderers now strip ANSI/OSC sequences and C0/C1/DEL control bytes (preserving tab/newline) from all result text and from untrusted call args before display.
+
+### Fixed
+
+- **Collapsed fetch failures stayed visible.** Non-page `web_fetch_exa` results (missing API key, timeout, cancellation) are preserved in the collapsed view instead of being flattened to a `# (no title)` placeholder.
+
+### Changed
+
+- **`@feniix/bridgekit` bumped `^0.13.0` → `^0.15.0`** for host renderer support.
+
 ## [5.0.1] - 2026-06-15
 
 ### Fixed
