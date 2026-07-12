@@ -69,7 +69,7 @@
     "@earendil-works/pi-tui": "*"
   },
   "dependencies": {
-    "@feniix/bridgekit": "^0.13.0",
+    "@feniix/bridgekit": "^0.15.0",
     "exa-js": "^2.8.0",
     "typebox": "^1.1.31"
   },
