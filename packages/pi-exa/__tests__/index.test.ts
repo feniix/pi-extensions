@@ -20,6 +20,13 @@ describe("pi-exa", () => {
       expect(pkg.pi.extensions).toContain("./extensions/index.ts");
     });
 
+    it("keeps the Pi-only renderer module private", () => {
+      const pkg = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8"));
+
+      expect(pkg.exports["./extensions/tui-renderers"]).toBeNull();
+      expect(pkg.exports["./extensions/tui-renderers.js"]).toBeNull();
+    });
+
     it("should have exa-js dependency", () => {
       const pkg = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8"));
       expect(pkg.dependencies).toHaveProperty("exa-js");

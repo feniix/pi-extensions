@@ -47,6 +47,8 @@
       "import": "./dist/extensions/tools.js"
     },
     "./package.json": "./package.json",
+    "./extensions/tui-renderers": null,
+    "./extensions/tui-renderers.js": null,
     "./extensions/*.js": {
       "types": "./dist/extensions/*.d.ts",
       "import": "./dist/extensions/*.js"
