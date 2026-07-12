@@ -9,7 +9,6 @@ type PullRequestInfo = {
   headRefName?: string;
   headRefOid?: string;
   headRepository?: {
-    id?: string;
     name?: string;
     nameWithOwner?: string;
   } | null;
