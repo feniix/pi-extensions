@@ -13,8 +13,31 @@ const MAX_EXPANDED_CHARS = 8000;
 const MAX_COLLAPSED_CHARS = 300;
 const MAX_COLLAPSED_LINES = 8;
 
+// Exa result text is built from web-page content (titles, URLs, bodies), so it
+// can carry ANSI/OSC escape sequences and other control bytes. pi's default
+// tool renderer strips these before display; these custom renderers replace
+// that path and must neutralize them themselves — otherwise a malicious page
+// could inject escapes to spoof the terminal review surface. Mirrors the
+// `stripAnsi` + `sanitizeBinaryOutput` step in pi-coding-agent's render-utils.
+//
+// Stripping control codes is the whole point of these two patterns. They use
+// RegExp(string) with ASCII escapes (not raw bytes) so the source can't be
+// corrupted by tooling; useRegexLiterals is suppressed for the same reason.
+// biome-ignore lint/complexity/useRegexLiterals: string form keeps control-char classes as ASCII escapes, not raw bytes
+const ANSI_PATTERN = new RegExp(
+  "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d/#&.:=?%@~_]+)*|[a-zA-Z\\d]+(?:;[-a-zA-Z\\d/#&.:=?%@~_]*)*)?\\u0007)|(?:(?:\\d{1,4}(?:;\\d{0,4})*)?[\\dA-PR-TZcf-ntqry=><~]))",
+  "g",
+);
+// Strip remaining C0 (except \t and \n) plus C1/DEL control bytes; \r is dropped too.
+// biome-ignore lint/complexity/useRegexLiterals: string form keeps the control-char class as ASCII escapes, not raw bytes
+const CONTROL_PATTERN = new RegExp("[\\u0000-\\u0008\\u000B-\\u001F\\u007F-\\u009F]", "g");
+
+function sanitizeForDisplay(text: string): string {
+  return text.replace(ANSI_PATTERN, "").replace(CONTROL_PATTERN, "");
+}
+
 function getTextContent(result: { content?: Array<{ type: string; text?: string }> }): string {
-  return result.content?.map((c) => (c.type === "text" ? c.text : "")).join("\n") ?? "";
+  return sanitizeForDisplay(result.content?.map((c) => (c.type === "text" ? c.text : "")).join("\n") ?? "");
 }
 
 function truncateText(text: string, maxChars: number): string {
@@ -86,7 +109,7 @@ function makeFetchCollapsed(text: string): string {
 function renderSearchCall(toolName: string) {
   return (args: any, theme: any, context: any) => {
     const text = context.lastComponent ?? new Text("", 0, 0);
-    const query = args.query ?? "";
+    const query = sanitizeForDisplay(args.query ?? "");
     const num = args.numResults ?? "";
     const numStr = num ? ` (${num} results)` : "";
     text.setText(`${theme.fg("toolTitle", theme.bold(`${toolName} `))} "${query}"${numStr}`);
@@ -107,7 +130,7 @@ function renderFetchCall(toolName: string) {
 function renderAnswerCall(toolName: string) {
   return (args: any, theme: any, context: any) => {
     const text = context.lastComponent ?? new Text("", 0, 0);
-    const query = args.query ?? "";
+    const query = sanitizeForDisplay(args.query ?? "");
     text.setText(`${theme.fg("toolTitle", theme.bold(`${toolName} `))} "${query}"`);
     return text;
   };
@@ -116,7 +139,7 @@ function renderAnswerCall(toolName: string) {
 function renderSimilarCall(toolName: string) {
   return (args: any, theme: any, context: any) => {
     const text = context.lastComponent ?? new Text("", 0, 0);
-    const url = args.url ?? "";
+    const url = sanitizeForDisplay(args.url ?? "");
     const num = args.numResults ?? "";
     const numStr = num ? ` (${num} results)` : "";
     text.setText(`${theme.fg("toolTitle", theme.bold(`${toolName} `))} ${url}${numStr}`);
@@ -127,8 +150,8 @@ function renderSimilarCall(toolName: string) {
 function renderResearchCall(toolName: string) {
   return (args: any, theme: any, context: any) => {
     const text = context.lastComponent ?? new Text("", 0, 0);
-    const query = args.query ?? "";
-    const type = args.type ?? "";
+    const query = sanitizeForDisplay(args.query ?? "");
+    const type = sanitizeForDisplay(args.type ?? "");
     const typeStr = type ? ` [${type}]` : "";
     text.setText(`${theme.fg("toolTitle", theme.bold(`${toolName} `))} "${query}"${typeStr}`);
     return text;
@@ -138,9 +161,9 @@ function renderResearchCall(toolName: string) {
 function renderAdvancedSearchCall(toolName: string) {
   return (args: any, theme: any, context: any) => {
     const text = context.lastComponent ?? new Text("", 0, 0);
-    const query = args.query ?? "";
+    const query = sanitizeForDisplay(args.query ?? "");
     const filters: string[] = [];
-    if (args.category) filters.push(`cat:${args.category}`);
+    if (args.category) filters.push(`cat:${sanitizeForDisplay(String(args.category))}`);
     if (args.includeDomains?.length) filters.push(`domains:${args.includeDomains.length}`);
     if (args.startPublishedDate || args.endPublishedDate) filters.push("date");
     const filterStr = filters.length ? ` (${filters.join(", ")})` : "";
