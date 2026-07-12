@@ -78,4 +78,31 @@ describe("pi-exa TUI renderers", () => {
     expect(component).toBe(previous);
     expect(renderComponent(component)).toContain("new answer");
   });
+
+  // Exa result text comes from web pages, so a malicious title/body could carry
+  // ANSI/OSC escapes to spoof the terminal. The renderers must strip them (pi's
+  // default renderer does; these replace that path). Uses String.fromCharCode to
+  // keep raw control bytes out of the test source.
+  const ESC = String.fromCharCode(0x1b);
+  const BEL = String.fromCharCode(0x07);
+
+  it.each([
+    ["web_fetch_exa", `# ${ESC}[31mEvil${ESC}[0m${ESC}]0;hijack${BEL} Title\nURL: https://ok.test`, true],
+    ["web_search_exa", `Title: ${ESC}[2J${ESC}[HSpoofed\nURL: https://ok.test`, false],
+    ["web_answer_exa", `${ESC}[1;31mFake answer${ESC}[0m`, false],
+    ["web_research_exa", `${ESC}]52;c;cG9w="${BEL}research`, false],
+  ])("strips terminal escapes from collapsed %s output", (toolName, payload) => {
+    const rendered = renderComponent(renderResult(toolName, payload));
+    expect(rendered).not.toContain(ESC);
+    expect(rendered).not.toContain(BEL);
+  });
+
+  it("strips terminal escapes from expanded output while keeping visible text", () => {
+    const rendered = renderComponent(
+      renderResult("web_research_exa", `${ESC}[31mVisible body${ESC}[0m\nsecond line`, true),
+    );
+    expect(rendered).not.toContain(ESC);
+    expect(rendered).toContain("Visible body");
+    expect(rendered).toContain("second line");
+  });
 });
