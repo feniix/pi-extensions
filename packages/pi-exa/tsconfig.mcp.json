@@ -9,5 +9,5 @@
     "rootDir": "."
   },
   "include": ["extensions/**/*.ts"],
-  "exclude": ["__tests__", "dist", "extensions/index.ts"]
+  "exclude": ["__tests__", "dist", "extensions/index.ts", "extensions/tui-renderers.ts"]
 }

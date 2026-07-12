@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-exa",
-  "version": "5.0.1",
+  "version": "5.1.0",
   "description": "Exa API extension for pi — web search, content fetching, and advanced search via Exa AI",
   "keywords": [
     "pi",
@@ -47,6 +47,8 @@
       "import": "./dist/extensions/tools.js"
     },
     "./package.json": "./package.json",
+    "./extensions/tui-renderers": null,
+    "./extensions/tui-renderers.js": null,
     "./extensions/*.js": {
       "types": "./dist/extensions/*.d.ts",
       "import": "./dist/extensions/*.js"
@@ -65,10 +67,11 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
   },
   "dependencies": {
-    "@feniix/bridgekit": "^0.13.0",
+    "@feniix/bridgekit": "^0.15.0",
     "exa-js": "^2.8.0",
     "typebox": "^1.1.31"
   },
@@ -91,6 +94,9 @@
       "optional": true
     },
     "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
       "optional": true
     }
   }
