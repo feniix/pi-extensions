@@ -47,6 +47,8 @@ describe("pi-devtools git integration", () => {
 
     // Initialize git repo
     execSync("git init -b main", { cwd: tempDir, stdio: "pipe" });
+    execSync("git config commit.gpgsign false", { cwd: tempDir, stdio: "pipe" });
+    execSync("git config tag.gpgsign false", { cwd: tempDir, stdio: "pipe" });
     execSync("git config user.email 'test@test.com'", { cwd: tempDir, stdio: "pipe" });
     execSync("git config user.name 'Test User'", { cwd: tempDir, stdio: "pipe" });
 
@@ -64,6 +66,11 @@ describe("pi-devtools git integration", () => {
   });
 
   describe("execGit", () => {
+    it("disables commit and tag signing in the disposable fixture repo", () => {
+      expect(execGit("git config --local --get commit.gpgsign", tempDir)).toBe("false");
+      expect(execGit("git config --local --get tag.gpgsign", tempDir)).toBe("false");
+    });
+
     it("executes git command successfully in temp repo", () => {
       const result = execGit(`git -C ${tempDir} status`);
       expect(result).toBeDefined();
@@ -125,7 +132,7 @@ describe("pi-devtools git integration", () => {
       const linkedDir = join(tmpdir(), `pi-devtools-active-${Date.now()}`);
       try {
         execSync(`git worktree add -b feature/active ${JSON.stringify(linkedDir)}`, { cwd: tempDir, stdio: "pipe" });
-        execSync("git -c tag.gpgSign=false tag v1.0.0", { cwd: tempDir, stdio: "pipe" });
+        execSync("git tag v1.0.0", { cwd: tempDir, stdio: "pipe" });
         writeFileSync(join(tempDir, "version.json"), '{"version":"1.0.0"}\n');
         writeFileSync(join(linkedDir, "version.json"), '{"version":"2.0.0"}\n');
         writeFileSync(join(linkedDir, "linked-only.txt"), "linked worktree");
@@ -292,16 +299,16 @@ describe("pi-devtools git integration", () => {
     });
 
     it("returns latest tag", () => {
-      execSync(`git -C ${tempDir} -c tag.gpgSign=false tag v1.0.0`);
+      execSync(`git -C ${tempDir} tag v1.0.0`);
 
       const tags = execGit(`git -C ${tempDir} tag -l 'v*' | sort -rV | head -1`);
       expect(tags).toBe("v1.0.0");
     });
 
     it("returns correct tag when multiple exist", () => {
-      execSync(`git -C ${tempDir} -c tag.gpgSign=false tag v1.0.0`);
-      execSync(`git -C ${tempDir} -c tag.gpgSign=false tag v2.0.0`);
-      execSync(`git -C ${tempDir} -c tag.gpgSign=false tag v1.5.0`);
+      execSync(`git -C ${tempDir} tag v1.0.0`);
+      execSync(`git -C ${tempDir} tag v2.0.0`);
+      execSync(`git -C ${tempDir} tag v1.5.0`);
 
       const tags = execGit(`git -C ${tempDir} tag -l 'v*' | sort -rV | head -1`);
       expect(tags).toBe("v2.0.0");
@@ -319,7 +326,7 @@ describe("pi-devtools git integration", () => {
     });
 
     it("counts commits since tag", () => {
-      execSync(`git -C ${tempDir} -c tag.gpgSign=false tag v1.0.0`);
+      execSync(`git -C ${tempDir} tag v1.0.0`);
 
       writeFileSync(join(tempDir, "a.txt"), "a");
       execSync("git add .", { cwd: tempDir, stdio: "pipe" });
