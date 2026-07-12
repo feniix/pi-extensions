@@ -1,9 +1,42 @@
 import { execSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { execGh, execGit, getDefaultBranch, getGitContext } from "../extensions/git.js";
+import { execGh, execGit, getDefaultBranch, getGitContext, getWorktreeContext, isGitRepo } from "../extensions/git.js";
+import { bumpVersionTool, commitTool, getLatestTagTool, mergePrTool, repoInfoTool } from "../extensions/index.js";
+
+function withFakeMergeGh<T>(headRefName: string, run: () => T): T {
+  const originalPath = process.env.PATH;
+  const fakeBinDir = mkdtempSync(join(tmpdir(), "pi-devtools-merge-gh-"));
+  const ghPath = join(fakeBinDir, "gh");
+  const markerPath = join(fakeBinDir, "merged");
+  writeFileSync(
+    ghPath,
+    `#!/bin/sh
+marker=${JSON.stringify(markerPath)}
+oid=$(git rev-parse ${JSON.stringify(`refs/heads/${headRefName}`)})
+if [ "$1 $2" = "pr view" ]; then
+  if [ -f "$marker" ]; then state=MERGED; mergedAt='"2026-07-11T12:00:00Z"'; rm -f "$marker"; else state=OPEN; mergedAt=null; fi
+  printf '{"title":"Integration PR","url":"https://example.test/base/repo/pull/1","state":"%s","mergedAt":%s,"headRefName":"${headRefName}","headRefOid":"%s","headRepository":{"id":"R_integration","name":"repo","nameWithOwner":"base/repo"},"headRepositoryOwner":{"login":"base"},"isCrossRepository":false}\\n' "$state" "$mergedAt" "$oid"
+  exit 0
+fi
+if [ "$1 $2" = "repo view" ]; then printf '%s\\n' '{"nameWithOwner":"base/repo","url":"https://example.test/base/repo"}'; exit 0; fi
+if [ "$1 $2" = "pr merge" ]; then touch "$marker"; exit 0; fi
+if [ "$1" = "api" ]; then printf '{"object":{"sha":"%s"}}\\n' "$oid"; exit 0; fi
+exit 2
+`,
+    { encoding: "utf-8", mode: 0o755 },
+  );
+  process.env.PATH = `${fakeBinDir}:${originalPath ?? ""}`;
+
+  try {
+    return run();
+  } finally {
+    process.env.PATH = originalPath;
+    rmSync(fakeBinDir, { recursive: true, force: true });
+  }
+}
 
 describe("pi-devtools git integration", () => {
   let tempDir: string;
@@ -40,6 +73,21 @@ describe("pi-devtools git integration", () => {
       expect(() => execGit("git invalid-command")).toThrow("Git error");
     });
 
+    it("ignores an inherited GIT_DIR when an explicit cwd is supplied", () => {
+      const otherRepo = mkdtempSync(join(tmpdir(), "pi-devtools-other-repo-"));
+      const originalGitDir = process.env.GIT_DIR;
+      try {
+        execSync("git init -b main", { cwd: otherRepo, stdio: "pipe" });
+        process.env.GIT_DIR = join(otherRepo, ".git");
+
+        expect(execGit("git rev-parse --show-toplevel", tempDir)).toBe(realpathSync(tempDir));
+      } finally {
+        if (originalGitDir === undefined) delete process.env.GIT_DIR;
+        else process.env.GIT_DIR = originalGitDir;
+        rmSync(otherRepo, { recursive: true, force: true });
+      }
+    });
+
     it("throws error when not in a git repo", () => {
       // Create a non-git directory using mktemp
       const nonGitDir = execSync("mktemp -d", { encoding: "utf-8" }).trim();
@@ -56,13 +104,103 @@ describe("pi-devtools git integration", () => {
   });
 
   describe("session git context", () => {
-    it("builds context inside a git repository", () => {
-      const originalCwd = process.cwd();
-      process.chdir(tempDir);
+    it("builds context for an explicit repository cwd without changing process cwd", () => {
+      expect(getGitContext(tempDir)).toContain("Branch: main");
+    });
+
+    it("does not fall back to the process cwd for a non-repository cwd", () => {
+      const nonGitDir = mkdtempSync(join(tmpdir(), "pi-devtools-non-git-"));
       try {
-        expect(getGitContext()).toContain("Branch: main");
+        expect(isGitRepo(nonGitDir)).toBe(false);
+        expect(getGitContext(nonGitDir)).toBe("");
+        expect(() => getWorktreeContext(nonGitDir)).toThrow("Git error");
       } finally {
-        process.chdir(originalCwd);
+        rmSync(nonGitDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("worktree context", () => {
+    it("scopes workflow, tag analysis, and version-file mutations to a linked worktree cwd", () => {
+      const linkedDir = join(tmpdir(), `pi-devtools-active-${Date.now()}`);
+      try {
+        execSync(`git worktree add -b feature/active ${JSON.stringify(linkedDir)}`, { cwd: tempDir, stdio: "pipe" });
+        execSync("git -c tag.gpgSign=false tag v1.0.0", { cwd: tempDir, stdio: "pipe" });
+        writeFileSync(join(tempDir, "version.json"), '{"version":"1.0.0"}\n');
+        writeFileSync(join(linkedDir, "version.json"), '{"version":"2.0.0"}\n');
+        writeFileSync(join(linkedDir, "linked-only.txt"), "linked worktree");
+
+        const commit = commitTool("test: linked cwd", ["linked-only.txt"], true, linkedDir);
+        const version = bumpVersionTool("2.1.0", "version.json", linkedDir);
+        const info = repoInfoTool(linkedDir);
+        const tag = getLatestTagTool(linkedDir);
+
+        expect(commit.isError).toBeUndefined();
+        expect(version.isError).toBeUndefined();
+        expect(info.details).toEqual(
+          expect.objectContaining({
+            branch: "feature/active",
+            worktreeRoot: realpathSync(linkedDir),
+            isLinkedWorktree: true,
+          }),
+        );
+        expect(tag.details).toEqual(expect.objectContaining({ tag: "v1.0.0", commitsSince: 1 }));
+        expect(JSON.parse(readFileSync(join(linkedDir, "version.json"), "utf-8")).version).toBe("2.1.0");
+        expect(JSON.parse(readFileSync(join(tempDir, "version.json"), "utf-8")).version).toBe("1.0.0");
+        expect(execGit("git log -1 --format=%s", linkedDir)).toBe("test: linked cwd");
+        expect(execGit("git log -1 --format=%s", tempDir)).toBe("initial commit");
+      } finally {
+        try {
+          execSync(`git worktree remove --force ${JSON.stringify(linkedDir)}`, { cwd: tempDir, stdio: "pipe" });
+        } catch {
+          rmSync(linkedDir, { recursive: true, force: true });
+        }
+      }
+    });
+
+    it("discovers canonical primary and linked topology, including a detached linked HEAD and spaces", () => {
+      const linkedDir = join(tmpdir(), `pi devtools linked ${Date.now()}`);
+      try {
+        execSync(`git worktree add -b feature/worktree ${JSON.stringify(linkedDir)}`, { cwd: tempDir, stdio: "pipe" });
+
+        const linkedRoot = execGit("git rev-parse --path-format=absolute --show-toplevel", linkedDir);
+        const primary = getWorktreeContext(tempDir);
+        expect(primary.worktreeRoot).toBe(execGit("git rev-parse --path-format=absolute --show-toplevel", tempDir));
+        expect(primary.privateGitDir).toBe(primary.commonGitDir);
+        expect(primary.gitDir).toBe(primary.privateGitDir);
+        expect(primary.isLinkedWorktree).toBe(false);
+        expect(primary.head).toEqual(expect.objectContaining({ branch: "refs/heads/main", detached: false }));
+        expect(primary.worktrees.some((record) => record.worktreeRoot === linkedRoot)).toBe(true);
+
+        execSync("git checkout --detach", { cwd: linkedDir, stdio: "pipe" });
+        execSync("git worktree lock --reason 'integration lock reason' .", { cwd: linkedDir, stdio: "pipe" });
+        const linked = getWorktreeContext(linkedDir);
+        expect(linked.worktreeRoot).toBe(linkedRoot);
+        expect(linked.privateGitDir).not.toBe(linked.commonGitDir);
+        expect(linked.privateGitDir).toContain("/worktrees/");
+        expect(linked.isLinkedWorktree).toBe(true);
+        expect(linked.head).toEqual(expect.objectContaining({ detached: true }));
+        expect(linked.head.branch).toBeUndefined();
+        expect(linked.activeWorktree).toEqual(
+          expect.objectContaining({
+            worktreeRoot: linkedRoot,
+            detached: true,
+            locked: true,
+            lockedReason: "integration lock reason",
+            isActive: true,
+          }),
+        );
+      } finally {
+        try {
+          execSync("git worktree unlock .", { cwd: linkedDir, stdio: "pipe" });
+        } catch {
+          // The fixture may not have reached the lock step.
+        }
+        try {
+          execSync(`git worktree remove --force ${JSON.stringify(linkedDir)}`, { cwd: tempDir, stdio: "pipe" });
+        } catch {
+          rmSync(linkedDir, { recursive: true, force: true });
+        }
       }
     });
   });
@@ -70,7 +208,7 @@ describe("pi-devtools git integration", () => {
   describe("getDefaultBranch", () => {
     it("returns main in repo without origin", () => {
       // In a fresh repo without origin, should return main via fallback
-      const result = getDefaultBranch();
+      const result = getDefaultBranch(tempDir);
       expect(result).toBe("main");
     });
   });
@@ -154,16 +292,16 @@ describe("pi-devtools git integration", () => {
     });
 
     it("returns latest tag", () => {
-      execSync(`git -C ${tempDir} tag v1.0.0`);
+      execSync(`git -C ${tempDir} -c tag.gpgSign=false tag v1.0.0`);
 
       const tags = execGit(`git -C ${tempDir} tag -l 'v*' | sort -rV | head -1`);
       expect(tags).toBe("v1.0.0");
     });
 
     it("returns correct tag when multiple exist", () => {
-      execSync(`git -C ${tempDir} tag v1.0.0`);
-      execSync(`git -C ${tempDir} tag v2.0.0`);
-      execSync(`git -C ${tempDir} tag v1.5.0`);
+      execSync(`git -C ${tempDir} -c tag.gpgSign=false tag v1.0.0`);
+      execSync(`git -C ${tempDir} -c tag.gpgSign=false tag v2.0.0`);
+      execSync(`git -C ${tempDir} -c tag.gpgSign=false tag v1.5.0`);
 
       const tags = execGit(`git -C ${tempDir} tag -l 'v*' | sort -rV | head -1`);
       expect(tags).toBe("v2.0.0");
@@ -181,7 +319,7 @@ describe("pi-devtools git integration", () => {
     });
 
     it("counts commits since tag", () => {
-      execSync(`git -C ${tempDir} tag v1.0.0`);
+      execSync(`git -C ${tempDir} -c tag.gpgSign=false tag v1.0.0`);
 
       writeFileSync(join(tempDir, "a.txt"), "a");
       execSync("git add .", { cwd: tempDir, stdio: "pipe" });
@@ -192,19 +330,161 @@ describe("pi-devtools git integration", () => {
     });
   });
 
-  describe("mergePrTool integration", () => {
-    it("handles pr view command", () => {
-      // This tests the gh pr view command structure
-      const prInfo = execGh("gh pr view 1 --json title,url,state 2>/dev/null || echo '{}'");
-      expect(prInfo).toBeDefined();
+  describe("version-file path isolation", () => {
+    it("rejects absolute and symlinked files outside the active cwd", () => {
+      const outsideDir = mkdtempSync(join(tmpdir(), "pi-devtools-outside-version-"));
+      const outsideFile = join(outsideDir, "version.json");
+      const linkedFile = join(tempDir, "linked-version.json");
+      writeFileSync(outsideFile, '{"version":"9.0.0"}\n');
+      symlinkSync(outsideFile, linkedFile);
+
+      try {
+        const absoluteResult = bumpVersionTool("9.1.0", outsideFile, tempDir);
+        const symlinkResult = bumpVersionTool("9.1.0", "linked-version.json", tempDir);
+
+        expect(absoluteResult).toEqual(expect.objectContaining({ isError: true }));
+        expect(absoluteResult.details.error).toBe("path_outside_worktree");
+        expect(symlinkResult).toEqual(expect.objectContaining({ isError: true }));
+        expect(symlinkResult.details.error).toBe("path_outside_worktree");
+        expect(JSON.parse(readFileSync(outsideFile, "utf-8")).version).toBe("9.0.0");
+      } finally {
+        rmSync(linkedFile, { force: true });
+        rmSync(outsideDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("mergePrTool worktree-safe cleanup integration", () => {
+    it("deletes an unoccupied local branch before reporting it deleted", () => {
+      const branch = "feature/unoccupied-cleanup";
+      execSync(`git branch ${branch}`, { cwd: tempDir, stdio: "pipe" });
+
+      const result = withFakeMergeGh(branch, () => mergePrTool(1, false, true, undefined, undefined, tempDir));
+
+      expect(result.isError).toBeUndefined();
+      expect(result.details.localCleanup).toEqual({ status: "deleted", branch });
+      expect(() => execGit(`git show-ref --verify refs/heads/${branch}`, tempDir)).toThrow("Git error");
+    });
+
+    it("retains a branch occupied by the active linked worktree", () => {
+      const linkedDir = join(tmpdir(), `pi-devtools-merge-active-${Date.now()}`);
+      try {
+        execSync(`git worktree add -b feature/active-cleanup ${JSON.stringify(linkedDir)}`, {
+          cwd: tempDir,
+          stdio: "pipe",
+        });
+
+        const result = withFakeMergeGh("feature/active-cleanup", () =>
+          mergePrTool(1, false, true, undefined, undefined, linkedDir),
+        );
+
+        expect(result.isError).toBeUndefined();
+        expect(result.details.localCleanup).toEqual({
+          status: "retained",
+          branch: "feature/active-cleanup",
+          reason: "branch_occupied_by_worktree",
+          worktrees: [expect.objectContaining({ path: realpathSync(linkedDir), state: "current", isActive: true })],
+        });
+        expect(execGit("git show-ref --verify refs/heads/feature/active-cleanup", tempDir)).not.toBe("");
+      } finally {
+        try {
+          execSync(`git worktree remove --force ${JSON.stringify(linkedDir)}`, { cwd: tempDir, stdio: "pipe" });
+        } catch {
+          rmSync(linkedDir, { recursive: true, force: true });
+        }
+      }
+    });
+
+    it("retains a branch occupied by another real locked linked worktree", () => {
+      const linkedDir = join(tmpdir(), `pi-devtools-merge-locked-${Date.now()}`);
+      try {
+        execSync(`git worktree add -b feature/locked-cleanup ${JSON.stringify(linkedDir)}`, {
+          cwd: tempDir,
+          stdio: "pipe",
+        });
+        execSync("git worktree lock --reason 'integration occupancy' .", { cwd: linkedDir, stdio: "pipe" });
+
+        const result = withFakeMergeGh("feature/locked-cleanup", () =>
+          mergePrTool(1, false, true, undefined, undefined, tempDir),
+        );
+
+        expect(result.isError).toBeUndefined();
+        expect(result.details.localCleanup).toEqual({
+          status: "retained",
+          branch: "feature/locked-cleanup",
+          reason: "branch_occupied_by_worktree",
+          worktrees: [
+            expect.objectContaining({
+              path: realpathSync(linkedDir),
+              state: "locked",
+              locked: true,
+              lockedReason: "integration occupancy",
+            }),
+          ],
+        });
+        expect(execGit("git show-ref --verify refs/heads/feature/locked-cleanup", tempDir)).not.toBe("");
+      } finally {
+        try {
+          execSync("git worktree unlock .", { cwd: linkedDir, stdio: "pipe" });
+        } catch {
+          // The fixture may not have reached the lock step.
+        }
+        try {
+          execSync(`git worktree remove --force ${JSON.stringify(linkedDir)}`, { cwd: tempDir, stdio: "pipe" });
+        } catch {
+          rmSync(linkedDir, { recursive: true, force: true });
+        }
+      }
+    });
+
+    it("conservatively retains a branch claimed by a real prunable worktree record", () => {
+      const linkedDir = join(tmpdir(), `pi-devtools-merge-prunable-${Date.now()}`);
+      try {
+        execSync(`git worktree add -b feature/prunable-cleanup ${JSON.stringify(linkedDir)}`, {
+          cwd: tempDir,
+          stdio: "pipe",
+        });
+        const canonicalLinkedDir = realpathSync(linkedDir);
+        rmSync(linkedDir, { recursive: true, force: true });
+        expect(getWorktreeContext(tempDir).worktrees).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ branch: "refs/heads/feature/prunable-cleanup", prunable: true }),
+          ]),
+        );
+
+        const result = withFakeMergeGh("feature/prunable-cleanup", () =>
+          mergePrTool(1, false, true, undefined, undefined, tempDir),
+        );
+
+        expect(result.isError).toBeUndefined();
+        expect(result.details.localCleanup).toEqual({
+          status: "retained",
+          branch: "feature/prunable-cleanup",
+          reason: "branch_occupied_by_worktree",
+          worktrees: [expect.objectContaining({ path: canonicalLinkedDir, state: "prunable", prunable: true })],
+        });
+        expect(execGit("git show-ref --verify refs/heads/feature/prunable-cleanup", tempDir)).not.toBe("");
+      } finally {
+        rmSync(linkedDir, { recursive: true, force: true });
+        execSync("git worktree prune", { cwd: tempDir, stdio: "pipe" });
+      }
     });
   });
 
   describe("checkCiTool integration", () => {
-    it("handles gh run list command", () => {
-      // Test gh run list command
-      const runs = execGh("gh run list --limit 1 2>/dev/null || echo ''");
-      expect(runs !== undefined).toBe(true);
+    it("handles gh run list command without contacting GitHub", () => {
+      const originalPath = process.env.PATH;
+      const fakeBinDir = mkdtempSync(join(tmpdir(), "pi-devtools-run-gh-"));
+      const ghPath = join(fakeBinDir, "gh");
+      writeFileSync(ghPath, "#!/bin/sh\nprintf '%s\\n' '[]'\n", { encoding: "utf-8", mode: 0o755 });
+      process.env.PATH = `${fakeBinDir}:${originalPath ?? ""}`;
+
+      try {
+        expect(execGh("gh run list --limit 1")).toBe("[]");
+      } finally {
+        process.env.PATH = originalPath;
+        rmSync(fakeBinDir, { recursive: true, force: true });
+      }
     });
   });
 });

@@ -27,7 +27,9 @@ export const createPrParams = Type.Object({
 export const mergePrParams = Type.Object({
   prNumber: Type.Optional(Type.Integer({ description: "PR number (default: current branch PR)" })),
   squash: Type.Optional(Type.Boolean({ description: "Squash merge (default: false)" })),
-  deleteBranch: Type.Optional(Type.Boolean({ description: "Delete source branch after merge (default: true)" })),
+  deleteBranch: Type.Optional(
+    Type.Boolean({ description: "Request best-effort remote and local cleanup after merge (default: true)" }),
+  ),
   commitTitle: Type.Optional(Type.String({ description: "Title for the squash commit" })),
   commitMessage: Type.Optional(Type.String({ description: "Message for the squash commit" })),
 });
@@ -41,7 +43,9 @@ export const emptyParams = Type.Object({});
 
 export const bumpVersionParams = Type.Object({
   newVersion: Type.String({ description: "New version (e.g., 1.2.3)" }),
-  file: Type.Optional(Type.String({ description: "File to update (default: package.json)" })),
+  file: Type.Optional(
+    Type.String({ description: "File relative to the active working directory (default: package.json)" }),
+  ),
 });
 
 export const createReleaseParams = Type.Object({

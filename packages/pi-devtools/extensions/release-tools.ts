@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { execGh, execGit } from "./git.js";
 import { errorResult, shellQuote, successResult, type ToolResult } from "./shared.js";
 
@@ -31,14 +32,14 @@ export function bumpVersion(version: string, type: "major" | "minor" | "patch"):
   }
 }
 
-export function getLatestTagTool(): ToolResult {
+export function getLatestTagTool(cwd?: string): ToolResult {
   try {
-    const tags = execGit("git tag -l 'v*' 'V*' | sort -rV | head -1");
+    const tags = execGit("git tag -l 'v*' 'V*' | sort -rV | head -1", cwd);
     if (!tags) {
       return successResult("No version tags found.", { tag: null });
     }
 
-    const commitCount = execGit(`git log ${tags}..HEAD --oneline | wc -l`).trim();
+    const commitCount = execGit(`git log ${tags}..HEAD --oneline | wc -l`, cwd).trim();
     return successResult(`Latest tag: ${tags}\nCommits since: ${commitCount}`, {
       tag: tags,
       commitsSince: parseInt(commitCount, 10),
@@ -48,18 +49,18 @@ export function getLatestTagTool(): ToolResult {
   }
 }
 
-export function analyzeCommitsTool(): ToolResult {
+export function analyzeCommitsTool(cwd?: string): ToolResult {
   try {
-    const tags = execGit("git tag -l 'v*' 'V*' | sort -rV | head -1");
+    const tags = execGit("git tag -l 'v*' 'V*' | sort -rV | head -1", cwd);
 
     let commitsSince: string[];
     let currentVersion = "0.0.0";
 
     if (tags) {
       currentVersion = tags.replace(/^v/, "");
-      commitsSince = execGit(`git log ${tags}..HEAD --format="%s"`).split("\n").filter(Boolean);
+      commitsSince = execGit(`git log ${tags}..HEAD --format="%s"`, cwd).split("\n").filter(Boolean);
     } else {
-      commitsSince = execGit('git log --format="%s" -n 100').split("\n").filter(Boolean);
+      commitsSince = execGit('git log --format="%s" -n 100', cwd).split("\n").filter(Boolean);
     }
 
     if (commitsSince.length === 0) {
@@ -116,20 +117,47 @@ export function analyzeCommitsTool(): ToolResult {
   }
 }
 
-export function bumpVersionTool(newVersion: string, file = "package.json"): ToolResult {
+function isWithinDirectory(directory: string, target: string): boolean {
+  const relativePath = relative(directory, target);
+  return (
+    relativePath === "" || (!isAbsolute(relativePath) && relativePath !== ".." && !relativePath.startsWith(`..${sep}`))
+  );
+}
+
+export function bumpVersionTool(newVersion: string, file = "package.json", cwd?: string): ToolResult {
   try {
-    if (!existsSync(file)) {
+    const workingDirectory = realpathSync(cwd ?? process.cwd());
+    if (isAbsolute(file)) {
+      return errorResult(
+        `Version file must be relative to the active working directory: ${file}`,
+        "path_outside_worktree",
+      );
+    }
+
+    const resolvedFile = resolve(workingDirectory, file);
+    if (!isWithinDirectory(workingDirectory, resolvedFile)) {
+      return errorResult(`Version file is outside the active working directory: ${file}`, "path_outside_worktree");
+    }
+    if (!existsSync(resolvedFile)) {
       return errorResult(`File not found: ${file}`, "file_not_found");
     }
 
-    const pkg = JSON.parse(readFileSync(file, "utf-8"));
+    const canonicalFile = realpathSync(resolvedFile);
+    if (!isWithinDirectory(workingDirectory, canonicalFile)) {
+      return errorResult(
+        `Version file resolves outside the active working directory: ${file}`,
+        "path_outside_worktree",
+      );
+    }
+
+    const pkg = JSON.parse(readFileSync(canonicalFile, "utf-8"));
     if (typeof pkg.version !== "string") {
       return errorResult(`No version field found in ${file}`, "no_version_field");
     }
 
     const oldVersion = pkg.version;
     pkg.version = newVersion;
-    writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`, "utf-8");
+    writeFileSync(canonicalFile, `${JSON.stringify(pkg, null, 2)}\n`, "utf-8");
 
     return successResult(`Updated ${file}: ${oldVersion} → ${newVersion}`, { oldVersion, newVersion, file });
   } catch (error) {
@@ -143,10 +171,12 @@ export function createReleaseTool(
   body?: string,
   draft = false,
   prerelease = false,
+  cwd?: string,
 ): ToolResult {
   try {
+    const target = execGit("git rev-parse HEAD", cwd);
     let command = `gh release create ${shellQuote(tag)} --title ${shellQuote(title)}`;
-    command += ` --notes ${shellQuote(body ?? "")}`;
+    command += ` --notes ${shellQuote(body ?? "")} --target ${shellQuote(target)}`;
     if (draft) {
       command += " --draft";
     }
@@ -154,7 +184,7 @@ export function createReleaseTool(
       command += " --prerelease";
     }
 
-    const releaseUrl = execGh(command);
+    const releaseUrl = execGh(command, cwd);
     return successResult(`Created release: ${releaseUrl}\n\nTag: ${tag}\nTitle: ${title}`, { tag, title, releaseUrl });
   } catch (error) {
     return errorResult("Failed to create release", error);

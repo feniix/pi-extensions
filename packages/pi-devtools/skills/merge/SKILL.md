@@ -1,12 +1,12 @@
 ---
 name: merge
-description: Merge or squash-merge a pull request and delete the source branch. Use when user says "merge this PR", "squash merge", "md", "smd", or anything about merging pull requests.
+description: Merge or squash-merge a pull request and report best-effort remote and local source-branch cleanup. Use when user says "merge this PR", "squash merge", "md", "smd", or anything about merging pull requests.
 context: fork
 ---
 
 # Merge PR Workflow
 
-Merge or squash-merge a pull request and optionally delete the source branch.
+Merge or squash-merge a pull request and optionally request best-effort source-branch cleanup.
 
 ## Tool Restrictions (Critical)
 
@@ -29,9 +29,9 @@ If user provides PR number, use it. Otherwise:
 **Important**: Always check CI before merging.
 
 Call `devtools_check_ci`:
-- If checks are failing: warn user, ask to proceed or wait
+- If checks are failing or pending: warn the user and ask whether to proceed or wait
 - If checks are passing: continue
-- If no checks: warn user (may need to proceed anyway)
+- If no CI checks exist for the PR: continue without warning or additional confirmation
 
 ### Step 3: Merge PR
 
@@ -43,14 +43,17 @@ Default: Squash merge (cleaner history).
 
 Call the appropriate tool with:
 - `prNumber`: The PR number (or detect from current branch)
-- `deleteBranch`: true (clean up source branch)
+- `deleteBranch`: true to request best-effort remote and local cleanup
 - `squash`: true for squash merge
 
-### Step 4: Cleanup
+### Step 4: Report Merge and Cleanup
 
-After merge:
-1. Checkout main/default branch
-2. Pull to update
+Branch first on `mergeStatus` before interpreting any cleanup fields:
+- When `mergeStatus` is `pending`, the merge is queued or auto-merge is pending. Explicitly report that it is pending and that cleanup was skipped; do not report the PR as merged or describe cleanup as incomplete after a successful merge.
+- When `mergeStatus` is `unknown`, the merge command was accepted but its result could not be confirmed. Report the uncertainty and skipped cleanup, and do not retry the merge automatically.
+- Only when `mergeStatus` is `merged`, report the successful merge and then inspect `remoteCleanup` and `localCleanup` separately. `remoteCleanup` reports whether the remote head ref was deleted, skipped, or failed. `localCleanup` reports whether the local branch was deleted, retained by one or more worktrees, skipped, or failed. When it is `retained`, report each retaining worktree path and state. Use `cleanupComplete` to summarize whether all requested cleanup completed.
+
+Only for `mergeStatus: merged`, a retained local branch, skipped cleanup, or cleanup failure is incomplete cleanup after a successful merge, not a merge failure. Clearly report any recommended manual follow-up. Do not switch to or update the default branch after merging; it may be checked out in another worktree.
 
 ## Examples
 
@@ -72,7 +75,7 @@ User: Squash merge and delete the branch
 2. devtools_check_ci
    → CI passing
 3. devtools_squash_merge_pr { deleteBranch: true }
-   → Squash-merged and branch deleted
+   → Squash-merged; remoteCleanup: deleted; localCleanup: retained (report worktree path)
 ```
 
 ### Check CI first
@@ -91,11 +94,12 @@ User: Can I merge this PR?
 | `--merge` | Standard merge (merge commit) |
 | `--squash` | Squash merge (one commit) |
 | `--rebase` | Rebase and merge |
-| `--delete-branch` | Remove source branch after merge |
+| `deleteBranch` | Request separate best-effort remote and local source-branch cleanup |
 
 ## Important Notes
 
-- Always check CI status before merging
+- Always check CI status before merging; if no CI checks exist for the PR, continue
 - Default to squash merge for cleaner history
-- Always delete branch after merge (keeps repo clean)
-- If merge fails, show error and suggest solutions (e.g., resolve conflicts)
+- Always branch first on `mergeStatus`; report `pending` as queued/auto-merge pending and `unknown` as unconfirmed, both with cleanup skipped
+- Only for `mergeStatus: merged`, inspect and report `remoteCleanup` and `localCleanup` separately and describe partial cleanup without misreporting the successful merge as failed
+- If the merge itself fails, show the error and suggest solutions (e.g., resolve conflicts)
