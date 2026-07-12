@@ -4,7 +4,7 @@
  * Provides Git workflow tools, PR operations, and release automation.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getGitContext, getWorktreeContext } from "./git.js";
 import { checkCiTool, createPrTool, mergePrTool } from "./pull-request-tools.js";
 import {
@@ -27,6 +27,8 @@ import {
   pushParams,
 } from "./tool-params.js";
 import { commitTool, createBranchTool, pushTool, repoInfoTool } from "./workflow-tools.js";
+
+type ToolExecutionContext = Pick<ExtensionContext, "cwd">;
 
 export {
   analyzeCommitsTool,
@@ -57,7 +59,7 @@ export const toolDefinitions = [
       params: unknown,
       _signal?: unknown,
       _onUpdate?: unknown,
-      ctx?: { cwd: string },
+      ctx?: ToolExecutionContext,
     ) => {
       const { branchName, switchBranch = true } = params as { branchName: string; switchBranch?: boolean };
       return createBranchTool(branchName, switchBranch, ctx?.cwd);
@@ -73,7 +75,7 @@ export const toolDefinitions = [
       params: unknown,
       _signal?: unknown,
       _onUpdate?: unknown,
-      ctx?: { cwd: string },
+      ctx?: ToolExecutionContext,
     ) => {
       const { message, files, noVerify = false } = params as { message: string; files?: string[]; noVerify?: boolean };
       return commitTool(message, files, noVerify, ctx?.cwd);
@@ -89,7 +91,7 @@ export const toolDefinitions = [
       params: unknown,
       _signal?: unknown,
       _onUpdate?: unknown,
-      ctx?: { cwd: string },
+      ctx?: ToolExecutionContext,
     ) => {
       const { branch, setUpstream = true } = params as { branch?: string; setUpstream?: boolean };
       return pushTool(branch, setUpstream, ctx?.cwd);
@@ -105,7 +107,7 @@ export const toolDefinitions = [
       params: unknown,
       _signal?: unknown,
       _onUpdate?: unknown,
-      ctx?: { cwd: string },
+      ctx?: ToolExecutionContext,
     ) => {
       const typed = params as { title: string; body?: string; base?: string; draft?: boolean; assignees?: string[] };
       return createPrTool(typed.title, typed.body, typed.base, typed.draft, typed.assignees, ctx?.cwd);
@@ -121,7 +123,7 @@ export const toolDefinitions = [
       params: unknown,
       _signal?: unknown,
       _onUpdate?: unknown,
-      ctx?: { cwd: string },
+      ctx?: ToolExecutionContext,
     ) => {
       const typed = params as {
         prNumber?: number;
@@ -150,7 +152,7 @@ export const toolDefinitions = [
       params: unknown,
       _signal?: unknown,
       _onUpdate?: unknown,
-      ctx?: { cwd: string },
+      ctx?: ToolExecutionContext,
     ) => {
       const typed = params as {
         prNumber?: number;
@@ -178,7 +180,7 @@ export const toolDefinitions = [
       params: unknown,
       _signal?: unknown,
       _onUpdate?: unknown,
-      ctx?: { cwd: string },
+      ctx?: ToolExecutionContext,
     ) => {
       const { prNumber, branch } = params as { prNumber?: number; branch?: string };
       return checkCiTool(prNumber, branch, ctx?.cwd);
@@ -194,7 +196,7 @@ export const toolDefinitions = [
       _params: unknown,
       _signal?: unknown,
       _onUpdate?: unknown,
-      ctx?: { cwd: string },
+      ctx?: ToolExecutionContext,
     ) => repoInfoTool(ctx?.cwd),
   },
   {
@@ -207,7 +209,7 @@ export const toolDefinitions = [
       _params: unknown,
       _signal?: unknown,
       _onUpdate?: unknown,
-      ctx?: { cwd: string },
+      ctx?: ToolExecutionContext,
     ) => getLatestTagTool(ctx?.cwd),
   },
   {
@@ -220,7 +222,7 @@ export const toolDefinitions = [
       _params: unknown,
       _signal?: unknown,
       _onUpdate?: unknown,
-      ctx?: { cwd: string },
+      ctx?: ToolExecutionContext,
     ) => analyzeCommitsTool(ctx?.cwd),
   },
   {
@@ -233,7 +235,7 @@ export const toolDefinitions = [
       params: unknown,
       _signal?: unknown,
       _onUpdate?: unknown,
-      ctx?: { cwd: string },
+      ctx?: ToolExecutionContext,
     ) => {
       const { newVersion, file = "package.json" } = params as { newVersion: string; file?: string };
       return bumpVersionTool(newVersion, file, ctx?.cwd);
@@ -249,7 +251,7 @@ export const toolDefinitions = [
       params: unknown,
       _signal?: unknown,
       _onUpdate?: unknown,
-      ctx?: { cwd: string },
+      ctx?: ToolExecutionContext,
     ) => {
       const typed = params as { tag: string; title: string; body?: string; draft?: boolean; prerelease?: boolean };
       return createReleaseTool(typed.tag, typed.title, typed.body, typed.draft, typed.prerelease, ctx?.cwd);
