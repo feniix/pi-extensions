@@ -237,22 +237,21 @@ function commandOptions(cwd?: string): ExecSyncOptionsWithStringEncoding {
   };
 }
 
-export function execGit(command: string, cwd?: string): string {
+function execCommand(command: string, cwd: string | undefined, label: "Git" | "gh"): string {
   try {
     return execSync(command, commandOptions(cwd)).trim();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Git error: ${message}`);
+    throw new Error(`${label} error: ${message}`);
   }
 }
 
+export function execGit(command: string, cwd?: string): string {
+  return execCommand(command, cwd, "Git");
+}
+
 export function execGh(command: string, cwd?: string): string {
-  try {
-    return execSync(command, commandOptions(cwd)).trim();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`gh error: ${message}`);
-  }
+  return execCommand(command, cwd, "gh");
 }
 
 export function getDefaultBranch(cwd?: string): string {
