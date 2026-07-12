@@ -72,6 +72,17 @@ describe("pi-devtools", () => {
       }
     });
 
+    it("continues merge workflows when a PR has no CI checks", () => {
+      const resources = ["skills/merge/SKILL.md", "prompts/md.md", "prompts/smd.md"].map(readResource);
+
+      for (const resource of resources) {
+        expect(resource).toMatch(/(?:no checks|checks do not exist|no CI checks)[\s\S]*continue/i);
+        expect(resource).not.toMatch(
+          /(?:no checks|checks do not exist|no CI checks)[^\n]*(?:warn the user|ask (?:the )?user)/i,
+        );
+      }
+    });
+
     it("keeps release safety gates without prescribing a default-branch checkout", () => {
       const skill = readResource("skills/release/SKILL.md");
 

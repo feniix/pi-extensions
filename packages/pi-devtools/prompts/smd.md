@@ -39,6 +39,7 @@ Show the PR details (number, title, base branch) and ask for confirmation.
 
 - If checks are failing or pending, warn the user and ask if they want to proceed anyway or wait
 - If checks are passing, continue
+- If no CI checks exist for the PR, continue without warning or additional confirmation
 
 ### Step 3: Squash Merge
 

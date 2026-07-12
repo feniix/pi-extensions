@@ -29,9 +29,9 @@ If user provides PR number, use it. Otherwise:
 **Important**: Always check CI before merging.
 
 Call `devtools_check_ci`:
-- If checks are failing: warn user, ask to proceed or wait
+- If checks are failing or pending: warn the user and ask whether to proceed or wait
 - If checks are passing: continue
-- If no checks: warn user (may need to proceed anyway)
+- If no CI checks exist for the PR: continue without warning or additional confirmation
 
 ### Step 3: Merge PR
 
@@ -98,7 +98,7 @@ User: Can I merge this PR?
 
 ## Important Notes
 
-- Always check CI status before merging
+- Always check CI status before merging; if no CI checks exist for the PR, continue
 - Default to squash merge for cleaner history
 - Always branch first on `mergeStatus`; report `pending` as queued/auto-merge pending and `unknown` as unconfirmed, both with cleanup skipped
 - Only for `mergeStatus: merged`, inspect and report `remoteCleanup` and `localCleanup` separately and describe partial cleanup without misreporting the successful merge as failed
