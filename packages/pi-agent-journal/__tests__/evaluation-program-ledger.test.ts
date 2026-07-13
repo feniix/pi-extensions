@@ -123,4 +123,52 @@ describe("Agent Journal evaluation program ledger", () => {
     skipped.pendingUserAction = "continue-v4";
     expect(() => validateEvaluationProgramState(skipped)).toThrow();
   });
+
+  it.each([
+    [
+      "accepted receipt while still hardening",
+      (state: typeof ledger) => {
+        state.acceptedInfrastructureReceiptDigest = "a".repeat(64);
+      },
+    ],
+    [
+      "direct V4 evaluation without a committed continue boundary",
+      (state: typeof ledger) => {
+        state.acceptedInfrastructureReceiptDigest = "a".repeat(64);
+        state.currentStage = "version-evaluation";
+      },
+    ],
+    [
+      "passing-result acceptance with only failed versions",
+      (state: typeof ledger) => {
+        state.acceptedInfrastructureReceiptDigest = "a".repeat(64);
+        state.currentStage = "awaiting-result-acceptance";
+        state.pendingUserAction = "accept-passing-result";
+      },
+    ],
+    [
+      "blocked state with continue authorization",
+      (state: typeof ledger) => {
+        state.acceptedInfrastructureReceiptDigest = "a".repeat(64);
+        state.currentStage = "blocked";
+        state.pendingUserAction = "continue-v4";
+      },
+    ],
+    [
+      "embedded double-slash private path",
+      (state: typeof ledger) => {
+        state.reconciledPullRequests[0].branch = "feat//Users/alice/secret";
+      },
+    ],
+    [
+      "credential-shaped branch",
+      (state: typeof ledger) => {
+        state.reconciledPullRequests[0].branch = "xoxb-1234567890-secret";
+      },
+    ],
+  ])("rejects contradictory or unsafe state: %s", (_label, mutate) => {
+    const state = structuredClone(ledger);
+    mutate(state);
+    expect(() => validateEvaluationProgramState(state)).toThrow();
+  });
 });

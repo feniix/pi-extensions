@@ -1,26 +1,14 @@
 const SHA256 = /^[a-f0-9]{64}$/;
 const GIT_COMMIT = /^[a-f0-9]{40}$/;
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
-const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
-const CREDENTIAL_LIKE = /(?:gh[pousr]_|github_pat_|sk-[A-Za-z0-9]|AKIA[0-9A-Z]{16}|-----BEGIN|Bearer\s)/;
+const BRANCH = /^(?!.*\/\/)[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+const CREDENTIAL_LIKE =
+  /(?:gh[pousr]_|github_pat_|sk-[A-Za-z0-9]|AKIA[0-9A-Z]{16}|xox[abprs]-|glpat-|npm_|pypi-|-----BEGIN|Bearer\s)/;
 
-const STAGES = [
-  "infrastructure-hardening",
-  "awaiting-infrastructure-acceptance",
-  "awaiting-v4-continue",
-  "version-evaluation",
-  "awaiting-terminal-continue",
-  "awaiting-result-acceptance",
-  "complete",
-  "blocked",
-] as const;
-const PENDING_ACTIONS = [
-  "none",
-  "accept-infrastructure",
-  "continue-v4",
-  "continue-next-version",
-  "accept-passing-result",
-] as const;
+// Schema v1 intentionally stops at the infrastructure acceptance decision.
+// Later stages require a new committed schema after the corresponding user gate.
+const STAGES = ["infrastructure-hardening", "awaiting-infrastructure-acceptance", "blocked"] as const;
+const PENDING_ACTIONS = ["none", "accept-infrastructure"] as const;
 const CLEANUP_STATES = [
   "private-traces-not-committed",
   "verified-and-deleted",
@@ -159,39 +147,20 @@ function validateTransition(
   latestCompletedVersion: number,
   versions: Array<{ terminalState: string }>,
 ): void {
-  if (acceptedDigest === null) {
-    if (!["infrastructure-hardening", "awaiting-infrastructure-acceptance", "blocked"].includes(stage)) {
-      throw new EvaluationProgramStateValidationError("infrastructure acceptance cannot be skipped");
-    }
-    if (!["none", "accept-infrastructure"].includes(pending) || latestCompletedVersion > 3) {
-      throw new EvaluationProgramStateValidationError("V4 cannot begin before infrastructure acceptance");
-    }
-  }
-  const expectedPending: Partial<Record<Stage, PendingAction>> = {
-    "awaiting-infrastructure-acceptance": "accept-infrastructure",
-    "awaiting-v4-continue": "continue-v4",
-    "version-evaluation": "none",
-    "awaiting-terminal-continue": "continue-next-version",
-    "awaiting-result-acceptance": "accept-passing-result",
-    complete: "none",
-  };
-  if (expectedPending[stage] !== undefined && pending !== expectedPending[stage]) {
-    throw new EvaluationProgramStateValidationError("pending user action does not match the current stage");
-  }
   if (
-    [
-      "awaiting-v4-continue",
-      "version-evaluation",
-      "awaiting-terminal-continue",
-      "awaiting-result-acceptance",
-      "complete",
-    ].includes(stage) &&
-    acceptedDigest === null
+    acceptedDigest !== null ||
+    latestCompletedVersion !== 3 ||
+    versions.some((version) => version.terminalState !== "FAIL")
   ) {
-    throw new EvaluationProgramStateValidationError("accepted infrastructure receipt is required for this stage");
+    throw new EvaluationProgramStateValidationError("schema v1 cannot claim accepted infrastructure or V4 progress");
   }
-  if (stage === "complete" && !versions.some((version) => version.terminalState === "PASS")) {
-    throw new EvaluationProgramStateValidationError("completion requires an accepted passing version");
+  const expectedPending: Record<Stage, PendingAction> = {
+    "infrastructure-hardening": "none",
+    "awaiting-infrastructure-acceptance": "accept-infrastructure",
+    blocked: "none",
+  };
+  if (pending !== expectedPending[stage]) {
+    throw new EvaluationProgramStateValidationError("pending user action does not match the current stage");
   }
 }
 
