@@ -48,6 +48,18 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[], 
   if (JSON.stringify(actual) !== JSON.stringify(wanted)) {
     throw new EvaluationProgramStateValidationError(`${field} contains unknown or missing fields`);
   }
+  for (const key of expected) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (
+      !descriptor ||
+      !("value" in descriptor) ||
+      descriptor.enumerable !== true ||
+      descriptor.writable !== true ||
+      descriptor.configurable !== true
+    ) {
+      throw new EvaluationProgramStateValidationError(`${field}.${key} must be ordinary enumerable JSON data`);
+    }
+  }
 }
 
 function jsonArray(value: unknown, field: string): unknown[] {

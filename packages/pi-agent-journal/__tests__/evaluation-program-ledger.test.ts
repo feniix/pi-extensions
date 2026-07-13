@@ -194,4 +194,19 @@ describe("Agent Journal evaluation program ledger", () => {
     symbolic.versions[Symbol("toolPayload")] = { command: "private" };
     expect(() => validateEvaluationProgramState(symbolic)).toThrow();
   });
+
+  it("rejects hidden or accessor-backed required record fields", () => {
+    const hiddenRoot = structuredClone(ledger);
+    Object.defineProperty(hiddenRoot, "currentStage", { enumerable: false });
+    expect(() => validateEvaluationProgramState(hiddenRoot)).toThrow();
+
+    const hiddenNested = structuredClone(ledger);
+    Object.defineProperty(hiddenNested.historicalEvidenceGuard, "digest", { enumerable: false });
+    expect(() => validateEvaluationProgramState(hiddenNested)).toThrow();
+
+    const accessor = structuredClone(ledger);
+    const stage = accessor.currentStage;
+    Object.defineProperty(accessor, "currentStage", { enumerable: true, get: () => stage });
+    expect(() => validateEvaluationProgramState(accessor)).toThrow();
+  });
 });
