@@ -25,3 +25,21 @@ The in-memory state accumulated by `exa_research_step` calls — topic, criteria
 *Avoid:* research project, research task.
 
 The planner never calls Exa network APIs internally — it only tracks and summarizes planning state, leaving the actual retrieval to an explicit later call (typically `web_research_exa` with the suggested payload, which produces a synthesis).
+
+## Agent work journal
+
+The durable source of operational state that lets a frontier-model agent resume work without replaying its narrated reasoning. It contains typed journal entries and compact checkpoints, retrieves only relevant prior state, and flags stale or conflicting records when judgment is required.
+
+*Avoid:* sequential thinking, code reasoning, chain-of-thought store (those describe the predecessor products or imply that internal model reasoning is being captured).
+
+## Journal entry
+
+An append-only agent work journal record with a required operational type and freeform content. Entry types cover observations, evidence, assumptions, decisions, rejected alternatives, validations, and next actions; entries may link to one another with `supersedes` or `alternative-to`.
+
+*Avoid:* thought (a journal entry records durable work state, not a claim about the model's internal cognition).
+
+## Checkpoint
+
+A compact resumable projection of an agent work journal: current objective, work status, settled decisions, open questions, relevant evidence or artifacts, and next action. A checkpoint references its supporting journal entries instead of duplicating the complete history.
+
+*Avoid:* summary (a summary describes accumulated content; a checkpoint is an operational continuation contract).

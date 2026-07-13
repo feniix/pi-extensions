@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 2,
+  "sourceEvaluationVersion": 2,
+  "evaluationUnit": "Agent Journal V2 U6",
+  "status": "FAIL",
+  "releaseAuthorized": false,
+  "gateEvaluated": false,
+  "failureStage": "pretrial-selection-integrity",
+  "failureCode": "missing-frozen-mutator-template",
+  "productOutcome": "not-adjudicated",
+  "repositorySnapshot": "9a1184ce9ca3389f3e1565a81b126149bad6bc4c",
+  "infrastructureManifestDigest": "bad596b7909c3b85aa6cafec7dd893516384eb1f157e44fe33e709c22a1e4e34",
+  "taskSetDigest": "b76ab2589d90e8b6a5194be37cc1e28badf4bb2d232317c06296d0820fa7604a",
+  "selectedTasks": [
+    {
+      "taskId": "6f3a9c2d4e7186b0",
+      "category": "automated-multi-file-continuation",
+      "promptDigest": "7770ab419f7420ca40618cc32bd0b9e1907b2c2ba28c10602ef7d8e72b978597",
+      "rubricDigest": "2bfe6a01b207978bd6a2fa896e9743ffdf0125bb72e249de79114c72109337a2",
+      "fixtureDigest": "7dfc4b1ff84a5328c34b993cfd597eb997fb45567857b1f332dac98b6938baad"
+    },
+    {
+      "taskId": "b814e7053ac962fd",
+      "category": "material-dependency-revalidation",
+      "promptDigest": "63a205ca67c03407edbde00fad6cd4d13ab26204330e7e1442dac43458c8d744",
+      "rubricDigest": "b4d0a0cfb526382d7f490db63aa2d1bf5b473c1d2eadf94d735f2d1d947d7819",
+      "fixtureDigest": "f3df4e1b8096e1dba4face8235ec7bd9895f911ebf114e5f33ab7837f4cafc08"
+    },
+    {
+      "taskId": "d0274fb19e63a852",
+      "category": "append-only-conflict-resolution",
+      "promptDigest": "0630c2398835ad10b0034364233600ccf3bf236dca0a2697ea7966616953bff6",
+      "rubricDigest": "c91e19aeb8f8212e1ffa42671cf59bf702eb12f9ed087c0901eff3fe7110618a",
+      "fixtureDigest": "5e0659b298c518bc5b594eaf9f1cd17178d8a4894d2d378c188de516a1c24b2a"
+    }
+  ],
+  "invalidTask": {
+    "taskId": "d0274fb19e63a852",
+    "category": "append-only-conflict-resolution",
+    "fixtureDigest": "5e0659b298c518bc5b594eaf9f1cd17178d8a4894d2d378c188de516a1c24b2a",
+    "reason": "required supplied deterministic mutator template was absent from frozen inputs"
+  },
+  "validTrialCounts": {
+    "automated-multi-file-continuation": {
+      "baseline": 0,
+      "journal": 0
+    },
+    "material-dependency-revalidation": {
+      "baseline": 0,
+      "journal": 0
+    },
+    "append-only-conflict-resolution": {
+      "baseline": 0,
+      "journal": 0
+    }
+  },
+  "excludedAttemptRunIds": [
+    "base-7ea175471e5122cd",
+    "base-8ded0d175f6737fe",
+    "jrnl-e9d0573a7e6261c6",
+    "base-b1f068104d0071de",
+    "jrnl-3562e0b3fe1086e5"
+  ],
+  "excludedAttemptReasons": [
+    "smoke-only",
+    "non-CLI execution",
+    "frozen 8000-token budget was not enforced",
+    "minimum repeated-trace count was incomplete",
+    "canonical V2 harness provenance was absent"
+  ],
+  "gateClauses": {
+    "taskCorrectness": "NOT_EVALUATED",
+    "repositoryReadParity": "NOT_EVALUATED",
+    "ownerMaintenance": "NOT_EVALUATED",
+    "materialSafety": "NOT_EVALUATED",
+    "noRestatementParity": "NOT_EVALUATED",
+    "evidenceIntegrity": "FAIL"
+  },
+  "scenarioMedians": null,
+  "independentAdjudication": {
+    "completed": true,
+    "decision": "terminal selection-integrity failure; do not repair or replace the exposed frozen task"
+  },
+  "privateEvidenceCleanup": {
+    "rawTraceDigestsVerified": true,
+    "privateTrialDirectoriesDeleted": true,
+    "privateSelectionDeleted": true
+  },
+  "terminalDecision": "stop-without-post-hoc-task-alteration"
+}

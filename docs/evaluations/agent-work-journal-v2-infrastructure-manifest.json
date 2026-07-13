@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 2,
+  "status": "pending-independent-review",
+  "concreteTasksSelected": false,
+  "taskIds": [],
+  "prompts": [],
+  "categories": [
+    "automated-multi-file-continuation",
+    "material-dependency-revalidation",
+    "append-only-conflict-resolution"
+  ],
+  "readTolerance": 1,
+  "minimumRunsPerCondition": 3,
+  "model": "openai-codex/gpt-5.6-sol",
+  "reasoning": "high",
+  "contextBudget": 8000,
+  "resumeBudget": 4000,
+  "pauseSemantics": "phase A settles and exits before phase B starts in a fresh process",
+  "rubricPolicy": "scenario-specific SHA-256 rubric digest fixed at task selection before trials and shared across conditions",
+  "ownerProtocol": {
+    "sameForBothConditions": true,
+    "baselineActions": [
+      "status_create",
+      "status_refresh",
+      "status_correction"
+    ],
+    "requiredFields": [
+      "objective",
+      "current_status",
+      "settled_decisions",
+      "evidence",
+      "open_questions",
+      "next_action",
+      "material_dependencies"
+    ],
+    "maxBytes": 4000,
+    "digest": "fc06cb28293ffe1bdf428c89d0d9d3420fcabc42bc77acc6dffc8de4f2649409"
+  },
+  "interventionTaxonomy": {
+    "avoidable": [
+      "status_create",
+      "status_refresh",
+      "status_correction",
+      "known_context_clarification",
+      "resume_restatement"
+    ],
+    "necessarySafety": [
+      "material_stale_resolution",
+      "material_conflict_resolution",
+      "binding_ambiguity_resolution",
+      "credential_exclusion_resolution"
+    ]
+  },
+  "materialSafety": {
+    "detectionBeforeContinuationRequired": true,
+    "appendOnlyResolutionRequired": true
+  },
+  "provenance": {
+    "rawToDerivedRequired": true,
+    "parityReceiptRequired": true,
+    "canonicalHarnessReceiptRequired": true,
+    "privateRawTraceRetainedUntilIndependentRecomputation": true
+  },
+  "rawTracePolicy": "private-ephemeral-delete-after-independent-recomputation",
+  "privacy": {
+    "rawPromptsCommitted": false,
+    "rawToolBytesCommitted": false,
+    "absolutePathsCommitted": false
+  }
+}
