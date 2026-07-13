@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { CanonicalJsonError, canonicalJson, canonicalSha256 } from "../extensions/evaluation-receipts.js";
+import {
+  CANONICAL_JSON_LIMITS,
+  CanonicalJsonError,
+  canonicalJson,
+  canonicalSha256,
+} from "../extensions/evaluation-receipts.js";
 
 describe("evaluation receipt canonicalization", () => {
   it("matches the RFC 8785 primitive and recursive sorting example", () => {
@@ -89,5 +94,59 @@ describe("evaluation receipt canonicalization", () => {
   it("accepts shared acyclic values and frozen JSON data", () => {
     const shared = Object.freeze({ b: 2, a: 1 });
     expect(canonicalJson({ right: shared, left: shared })).toBe('{"left":{"a":1,"b":2},"right":{"a":1,"b":2}}');
+  });
+
+  it("rejects proxies before executing traps", () => {
+    let traps = 0;
+    const handlers: ProxyHandler<Record<string, unknown>> = {
+      getPrototypeOf: () => {
+        traps += 1;
+        return Object.prototype;
+      },
+      ownKeys: () => {
+        traps += 1;
+        return ["safe"];
+      },
+      getOwnPropertyDescriptor: () => {
+        traps += 1;
+        return { value: "forged", enumerable: true, writable: true, configurable: true };
+      },
+    };
+    expect(() => canonicalJson(new Proxy({ safe: true }, handlers))).toThrow(/proxy/i);
+    expect(traps).toBe(0);
+
+    let arrayTraps = 0;
+    const array = new Proxy([1, 2], {
+      getPrototypeOf: () => {
+        arrayTraps += 1;
+        return Array.prototype;
+      },
+    });
+    expect(() => canonicalJson(array)).toThrow(/proxy/i);
+    expect(arrayTraps).toBe(0);
+  });
+
+  it("fails closed on frozen depth, collection, node, string, and output limits", () => {
+    let deep: Record<string, unknown> = {};
+    for (let index = 0; index <= CANONICAL_JSON_LIMITS.maxDepth; index += 1) deep = { child: deep };
+    expect(() => canonicalJson(deep)).toThrow(/depth limit/i);
+
+    const longArray = Array.from({ length: CANONICAL_JSON_LIMITS.maxArrayLength + 1 }, () => null);
+    expect(() => canonicalJson(longArray)).toThrow(/array length limit/i);
+
+    const wideObject = Object.fromEntries(
+      Array.from({ length: CANONICAL_JSON_LIMITS.maxObjectProperties + 1 }, (_, index) => [`k${index}`, null]),
+    );
+    expect(() => canonicalJson(wideObject)).toThrow(/property limit/i);
+
+    const childrenPerArray = Math.ceil(CANONICAL_JSON_LIMITS.maxNodes / CANONICAL_JSON_LIMITS.maxArrayLength);
+    const manyNodes = Array.from({ length: CANONICAL_JSON_LIMITS.maxArrayLength }, () =>
+      Array.from({ length: childrenPerArray }, () => null),
+    );
+    expect(() => canonicalJson(manyNodes)).toThrow(/node limit/i);
+
+    expect(() => canonicalJson("x".repeat(CANONICAL_JSON_LIMITS.maxStringBytes + 1))).toThrow(/string byte limit/i);
+    const escaped = "\u0000".repeat(Math.floor(CANONICAL_JSON_LIMITS.maxOutputBytes / 6) + 1);
+    expect(() => canonicalJson(escaped)).toThrow(/output byte limit/i);
   });
 });
