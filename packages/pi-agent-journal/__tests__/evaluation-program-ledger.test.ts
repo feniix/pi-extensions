@@ -70,6 +70,13 @@ describe("Agent Journal evaluation program ledger", () => {
         ciRunId: 29264072142,
         ciConclusion: "success",
       },
+      {
+        prNumber: 128,
+        branch: "feat/agent-journal-provider-context",
+        mergeCommit: "568d0ef8b19650ce9e0a9f703cc0ffe2175db7cc",
+        ciRunId: 29266604083,
+        ciConclusion: "success",
+      },
     ]);
   });
 
