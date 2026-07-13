@@ -1,6 +1,6 @@
 # Agent Work Journal V2 Evaluation Contract
 
-Status: **infrastructure freeze in progress; concrete held-out tasks are forbidden before U5 acceptance**.
+Status: **U6 stopped with a terminal selection-integrity failure; product outcome not adjudicated and cutover unauthorized**.
 
 ## Product claim
 
@@ -90,4 +90,12 @@ For material cases, the derived receipt must prove the durable notice existed af
 
 ## Pre-task infrastructure boundary
 
-[`agent-work-journal-v2-infrastructure-manifest.json`](./agent-work-journal-v2-infrastructure-manifest.json) is the machine-readable freeze candidate. Its status is `pending-independent-review`; concrete task IDs and prompts remain absent. U6 is forbidden until independent review changes that decision outside implementation, without changing the frozen fields above.
+[`agent-work-journal-v2-infrastructure-manifest.json`](./agent-work-journal-v2-infrastructure-manifest.json) remains the immutable machine-readable pre-task snapshot. Its `pending-independent-review` status and empty task/prompt arrays preserve what was true before U5 acceptance; they are not rewritten after selection.
+
+## U6 outcome — terminal FAIL before valid trials
+
+After U5 acceptance, an independent selector froze three opaque held-out tasks, one per category. Before the full repeated evaluation could begin, independent execution review found that the frozen append-only-conflict task required a supplied deterministic mutator template, but the selected artifact contained neither template bytes nor a template digest. Creating that template after task exposure would alter the frozen fixture and task-set digests. The one-shot selection rule forbids repairing or replacing it.
+
+Several private runner attempts were made while validating real Pi phase orchestration. They are excluded rather than counted: they were smoke-only SDK executions, did not enforce the frozen 8,000-token budget, lacked canonical V2 harness provenance, and did not meet minimum repeated-trace counts. Consequently there are zero valid trials in every category, no scenario medians, and no product-performance adjudication.
+
+U6 fails closed on evidence integrity before product-gate evaluation. Overall U6 status is **FAIL**, `releaseAuthorized` is false, and both predecessor packages remain required. Safe task identities, excluded attempt IDs, and the terminal adjudication are recorded in [`agent-work-journal-v2-results.json`](./agent-work-journal-v2-results.json). Raw prompts and private traces are not committed.
