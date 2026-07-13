@@ -288,7 +288,12 @@ export function createProviderFetchWitness(options: ProviderFetchWitnessOptions)
         inputItems: items.length,
         previousResponseIdPresent: false,
       });
-      return fetchImpl(input, init);
+      const forwardedInit = {
+        ...request,
+        headers: new Headers(request.headers),
+        body: Buffer.from(physical),
+      } as RequestInit;
+      return fetchImpl(requestUrl, forwardedInit);
     } catch (error) {
       if (requestCount === 1 && receipt && !(error instanceof EvaluationProviderFetchWitnessError)) throw error;
       return failClosed();

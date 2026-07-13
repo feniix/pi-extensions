@@ -210,6 +210,26 @@ describe("Agent Journal provider fetch witness", () => {
     expect(witness.getReceipt()).toBeNull();
   });
 
+  it("forwards private body and header copies rather than caller-retained references", async () => {
+    const body = Buffer.from(logicalBody(), "utf8");
+    const original = Buffer.from(body);
+    const headers = new Headers({ "x-safe-metadata": "one" });
+    let forwardedInit: RequestInit | undefined;
+    const { witness } = directSetup({
+      fetchImpl: vi.fn(async (_input: URL | RequestInfo, init?: RequestInit) => {
+        forwardedInit = init;
+        return new Response("ok");
+      }),
+    });
+    await witness.fetch("https://chatgpt.com/backend-api/codex/responses", { method: "POST", headers, body });
+    expect(forwardedInit?.body).not.toBe(body);
+    expect(forwardedInit?.headers).not.toBe(headers);
+    body.fill(0);
+    headers.set("x-safe-metadata", "mutated");
+    expect(Buffer.from(forwardedInit?.body as Uint8Array)).toEqual(original);
+    expect(new Headers(forwardedInit?.headers).get("x-safe-metadata")).toBe("one");
+  });
+
   it("rejects a Headers subclass without invoking its overridden get method", async () => {
     const trap = vi.fn((_name: string) => null);
     class HostileHeaders extends Headers {
