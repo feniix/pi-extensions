@@ -49,6 +49,13 @@ describe("Agent Journal evaluation program ledger", () => {
         ciRunId: 29259743229,
         ciConclusion: "success",
       },
+      {
+        prNumber: 125,
+        branch: "feat/agent-journal-evaluation-ledger",
+        mergeCommit: "cf8698b437203bc4520a8ea01e073a1146460dcb",
+        ciRunId: 29262266998,
+        ciConclusion: "success",
+      },
     ]);
   });
 
