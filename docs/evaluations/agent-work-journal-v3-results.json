@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 3,
+  "status": "FAIL",
+  "failureStage": "infrastructure-acceptance",
+  "releaseAuthorized": false,
+  "productOutcome": "not-adjudicated",
+  "concreteTasksSelected": false,
+  "infrastructureAccepted": false,
+  "gateEvaluated": false,
+  "validTraceCount": 0,
+  "repositorySnapshot": "f33ed7cbfddbeee0251bab0b56f33c8af1ccf830",
+  "preTaskManifest": {
+    "digest": "5d328c49382539ff117f1de8dcf6ed99139a1a5f200394be65c2b3de91649ac7",
+    "taskIds": [],
+    "promptDigests": []
+  },
+  "completedUnits": [
+    "v3_contract",
+    "material_file_observation"
+  ],
+  "blockers": [
+    "real_two_condition_two_phase_capsule_only_provenance_not_proven",
+    "byte_complete_independent_quarantine_not_accepted",
+    "sandbox_and_attempt_provenance_not_accepted",
+    "raw_to_derived_scorer_chain_not_accepted"
+  ],
+  "selectedTaskIds": [],
+  "runIds": [],
+  "scenarioMedians": null,
+  "gateClauses": {
+    "taskCorrectness": "NOT_EVALUATED",
+    "repositoryReadParity": "NOT_EVALUATED",
+    "ownerMaintenance": "NOT_EVALUATED",
+    "noRestatementParity": "NOT_EVALUATED",
+    "materialSafety": "NOT_EVALUATED",
+    "evidenceIntegrity": "FAIL"
+  },
+  "privateEvidenceCleanup": {
+    "syntheticWorktreesDeleted": true,
+    "syntheticSessionsAndTracesDeleted": true,
+    "heldOutEvidenceCreated": false
+  },
+  "predecessorCutoverPerformed": false,
+  "terminalDecision": "stop-before-held-out-selection"
+}

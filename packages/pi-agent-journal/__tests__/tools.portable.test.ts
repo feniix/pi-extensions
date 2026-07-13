@@ -121,6 +121,49 @@ describe("Agent Journal portable tools", () => {
     expect(JSON.stringify(entry)).not.toContain("forged");
   });
 
+  it("canonicalizes forged checkpoint file provenance from the persisted originating entry", async () => {
+    writeFileSync(join(workspace, "checkpoint.txt"), "bound\n");
+    await executePortableTool(
+      tool("journal_record"),
+      {
+        entries: [
+          {
+            id: "checkpoint-source",
+            type: "evidence",
+            content: "Checkpoint support",
+            observe_files: [{ path: "checkpoint.txt", material: true }],
+          },
+        ],
+      },
+      { host: "test" },
+    );
+    const persistedEntry = (await storage.getSession("work")).entries[0];
+    const forged = {
+      kind: "file",
+      path: "checkpoint.txt",
+      workspaceId: "forged",
+      observedHash: "forged",
+      observedAt: "forged",
+      originatingEntryId: "checkpoint-source",
+      material: false,
+    };
+    const result = await executePortableTool(
+      tool("journal_checkpoint"),
+      {
+        action: "create",
+        objective: "Bind support",
+        status: "paused",
+        evidence_entry_ids: ["checkpoint-source"],
+        artifact_dependencies: [forged],
+      },
+      { host: "test" },
+    );
+    expect(result.isError).toBeFalsy();
+    const checkpoint = (await storage.getSession("work")).checkpoints[0];
+    expect(checkpoint.artifactDependencies).toEqual([persistedEntry.dependencies[0]]);
+    expect(JSON.stringify(checkpoint)).not.toContain("forged");
+  });
+
   it("rejects unsafe observed files atomically without leaking candidate data", async () => {
     writeFileSync(join(workspace, "good.txt"), "safe\n");
     writeFileSync(join(workspace, ".env"), "PUBLIC=true\n");

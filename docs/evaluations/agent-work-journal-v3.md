@@ -1,6 +1,6 @@
 # Agent Work Journal V3 Evaluation Contract
 
-Status: **pre-task infrastructure implementation; held-out selection forbidden**.
+Status: **terminal infrastructure FAIL; held-out selection never occurred and product outcome is not adjudicated**.
 
 ## Product claim
 
@@ -90,3 +90,9 @@ Use RFC 8785 JCS and SHA-256 receipts binding repository commit/tree, contract, 
 ## Pre-task boundary
 
 [`agent-work-journal-v3-infrastructure-manifest.json`](./agent-work-journal-v3-infrastructure-manifest.json) is the immutable pre-task candidate. Until U1–U5 pass independent acceptance, it must retain empty task and prompt arrays and `concreteTasksSelected: false`. U5 writes a separate immutable infrastructure-acceptance receipt. U6 writes a separate immutable frozen-task-set receipt; neither mutates the pre-task manifest.
+
+## Terminal infrastructure outcome
+
+U1 froze the V3 contract and U2 added safe service-computed material file observations without adding a fifth tool. U3/U4 synthetic infrastructure passed unit tests but failed independent acceptance: the real four-process smoke could not prove provider-bound capsule-only continuation, and independent reviews rejected the quarantine independence, sandbox/attempt provenance, and raw-to-derived scorer chain. All candidate U3/U4 code was discarded rather than weakening the contract.
+
+No selector was launched, no held-out task or prompt was created, and no product trial ran. V3 therefore fails closed at infrastructure acceptance with product performance not adjudicated. Synthetic worktrees, sessions, stores, and traces were deleted. Safe terminal evidence is recorded in [`agent-work-journal-v3-results.json`](./agent-work-journal-v3-results.json). Both predecessors remain active and cutover remains unauthorized.

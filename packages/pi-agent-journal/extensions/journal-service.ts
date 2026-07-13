@@ -439,13 +439,22 @@ export class JournalService {
         `checkpoint next action must reference a next_action entry: '${nextActionEntryId}'`,
       );
     }
-    for (const dependency of draft.artifactDependencies ?? []) {
-      if (!entryIds.has(dependency.originatingEntryId)) {
+    const artifactDependencies = (draft.artifactDependencies ?? []).map((dependency) => {
+      const origin = entriesById.get(dependency.originatingEntryId);
+      if (!origin) {
         throw new JournalValidationError(
           `checkpoint dependency entry '${dependency.originatingEntryId}' does not exist`,
         );
       }
-    }
+      if (dependency.kind !== "file") return dependency;
+      const observed = origin.dependencies.filter(
+        (candidate): candidate is FileDependency => candidate.kind === "file" && candidate.path === dependency.path,
+      );
+      if (observed.length !== 1) {
+        throw new JournalValidationError("checkpoint file dependency must reference one persisted observation");
+      }
+      return observed[0];
+    });
     const checkpoint = validateCheckpointShape({
       id: draft.id ?? this.idGenerator(),
       objective: draft.objective.trim(),
@@ -453,7 +462,7 @@ export class JournalService {
       settledDecisionEntryIds,
       openQuestions: draft.openQuestions ?? [],
       evidenceEntryIds,
-      artifactDependencies: draft.artifactDependencies ?? [],
+      artifactDependencies,
       nextActionEntryId,
       supportEntryIds,
       createdAt: this.clock(),
@@ -498,15 +507,41 @@ export class JournalService {
   private async readSafeFile(path: string): Promise<{ path: string; bytes: Buffer }> {
     const safePath = this.resolveSafeFile(path);
     const handle = await open(safePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.freshnessTimeoutMs);
     try {
-      const stats = await handle.stat();
-      if (!stats.isFile()) throw new JournalValidationError("artifact must be a regular file");
-      if (stats.size > MAX_HASH_BYTES) throw new JournalValidationError("artifact exceeds hash byte limit");
-      return { path: safePath, bytes: await handle.readFile({ signal: controller.signal }) };
+      const before = await handle.stat();
+      if (!before.isFile()) throw new JournalValidationError("artifact must be a regular file");
+      if (before.size > MAX_HASH_BYTES) throw new JournalValidationError("artifact exceeds hash byte limit");
+      const assertPathIdentity = (): void => {
+        const canonical = realpathSync(safePath);
+        if (canonical !== safePath || (canonical !== this.workspaceRoot && !canonical.startsWith(`${this.workspaceRoot}${sep}`))) {
+          throw new JournalValidationError("opened artifact escapes workspace");
+        }
+        const pathStats = statSync(safePath);
+        if (pathStats.dev !== before.dev || pathStats.ino !== before.ino) {
+          throw new JournalValidationError("artifact identity changed while being observed");
+        }
+      };
+      assertPathIdentity();
+      const buffer = Buffer.allocUnsafe(MAX_HASH_BYTES + 1);
+      let offset = 0;
+      while (offset <= MAX_HASH_BYTES) {
+        const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, null);
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+      if (offset > MAX_HASH_BYTES) throw new JournalValidationError("artifact exceeds hash byte limit");
+      const after = await handle.stat();
+      assertPathIdentity();
+      if (
+        before.dev !== after.dev ||
+        before.ino !== after.ino ||
+        before.size !== after.size ||
+        before.mtimeMs !== after.mtimeMs
+      ) {
+        throw new JournalValidationError("artifact changed while being observed");
+      }
+      return { path: safePath, bytes: Buffer.from(buffer.subarray(0, offset)) };
     } finally {
-      clearTimeout(timeout);
       await handle.close();
     }
   }
