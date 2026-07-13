@@ -6,7 +6,8 @@ import type { ProviderPayloadReceipt } from "./evaluation-provider-context.js";
 /**
  * Evaluation-only physical request witness. This observes one frozen SSE fetch
  * after provider filtering; it does not establish extension order, credentials,
- * provider authenticity, attempt scheduling, or full B3 acceptance by itself.
+ * provider authenticity, attempt scheduling, a real Pi runner lifecycle, or full
+ * B3 acceptance by itself.
  */
 const SHA256 = /^[a-f0-9]{64}$/;
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -41,7 +42,7 @@ const LOGICAL_RECEIPT_KEYS = [
   "capsuleDigest",
 ] as const;
 
-export type ProviderFetchFailureCode = "invalid-fetch";
+export type ProviderFetchFailureCode = "invalid-fetch" | "fetch-failed";
 export type ProviderEndpointClass = "openai-codex" | "loopback";
 
 export interface ProviderFetchWitnessOptions {
@@ -163,9 +164,10 @@ function validateEndpoint(expectedUrl: string, endpointClass: ProviderEndpointCl
   }
   if (parsed.username || parsed.password || parsed.search || parsed.hash) reject();
   if (endpointClass === "openai-codex") {
-    if (parsed.protocol !== "https:" || parsed.hostname !== "chatgpt.com") reject();
+    if (parsed.origin !== "https://chatgpt.com" || parsed.pathname !== "/backend-api/codex/responses") reject();
   } else if (
     parsed.protocol !== "http:" ||
+    parsed.pathname !== "/codex/responses" ||
     (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost" && parsed.hostname !== "[::1]")
   ) {
     reject();
@@ -224,32 +226,46 @@ export function createProviderFetchWitness(options: ProviderFetchWitnessOptions)
   const onTerminalFailure = config.onTerminalFailure as (code: ProviderFetchFailureCode) => void;
 
   let terminal = false;
+  let requestInProgress = false;
   let requestCount = 0;
   let receipt: ProviderFetchReceipt | null = null;
 
-  const failClosed = (): never => {
+  const failClosed = (code: ProviderFetchFailureCode): never => {
+    const notify = !terminal;
     terminal = true;
     receipt = null;
-    try {
-      onTerminalFailure("invalid-fetch");
-    } catch {
-      // The generic thrown error remains authoritative and content-free.
+    if (notify) {
+      try {
+        onTerminalFailure(code);
+      } catch {
+        // The generic thrown error remains authoritative and content-free.
+      }
     }
     reject();
   };
 
   const witnessedFetch: typeof fetch = async (input, init) => {
-    if (terminal || requestCount !== 0) failClosed();
+    if (terminal || requestInProgress || requestCount !== 0) failClosed("invalid-fetch");
+    requestInProgress = true;
     try {
-      const requestUrl =
-        typeof input === "string" ? input : input instanceof URL && !isProxy(input) ? input.href : reject();
+      let requestUrl: string;
+      if (typeof input === "string") requestUrl = input;
+      else {
+        if (!(input instanceof URL) || isProxy(input) || Object.getPrototypeOf(input) !== URL.prototype) reject();
+        requestUrl = URL.prototype.toString.call(input);
+      }
       if (requestUrl !== expectedUrl || !init || isProxy(init)) reject();
       const request = dataRecord(init);
       if (request.method !== "POST") reject();
       if (!request.headers || typeof request.headers !== "object" || isProxy(request.headers)) reject();
-      if (!(request.headers instanceof Headers) || Object.getPrototypeOf(request.headers) !== Headers.prototype)
+      if (
+        !(request.headers instanceof Headers) ||
+        Object.getPrototypeOf(request.headers) !== Headers.prototype ||
+        Reflect.ownKeys(request.headers).length !== 0
+      ) {
         reject();
-      const rawEncoding = request.headers.get("content-encoding");
+      }
+      const rawEncoding = Headers.prototype.get.call(request.headers, "content-encoding");
       if (rawEncoding !== null && rawEncoding !== "zstd") reject();
       const encoding = rawEncoding === "zstd" ? "zstd" : "identity";
       const physical = physicalBody(request.body);
@@ -263,6 +279,7 @@ export function createProviderFetchWitness(options: ProviderFetchWitnessOptions)
       if (!Buffer.from(text, "utf8").equals(logical)) reject();
 
       const expected = logicalReceipt(getLogicalReceipt());
+      if (terminal) reject();
       if (expected.byteLength !== logical.byteLength || expected.payloadDigest !== sha256(logical)) reject();
       const payload: unknown = JSON.parse(text);
       const root = exactRecord(payload, PAYLOAD_KEYS);
@@ -293,10 +310,9 @@ export function createProviderFetchWitness(options: ProviderFetchWitnessOptions)
         headers: new Headers(request.headers),
         body: Buffer.from(physical),
       } as RequestInit;
-      return fetchImpl(requestUrl, forwardedInit);
-    } catch (error) {
-      if (requestCount === 1 && receipt && !(error instanceof EvaluationProviderFetchWitnessError)) throw error;
-      return failClosed();
+      return await fetchImpl(requestUrl, forwardedInit);
+    } catch {
+      return failClosed(requestCount === 1 ? "fetch-failed" : "invalid-fetch");
     }
   };
 

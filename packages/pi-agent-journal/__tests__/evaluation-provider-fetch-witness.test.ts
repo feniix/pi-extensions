@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { zstdCompressSync } from "node:zlib";
+import { zstdCompressSync, zstdDecompressSync } from "node:zlib";
 import { stream as streamOpenAICodex } from "@earendil-works/pi-ai/api/openai-codex-responses";
 import { OPENAI_CODEX_MODELS } from "@earendil-works/pi-ai/providers/openai-codex.models";
 import { describe, expect, it, vi } from "vitest";
@@ -105,22 +105,28 @@ function directSetup(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Agent Journal provider fetch witness", () => {
-  it("attests the physical zstd body sent by the real Pi 0.80.6 Codex SSE serializer", async () => {
-    let received = false;
-    const server = createServer((_request, response) => {
-      received = true;
-      response.writeHead(200, { "content-type": "text/event-stream", connection: "close" });
-      response.end(
-        `data: ${JSON.stringify({
-          type: "response.completed",
-          response: {
-            id: "response-synthetic",
-            status: "completed",
-            output: [],
-            usage: { input_tokens: 0, output_tokens: 0, input_tokens_details: {}, output_tokens_details: {} },
-          },
-        })}\n\n`,
-      );
+  it("attests the physical zstd body sent by the Pi 0.80.6 Codex SSE serializer", async () => {
+    let receivedPhysical = Buffer.alloc(0);
+    let receivedEncoding: string | undefined;
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        receivedPhysical = Buffer.concat(chunks);
+        receivedEncoding = request.headers["content-encoding"];
+        response.writeHead(200, { "content-type": "text/event-stream", connection: "close" });
+        response.end(
+          `data: ${JSON.stringify({
+            type: "response.completed",
+            response: {
+              id: "response-synthetic",
+              status: "completed",
+              output: [],
+              usage: { input_tokens: 0, output_tokens: 0, input_tokens_details: {}, output_tokens_details: {} },
+            },
+          })}\n\n`,
+        );
+      });
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const originalFetch = globalThis.fetch;
@@ -164,7 +170,8 @@ describe("Agent Journal provider fetch witness", () => {
       }
       const filtered = boundary.getLastPayloadReceipt();
       const receipt = witness.getReceipt();
-      expect(received).toBe(true);
+      expect(receivedPhysical.byteLength).toBeGreaterThan(0);
+      expect(receivedEncoding).toBe("zstd");
       expect(receipt).toMatchObject({
         schemaVersion: 1,
         state: "observed",
@@ -179,8 +186,11 @@ describe("Agent Journal provider fetch witness", () => {
         inputItems: 2,
         previousResponseIdPresent: false,
       });
-      expect(receipt?.physicalDigest).toMatch(/^[a-f0-9]{64}$/);
-      expect(receipt?.physicalByteLength).toBeGreaterThan(0);
+      expect(receipt?.physicalDigest).toBe(sha256(receivedPhysical));
+      expect(receipt?.physicalByteLength).toBe(receivedPhysical.byteLength);
+      const receivedLogical = zstdDecompressSync(receivedPhysical);
+      expect(sha256(receivedLogical)).toBe(receipt?.logicalDigest);
+      expect(receivedLogical.byteLength).toBe(receipt?.logicalByteLength);
       expect(JSON.stringify(receipt)).not.toContain(prompt);
       expect(JSON.stringify(receipt)).not.toContain(capsule);
       expect(failures).toEqual([]);
@@ -230,6 +240,37 @@ describe("Agent Journal provider fetch witness", () => {
     expect(new Headers(forwardedInit?.headers).get("x-safe-metadata")).toBe("one");
   });
 
+  it("rejects an own Headers.get override without invoking it", async () => {
+    const trap = vi.fn((_name: string) => null);
+    const headers = new Headers();
+    Object.defineProperty(headers, "get", { value: trap, enumerable: false });
+    const { witness, forwarded, body } = directSetup();
+    await expect(
+      witness.fetch("https://chatgpt.com/backend-api/codex/responses", { method: "POST", headers, body }),
+    ).rejects.toThrow(EvaluationProviderFetchWitnessError);
+    expect(trap).not.toHaveBeenCalled();
+    expect(forwarded).not.toHaveBeenCalled();
+  });
+
+  it("rejects a URL subclass without invoking an overridden href getter", async () => {
+    const trap = vi.fn(() => "https://chatgpt.com/backend-api/codex/responses");
+    class HostileUrl extends URL {
+      override get href(): string {
+        return trap();
+      }
+    }
+    const { witness, forwarded, body } = directSetup();
+    await expect(
+      witness.fetch(new HostileUrl("https://evil.invalid/responses"), {
+        method: "POST",
+        headers: new Headers(),
+        body,
+      }),
+    ).rejects.toThrow(EvaluationProviderFetchWitnessError);
+    expect(trap).not.toHaveBeenCalled();
+    expect(forwarded).not.toHaveBeenCalled();
+  });
+
   it("rejects a Headers subclass without invoking its overridden get method", async () => {
     const trap = vi.fn((_name: string) => null);
     class HostileHeaders extends Headers {
@@ -248,6 +289,65 @@ describe("Agent Journal provider fetch witness", () => {
     ).rejects.toThrow(EvaluationProviderFetchWitnessError);
     expect(trap).not.toHaveBeenCalled();
     expect(forwarded).not.toHaveBeenCalled();
+  });
+
+  it("fails the whole witness on callback reentry before either request forwards", async () => {
+    const body = logicalBody();
+    const forwarded = vi.fn(async () => new Response("ok"));
+    let witness: ReturnType<typeof createProviderFetchWitness>;
+    let inner: Promise<Response> | undefined;
+    let recursing = false;
+    witness = createProviderFetchWitness({
+      attemptId: "attempt-reentrant",
+      expectedUrl: "https://chatgpt.com/backend-api/codex/responses",
+      endpointClass: "openai-codex",
+      getLogicalReceipt: () => {
+        if (!recursing) {
+          recursing = true;
+          inner = witness.fetch("https://chatgpt.com/backend-api/codex/responses", {
+            method: "POST",
+            headers: new Headers(),
+            body,
+          });
+        }
+        return logicalReceipt(body);
+      },
+      fetchImpl: forwarded,
+      onTerminalFailure: () => undefined,
+    });
+    const outer = witness.fetch("https://chatgpt.com/backend-api/codex/responses", {
+      method: "POST",
+      headers: new Headers(),
+      body,
+    });
+    await expect(outer).rejects.toThrow(EvaluationProviderFetchWitnessError);
+    await expect(inner).rejects.toThrow(EvaluationProviderFetchWitnessError);
+    expect(forwarded).not.toHaveBeenCalled();
+    expect(witness.getReceipt()).toBeNull();
+  });
+
+  it("clears evidence and fails terminally when the underlying fetch rejects", async () => {
+    const failures: string[] = [];
+    const body = logicalBody();
+    const witness = createProviderFetchWitness({
+      attemptId: "attempt-fetch-failure",
+      expectedUrl: "https://chatgpt.com/backend-api/codex/responses",
+      endpointClass: "openai-codex",
+      getLogicalReceipt: () => logicalReceipt(body),
+      fetchImpl: vi.fn(async () => {
+        throw new Error("private transport detail");
+      }),
+      onTerminalFailure: (code) => failures.push(code),
+    });
+    await expect(
+      witness.fetch("https://chatgpt.com/backend-api/codex/responses", {
+        method: "POST",
+        headers: new Headers(),
+        body,
+      }),
+    ).rejects.toThrow("provider fetch witness rejected the request");
+    expect(witness.getReceipt()).toBeNull();
+    expect(failures).toEqual(["fetch-failed"]);
   });
 
   it("rejects a second provider request without forwarding it", async () => {
@@ -278,6 +378,19 @@ describe("Agent Journal provider fetch witness", () => {
       ).rejects.toThrow(EvaluationProviderFetchWitnessError);
       expect(forwarded).not.toHaveBeenCalled();
     }
+  });
+
+  it("requires the exact frozen OpenAI Codex endpoint path", () => {
+    expect(() =>
+      createProviderFetchWitness({
+        attemptId: "attempt-wrong-path",
+        expectedUrl: "https://chatgpt.com/other",
+        endpointClass: "openai-codex",
+        getLogicalReceipt: () => logicalReceipt(),
+        fetchImpl: globalThis.fetch,
+        onTerminalFailure: () => undefined,
+      }),
+    ).toThrow(EvaluationProviderFetchWitnessError);
   });
 
   it("bounds zstd decompression and normalizes callback failures", async () => {
