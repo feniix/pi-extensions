@@ -1,13 +1,23 @@
 import { createHash } from "node:crypto";
 import { isProxy } from "node:util/types";
+import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-responses-shared";
+import { OPENAI_CODEX_MODELS } from "@earendil-works/pi-ai/providers/openai-codex.models";
+import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import { canonicalJson, canonicalSha256 } from "./evaluation-receipts.js";
 
+/**
+ * Evaluation-only logical-request primitive for the frozen Pi 0.80.6 Codex SSE path.
+ * This module does not complete B3: an independent suffix witness, extension-order
+ * attestation, physical fetch-body receipt, and authenticated real-Pi proof remain
+ * required before infrastructure acceptance.
+ */
 const SHA256 = /^[a-f0-9]{64}$/;
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MAX_CAPSULE_BYTES = 4000;
 const MAX_PROMPT_BYTES = 64 * 1024;
 const MAX_INSTRUCTIONS_BYTES = 256 * 1024;
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
+const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 const PAYLOAD_KEYS = [
   "model",
   "store",
@@ -76,6 +86,8 @@ interface BoundarySnapshot {
   capsule: string;
   capsuleDigest: string;
   detailsDigest: string;
+  input: unknown[];
+  inputDigest: string;
 }
 
 type DataRecord = Record<string, unknown>;
@@ -188,6 +200,15 @@ function jsonCopy<T>(value: T): T {
   return JSON.parse(canonicalJson(value)) as T;
 }
 
+function providerWireCopy(value: unknown): unknown[] {
+  const encoded = JSON.stringify(value);
+  if (Buffer.byteLength(encoded, "utf8") > MAX_PAYLOAD_BYTES) fail("provider input exceeds the wire byte limit");
+  const copy: unknown = JSON.parse(encoded);
+  const items = dataArray(copy, "provider input");
+  canonicalJson(items);
+  return items;
+}
+
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object") {
     for (const item of Object.values(value as DataRecord)) deepFreeze(item);
@@ -223,7 +244,11 @@ function validatePromptMessage(value: unknown, expectedPrompt: string, field: st
   if (Object.hasOwn(record, "timestamp") && !Number.isFinite(record.timestamp)) fail(`${field}.timestamp is invalid`);
 }
 
-function validateCapsuleMessage(value: unknown, expectedSessionId: string, field: string): BoundarySnapshot {
+function validateCapsuleMessage(
+  value: unknown,
+  expectedSessionId: string,
+  field: string,
+): Omit<BoundarySnapshot, "input" | "inputDigest"> {
   const record = exactRecord(value, ["role", "customType", "content", "display", "details", "timestamp"], field);
   if (record.role !== "custom" || record.customType !== "agent-journal-resume" || record.display !== false) {
     fail(`${field} is not a runtime Agent Journal capsule`);
@@ -276,22 +301,46 @@ function toolNames(value: unknown): string[] {
 export function createJournalPhaseBProviderBoundary(
   options: JournalPhaseBProviderBoundaryOptions,
 ): JournalPhaseBProviderBoundary {
-  if (options.transport !== "sse") throw new EvaluationProviderContextError("journal phase B requires SSE transport");
-  const phaseBPrompt = boundedString(options.phaseBPrompt, "phaseBPrompt", MAX_PROMPT_BYTES);
-  if (!OPAQUE_ID.test(options.expectedSessionId) || !OPAQUE_ID.test(options.expectedPromptCacheKey)) {
+  const config = exactRecord(
+    options,
+    [
+      "phaseBPrompt",
+      "expectedSessionId",
+      "expectedInstructionsDigest",
+      "expectedToolsDigest",
+      "expectedToolNames",
+      "expectedPromptCacheKey",
+      "transport",
+      "onTerminalFailure",
+    ],
+    "options",
+  );
+  if (config.transport !== "sse") throw new EvaluationProviderContextError("journal phase B requires SSE transport");
+  const phaseBPrompt = boundedString(config.phaseBPrompt, "phaseBPrompt", MAX_PROMPT_BYTES);
+  const expectedSessionId = boundedString(config.expectedSessionId, "expectedSessionId", 128);
+  const expectedPromptCacheKey = boundedString(config.expectedPromptCacheKey, "expectedPromptCacheKey", 128);
+  if (!OPAQUE_ID.test(expectedSessionId) || !OPAQUE_ID.test(expectedPromptCacheKey)) {
     throw new EvaluationProviderContextError("expected opaque identifiers are invalid");
   }
-  if (!SHA256.test(options.expectedInstructionsDigest) || !SHA256.test(options.expectedToolsDigest)) {
+  const expectedInstructionsDigest = boundedString(config.expectedInstructionsDigest, "expectedInstructionsDigest", 64);
+  const expectedToolsDigest = boundedString(config.expectedToolsDigest, "expectedToolsDigest", 64);
+  if (!SHA256.test(expectedInstructionsDigest) || !SHA256.test(expectedToolsDigest)) {
     throw new EvaluationProviderContextError("expected digests are invalid");
   }
-  const expectedToolNames = jsonCopy(options.expectedToolNames);
+  const expectedToolNames = dataArray(config.expectedToolNames, "expectedToolNames").map((name) =>
+    boundedString(name, "expectedToolNames item", 128),
+  );
   if (
     expectedToolNames.length === 0 ||
-    expectedToolNames.some((name) => typeof name !== "string" || !OPAQUE_ID.test(name)) ||
+    expectedToolNames.some((name) => !OPAQUE_ID.test(name)) ||
     new Set(expectedToolNames).size !== expectedToolNames.length
   ) {
     throw new EvaluationProviderContextError("expected tool names are invalid");
   }
+  if (typeof config.onTerminalFailure !== "function") {
+    throw new EvaluationProviderContextError("terminal failure callback is invalid");
+  }
+  const onTerminalFailure = config.onTerminalFailure as (code: EvaluationProviderFailureCode) => void;
 
   let terminal = false;
   let snapshot: BoundarySnapshot | null = null;
@@ -302,7 +351,7 @@ export function createJournalPhaseBProviderBoundary(
     terminal = true;
     receipt = null;
     try {
-      options.onTerminalFailure(code);
+      onTerminalFailure(code);
     } catch {
       // The terminal state and non-serializable payload remain authoritative.
     }
@@ -320,11 +369,7 @@ export function createJournalPhaseBProviderBoundary(
       const capsuleIndex = capsules.at(-1);
       if (capsuleIndex === undefined || capsuleIndex < 1) fail("current runtime capsule is missing");
       validatePromptMessage(items[capsuleIndex - 1], phaseBPrompt, `messages[${capsuleIndex - 1}]`);
-      const nextSnapshot = validateCapsuleMessage(
-        items[capsuleIndex],
-        options.expectedSessionId,
-        `messages[${capsuleIndex}]`,
-      );
+      const nextSnapshot = validateCapsuleMessage(items[capsuleIndex], expectedSessionId, `messages[${capsuleIndex}]`);
       if (
         items.slice(capsuleIndex + 1).some((item, offset) => {
           const { record, role } = messageRole(item, `messages[${capsuleIndex + 1 + offset}]`);
@@ -339,8 +384,22 @@ export function createJournalPhaseBProviderBoundary(
       ) {
         fail("phase-B boundary changed after its first provider call");
       }
-      snapshot = nextSnapshot;
-      return items.slice(capsuleIndex - 1);
+      const safeSuffix = jsonCopy(items.slice(capsuleIndex - 1));
+      const llmMessages = convertToLlm(safeSuffix as Parameters<typeof convertToLlm>[0]);
+      const convertedInput = convertResponsesMessages(
+        OPENAI_CODEX_MODELS["gpt-5.6-sol"],
+        { messages: llmMessages },
+        CODEX_TOOL_CALL_PROVIDERS,
+        { includeSystemPrompt: false },
+      );
+      const expectedInput = providerWireCopy(convertedInput);
+      deepFreeze(expectedInput);
+      snapshot = {
+        ...nextSnapshot,
+        input: expectedInput,
+        inputDigest: canonicalSha256(expectedInput).digest,
+      };
+      return safeSuffix;
     } catch {
       terminalFailure("invalid-context");
       return [];
@@ -360,27 +419,30 @@ export function createJournalPhaseBProviderBoundary(
         source.stream !== true ||
         source.tool_choice !== "auto" ||
         source.parallel_tool_calls !== true ||
-        source.prompt_cache_key !== options.expectedPromptCacheKey
+        source.prompt_cache_key !== expectedPromptCacheKey
       ) {
         fail("payload frozen scalar fields do not match");
       }
       const bodyInstructions = boundedString(source.instructions, "payload.instructions", MAX_INSTRUCTIONS_BYTES);
-      if (sha256(bodyInstructions) !== options.expectedInstructionsDigest) fail("payload instructions digest differs");
+      if (sha256(bodyInstructions) !== expectedInstructionsDigest) fail("payload instructions digest differs");
       const text = exactRecord(source.text, ["verbosity"], "payload.text");
       if (text.verbosity !== "low") fail("payload text verbosity differs");
       const include = dataArray(source.include, "payload.include");
       if (JSON.stringify(include) !== JSON.stringify(["reasoning.encrypted_content"])) fail("payload include differs");
       const reasoning = exactRecord(source.reasoning, ["effort", "summary"], "payload.reasoning");
       if (reasoning.effort !== "high" || reasoning.summary !== "auto") fail("payload reasoning differs");
-      if (canonicalSha256(source.tools).digest !== options.expectedToolsDigest) fail("payload tools digest differs");
+      if (canonicalSha256(source.tools).digest !== expectedToolsDigest) fail("payload tools digest differs");
       if (JSON.stringify(toolNames(source.tools)) !== JSON.stringify(expectedToolNames))
         fail("payload tool allowlist differs");
 
       const input = dataArray(source.input, "payload.input");
-      if (input.length < 2) fail("payload input omits the phase-B boundary");
+      if (input.length !== snapshot.input.length) fail("payload input length differs from the filtered context");
       providerInputText(input[0], phaseBPrompt, "payload.input[0]");
       providerInputText(input[1], snapshot.capsule, "payload.input[1]");
-      const copiedInput = jsonCopy(input);
+      const copiedInput = jsonCopy(snapshot.input);
+      if (canonicalSha256(copiedInput).digest !== snapshot.inputDigest) {
+        fail("stored provider input changed after context filtering");
+      }
       const rebuilt = {
         model: "gpt-5.6-sol",
         store: false,
@@ -389,7 +451,7 @@ export function createJournalPhaseBProviderBoundary(
         input: copiedInput,
         text: jsonCopy(text),
         include: jsonCopy(include),
-        prompt_cache_key: options.expectedPromptCacheKey,
+        prompt_cache_key: expectedPromptCacheKey,
         tool_choice: "auto",
         parallel_tool_calls: true,
         tools: jsonCopy(source.tools),
@@ -408,8 +470,8 @@ export function createJournalPhaseBProviderBoundary(
         previousResponseIdPresent: false,
         byteLength,
         payloadDigest: sha256(wireBody),
-        instructionsDigest: options.expectedInstructionsDigest,
-        toolsDigest: options.expectedToolsDigest,
+        instructionsDigest: expectedInstructionsDigest,
+        toolsDigest: expectedToolsDigest,
         phaseBPromptDigest: sha256(phaseBPrompt),
         capsuleDigest: snapshot.capsuleDigest,
       });

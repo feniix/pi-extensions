@@ -192,6 +192,63 @@ describe("Agent Journal phase-B provider boundary", () => {
     expect(failures).toEqual(["invalid-payload"]);
   });
 
+  it("snapshots trusted configuration against post-construction mutation", () => {
+    const failures: string[] = [];
+    const options = {
+      phaseBPrompt,
+      expectedSessionId: "journal-session",
+      expectedInstructionsDigest: sha256(instructions),
+      expectedToolsDigest: canonicalSha256(tools).digest,
+      expectedToolNames: ["read"],
+      expectedPromptCacheKey: "phase-b-cache",
+      transport: "sse" as const,
+      onTerminalFailure: (code: string) => {
+        failures.push(code);
+      },
+    };
+    const boundary = createJournalPhaseBProviderBoundary(options);
+    options.expectedInstructionsDigest = sha256(`${instructions} MUTATED_SECRET`);
+    options.expectedToolsDigest = "b".repeat(64);
+    options.expectedToolNames.push("bash");
+    options.expectedPromptCacheKey = "mutated-cache";
+    options.onTerminalFailure = () => undefined;
+
+    boundary.filterContext([user(phaseBPrompt), resume()]);
+    const unsafe = payload();
+    unsafe.instructions = `${instructions} MUTATED_SECRET`;
+    unsafe.prompt_cache_key = "mutated-cache";
+    expect(boundary.filterProviderPayload(unsafe)).toBe(PROVIDER_ABORT_PAYLOAD);
+    expect(failures).toEqual(["invalid-payload"]);
+  });
+
+  it("rejects provider items not derived from the filtered Agent-message suffix", () => {
+    const { boundary, failures } = setup();
+    boundary.filterContext([user("PHASE_A_SECRET"), user(phaseBPrompt), resume()]);
+    const unsafe = payload([providerUser(phaseBPrompt), providerUser(capsule), providerUser("PHASE_A_SECRET")]);
+    expect(boundary.filterProviderPayload(unsafe)).toBe(PROVIDER_ABORT_PAYLOAD);
+    expect(boundary.getLastPayloadReceipt()).toBeNull();
+    expect(failures).toEqual(["invalid-payload"]);
+  });
+
+  it("rebuilds same-length later input items from Agent messages instead of copying injected content", () => {
+    const { boundary, failures } = setup();
+    boundary.filterContext([
+      user(phaseBPrompt),
+      resume(),
+      { role: "assistant", content: [{ type: "text", text: "safe phase-B progress" }], timestamp: 12 },
+    ]);
+    const unsafe = payload([
+      providerUser(phaseBPrompt),
+      providerUser(capsule),
+      providerUser("PHASE_A_SAME_LENGTH_SECRET"),
+    ]);
+    const rebuilt = boundary.filterProviderPayload(unsafe);
+    expect(rebuilt).not.toBe(PROVIDER_ABORT_PAYLOAD);
+    expect(JSON.stringify(rebuilt)).toContain("safe phase-B progress");
+    expect(JSON.stringify(rebuilt)).not.toContain("PHASE_A_SAME_LENGTH_SECRET");
+    expect(failures).toEqual([]);
+  });
+
   it("binds model, instructions, tools, tool names, prompt cache, reasoning, and provider input prefix", () => {
     const mutations: Array<(value: ReturnType<typeof payload>) => void> = [
       (value) => (value.model = "other-model"),
@@ -363,6 +420,33 @@ describe("Agent Journal phase-B provider boundary", () => {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
   }, 10_000);
+
+  it("prevents the real Codex serializer from reaching fetch after a terminal boundary failure", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    try {
+      const { boundary } = setup();
+      boundary.filterContext([user("missing capsule")]);
+      const stream = streamOpenAICodex(
+        OPENAI_CODEX_MODELS["gpt-5.6-sol"],
+        { systemPrompt: instructions, messages: [{ role: "user", content: phaseBPrompt, timestamp: 10 }], tools: [] },
+        {
+          apiKey: `e30.${Buffer.from(
+            JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "synthetic-account" } }),
+          ).toString("base64url")}.signature`,
+          transport: "sse",
+          maxRetries: 0,
+          onPayload: (value) => boundary.filterProviderPayload(value),
+        },
+      );
+      for await (const _event of stream) {
+        // A serialization error is reported through the stream without a request.
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("normalizes callback failures and never returns the unsafe incoming payload", () => {
     const boundary = createJournalPhaseBProviderBoundary({
