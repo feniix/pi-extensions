@@ -41,7 +41,16 @@ function normalize(value: unknown): unknown {
     Object.entries(value as Record<string, unknown>)
       .filter(
         ([key]) =>
-          !["id", "createdAt", "updatedAt", "closedAt", "activeCheckpointId", "fingerprint", "timestamp"].includes(key),
+          ![
+            "id",
+            "createdAt",
+            "updatedAt",
+            "closedAt",
+            "activeCheckpointId",
+            "fingerprint",
+            "timestamp",
+            "observedAt",
+          ].includes(key),
       )
       .map(([key, item]) => [key, normalize(item)]),
   );

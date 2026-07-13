@@ -82,13 +82,40 @@ export class JournalService {
   async recordBatch(sessionId: string, inputs: EntryInput[]): Promise<JournalEntry[]> {
     if (inputs.length === 0) throw new JournalValidationError("journal record batch must not be empty");
     for (const input of inputs) await this.rejectSecretCandidate(sessionId, input);
-    const entries = inputs.map((input) =>
-      normalizeEntryInput(input, {
-        id: input.id ?? this.idGenerator(),
-        timestamp: this.clock(),
-        maxEntryBytes: this.maxEntryBytes,
-      }),
-    );
+    const entries: JournalEntry[] = [];
+    for (const input of inputs) {
+      const id = input.id ?? this.idGenerator();
+      const explicit = input.dependencies ?? [];
+      const base = normalizeEntryInput(
+        {
+          ...input,
+          id,
+          dependencies: explicit.filter((dependency) => dependency.kind !== "file"),
+          observeFiles: undefined,
+        },
+        { id, timestamp: this.clock(), maxEntryBytes: this.maxEntryBytes },
+      );
+      const observations = [
+        ...(input.observeFiles ?? []),
+        ...explicit.filter((dependency): dependency is FileDependency => dependency.kind === "file"),
+      ];
+      if (observations.length > 20) throw new JournalValidationError("entry file observations exceed item limit");
+      const byPath = new Map<string, boolean>();
+      for (const observation of observations) {
+        if (
+          typeof observation.path !== "string" ||
+          !observation.path.trim() ||
+          typeof observation.material !== "boolean"
+        ) {
+          throw new JournalValidationError("file observation requires path and material boolean");
+        }
+        const path = observation.path.trim();
+        byPath.set(path, (byPath.get(path) ?? false) || observation.material);
+      }
+      const computed: FileDependency[] = [];
+      for (const [path, material] of byPath) computed.push(await this.observeFileDependency(path, id, material));
+      entries.push({ ...base, dependencies: [...base.dependencies, ...computed] });
+    }
     for (const entry of entries) {
       await this.rejectSecretCandidate(sessionId, entry);
       if (entry.dependencies.some((dependency) => dependency.originatingEntryId !== entry.id)) {
@@ -295,6 +322,9 @@ export class JournalService {
 
   async observeFileDependency(path: string, originatingEntryId: string, material: boolean): Promise<FileDependency> {
     const { path: safePath, bytes } = await this.readSafeFile(path);
+    if (containsLikelySecretValue(bytes.toString("utf8"))) {
+      throw new JournalValidationError("artifact content rejected sensitive data");
+    }
     return {
       kind: "file",
       path: relative(this.workspaceRoot, safePath),
@@ -482,6 +512,16 @@ export class JournalService {
   }
 
   private resolveSafeFile(path: string): string {
+    const sensitiveSegment = path
+      .replaceAll("\\", "/")
+      .split("/")
+      .some(
+        (segment) =>
+          /^\.env(?:\.|$)/i.test(segment) ||
+          /credential|secret|private[-_.]?key/i.test(segment) ||
+          /^id_(?:rsa|ed25519)$/i.test(segment),
+      );
+    if (sensitiveSegment) throw new JournalValidationError("artifact path rejected by sensitive-path policy");
     const absolute = resolve(this.workspaceRoot, path);
     if (absolute !== this.workspaceRoot && !absolute.startsWith(`${this.workspaceRoot}${sep}`)) {
       throw new JournalValidationError("artifact path escapes workspace");

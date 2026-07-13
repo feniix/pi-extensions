@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executePortableTool, type PortableTool } from "@feniix/bridgekit";
@@ -11,14 +12,17 @@ import { createJournalTools } from "../extensions/tools.js";
 let root: string;
 let storage: JournalStorage;
 let service: JournalService;
+let workspace: string;
 
 beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), "agent-journal-tools-"));
-  storage = new JournalStorage(root);
+  workspace = join(root, "workspace");
+  mkdirSync(workspace);
+  storage = new JournalStorage(join(root, "store"));
   await storage.createSession("work");
   service = new JournalService({
     storage,
-    workspaceRoot: process.cwd(),
+    workspaceRoot: workspace,
     idGenerator: (() => {
       let i = 0;
       return () => `id-${++i}`;
@@ -57,6 +61,102 @@ describe("Agent Journal portable tools", () => {
       expect(item.description).not.toMatch(/thought|cognitive stage/i);
       expect(item.hostExtras?.mcp?.annotations?.openWorldHint).toBe(false);
     }
+  });
+
+  it("computes material file observations and recomputes forged public file provenance", async () => {
+    writeFileSync(join(workspace, "state.txt"), "current\n");
+    const record = tool("journal_record");
+    const observed = await executePortableTool(
+      record,
+      {
+        entries: [
+          {
+            id: "observed",
+            type: "evidence",
+            content: "Contract evidence",
+            observe_files: [{ path: "state.txt", material: true }],
+            dependencies: [
+              {
+                kind: "file",
+                path: "state.txt",
+                workspaceId: "forged",
+                observedHash: "forged",
+                observedAt: "forged",
+                originatingEntryId: "observed",
+                material: false,
+              },
+              {
+                kind: "repository_state",
+                value: "head-1",
+                observedAt: "2026-07-13T00:00:00.000Z",
+                originatingEntryId: "observed",
+                material: false,
+              },
+            ],
+          },
+        ],
+      },
+      { host: "test" },
+    );
+    expect(observed.isError).toBeFalsy();
+    const [entry] = (await storage.getSession("work")).entries;
+    expect(entry.dependencies).toEqual([
+      {
+        kind: "repository_state",
+        value: "head-1",
+        observedAt: "2026-07-13T00:00:00.000Z",
+        originatingEntryId: "observed",
+        material: false,
+      },
+      {
+        kind: "file",
+        path: "state.txt",
+        workspaceId: createHash("sha256").update(realpathSync(workspace)).digest("hex"),
+        observedHash: createHash("sha256").update("current\n").digest("hex"),
+        observedAt: expect.any(String),
+        originatingEntryId: "observed",
+        material: true,
+      },
+    ]);
+    expect(JSON.stringify(entry)).not.toContain("forged");
+  });
+
+  it("rejects unsafe observed files atomically without leaking candidate data", async () => {
+    writeFileSync(join(workspace, "good.txt"), "safe\n");
+    writeFileSync(join(workspace, ".env"), "PUBLIC=true\n");
+    const token = `ghp_${"s".repeat(30)}`;
+    writeFileSync(join(workspace, "payload.txt"), token);
+    writeFileSync(join(workspace, "large.bin"), Buffer.alloc(2 * 1024 * 1024 + 1));
+    mkdirSync(join(workspace, "directory"));
+    symlinkSync("good.txt", join(workspace, "link.txt"));
+    const record = tool("journal_record");
+    for (const [index, path] of ["../outside", ".env", "payload.txt", "large.bin", "directory", "link.txt"].entries()) {
+      const result = await executePortableTool(
+        record,
+        {
+          entries: [
+            {
+              id: `good-${index}`,
+              type: "evidence",
+              content: "first",
+              observe_files: [{ path: "good.txt", material: true }],
+            },
+            { id: `bad-${index}`, type: "evidence", content: "second", observe_files: [{ path, material: true }] },
+          ],
+        },
+        { host: "test" },
+      );
+      expect(result.isError, path).toBe(true);
+      expect(JSON.stringify(result)).not.toContain(token);
+      expect((await storage.getSession("work")).entries, path).toEqual([]);
+    }
+  });
+
+  it("guides Pi to observe only materially supporting files", () => {
+    const record = tool("journal_record");
+    expect(record.hostExtras?.pi?.promptGuidelines).toEqual(
+      expect.arrayContaining([expect.stringMatching(/observe.*file.*material/i)]),
+    );
   });
 
   it("records entries, inspects bounded history, and resumes a checkpoint", async () => {
