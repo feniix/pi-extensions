@@ -513,7 +513,10 @@ export class JournalService {
       if (before.size > MAX_HASH_BYTES) throw new JournalValidationError("artifact exceeds hash byte limit");
       const assertPathIdentity = (): void => {
         const canonical = realpathSync(safePath);
-        if (canonical !== safePath || (canonical !== this.workspaceRoot && !canonical.startsWith(`${this.workspaceRoot}${sep}`))) {
+        if (
+          canonical !== safePath ||
+          (canonical !== this.workspaceRoot && !canonical.startsWith(`${this.workspaceRoot}${sep}`))
+        ) {
           throw new JournalValidationError("opened artifact escapes workspace");
         }
         const pathStats = statSync(safePath);
