@@ -171,4 +171,13 @@ describe("Agent Journal evaluation program ledger", () => {
     mutate(state);
     expect(() => validateEvaluationProgramState(state)).toThrow();
   });
+
+  it("rejects inherited and non-enumerable payload fields", () => {
+    const inherited = Object.assign(Object.create({ rawMessages: [{ content: "private" }] }), structuredClone(ledger));
+    expect(() => validateEvaluationProgramState(inherited)).toThrow();
+
+    const hidden = structuredClone(ledger);
+    Object.defineProperty(hidden, "toolPayload", { value: { command: "private" }, enumerable: false });
+    expect(() => validateEvaluationProgramState(hidden)).toThrow();
+  });
 });

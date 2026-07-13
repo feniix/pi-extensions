@@ -27,14 +27,23 @@ export class EvaluationProgramStateValidationError extends Error {
 }
 
 function record(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new EvaluationProgramStateValidationError(`${field} must be an object`);
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    throw new EvaluationProgramStateValidationError(`${field} must be a plain JSON object`);
   }
   return value as Record<string, unknown>;
 }
 
 function exactKeys(value: Record<string, unknown>, expected: readonly string[], field: string): void {
-  const actual = Object.keys(value).sort();
+  const ownKeys = Reflect.ownKeys(value);
+  if (ownKeys.some((key) => typeof key !== "string")) {
+    throw new EvaluationProgramStateValidationError(`${field} contains non-JSON fields`);
+  }
+  const actual = (ownKeys as string[]).sort();
   const wanted = [...expected].sort();
   if (JSON.stringify(actual) !== JSON.stringify(wanted)) {
     throw new EvaluationProgramStateValidationError(`${field} contains unknown or missing fields`);
