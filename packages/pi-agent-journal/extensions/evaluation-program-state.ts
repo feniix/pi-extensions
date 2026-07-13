@@ -1,0 +1,228 @@
+const SHA256 = /^[a-f0-9]{64}$/;
+const GIT_COMMIT = /^[a-f0-9]{40}$/;
+const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
+const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+const CREDENTIAL_LIKE = /(?:gh[pousr]_|github_pat_|sk-[A-Za-z0-9]|AKIA[0-9A-Z]{16}|-----BEGIN|Bearer\s)/;
+
+const STAGES = [
+  "infrastructure-hardening",
+  "awaiting-infrastructure-acceptance",
+  "awaiting-v4-continue",
+  "version-evaluation",
+  "awaiting-terminal-continue",
+  "awaiting-result-acceptance",
+  "complete",
+  "blocked",
+] as const;
+const PENDING_ACTIONS = [
+  "none",
+  "accept-infrastructure",
+  "continue-v4",
+  "continue-next-version",
+  "accept-passing-result",
+] as const;
+const CLEANUP_STATES = [
+  "private-traces-not-committed",
+  "verified-and-deleted",
+  "synthetic-evidence-deleted",
+  "retained-private",
+] as const;
+
+type Stage = (typeof STAGES)[number];
+type PendingAction = (typeof PENDING_ACTIONS)[number];
+
+export class EvaluationProgramStateValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EvaluationProgramStateValidationError";
+  }
+}
+
+function record(value: unknown, field: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new EvaluationProgramStateValidationError(`${field} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function exactKeys(value: Record<string, unknown>, expected: readonly string[], field: string): void {
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  if (JSON.stringify(actual) !== JSON.stringify(wanted)) {
+    throw new EvaluationProgramStateValidationError(`${field} contains unknown or missing fields`);
+  }
+}
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], field: string): T {
+  if (typeof value !== "string" || !allowed.includes(value as T)) {
+    throw new EvaluationProgramStateValidationError(`${field} is invalid`);
+  }
+  return value as T;
+}
+
+function integer(value: unknown, field: string, minimum = 1): number {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum) {
+    throw new EvaluationProgramStateValidationError(`${field} must be a safe integer of at least ${minimum}`);
+  }
+  return value as number;
+}
+
+function safeString(value: unknown, pattern: RegExp, field: string): string {
+  if (typeof value !== "string" || !pattern.test(value) || CREDENTIAL_LIKE.test(value)) {
+    throw new EvaluationProgramStateValidationError(`${field} is not safe metadata`);
+  }
+  return value;
+}
+
+function digestOrNull(value: unknown, field: string): string | null {
+  if (value === null) return null;
+  return safeString(value, SHA256, field);
+}
+
+function opaqueIds(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) throw new EvaluationProgramStateValidationError(`${field} must be an array`);
+  const ids = value.map((item, index) => safeString(item, OPAQUE_ID, `${field}[${index}]`));
+  if (new Set(ids).size !== ids.length) throw new EvaluationProgramStateValidationError(`${field} contains duplicates`);
+  return ids;
+}
+
+function validateHistoricalGuard(value: unknown): void {
+  const guard = record(value, "historicalEvidenceGuard");
+  exactKeys(guard, ["path", "digest"], "historicalEvidenceGuard");
+  if (guard.path !== "docs/evaluations/agent-work-journal-historical-guard.json") {
+    throw new EvaluationProgramStateValidationError("historicalEvidenceGuard.path is invalid");
+  }
+  safeString(guard.digest, SHA256, "historicalEvidenceGuard.digest");
+}
+
+function validatePullRequests(value: unknown): void {
+  if (!Array.isArray(value)) throw new EvaluationProgramStateValidationError("reconciledPullRequests must be an array");
+  const numbers = new Set<number>();
+  for (const [index, item] of value.entries()) {
+    const receipt = record(item, `reconciledPullRequests[${index}]`);
+    exactKeys(
+      receipt,
+      ["prNumber", "branch", "mergeCommit", "ciRunId", "ciConclusion"],
+      `reconciledPullRequests[${index}]`,
+    );
+    const prNumber = integer(receipt.prNumber, `reconciledPullRequests[${index}].prNumber`);
+    if (numbers.has(prNumber))
+      throw new EvaluationProgramStateValidationError("reconciledPullRequests contains duplicates");
+    numbers.add(prNumber);
+    safeString(receipt.branch, BRANCH, `reconciledPullRequests[${index}].branch`);
+    safeString(receipt.mergeCommit, GIT_COMMIT, `reconciledPullRequests[${index}].mergeCommit`);
+    integer(receipt.ciRunId, `reconciledPullRequests[${index}].ciRunId`);
+    if (receipt.ciConclusion !== "success") {
+      throw new EvaluationProgramStateValidationError("reconciled pull request CI must be successful");
+    }
+  }
+}
+
+function validateVersions(
+  value: unknown,
+  latestCompletedVersion: number,
+): Array<{ version: number; terminalState: string }> {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new EvaluationProgramStateValidationError("versions must be a non-empty array");
+  }
+  const versions = value.map((item, index) => {
+    const version = record(item, `versions[${index}]`);
+    exactKeys(
+      version,
+      ["version", "terminalState", "failureStage", "taskIds", "runIds", "resultDigest", "cleanupState"],
+      `versions[${index}]`,
+    );
+    const number = integer(version.version, `versions[${index}].version`);
+    const terminalState = oneOf(version.terminalState, ["PASS", "FAIL"] as const, `versions[${index}].terminalState`);
+    if (terminalState === "FAIL") safeString(version.failureStage, OPAQUE_ID, `versions[${index}].failureStage`);
+    else if (version.failureStage !== null)
+      throw new EvaluationProgramStateValidationError(`versions[${index}].failureStage must be null for PASS`);
+    opaqueIds(version.taskIds, `versions[${index}].taskIds`);
+    opaqueIds(version.runIds, `versions[${index}].runIds`);
+    safeString(version.resultDigest, SHA256, `versions[${index}].resultDigest`);
+    oneOf(version.cleanupState, CLEANUP_STATES, `versions[${index}].cleanupState`);
+    return { version: number, terminalState };
+  });
+  if (
+    versions.some((item, index) => item.version !== index + 1) ||
+    versions.at(-1)?.version !== latestCompletedVersion
+  ) {
+    throw new EvaluationProgramStateValidationError("versions must be sequential through latestCompletedVersion");
+  }
+  return versions;
+}
+
+function validateTransition(
+  stage: Stage,
+  pending: PendingAction,
+  acceptedDigest: string | null,
+  latestCompletedVersion: number,
+  versions: Array<{ terminalState: string }>,
+): void {
+  if (acceptedDigest === null) {
+    if (!["infrastructure-hardening", "awaiting-infrastructure-acceptance", "blocked"].includes(stage)) {
+      throw new EvaluationProgramStateValidationError("infrastructure acceptance cannot be skipped");
+    }
+    if (!["none", "accept-infrastructure"].includes(pending) || latestCompletedVersion > 3) {
+      throw new EvaluationProgramStateValidationError("V4 cannot begin before infrastructure acceptance");
+    }
+  }
+  const expectedPending: Partial<Record<Stage, PendingAction>> = {
+    "awaiting-infrastructure-acceptance": "accept-infrastructure",
+    "awaiting-v4-continue": "continue-v4",
+    "version-evaluation": "none",
+    "awaiting-terminal-continue": "continue-next-version",
+    "awaiting-result-acceptance": "accept-passing-result",
+    complete: "none",
+  };
+  if (expectedPending[stage] !== undefined && pending !== expectedPending[stage]) {
+    throw new EvaluationProgramStateValidationError("pending user action does not match the current stage");
+  }
+  if (
+    [
+      "awaiting-v4-continue",
+      "version-evaluation",
+      "awaiting-terminal-continue",
+      "awaiting-result-acceptance",
+      "complete",
+    ].includes(stage) &&
+    acceptedDigest === null
+  ) {
+    throw new EvaluationProgramStateValidationError("accepted infrastructure receipt is required for this stage");
+  }
+  if (stage === "complete" && !versions.some((version) => version.terminalState === "PASS")) {
+    throw new EvaluationProgramStateValidationError("completion requires an accepted passing version");
+  }
+}
+
+export function validateEvaluationProgramState(value: unknown): Record<string, unknown> {
+  const state = record(value, "programState");
+  exactKeys(
+    state,
+    [
+      "schemaVersion",
+      "currentStage",
+      "latestCompletedVersion",
+      "acceptedInfrastructureReceiptDigest",
+      "pendingUserAction",
+      "predecessorCutoverPerformed",
+      "historicalEvidenceGuard",
+      "reconciledPullRequests",
+      "versions",
+    ],
+    "programState",
+  );
+  if (state.schemaVersion !== 1) throw new EvaluationProgramStateValidationError("unsupported program state schema");
+  const stage = oneOf(state.currentStage, STAGES, "currentStage");
+  const latestCompletedVersion = integer(state.latestCompletedVersion, "latestCompletedVersion");
+  const acceptedDigest = digestOrNull(state.acceptedInfrastructureReceiptDigest, "acceptedInfrastructureReceiptDigest");
+  const pending = oneOf(state.pendingUserAction, PENDING_ACTIONS, "pendingUserAction");
+  if (state.predecessorCutoverPerformed !== false) {
+    throw new EvaluationProgramStateValidationError("predecessor cutover is forbidden by this program");
+  }
+  validateHistoricalGuard(state.historicalEvidenceGuard);
+  validatePullRequests(state.reconciledPullRequests);
+  const versions = validateVersions(state.versions, latestCompletedVersion);
+  validateTransition(stage, pending, acceptedDigest, latestCompletedVersion, versions);
+  return state;
+}

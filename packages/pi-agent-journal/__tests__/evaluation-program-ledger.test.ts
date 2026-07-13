@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { validateEvaluationProgramState } from "../extensions/evaluation-program-state.js";
 
 const ledgerPath = "docs/evaluations/agent-work-journal-evaluation-program-state.json";
 const v1 = JSON.parse(readFileSync("docs/evaluations/agent-work-journal-v1-results.json", "utf8"));
@@ -20,6 +21,7 @@ function stringsIn(value: unknown): string[] {
 
 describe("Agent Journal evaluation program ledger", () => {
   it("records the reconciled program state without skipping an acceptance pause", () => {
+    expect(validateEvaluationProgramState(ledger)).toBe(ledger);
     expect(ledger).toMatchObject({
       schemaVersion: 1,
       currentStage: "infrastructure-hardening",
@@ -92,10 +94,33 @@ describe("Agent Journal evaluation program ledger", () => {
       /prompt|fixture|rubric|grader|mutation|credential|toolPayload|modelMessage|reasoning|tracePayload/i,
     );
     for (const value of stringsIn(ledger)) {
-      expect(value).not.toMatch(/^\/(?!\/)|^[A-Za-z]:[\\/]/);
+      expect(value).not.toMatch(/^\/|^[A-Za-z]:[\\/]|^file:|^\\\\/);
     }
     expect(
       ledger.versions.every((version: { resultDigest: string }) => /^[a-f0-9]{64}$/.test(version.resultDigest)),
     ).toBe(true);
+  });
+
+  it.each([
+    ["unknown release authority", { releaseAuthorized: true }],
+    ["held-out stage before infrastructure acceptance", { currentStage: "version-evaluation" }],
+    ["contradictory next stage", { nextStage: "held-out-selection" }],
+    ["raw messages", { rawMessages: [{ role: "assistant", content: "private" }] }],
+    ["separated tool payload key", { tool_payloads: [{ command: "private" }] }],
+    ["generic secret", { secret: "ghp_abcdefghijklmnopqrstuvwxyz1234567890" }],
+    ["UNC private path", { privatePath: "\\\\private-host\\Users\\alice\\secret" }],
+    ["file URL private path", { privatePath: "file:///Users/alice/secret" }],
+  ])("rejects unsafe or unknown metadata: %s", (_label, mutation) => {
+    expect(() => validateEvaluationProgramState({ ...structuredClone(ledger), ...mutation })).toThrow();
+  });
+
+  it("rejects nested unknown metadata and a skipped acceptance state", () => {
+    const nested = structuredClone(ledger);
+    nested.historicalEvidenceGuard.rawMessages = [];
+    expect(() => validateEvaluationProgramState(nested)).toThrow();
+
+    const skipped = structuredClone(ledger);
+    skipped.pendingUserAction = "continue-v4";
+    expect(() => validateEvaluationProgramState(skipped)).toThrow();
   });
 });
