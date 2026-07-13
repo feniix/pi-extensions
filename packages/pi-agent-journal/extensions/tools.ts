@@ -38,6 +38,10 @@ const relationship = Type.Object({
   type: Type.Union([Type.Literal("supersedes"), Type.Literal("alternative-to")]),
   targetEntryId: entryId,
 });
+const fileObservation = Type.Object({
+  path: Type.String({ minLength: 1, maxLength: 512 }),
+  material: Type.Boolean(),
+});
 const dependency = Type.Union([
   Type.Object({
     kind: Type.Literal("file"),
@@ -78,6 +82,7 @@ const entry = Type.Object({
   content: Type.String({ minLength: 1, maxLength: 20000 }),
   relationships: Type.Optional(Type.Array(relationship, { maxItems: 20 })),
   dependencies: Type.Optional(Type.Array(dependency, { maxItems: 20 })),
+  observe_files: Type.Optional(Type.Array(fileObservation, { maxItems: 20 })),
 });
 
 export const recordParams = Type.Object({
@@ -369,6 +374,7 @@ export function createJournalTools(deps: JournalToolDeps): PortableTool<TObject>
             promptSnippet: "Record only durable decisions, evidence, assumptions, validations, and next actions.",
             promptGuidelines: [
               "Use journal_record for semantic durable state; omit exploratory narration and raw tool output.",
+              "Observe a file only when it materially supports a durable entry; provide only its workspace-relative path and material flag.",
               "Use supersedes or alternative-to to relate append-only entries.",
             ],
           },
@@ -384,6 +390,7 @@ export function createJournalTools(deps: JournalToolDeps): PortableTool<TObject>
             content: value.content as string,
             relationships: value.relationships as Relationship[] | undefined,
             dependencies: value.dependencies as FreshnessDependency[] | undefined,
+            observeFiles: value.observe_files as EntryInput["observeFiles"],
           }));
           const entries = await deps.service.recordBatch(id, inputs);
           return { sessionId: id, persisted: entries.length, entryIds: entries.map((item) => item.id) };

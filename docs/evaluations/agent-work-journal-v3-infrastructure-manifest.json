@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 3,
+  "status": "pre-task-infrastructure",
+  "concreteTasksSelected": false,
+  "taskIds": [],
+  "promptDigests": [],
+  "categories": [
+    "automated-multi-file-continuation",
+    "material-dependency-revalidation",
+    "append-only-conflict-resolution"
+  ],
+  "model": "openai-codex/gpt-5.6-sol",
+  "reasoning": "high",
+  "runtime": {
+    "nodeVersion": "24.14.1",
+    "piCodingAgentVersion": "0.80.6",
+    "repositoryLockedExecutableRequired": true,
+    "darwinSandboxExecRequiredForUntrustedCommands": true
+  },
+  "readTolerance": 1,
+  "exactRunsPerCondition": 3,
+  "exactTotalTraces": 18,
+  "budgetPolicy": {
+    "taskAgentMaximumAssistantTurnsPerPhase": 12,
+    "taskAgentMaximumToolCallsPerPhase": 40,
+    "phaseWallTimeoutSeconds": 1800,
+    "ownerSimulatorMaximumAssistantTurns": 2,
+    "ownerSimulatorMaximumToolCalls": 8,
+    "ownerSimulatorWallTimeoutSeconds": 600,
+    "statusByteLimit": 4000,
+    "capsuleByteLimit": 4000,
+    "tokensReportedPostHoc": true,
+    "budgetExhaustionResult": "terminal_fail"
+  },
+  "attemptPolicy": {
+    "scheduleAndRunIdsPreRegistered": true,
+    "firstProviderRequestStartsAttempt": true,
+    "postRequestFailureResult": "terminal_fail_no_retry",
+    "preRequestInfrastructureRetries": 1,
+    "extraMissingDuplicateOrReplacementTraceResult": "terminal_fail"
+  },
+  "ownerProtocol": {
+    "fields": [
+      "objective",
+      "current_status",
+      "settled_decisions",
+      "evidence",
+      "open_questions",
+      "next_action",
+      "material_dependencies"
+    ],
+    "phaseAActions": ["status_create", "status_refresh", "status_correction"],
+    "phaseBActions": ["known_context_clarification", "resume_restatement"],
+    "eachActionRecorded": true,
+    "statusCreateAlwaysCountsAsAvoidableMaintenance": true
+  },
+  "materialCaseMatrix": {
+    "journalSafetyAssertionsOnly": true,
+    "baselineMustDetectAndRevalidateForTaskCorrectness": true,
+    "dependencyTaskPerRepetition": ["one_material_stale_or_missing", "one_unaffected_control"],
+    "conflictTaskPerRepetition": ["one_material_conflict", "one_unaffected_control"],
+    "falsePositiveUniverse": "all_declared_unaffected_controls"
+  },
+  "taskLifecycle": {
+    "antiTuningEmbargoStartsBeforeCandidateGeneration": true,
+    "maximumCandidateAttemptsPerCategory": 3,
+    "firstStructurallyValidCandidateMustFreeze": true,
+    "candidateRejectableBeforeAnyModelTrial": true,
+    "allowedCandidateRejections": [
+      "missing_bytes_or_digest",
+      "invalid_fixture",
+      "nondeterministic_mutation",
+      "broken_grader",
+      "category_mismatch",
+      "prior_task_reuse",
+      "unsupported_runner_requirement"
+    ],
+    "safeRejectionReceiptRequired": true,
+    "atomicThreeTaskFreezeRequired": true,
+    "frozenTasksOneShot": true
+  },
+  "quarantine": {
+    "twoIndependentImplementationsRequired": true,
+    "duplicateReconstructionRequired": true,
+    "duplicateMutationRequired": true,
+    "expectedHashesRequired": true,
+    "mutationPreconditionFailureRequired": true,
+    "positiveAndNegativeGraderChecksRequired": true,
+    "independentReceiptReviewRequired": true,
+    "proseOnlyMutationForbidden": true
+  },
+  "sandbox": {
+    "privateRootMode": "0700",
+    "sanitizedEnvironmentAllowlistRequired": true,
+    "ambientCredentialsForbidden": true,
+    "mutatorAndGraderNetworkDisabled": true,
+    "readOnlyInputsAndSingleWritableTrialRoot": true,
+    "commandsSpawnedWithoutShellConcatenation": true,
+    "resourceLimitsAndProcessTreeTerminationRequired": true
+  },
+  "productBoundary": {
+    "toolNames": ["journal_record", "journal_inspect", "journal_checkpoint", "journal_session"],
+    "materialFileObservationWithinJournalRecord": true,
+    "callerSuppliedFileProvenanceMustBeRecomputed": true,
+    "predecessorCutoverIncluded": false
+  },
+  "provenance": {
+    "canonicalSerialization": "RFC8785-JCS",
+    "digest": "SHA-256",
+    "separateInfrastructureAcceptanceReceiptRequired": true,
+    "separateFrozenTaskSetReceiptRequired": true,
+    "bindRepositoryCommitAndTree": true,
+    "bindContractManifestRunnerScorerNormalizerValidatorOwnerProtocolGate": true,
+    "bindScheduleAttemptsRawDerivedRecomputationCleanup": true
+  },
+  "historicalEvidenceGuard": {
+    "docs/evaluations/agent-work-journal-v1.md": "cb4e88d65ecba49bd12669c03c8a865641b1538516dca1e056258ebbca0bdbe1",
+    "docs/evaluations/agent-work-journal-v1-results.json": "ff6f8b1389e0667ca410fd6d544247901ebc2955aaa1a6fa1a47404d00e0315b",
+    "docs/plans/2026-07-12-001-feat-agent-work-journal-plan.md": "d74dee96690d5f125ee53001b182100209587c4e207173272c86d604e5206748",
+    "docs/evaluations/agent-work-journal-v2.md": "939f479276af7038b2d1512d71d0bdd822b7ed7b56f95cd4632cb089603c63f2",
+    "docs/evaluations/agent-work-journal-v2-results.json": "1f0aafc726bab5c6482a56cc187d588c51d7081c3e2dfef7af3ad42cc23e0f7c",
+    "docs/evaluations/agent-work-journal-v2-infrastructure-manifest.json": "bad596b7909c3b85aa6cafec7dd893516384eb1f157e44fe33e709c22a1e4e34",
+    "docs/plans/2026-07-12-002-feat-agent-work-journal-v2-redesign-plan.md": "c67417dca8747a1310f6419ef2f51b4a6173985d1390c8415fe5c25d07fda141"
+  },
+  "priorTaskNovelty": {
+    "v1SemanticDenylist": [
+      "partial_multi_file_investigation",
+      "material_dependency_change",
+      "settled_competing_alternative"
+    ],
+    "v2SafeTaskDigestsFromHistoricalResultRequired": true,
+    "independentSemanticNoveltyReviewRequired": true
+  },
+  "privacy": {
+    "rawPromptsCommitted": false,
+    "fixtureSourceCommitted": false,
+    "graderSourceCommitted": false,
+    "mutationSourceCommitted": false,
+    "rawToolPayloadsCommitted": false,
+    "rawModelMessagesCommitted": false,
+    "absolutePrivatePathsCommitted": false,
+    "privateEvidenceDeletedAfterFinalGateAndRecomputation": true
+  }
+}

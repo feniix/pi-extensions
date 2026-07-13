@@ -20,7 +20,7 @@ Pi and MCP use separate default stores and cannot be configured to the same cano
 
 ## Tools
 
-- `journal_record` — append bounded typed entries (`observation`, `evidence`, `assumption`, `decision`, `rejected_alternative`, `validation`, `next_action`) and optional `supersedes` / `alternative-to` links.
+- `journal_record` — append bounded typed entries (`observation`, `evidence`, `assumption`, `decision`, `rejected_alternative`, `validation`, `next_action`), optional `supersedes` / `alternative-to` links, and optional `observe_files` declarations. For observed files, callers provide only a workspace-relative path and material flag; the service safely computes the dependency hash, workspace identity, timestamp, and entry binding.
 - `journal_inspect` — read a bounded current projection, append-only history, or durable notices.
 - `journal_checkpoint` — create a compact checkpoint or resume with referenced entries and freshness results.
 - `journal_session` — list, create, select, inspect, or close sessions. Close never deletes history.
@@ -49,7 +49,7 @@ Pi storage can be overridden by `AGENT_JOURNAL_STORAGE_DIR` or `--agent-journal-
 
 ## Privacy and limits
 
-Journal files are local plaintext JSON with private filesystem permissions where supported. Credential detection is best-effort; detected candidate bytes are excluded from journal-owned files, temp files, outputs, and notices. Pi's own session transcript is separate plaintext storage outside this guarantee. Do not pass suspected secrets in tool arguments.
+Journal files are local plaintext JSON with private filesystem permissions where supported. Credential detection is best-effort; detected candidate bytes are excluded from journal-owned files, temp files, outputs, and notices. File observation denies sensitive path names, scans bounded bytes before hashing, rejects symlinks/special/oversized files, and never stores file contents. Pi's own session transcript is separate plaintext storage outside this guarantee. Do not pass suspected secrets in tool arguments.
 
 V1 supports one process/writer per store. Reads and outputs are bounded, artifact freshness reads stay inside the workspace and reject symlinks/special files, and unresolved conflicts remain available in headless modes. Existing Sequential Thinking data is never scanned, imported, migrated, or deleted.
 

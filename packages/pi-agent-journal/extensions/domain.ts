@@ -112,12 +112,19 @@ export interface JournalSession {
   fingerprint: string;
 }
 
+export interface FileObservationInput {
+  path: string;
+  material: boolean;
+}
+
 export interface EntryInput {
   id?: string;
   type: EntryType;
   content: string;
   relationships?: Relationship[];
   dependencies?: FreshnessDependency[];
+  /** Safe service-computed file dependencies; never persisted as a separate field. */
+  observeFiles?: FileObservationInput[];
 }
 
 export const EVALUATION_SCENARIO_CATEGORIES = [

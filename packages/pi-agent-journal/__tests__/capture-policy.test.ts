@@ -219,6 +219,56 @@ describe("capture policy and journal service", () => {
     await expect(service.observeFileDependency("../outside", "evidence", true)).rejects.toThrow(/workspace/i);
   });
 
+  it("propagates computed observations through checkpoints and resolves stale history append-only", async () => {
+    writeFileSync(join(workspace, "observed.txt"), "v1\n");
+    const original = await service.record("work", {
+      id: "observed-entry",
+      type: "evidence",
+      content: "Observed contract",
+      observeFiles: [{ path: "observed.txt", material: true }],
+    });
+    expect(original.dependencies).toEqual([
+      expect.objectContaining({
+        kind: "file",
+        path: "observed.txt",
+        material: true,
+        originatingEntryId: "observed-entry",
+      }),
+    ]);
+    await service.createCheckpoint("work", {
+      objective: "observe",
+      status: "active",
+      evidenceEntryIds: [original.id],
+      artifactDependencies: original.dependencies,
+      supportEntryIds: [original.id],
+    });
+    writeFileSync(join(workspace, "observed.txt"), "v2\n");
+    const stale = await service.resume("work");
+    expect(stale.entries).toEqual([]);
+    expect(stale.notices).toEqual([expect.objectContaining({ category: "stale", requiresJudgment: true })]);
+    const before = await service.inspectHistory("work");
+    const noticeBefore = (await service.inspectNotices("work"))[0];
+
+    const fresh = await service.record("work", {
+      id: "fresh-entry",
+      type: "evidence",
+      content: "Revalidated contract",
+      relationships: [{ type: "supersedes", targetEntryId: original.id }],
+      observeFiles: [{ path: "observed.txt", material: true }],
+    });
+    await service.createCheckpoint("work", {
+      objective: "observe",
+      status: "revalidated",
+      evidenceEntryIds: [fresh.id],
+      artifactDependencies: fresh.dependencies,
+      supportEntryIds: [fresh.id],
+    });
+    await service.resume("work");
+    const after = await service.inspectHistory("work");
+    expect(after.slice(0, before.length)).toEqual(before);
+    expect((await service.inspectNotices("work"))[0]).toMatchObject({ ...noticeBefore, requiresJudgment: false });
+  });
+
   it("excludes stale material supporting entries from resumable current state", async () => {
     writeFileSync(join(workspace, "state.txt"), "one", "utf8");
     const dependency = await service.observeFileDependency("state.txt", "file-evidence", true);
