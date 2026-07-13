@@ -50,6 +50,26 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[], 
   }
 }
 
+function jsonArray(value: unknown, field: string): unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) {
+    throw new EvaluationProgramStateValidationError(`${field} must be a plain JSON array`);
+  }
+  const expected = [...Array.from({ length: value.length }, (_, index) => String(index)), "length"].sort();
+  const ownKeys = Reflect.ownKeys(value);
+  if (
+    ownKeys.some((key) => typeof key !== "string") ||
+    JSON.stringify((ownKeys as string[]).sort()) !== JSON.stringify(expected)
+  ) {
+    throw new EvaluationProgramStateValidationError(`${field} contains non-JSON fields or sparse items`);
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    if (Object.getOwnPropertyDescriptor(value, String(index))?.enumerable !== true) {
+      throw new EvaluationProgramStateValidationError(`${field}[${index}] must be enumerable JSON data`);
+    }
+  }
+  return value;
+}
+
 function oneOf<T extends string>(value: unknown, allowed: readonly T[], field: string): T {
   if (typeof value !== "string" || !allowed.includes(value as T)) {
     throw new EvaluationProgramStateValidationError(`${field} is invalid`);
@@ -77,8 +97,8 @@ function digestOrNull(value: unknown, field: string): string | null {
 }
 
 function opaqueIds(value: unknown, field: string): string[] {
-  if (!Array.isArray(value)) throw new EvaluationProgramStateValidationError(`${field} must be an array`);
-  const ids = value.map((item, index) => safeString(item, OPAQUE_ID, `${field}[${index}]`));
+  const array = jsonArray(value, field);
+  const ids = array.map((item, index) => safeString(item, OPAQUE_ID, `${field}[${index}]`));
   if (new Set(ids).size !== ids.length) throw new EvaluationProgramStateValidationError(`${field} contains duplicates`);
   return ids;
 }
@@ -93,9 +113,9 @@ function validateHistoricalGuard(value: unknown): void {
 }
 
 function validatePullRequests(value: unknown): void {
-  if (!Array.isArray(value)) throw new EvaluationProgramStateValidationError("reconciledPullRequests must be an array");
+  const pullRequests = jsonArray(value, "reconciledPullRequests");
   const numbers = new Set<number>();
-  for (const [index, item] of value.entries()) {
+  for (const [index, item] of pullRequests.entries()) {
     const receipt = record(item, `reconciledPullRequests[${index}]`);
     exactKeys(
       receipt,
@@ -119,10 +139,11 @@ function validateVersions(
   value: unknown,
   latestCompletedVersion: number,
 ): Array<{ version: number; terminalState: string }> {
-  if (!Array.isArray(value) || value.length === 0) {
+  const versionArray = jsonArray(value, "versions");
+  if (versionArray.length === 0) {
     throw new EvaluationProgramStateValidationError("versions must be a non-empty array");
   }
-  const versions = value.map((item, index) => {
+  const versions = versionArray.map((item, index) => {
     const version = record(item, `versions[${index}]`);
     exactKeys(
       version,

@@ -180,4 +180,18 @@ describe("Agent Journal evaluation program ledger", () => {
     Object.defineProperty(hidden, "toolPayload", { value: { command: "private" }, enumerable: false });
     expect(() => validateEvaluationProgramState(hidden)).toThrow();
   });
+
+  it("rejects inherited, hidden, and symbolic fields on array containers", () => {
+    const inherited = structuredClone(ledger);
+    Object.setPrototypeOf(inherited.versions, Object.assign(Object.create(Array.prototype), { rawMessages: [] }));
+    expect(() => validateEvaluationProgramState(inherited)).toThrow();
+
+    const hidden = structuredClone(ledger);
+    Object.defineProperty(hidden.versions, "toolPayload", { value: { command: "private" }, enumerable: false });
+    expect(() => validateEvaluationProgramState(hidden)).toThrow();
+
+    const symbolic = structuredClone(ledger);
+    symbolic.versions[Symbol("toolPayload")] = { command: "private" };
+    expect(() => validateEvaluationProgramState(symbolic)).toThrow();
+  });
 });
