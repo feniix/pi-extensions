@@ -193,6 +193,24 @@ describe("Agent Journal evaluation program ledger", () => {
     const symbolic = structuredClone(ledger);
     symbolic.versions[Symbol("toolPayload")] = { command: "private" };
     expect(() => validateEvaluationProgramState(symbolic)).toThrow();
+
+    const accessor = structuredClone(ledger);
+    const firstVersion = accessor.versions[0];
+    Object.defineProperty(accessor.versions, "0", { enumerable: true, get: () => firstVersion });
+    expect(() => validateEvaluationProgramState(accessor)).toThrow();
+
+    const nonWritable = structuredClone(ledger);
+    Object.defineProperty(nonWritable.versions, "0", {
+      value: nonWritable.versions[0],
+      enumerable: true,
+      writable: false,
+      configurable: true,
+    });
+    expect(() => validateEvaluationProgramState(nonWritable)).toThrow();
+
+    const nonWritableLength = structuredClone(ledger);
+    Object.defineProperty(nonWritableLength.versions, "length", { writable: false });
+    expect(() => validateEvaluationProgramState(nonWritableLength)).toThrow();
   });
 
   it("rejects hidden or accessor-backed required record fields", () => {

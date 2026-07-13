@@ -74,9 +74,27 @@ function jsonArray(value: unknown, field: string): unknown[] {
   ) {
     throw new EvaluationProgramStateValidationError(`${field} contains non-JSON fields or sparse items`);
   }
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+  if (
+    !lengthDescriptor ||
+    !("value" in lengthDescriptor) ||
+    lengthDescriptor.value !== value.length ||
+    lengthDescriptor.enumerable !== false ||
+    lengthDescriptor.writable !== true ||
+    lengthDescriptor.configurable !== false
+  ) {
+    throw new EvaluationProgramStateValidationError(`${field}.length must be an ordinary array length`);
+  }
   for (let index = 0; index < value.length; index += 1) {
-    if (Object.getOwnPropertyDescriptor(value, String(index))?.enumerable !== true) {
-      throw new EvaluationProgramStateValidationError(`${field}[${index}] must be enumerable JSON data`);
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (
+      !descriptor ||
+      !("value" in descriptor) ||
+      descriptor.enumerable !== true ||
+      descriptor.writable !== true ||
+      descriptor.configurable !== true
+    ) {
+      throw new EvaluationProgramStateValidationError(`${field}[${index}] must be ordinary enumerable JSON data`);
     }
   }
   return value;
