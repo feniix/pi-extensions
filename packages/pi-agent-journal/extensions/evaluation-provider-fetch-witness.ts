@@ -265,7 +265,8 @@ export function createProviderFetchWitness(options: ProviderFetchWitnessOptions)
       ) {
         reject();
       }
-      const rawEncoding = Headers.prototype.get.call(request.headers, "content-encoding");
+      const headersSnapshot = new Headers(request.headers);
+      const rawEncoding = Headers.prototype.get.call(headersSnapshot, "content-encoding");
       if (rawEncoding !== null && rawEncoding !== "zstd") reject();
       const encoding = rawEncoding === "zstd" ? "zstd" : "identity";
       const physical = physicalBody(request.body);
@@ -307,10 +308,12 @@ export function createProviderFetchWitness(options: ProviderFetchWitnessOptions)
       });
       const forwardedInit = {
         ...request,
-        headers: new Headers(request.headers),
+        headers: headersSnapshot,
         body: Buffer.from(physical),
       } as RequestInit;
-      return await fetchImpl(requestUrl, forwardedInit);
+      const response = await fetchImpl(requestUrl, forwardedInit);
+      if (terminal) reject();
+      return response;
     } catch {
       return failClosed(requestCount === 1 ? "fetch-failed" : "invalid-fetch");
     }

@@ -240,6 +240,31 @@ describe("Agent Journal provider fetch witness", () => {
     expect(new Headers(forwardedInit?.headers).get("x-safe-metadata")).toBe("one");
   });
 
+  it("snapshots headers before receipt callbacks can mutate caller-owned state", async () => {
+    const body = logicalBody();
+    const headers = new Headers();
+    let forwardedHeaders: Headers | undefined;
+    const witness = createProviderFetchWitness({
+      attemptId: "attempt-header-callback",
+      expectedUrl: "https://chatgpt.com/backend-api/codex/responses",
+      endpointClass: "openai-codex",
+      getLogicalReceipt: () => {
+        headers.set("content-encoding", "zstd");
+        headers.set("x-injected", "private");
+        return logicalReceipt(body);
+      },
+      fetchImpl: vi.fn(async (_input, init) => {
+        forwardedHeaders = new Headers(init?.headers);
+        return new Response("ok");
+      }),
+      onTerminalFailure: () => undefined,
+    });
+    await witness.fetch("https://chatgpt.com/backend-api/codex/responses", { method: "POST", headers, body });
+    expect(witness.getReceipt()?.encoding).toBe("identity");
+    expect(forwardedHeaders?.get("content-encoding")).toBeNull();
+    expect(forwardedHeaders?.get("x-injected")).toBeNull();
+  });
+
   it("rejects an own Headers.get override without invoking it", async () => {
     const trap = vi.fn((_name: string) => null);
     const headers = new Headers();
@@ -348,6 +373,27 @@ describe("Agent Journal provider fetch witness", () => {
     ).rejects.toThrow("provider fetch witness rejected the request");
     expect(witness.getReceipt()).toBeNull();
     expect(failures).toEqual(["fetch-failed"]);
+  });
+
+  it("invalidates an in-flight first result when a concurrent second request is attempted", async () => {
+    let release: () => void = () => undefined;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const inFlightFetch = vi.fn(async () => {
+      await pending;
+      return new Response("ok");
+    });
+    const { witness, body, failures } = directSetup({ fetchImpl: inFlightFetch });
+    const init = { method: "POST", headers: new Headers(), body };
+    const first = witness.fetch("https://chatgpt.com/backend-api/codex/responses", init);
+    const second = witness.fetch("https://chatgpt.com/backend-api/codex/responses", init);
+    await expect(second).rejects.toThrow(EvaluationProviderFetchWitnessError);
+    release();
+    await expect(first).rejects.toThrow(EvaluationProviderFetchWitnessError);
+    expect(inFlightFetch).toHaveBeenCalledTimes(1);
+    expect(failures).toEqual(["invalid-fetch"]);
+    expect(witness.getReceipt()).toBeNull();
   });
 
   it("rejects a second provider request without forwarding it", async () => {
