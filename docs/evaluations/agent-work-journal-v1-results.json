@@ -1,0 +1,137 @@
+{
+  "fixtureSet": "agent-journal-u6-held-out-v1",
+  "repositoryRevision": "6ce2e35c2a613187e83a0230a0d0226e8b12bc1c",
+  "model": "openai-codex/gpt-5.6-sol",
+  "thinking": "high",
+  "supplementalResumeContextTokens": 8000,
+  "statusArtifactMaxUtf8Bytes": 4000,
+  "trialCountPerCondition": 3,
+  "scenarios": [
+    {
+      "category": "partial-multi-file-investigation",
+      "baselineTraces": [
+        {
+          "runId": "019f580c-4238-7528-904e-5616b1102637",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        },
+        {
+          "runId": "019f580c-4224-75cd-b13e-51b9b8627144",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        },
+        {
+          "runId": "019f580c-424c-703f-83e9-9787652bdc19",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        }
+      ],
+      "journalTraces": [
+        {
+          "runId": "019f580d-5d7f-708a-92d6-0439853b75a5",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        },
+        {
+          "runId": "019f580d-b4e3-778e-8ffe-134b1f7bb495",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        },
+        {
+          "runId": "019f580d-f790-7fca-86e3-5d175a591c62",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        }
+      ],
+      "equalContextBudget": true,
+      "equalStatusBudget": true,
+      "exposedDuringImplementation": false
+    },
+    {
+      "category": "material-dependency-change",
+      "baselineTraces": [
+        {
+          "runId": "019f580e-f3d9-76c9-87c6-1edb2fc038f4",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 1
+        },
+        {
+          "runId": "019f580f-41f4-75ff-8dd1-bcd3a4d3a26e",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 1
+        },
+        {
+          "runId": "019f580f-45ed-7440-b6bc-a16f0c94e85c",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 2
+        }
+      ],
+      "journalTraces": [
+        {
+          "runId": "019f5811-6822-72ff-843d-1357096421a4",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 1
+        },
+        {
+          "runId": "019f5811-682c-7ecf-8170-8622b4fb5a88",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        },
+        {
+          "runId": "019f5811-aa9d-7b44-9ad9-c04ab2be880a",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        }
+      ],
+      "equalContextBudget": true,
+      "equalStatusBudget": true,
+      "exposedDuringImplementation": false
+    },
+    {
+      "category": "settled-competing-alternative",
+      "baselineTraces": [
+        {
+          "runId": "019f5813-3e85-716c-84d3-f1996354dc8e",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        },
+        {
+          "runId": "019f5814-68f4-7407-870e-ae75b5b58af5",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        },
+        {
+          "runId": "019f5814-6bd4-7cc0-be95-48ee972e7c2e",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        }
+      ],
+      "journalTraces": [
+        {
+          "runId": "019f5814-d24c-7fc0-80d4-0fbccbf7db39",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        },
+        {
+          "runId": "019f5815-8501-750b-9b54-45cdbc038c4c",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        },
+        {
+          "runId": "019f5815-859b-76b0-a19c-705f5644fa85",
+          "resumedWithoutRestatement": true,
+          "repeatedRepositoryReads": 0
+        }
+      ],
+      "equalContextBudget": true,
+      "equalStatusBudget": true,
+      "exposedDuringImplementation": false
+    }
+  ],
+  "derivedOutcome": {
+    "passed": false,
+    "resumePasses": 3,
+    "repeatedReadPasses": 1
+  },
+  "traceLocationNote": "Raw JSONL traces were generated in isolated temporary worktrees and are intentionally not committed; run IDs and frozen aggregate inputs are preserved here."
+}
