@@ -30,6 +30,20 @@
       "mergeCommit": "cf8698b437203bc4520a8ea01e073a1146460dcb",
       "ciRunId": 29262266998,
       "ciConclusion": "success"
+    },
+    {
+      "prNumber": 126,
+      "branch": "chore/agent-journal-ledger-pr125",
+      "mergeCommit": "abfb35d1294fa2ab3402bec13eafab5563dd5970",
+      "ciRunId": 29262769844,
+      "ciConclusion": "success"
+    },
+    {
+      "prNumber": 127,
+      "branch": "feat/agent-journal-evaluation-receipts",
+      "mergeCommit": "c2d0104581538d2b5d343e1a490e43b54d4fecf2",
+      "ciRunId": 29264072142,
+      "ciConclusion": "success"
     }
   ],
   "versions": [
