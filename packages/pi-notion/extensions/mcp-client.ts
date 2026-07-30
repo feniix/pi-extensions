@@ -640,8 +640,13 @@ const storage = new FileTokenStorage();
 async function openBrowser(url: string): Promise<void> {
   const { exec } = await import("node:child_process");
   const platform = process.platform;
-  const cmd = platform === "darwin" ? "open" : platform === "win32" ? "start" : "xdg-open";
-  exec(`${cmd} "${url}"`);
+  if (platform === "win32") {
+    exec(`start "" "${url}"`);
+  } else if (platform === "darwin") {
+    exec(`open "${url}"`);
+  } else {
+    exec(`xdg-open "${url}"`);
+  }
 }
 
 function createUiNotifier(pi: ExtensionAPI): NotifyFn {
