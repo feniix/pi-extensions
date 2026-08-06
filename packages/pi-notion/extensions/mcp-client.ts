@@ -25,6 +25,7 @@ import { Type } from "typebox";
 const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
 const HTTP_REQUEST_COMPLETE_MARKER = "\r\n\r\n";
 const CALLBACK_PATH_PREFIX = "GET /callback?";
+const OAUTH_CALLBACK_HOST = "127.0.0.1";
 const NOTION_MCP_AUTH_FILE_ENV = "NOTION_MCP_AUTH_FILE";
 const NOTION_MCP_AUTH_FILE_LEGACY_ENV = "NOTION_MCP_AUTH";
 
@@ -77,6 +78,10 @@ interface OAuthCallbackServerResult {
 
 function buildHtmlResponse(statusLine: string, html: string): string {
   return `${statusLine}\r\nContent-Length: ${html.length}\r\nContent-Type: text/html\r\n\r\n${html}`;
+}
+
+function buildOAuthCallbackUrl(port: number): string {
+  return `http://${OAUTH_CALLBACK_HOST}:${port}/callback`;
 }
 
 function writeHtmlResponse(socket: NodeJS.WritableStream, statusLine: string, html: string): void {
@@ -196,7 +201,7 @@ async function startOAuthCallbackServer(
       reject(new Error(`Callback server error: ${err.message}`));
     });
 
-    server.listen(port, "127.0.0.1", () => {});
+    server.listen(port, OAUTH_CALLBACK_HOST, () => {});
   });
 
   return { port, result: resultPromise };
@@ -741,7 +746,7 @@ async function connectWithSavedConfig(client: NotionMCPClient, notify: NotifyFn)
 async function performOAuthConnection(notify: NotifyFn): Promise<OAuthConnectionData> {
   const state = randomBytes(16).toString("hex");
   const callbackServer = await startOAuthCallbackServer(3000, state);
-  const callbackUrl = `http://localhost:${callbackServer.port}/callback`;
+  const callbackUrl = buildOAuthCallbackUrl(callbackServer.port);
 
   notify("Registering OAuth client...");
   const registration = await registerClient(callbackUrl);
@@ -799,6 +804,7 @@ async function disconnectClient(client: NotionMCPClient): Promise<void> {
 export {
   buildAuthorizationUrl,
   buildHtmlResponse,
+  buildOAuthCallbackUrl,
   coerceNumericProperties,
   coercePropertyMap,
   connectWithSavedConfig,
