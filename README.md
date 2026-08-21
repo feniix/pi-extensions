@@ -5,8 +5,6 @@ A monorepo of extensions, tools, and integrations for
 published independently under the [`@feniix`](https://www.npmjs.com/~feniix)
 npm scope.
 
-![Pi extensions running in the terminal](assets/tui-demo.png)
-
 ## Packages
 
 | Package | What it adds |
