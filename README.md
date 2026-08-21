@@ -41,7 +41,7 @@ Replace `pi-devtools` with any package name from the table above.
 
 ## Develop
 
-This repository is an npm workspace. It requires Node.js 22 or newer.
+This repository is an npm workspace. It requires Node.js 22.19.0 or newer.
 
 ```bash
 npm ci
