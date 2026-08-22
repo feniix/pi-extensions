@@ -16,7 +16,7 @@ on:
         default: false
         type: boolean
       package_filter:
-        description: "Comma-separated package names to test (e.g. pi-statusline,pi-specdocs) or 'all'"
+        description: "Comma-separated package names to test (e.g. pi-statusline,pi-devtools) or 'all'"
         required: false
         default: ""
         type: string
@@ -231,18 +231,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          ARCHIVED_PACKAGES="packages/pi-code-reasoning packages/pi-sequential-thinking packages/pi-specdocs"
-
           for pkg in $(echo '${{ needs.checks.outputs.matrix }}' | jq -r '.[]'); do
             echo "Publishing $pkg"
-            if [[ " $ARCHIVED_PACKAGES " == *" $pkg "* ]]; then
-              echo "Publishing archived $pkg without provenance because its final package metadata points to the archive repository."
-              # npm generates provenance by default when id-token: write is available,
-              # so omitting --provenance is not enough to turn it off.
-              (cd "$pkg" && NPM_CONFIG_PROVENANCE=false npm publish --access public)
-            else
-              (cd "$pkg" && npm publish --access public --provenance)
-            fi
+            (cd "$pkg" && npm publish --access public --provenance)
           done
 
   publish_skipped:
