@@ -820,6 +820,7 @@ export {
   isNumericString,
   isRecord,
   NotionMCPClient,
+  openBrowser,
   resolveAccessToken,
   resolveCallbackResult,
   startOAuthCallbackServer,
