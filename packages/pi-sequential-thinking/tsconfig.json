@@ -1,4 +1,0 @@
-{
-	"extends": "../../tsconfig.json",
-	"include": ["extensions/**/*.ts", "__tests__/**/*.ts"]
-}

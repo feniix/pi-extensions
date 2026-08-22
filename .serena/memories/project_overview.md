@@ -11,17 +11,13 @@ A monorepo of extensions (plugins) for **pi**, an AI coding agent CLI (`pi.dev`)
 - **Type-checking**: `tsc --noEmit` (no build step; extensions are loaded as TS directly by pi)
 - **CI**: GitHub Actions (`.github/workflows/ci.yml`) — detects changed packages and runs scoped lint/typecheck/test/coverage
 
-## Packages (9 total)
+## Packages (5 total)
 | Package | Purpose |
 |---|---|
-| `pi-code-reasoning` | Structured code-reasoning MCP tool |
-| `pi-conductor` | Orchestration layer for multi-agent / worktree workflows |
 | `pi-devtools` | Git/PR/release helper tools (commit, push, merge, CI check, etc.) |
 | `pi-exa` | Exa web search integration |
 | `pi-notion` | Notion integration |
 | `pi-ref-tools` | Documentation search & reading via ref.docs |
-| `pi-sequential-thinking` | Step-by-step structured reasoning tools |
-| `pi-specdocs` | PRD/ADR/plan management |
 | `pi-statusline` | Status-line display extension |
 
 ## Key Conventions

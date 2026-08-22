@@ -7,10 +7,8 @@
   "permissions": {
     "allow": [
       "mcp__basic-memory__*",
-      "mcp__code-reasoning__*",
       "mcp__exa__*",
       "mcp__ref__*",
-      "mcp__sequential-thinking__*",
       "mcp__serena__*",
       "Bash(bun run check:*)",
       "Bash(bun run lint:*)",
