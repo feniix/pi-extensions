@@ -1,7 +1,7 @@
 ---
 title: "Specdocs validation layering strategy"
 adr: ADR-0009
-status: Accepted
+status: Superseded
 date: 2026-04-21
 prd: "PRD-004-pi-specdocs-in-process-markdown-linting"
 decision: "Keep specdocs-specific validation and formatting rules as a separate layer on top of shared parsed document data"
@@ -9,9 +9,11 @@ decision: "Keep specdocs-specific validation and formatting rules as a separate 
 
 # ADR-0009: Specdocs validation layering strategy
 
+> **Retired.** `@feniix/pi-specdocs` is no longer maintained; the package was archived at https://github.com/feniix/pi-specdocs and removed from this repository. This document is kept as a historical record of the decision and no longer describes maintained code.
+
 ## Status
 
-Accepted
+Superseded
 
 ## Date
 
