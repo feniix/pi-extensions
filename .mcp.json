@@ -20,21 +20,6 @@
         "REF_API_KEY": "${REF_API_KEY}"
       }
     },
-    "sequential-thinking": {
-      "command": "uvx",
-      "args": [
-        "--from",
-        "sequential-thinking@0.7.0",
-        "mcp-sequential-thinking"
-      ]
-    },
-    "code-reasoning": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "github:feniix/code-reasoning#fix-strict-stdio-startup"
-      ]
-    },
     "serena": {
       "command": "uvx",
       "args": [
