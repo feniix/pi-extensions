@@ -1,5 +1,7 @@
 # @feniix/pi-code-reasoning
 
+> **Archived and no longer maintained.** `pi-code-reasoning` has been retired. This package is kept for historical reference and one final archival publish before the code moves to a separate archive repository. Do not start new work on it.
+
 [Code Reasoning](https://github.com/mettamatt/code-reasoning) tools for [pi](https://pi.dev/) and MCP — reflective problem-solving through sequential thinking with branching and revision support.
 
 Based on the MCP server by Matt Westgate, this package defines its tools once with [BridgeKit](https://www.npmjs.com/package/@feniix/bridgekit) and exposes the same implementation through both pi and MCP adapters.
