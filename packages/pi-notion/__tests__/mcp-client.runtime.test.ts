@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import notionMCPClientExtension, {
   buildAuthorizationUrl,
   buildHtmlResponse,
+  buildOAuthCallbackUrl,
   coerceNumericProperties,
   connectWithSavedConfig,
   createPkceChallenge,
@@ -503,11 +504,15 @@ describe("pi-notion mcp client runtime helpers", () => {
     expect(exec).toHaveBeenCalledWith(`start "" "${authorizationUrl}"`);
   });
 
+  it("builds the OAuth callback URL with the server's IPv4 loopback host", () => {
+    expect(buildOAuthCallbackUrl(4300)).toBe("http://127.0.0.1:4300/callback");
+  });
+
   it("runs an OAuth callback server and resolves callback results", async () => {
     const state = "state-123";
     const server = await startOAuthCallbackServer(4300, state, 5000);
 
-    await fetch(`http://127.0.0.1:${server.port}/callback?state=${state}&code=auth-code`);
+    await fetch(`${buildOAuthCallbackUrl(server.port)}?state=${state}&code=auth-code`);
     await expect(server.result).resolves.toEqual({ code: "auth-code" });
   });
 });
