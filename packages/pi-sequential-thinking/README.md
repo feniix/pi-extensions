@@ -1,5 +1,7 @@
 # @feniix/pi-sequential-thinking
 
+> **Archived and no longer maintained.** `pi-sequential-thinking` has been retired. This package is kept for historical reference and one final archival publish before the code moves to a separate archive repository. Do not start new work on it.
+
 [Sequential Thinking](https://github.com/arben-adm/mcp-sequential-thinking) extension for [pi](https://pi.dev/) and MCP — structured progressive thinking through defined cognitive stages.
 
 ## Features
