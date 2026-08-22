@@ -3,10 +3,12 @@ title: "pi-sequential-thinking State Foundation"
 prd: "PRD-009-pi-sequential-thinking-state-foundation"
 date: 2026-05-16
 author: "pi"
-status: Implemented
+status: Archived
 ---
 
 # Plan: pi-sequential-thinking State Foundation
+
+> **Retired.** `@feniix/pi-sequential-thinking` is no longer maintained; the package was archived at https://github.com/feniix/pi-sequential-thinking and removed from this repository. This document is kept as a historical record of the decision and no longer describes maintained code.
 
 ## Source
 

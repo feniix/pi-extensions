@@ -1,7 +1,7 @@
 ---
 title: "Specdocs formatting activation model"
 adr: ADR-0010
-status: Accepted
+status: Superseded
 date: 2026-04-21
 prd: "PRD-004-pi-specdocs-in-process-markdown-linting"
 decision: "Ship formatting as an explicit specdocs-format command and keep post-tool behavior lint-only in the first release"
@@ -9,9 +9,11 @@ decision: "Ship formatting as an explicit specdocs-format command and keep post-
 
 # ADR-0010: Specdocs formatting activation model
 
+> **Retired.** `@feniix/pi-specdocs` is no longer maintained; the package was archived at https://github.com/feniix/pi-specdocs and removed from this repository. This document is kept as a historical record of the decision and no longer describes maintained code.
+
 ## Status
 
-Accepted
+Superseded
 
 ## Date
 

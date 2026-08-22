@@ -1,7 +1,7 @@
 ---
 title: "pi-specdocs in-process markdown linting and formatting"
 prd: PRD-004
-status: Implemented
+status: Superseded
 owner: "Sebastian Otaegui"
 issue: "N/A"
 date: 2026-04-21
@@ -9,6 +9,8 @@ version: "1.1"
 ---
 
 # PRD: pi-specdocs in-process markdown linting and formatting
+
+> **Retired.** `@feniix/pi-specdocs` is no longer maintained; the package was archived at https://github.com/feniix/pi-specdocs and removed from this repository. This document is kept as a historical record of the decision and no longer describes maintained code.
 
 ---
 

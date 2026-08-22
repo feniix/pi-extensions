@@ -231,9 +231,16 @@ jobs:
         run: |
           set -euo pipefail
 
+          ARCHIVED_PACKAGES="packages/pi-code-reasoning packages/pi-sequential-thinking packages/pi-specdocs"
+
           for pkg in $(echo '${{ needs.checks.outputs.matrix }}' | jq -r '.[]'); do
             echo "Publishing $pkg"
-            (cd "$pkg" && npm publish --access public --provenance)
+            if [[ " $ARCHIVED_PACKAGES " == *" $pkg "* ]]; then
+              echo "Publishing archived $pkg without provenance because its final package metadata points to the archive repository."
+              (cd "$pkg" && npm publish --access public)
+            else
+              (cd "$pkg" && npm publish --access public --provenance)
+            fi
           done
 
   publish_skipped:

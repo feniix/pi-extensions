@@ -1,5 +1,7 @@
 # @feniix/pi-specdocs
 
+> **Archived and no longer maintained.** `pi-specdocs` has been retired. This package is kept for historical reference and one final archival publish before the code moves to a separate archive repository. Do not start new work on it.
+
 Structured spec documentation workflow for [pi](https://pi.dev/) — PRDs, ADRs, and implementation plans with cross-referencing.
 
 ## Features

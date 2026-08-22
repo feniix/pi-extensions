@@ -1,7 +1,7 @@
 {
   "name": "@feniix/pi-specdocs",
-  "version": "3.0.2",
-  "description": "Structured spec documentation — PRDs, ADRs, and implementation plans with cross-referencing",
+  "version": "3.1.0",
+  "description": "Archived and no longer maintained: structured spec documentation — PRDs, ADRs, and implementation plans with cross-referencing",
   "keywords": [
     "pi",
     "pi-package",
@@ -50,8 +50,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/feniix/pi-extensions.git",
-    "directory": "packages/pi-specdocs"
+    "url": "git+https://github.com/feniix/pi-specdocs.git"
   },
   "author": {
     "name": "Sebastian Otaegui",
@@ -59,9 +58,9 @@
   },
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/feniix/pi-extensions/issues"
+    "url": "https://github.com/feniix/pi-specdocs/issues"
   },
-  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-specdocs#readme",
+  "homepage": "https://github.com/feniix/pi-specdocs#readme",
   "peerDependenciesMeta": {
     "@earendil-works/pi-ai": {
       "optional": true

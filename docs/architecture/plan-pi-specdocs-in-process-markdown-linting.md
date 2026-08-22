@@ -3,10 +3,12 @@ title: "pi-specdocs in-process markdown linting and formatting"
 prd: "PRD-004-pi-specdocs-in-process-markdown-linting"
 date: 2026-04-21
 author: "Pi"
-status: Implemented
+status: Archived
 ---
 
 # Plan: pi-specdocs in-process markdown linting and formatting
+
+> **Retired.** `@feniix/pi-specdocs` is no longer maintained; the package was archived at https://github.com/feniix/pi-specdocs and removed from this repository. This document is kept as a historical record of the decision and no longer describes maintained code.
 
 ## Source
 
