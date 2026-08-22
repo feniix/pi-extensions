@@ -1,3 +1,4 @@
+import { exec } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +19,7 @@ import notionMCPClientExtension, {
   getConnectionStatusText,
   getDefaultAuthFilePath,
   NotionMCPClient,
+  openBrowser,
   resolveAccessToken,
   resolveCallbackResult,
   startOAuthCallbackServer,
@@ -25,6 +27,8 @@ import notionMCPClientExtension, {
   toolError,
   toolResult,
 } from "../extensions/mcp-client.js";
+
+vi.mock("node:child_process", () => ({ exec: vi.fn() }));
 
 describe("pi-notion mcp client runtime helpers", () => {
   const originalFetch = global.fetch;
@@ -488,6 +492,15 @@ describe("pi-notion mcp client runtime helpers", () => {
       .find((tool) => tool.name === "notion_mcp_status");
     const result = await statusTool.execute("id", {}, new AbortController().signal, undefined, undefined);
     expect(result.content[0].text).toContain("Connected: No");
+  });
+
+  it("opens the authorization URL with an empty window title on Windows", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    const authorizationUrl = "https://api.notion.com/authorize?client_id=client-1&state=state-1";
+
+    await openBrowser(authorizationUrl);
+
+    expect(exec).toHaveBeenCalledWith(`start "" "${authorizationUrl}"`);
   });
 
   it("runs an OAuth callback server and resolves callback results", async () => {
