@@ -73,14 +73,6 @@ included_optional_tools: []
 # Find the list of tools here: https://oraios.github.io/serena/01-about/035_tools.html
 fixed_tools: []
 
-# list of mode names to that are always to be included in the set of active modes
-# The full set of modes to be activated is base_modes + default_modes.
-# If the setting is undefined, the base_modes from the global configuration (serena_config.yml) apply.
-# Otherwise, this setting overrides the global configuration.
-# Set this to [] to disable base modes for this project.
-# Set this to a list of mode names to always include the respective modes for this project.
-base_modes:
-
 # list of mode names that are to be activated by default, overriding the setting in the global configuration.
 # The full set of modes to be activated is base_modes (from global config) + default_modes + added_modes.
 # If the setting is undefined/empty, the default_modes from the global configuration (serena_config.yml) apply.
@@ -135,7 +127,7 @@ added_modes:
 # symbols and references across package boundaries, but these folders are not indexed by Serena,
 # i.e. the respective symbols will not be found using Serena's symbol search tools.
 # Example:
-#   additional_workspace_folders:
+#   ls_additional_workspace_folders:
 #     - ../sibling-package
 #     - ../shared-lib
 ls_additional_workspace_folders: []
@@ -151,19 +143,16 @@ ls_additional_workspace_folders: []
 #     - "./subproject2"
 ls_workspace_folders:
 - .
+
+# optional shell command to run before the language backend (LSP or JetBrains) is initialised.
+# the command runs in the project root directory and is only executed if the project is trusted
+# (see trusted_project_path_patterns in the global configuration).
+# serena waits for the command to exit: a non-zero exit code is logged as an error but does not
+# abort activation. a per-project timeout (activation_command_timeout, default 180s) is the safety
+# backstop for non-terminating commands; on expiry the process is killed and activation continues.
+# example: activation_command: "npx nx run-many -t build"
 activation_command:
 
 # maximum time in seconds to wait for activation_command to complete before killing it (default 180s).
 # must be a positive number.
 activation_command_timeout: 180.0
-
-# list of additional workspace folder paths for cross-package reference support (e.g. in monorepos).
-# Paths can be absolute or relative to the project root.
-# Each folder is registered as an LSP workspace folder, enabling language servers to discover
-# symbols and references across package boundaries.
-# Currently supported for: TypeScript.
-# Example:
-#   additional_workspace_folders:
-#     - ../sibling-package
-#     - ../shared-lib
-additional_workspace_folders: []
