@@ -1,3 +1,4 @@
+import { exec } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import notionMCPClientExtension, {
   buildAuthorizationUrl,
   buildHtmlResponse,
+  buildOAuthCallbackUrl,
   coerceNumericProperties,
   connectWithSavedConfig,
   createPkceChallenge,
@@ -18,6 +20,7 @@ import notionMCPClientExtension, {
   getConnectionStatusText,
   getDefaultAuthFilePath,
   NotionMCPClient,
+  openBrowser,
   resolveAccessToken,
   resolveCallbackResult,
   startOAuthCallbackServer,
@@ -25,6 +28,8 @@ import notionMCPClientExtension, {
   toolError,
   toolResult,
 } from "../extensions/mcp-client.js";
+
+vi.mock("node:child_process", () => ({ exec: vi.fn() }));
 
 describe("pi-notion mcp client runtime helpers", () => {
   const originalFetch = global.fetch;
@@ -490,11 +495,24 @@ describe("pi-notion mcp client runtime helpers", () => {
     expect(result.content[0].text).toContain("Connected: No");
   });
 
+  it("opens the authorization URL with an empty window title on Windows", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+    const authorizationUrl = "https://api.notion.com/authorize?client_id=client-1&state=state-1";
+
+    await openBrowser(authorizationUrl);
+
+    expect(exec).toHaveBeenCalledWith(`start "" "${authorizationUrl}"`);
+  });
+
+  it("builds the OAuth callback URL with the server's IPv4 loopback host", () => {
+    expect(buildOAuthCallbackUrl(4300)).toBe("http://127.0.0.1:4300/callback");
+  });
+
   it("runs an OAuth callback server and resolves callback results", async () => {
     const state = "state-123";
     const server = await startOAuthCallbackServer(4300, state, 5000);
 
-    await fetch(`http://127.0.0.1:${server.port}/callback?state=${state}&code=auth-code`);
+    await fetch(`${buildOAuthCallbackUrl(server.port)}?state=${state}&code=auth-code`);
     await expect(server.result).resolves.toEqual({ code: "auth-code" });
   });
 });
