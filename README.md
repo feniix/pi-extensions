@@ -9,13 +9,10 @@ npm scope.
 
 | Package | What it adds |
 | --- | --- |
-| [`@feniix/pi-code-reasoning`](packages/pi-code-reasoning/) | Reflective sequential reasoning with branching and revision support for pi and MCP |
 | [`@feniix/pi-devtools`](packages/pi-devtools/) | Branch, pull-request, merge, CI, and release workflows |
 | [`@feniix/pi-exa`](packages/pi-exa/) | Exa search, content retrieval, grounded answers, and research planning |
 | [`@feniix/pi-notion`](packages/pi-notion/) | Notion access through the official Notion MCP server |
 | [`@feniix/pi-ref-tools`](packages/pi-ref-tools/) | Token-efficient technical documentation search through Ref.tools |
-| [`@feniix/pi-sequential-thinking`](packages/pi-sequential-thinking/) | Structured progressive thinking through defined cognitive stages |
-| [`@feniix/pi-specdocs`](packages/pi-specdocs/) | PRD, ADR, and implementation-plan documentation workflows |
 | [`@feniix/pi-statusline`](packages/pi-statusline/) | A two-line terminal status display for model, context, Git, token, and skill state |
 
 Follow a package link for its requirements, configuration, tool reference, and
