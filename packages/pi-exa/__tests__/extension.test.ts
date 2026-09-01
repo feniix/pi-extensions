@@ -13,6 +13,9 @@ const mockSearch = vi.fn();
 const mockGetContents = vi.fn();
 const mockAnswer = vi.fn();
 const mockFindSimilar = vi.fn();
+const mockAgentCreate = vi.fn();
+const mockAgentGet = vi.fn();
+const mockAgentCancel = vi.fn();
 const mockExaConstructor = vi.fn();
 
 // Structurally typing the mock against the real Exa surface means a future
@@ -30,6 +33,13 @@ vi.mock("exa-js", () => ({
     getContents = mockGetContents as unknown as ExaMockShape["getContents"];
     answer = mockAnswer as unknown as ExaMockShape["answer"];
     findSimilar = mockFindSimilar as unknown as ExaMockShape["findSimilar"];
+    agent = {
+      runs: {
+        create: mockAgentCreate,
+        get: mockAgentGet,
+        cancel: mockAgentCancel,
+      },
+    };
   },
 }));
 
@@ -105,6 +115,9 @@ describe("pi-exa extension", () => {
     mockGetContents.mockReset();
     mockAnswer.mockReset();
     mockFindSimilar.mockReset();
+    mockAgentCreate.mockReset();
+    mockAgentGet.mockReset();
+    mockAgentCancel.mockReset();
     mockExaConstructor.mockReset();
     resetExaClientCache();
 
@@ -645,24 +658,19 @@ describe("pi-exa extension", () => {
     expect(result.details).toMatchObject({ kind: "validation", tool: "web_search_advanced_exa" });
   });
 
-  it("executes web_research_exa and forwards deep search options", async () => {
-    mockSearch.mockResolvedValue({
-      requestId: "req-r",
+  it("executes web_research_exa through the Agent Runs API", async () => {
+    mockAgentCreate.mockResolvedValue({
+      id: "agent_run_extension",
+      status: "completed",
+      stopReason: "schema_satisfied",
       costDollars: { total: 0.1 },
-      searchTime: 1800,
       output: {
-        content: {
+        text: "research summary",
+        structured: {
           summary: "research summary",
         },
         grounding: [{ field: "Overview", citations: [{ url: "https://example.com", title: "Source" }] }],
       },
-      results: [
-        {
-          title: "Research result",
-          url: "https://example.com/research",
-          text: "research text",
-        },
-      ],
     });
 
     const mockPi = createMockPi({ "--exa-enable-research": true, "--exa-api-key": "flag-key" });
@@ -673,8 +681,8 @@ describe("pi-exa extension", () => {
       "call-1",
       {
         query: "what is future AI",
-        type: "deep-reasoning",
         systemPrompt: "Use only primary sources",
+        effort: "high",
         outputSchema: {
           type: "object",
           properties: {
@@ -683,21 +691,20 @@ describe("pi-exa extension", () => {
             },
           },
         },
-        additionalQueries: ["future models", "AI roadmap"],
       },
       { aborted: false } as AbortSignal,
       vi.fn(),
       undefined as never,
     );
 
-    expect(mockSearch).toHaveBeenCalledWith(
-      "what is future AI",
+    expect(mockAgentCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "deep-reasoning",
-        additionalQueries: ["future models", "AI roadmap"],
+        query: "what is future AI",
+        effort: "high",
         systemPrompt: "Use only primary sources",
       }),
     );
+    expect(mockSearch).not.toHaveBeenCalled();
     expect(result.content[0].text).toContain('"summary": "research summary"');
     expect(result.details.parsedOutput).toEqual({ summary: "research summary" });
   });
@@ -898,7 +905,7 @@ describe("pi-exa extension", () => {
   });
 
   it("returns an error when research SDK calls fail", async () => {
-    mockSearch.mockRejectedValue(new Error("research down"));
+    mockAgentCreate.mockRejectedValue(new Error("research down"));
 
     const mockPi = createMockPi({ "--exa-enable-research": true, "--exa-api-key": "flag-key" });
     exaExtension(mockPi as unknown as ExtensionAPI);
@@ -1159,7 +1166,9 @@ describe("pi-exa extension", () => {
     });
 
     it("--exa-research-timeout-ms specifically overrides the research budget", async () => {
-      mockSearch.mockReturnValue(new Promise(() => {}));
+      mockAgentCreate.mockResolvedValue({ id: "agent_run_timeout", status: "queued" });
+      mockAgentGet.mockResolvedValue({ id: "agent_run_timeout", status: "running" });
+      mockAgentCancel.mockResolvedValue({ id: "agent_run_timeout", status: "cancelled" });
       const mockPi = createMockPi({
         "--exa-api-key": "flag-key",
         "--exa-enable-research": true,

@@ -31,7 +31,7 @@ import { PLANNER_GUIDELINES } from "./tool-guidance.js";
 import { performAnswer } from "./web-answer.js";
 import { performWebFetch } from "./web-fetch.js";
 import { performFindSimilar } from "./web-find-similar.js";
-import { performResearch } from "./web-research.js";
+import { AgentResearchCancelledError, AgentResearchTimeoutError, performResearch } from "./web-research.js";
 import { DEFAULT_NUM_RESULTS, performWebSearch } from "./web-search.js";
 import { performAdvancedSearch } from "./web-search-advanced.js";
 
@@ -47,9 +47,10 @@ export interface ExaToolsOptions {
    * built-in per-tool default (60_000ms; 180_000ms for web_research_exa).
    * Resolved at execute time so config can change after construction.
    *
-   * NB: exa-js does not yet accept AbortSignal (exa-labs/exa-js#158). The
-   * timeout bounds the JS-side wait; the underlying HTTP request continues
-   * until exa-js resolves it and Exa still bills for the call.
+   * For ordinary SDK calls, the timeout bounds only the JS-side wait because
+   * exa-js does not accept AbortSignal (exa-labs/exa-js#158).
+   * `web_research_exa` owns its lifecycle and cancels its remote Agent run
+   * when the host aborts or its timeout expires after a run ID is known.
    */
   timeouts?: ExaToolTimeouts;
 }
@@ -191,10 +192,10 @@ function missingApiKeyResult(toolName: string) {
   };
 }
 
-function cancelledResult(toolName: string) {
+function cancelledResult(toolName: string, details: Record<string, unknown> = {}) {
   return {
     text: "Cancelled.",
-    structuredContent: { tool: toolName, cancelled: true },
+    structuredContent: { tool: toolName, cancelled: true, ...details },
   };
 }
 
@@ -218,7 +219,12 @@ interface ExaToolSpec<TParams extends TObject> {
   pendingMessage: string;
   errorPrefix: string;
   hostExtras?: PortableToolHostExtras;
-  perform: (apiKey: string, args: Static<TParams>) => Promise<ToolPerformResult>;
+  managesLifecycle?: boolean;
+  perform: (
+    apiKey: string,
+    args: Static<TParams>,
+    context: { signal?: AbortSignal; timeoutMs: number },
+  ) => Promise<ToolPerformResult>;
 }
 
 function exaTool<TParams extends TObject>(
@@ -250,13 +256,36 @@ function exaTool<TParams extends TObject>(
       }
       const timeoutMs = resolveTimeoutMs();
       try {
-        const result = await withTimeoutAndAbort(spec.perform(apiKey, args), {
-          signal: ctx.signal,
-          timeoutMs,
-          toolName: spec.name,
-        });
+        const performPromise = spec.perform(apiKey, args, { signal: ctx.signal, timeoutMs });
+        const result = spec.managesLifecycle
+          ? await performPromise
+          : await withTimeoutAndAbort(performPromise, {
+              signal: ctx.signal,
+              timeoutMs,
+              toolName: spec.name,
+            });
         return { text: result.text, structuredContent: result.details };
       } catch (error) {
+        if (error instanceof AgentResearchCancelledError) {
+          return cancelledResult(spec.name, {
+            ...(error.runId === undefined ? {} : { runId: error.runId }),
+            ...(error.cancelError === undefined ? {} : { cancelError: error.cancelError }),
+          });
+        }
+        if (error instanceof AgentResearchTimeoutError) {
+          return {
+            text: error.message,
+            isError: true,
+            structuredContent: {
+              kind: "domain",
+              tool: spec.name,
+              error: "timeout",
+              timeoutMs: error.timeoutMs,
+              ...(error.runId === undefined ? {} : { runId: error.runId }),
+              ...(error.cancelError === undefined ? {} : { cancelError: error.cancelError }),
+            },
+          };
+        }
         if (error instanceof ExaCancelledError) {
           return cancelledResult(spec.name);
         }
@@ -550,41 +579,43 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
       exaTool(
         {
           name: "web_research_exa",
-          title: "Exa Deep Research",
+          title: "Exa Agent Research",
           description:
-            "Deep-reasoning Exa search with synthesized, grounded output for complex research topics. " +
+            "Asynchronous Exa Agent research with synthesized, grounded output for complex topics. " +
             'Returns the synthesis as plain text by default; pass `outputSchema: { "type": "object", "properties": {...} }` ' +
-            "to receive structured output (max 10 properties, max depth 2).",
+            "to receive structured output.",
           parameters: webResearchParams,
           pendingMessage: "Performing deep research via Exa...",
           errorPrefix: "Exa research error",
+          managesLifecycle: true,
           hostExtras: {
             pi: {
-              promptSnippet:
-                "Deep research; higher cost/latency. Use outputSchema: { type: 'object' } for structured output.",
+              promptSnippet: "Agent research; higher cost/latency. Choose effort and output schema deliberately.",
               promptGuidelines: [
                 "Use web_research_exa for conclusions, comparisons, and recommendations; use web_search_exa for simple lookups.",
                 "Use web_research_exa for open-ended synthesis; use web_answer_exa for direct questions needing a concise cited answer.",
-                "web_research_exa defaults to text-mode synthesis for prose; use web_answer_exa when the question is direct and a short answer suffices.",
-                "web_research_exa accepts `outputSchema: { type: 'object', properties: {...} }` for structured extraction (max 10 properties, max depth 2); use web_search_advanced_exa for filtered retrieval when no synthesis is needed.",
+                "web_research_exa defaults to medium-effort text synthesis; select low/minimal for cheaper research, or use web_answer_exa for a concise answer.",
+                "web_research_exa accepts Agent-native input, continuation, dataSources, budget, metadata, and object outputSchema fields; use web_search_advanced_exa for filtered retrieval without synthesis.",
               ],
             },
             mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
-          perform: (apiKey, args) =>
-            performResearch(apiKey, {
-              query: args.query,
-              type: args.type,
-              systemPrompt: args.systemPrompt,
-              textMaxCharacters: args.textMaxCharacters,
-              outputSchema: args.outputSchema,
-              additionalQueries: args.additionalQueries,
-              numResults: args.numResults,
-              includeDomains: args.includeDomains,
-              excludeDomains: args.excludeDomains,
-              startPublishedDate: args.startPublishedDate,
-              endPublishedDate: args.endPublishedDate,
-            }),
+          perform: (apiKey, args, context) =>
+            performResearch(
+              apiKey,
+              {
+                query: args.query,
+                systemPrompt: args.systemPrompt,
+                outputSchema: args.outputSchema,
+                effort: args.effort,
+                input: args.input as Parameters<typeof performResearch>[1]["input"],
+                previousRunId: args.previousRunId,
+                metadata: args.metadata as Parameters<typeof performResearch>[1]["metadata"],
+                dataSources: args.dataSources,
+                budget: args.budget,
+              },
+              context,
+            ),
         },
         resolveApiKey,
         timeoutFor("web_research_exa"),
