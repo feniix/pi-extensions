@@ -7,7 +7,7 @@
 - **web_search_exa**: default web search (highlights + short text snippets).
 - **web_fetch_exa**: fetch page content by URL.
 - **web_search_advanced_exa**: advanced search options and category filters (disabled by default).
-- **web_research_exa**: deep-research synthesis (disabled by default).
+- **web_research_exa**: asynchronous Agent research with polling and remote cancellation once a run ID is known (disabled by default).
 - **web_answer_exa**: quick grounded answers.
 - **web_find_similar_exa**: discover related URLs.
 - **exa_research_step/status/summary/reset**: local, stateful research-planning tools that recommend explicit Exa retrieval calls without executing them.
@@ -20,7 +20,7 @@ The hosted Exa MCP at `https://mcp.exa.ai/mcp` is a fine default for one-shot se
 - **Local stateful planning.** `exa_research_step / status / summary / reset` keep an in-memory research plan that survives across calls in a single pi session. A stateless remote MCP cannot offer this — there is no per-session memory to update.
 - **Local key custody and allowlists.** Your `EXA_API_KEY` and `enabledTools` allowlist stay on the workstation. The hosted MCP requires sending your key to a third party on every request.
 - **Pre-flight validation.** pi-exa rejects category/filter combinations Exa silently ignores (e.g., `category: "people"` with non-LinkedIn `includeDomains`), so you find out at the call site instead of in a quiet, empty result set.
-- **Forward-compatibility on the `/research` sunset.** Every pi-exa tool routes through Exa's canonical endpoints — `/search`, `/contents`, `/answer`, `/findSimilar`. The hosted MCP's `deep_researcher_start` / `deep_researcher_check` tools route through the deprecated `/research` endpoint. When Exa enforces that sunset, those hosted tools break or lose async semantics; pi-exa's `web_research_exa` (which uses `/search` with `type: "deep-reasoning"`) keeps working.
+- **Agent-native research lifecycle.** `web_research_exa` submits an Agent run, polls it to a terminal state, and cancels the remote run when the host aborts or its deadline expires after a run ID is known. Other tools stay on Exa's purpose-built `/search`, `/contents`, `/answer`, and `/findSimilar` APIs.
 
 | Capability                                  | Hosted Exa MCP | pi-exa |
 | ------------------------------------------- | :------------: | :----: |
@@ -31,7 +31,7 @@ The hosted Exa MCP at `https://mcp.exa.ai/mcp` is a fine default for one-shot se
 | `web_find_similar_exa` (`/findSimilar`)     |       no       |   yes  |
 | Local research planner (`exa_research_*`)   |       no       |   yes  |
 | Local API key custody                       |       no       |   yes  |
-| Routes deep research through `/search`      |       no       |   yes  |
+| Agent Runs API with timeout cancellation    |       no       |   yes  |
 
 ## Install
 
@@ -123,9 +123,9 @@ Example:
 - `--exa-config-file <path>`: load configuration from file.
 - `--exa-config <path>` (deprecated alias for `--exa-config-file`).
 - `--exa-timeout-ms <ms>`: default per-call timeout for Exa-backed tools (built-in 60000).
-- `--exa-research-timeout-ms <ms>`: override for `web_research_exa` (built-in 180000; deep-reasoning runs longer).
+- `--exa-research-timeout-ms <ms>`: override for `web_research_exa` Agent runs (built-in 180000).
 
-> The timeout bounds the JS-side wait. `exa-js` does not yet accept `AbortSignal` ([exa-labs/exa-js#158](https://github.com/exa-labs/exa-js/issues/158)), so the underlying HTTP request continues until Exa resolves it and Exa still bills for the completed call. The timeout error message states this explicitly.
+> For ordinary Exa SDK calls, the timeout bounds the JS-side wait because `exa-js` does not yet accept `AbortSignal` ([exa-labs/exa-js#158](https://github.com/exa-labs/exa-js/issues/158)). `web_research_exa` owns the Agent run lifecycle and calls Exa's cancel endpoint on host abort or timeout once Exa has returned a run ID.
 
 ## Tools
 
@@ -162,7 +162,7 @@ Params:
 - `query` (required)
 - `numResults` (1-100, default 10)
 - `category`: one of `company`, `research paper`, `news`, `pdf`, `personal site`, `financial report`, `people`
-- `type`: canonical `auto | fast | instant`; legacy `keyword | neural | hybrid` still accepted (Exa's `/search` endpoint continues to accept them). Deep types (`deep-reasoning | deep-lite | deep`) are rejected here — use `web_research_exa` for those.
+- `type`: canonical `auto | fast | instant`; legacy `keyword | neural | hybrid` still accepted (Exa's `/search` endpoint continues to accept them).
 - Date filters: `startPublishedDate`, `endPublishedDate` (ISO dates).
 - Domain filters: `includeDomains`, `excludeDomains`.
 - Text filters: `includeText` (single-element array; only return results whose text contains this string, up to 5 words), `excludeText` (single-element array; exclude results whose text contains this string, up to 5 words). The Exa API accepts at most one string per filter.
@@ -177,7 +177,7 @@ Params:
 - Subpages: `subpages` (1-10), `subpageTarget` (single keyword or list of keywords used to select which subpages to crawl, e.g. `'about'` or `['about', 'pricing']`).
 
 Notes:
-- Deep types are rejected here. Use `web_research_exa` for `deep-reasoning`, `deep-lite`, or `deep`.
+- Deep Search types are rejected here. Use `web_research_exa` for Agent-based synthesis.
 - Invalid categories return an error instead of silently falling back to an unfiltered search.
 - The `company` and `people` categories do not support `startPublishedDate`, `endPublishedDate`, or `excludeDomains`; the `people` category only accepts LinkedIn domains for `includeDomains`. These are enforced pre-flight.
 - `startCrawlDate` / `endCrawlDate` are intentionally not exposed — Exa silently ignores them as of 2026-04-15.
@@ -187,10 +187,16 @@ Notes:
 Params include:
 
 - `query` (required)
-- `type`: `deep-reasoning | deep-lite | deep`
 - `systemPrompt`
-- `outputSchema` (`type` may be `"object"` or `"text"`, default `"text"`; object mode is capped at 10 properties / depth 2 and gives per-field grounding). The default is required for synthesis to run — Exa's `/search` endpoint only returns an `output` field when an `outputSchema` is provided (see issue #115 and the [Search API Reference for Coding Agents](https://docs.exa.ai/reference/search-api-guide-for-coding-agents)).
-- optional `additionalQueries`, filters, `numResults`, and `textMaxCharacters`
+- `effort`: `minimal | low | medium | high | xhigh | auto | max` (default `medium`). `auto` and `max` are metered; use `budget.maxCostDollars` to cap them.
+- `outputSchema`: `{ "type": "text" }` (default) reads `output.text`; an object JSON Schema is sent to Exa and returns `output.structured`.
+- `input.data` / `input.exclusion`: records to process or exclude.
+- `previousRunId`: continue from a completed Agent run.
+- `metadata`: string key/value metadata stored with the run.
+- `dataSources`: up to five Exa Connect providers.
+- `budget.maxCostDollars`: spend ceiling for `auto` or `max`.
+
+The tool submits `POST /agent/runs`, polls the run to completion, returns the run ID and cost/usage metadata, and attempts `POST /agent/runs/{id}/cancel` on host abort or timeout. `max` effort automatically opts into Exa's required max-effort beta.
 
 ### web_answer_exa
 
