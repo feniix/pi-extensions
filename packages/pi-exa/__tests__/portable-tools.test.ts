@@ -357,8 +357,8 @@ describe("portable Exa tools", () => {
         {
           query: "rust async runtime",
           numResults: 5,
-          category: "research paper",
-          type: "auto",
+          category: "publication",
+          type: "deep-lite",
           startPublishedDate: "2024-01-01",
           includeDomains: ["arxiv.org"],
           includeText: ["rust"],
@@ -386,8 +386,8 @@ describe("portable Exa tools", () => {
         "rust async runtime",
         expect.objectContaining({
           numResults: 5,
-          category: "research paper",
-          type: "auto",
+          category: "publication",
+          type: "deep-lite",
           startPublishedDate: "2024-01-01",
           includeDomains: ["arxiv.org"],
           includeText: ["rust"],
@@ -406,6 +406,72 @@ describe("portable Exa tools", () => {
           }),
         }),
       );
+    });
+
+    it("supports deep-reasoning search with synthesized structured output", async () => {
+      mockSearch.mockResolvedValue({
+        ...defaultSearchResponse,
+        output: {
+          content: { conclusion: "Deep Search conclusion" },
+          grounding: [],
+        },
+      });
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_search_advanced_exa");
+      const outputSchema = {
+        type: "object",
+        properties: {
+          conclusion: { type: "string" },
+        },
+      };
+
+      const result = await executePortableTool(
+        tool,
+        {
+          query: "compare the leading approaches",
+          type: "deep-reasoning",
+          additionalQueries: ["approach tradeoffs", "primary evidence"],
+          systemPrompt: "Prefer primary sources.",
+          outputSchema,
+        },
+        { host: "test" },
+      );
+
+      expect(mockSearch).toHaveBeenCalledWith(
+        "compare the leading approaches",
+        expect.objectContaining({
+          type: "deep-reasoning",
+          additionalQueries: ["approach tradeoffs", "primary evidence"],
+          systemPrompt: "Prefer primary sources.",
+          outputSchema,
+        }),
+      );
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toContain('"conclusion": "Deep Search conclusion"');
+      expect(result.text).toContain("Example Result");
+      expect(result.structuredContent).toMatchObject({
+        tool: "web_search_advanced_exa",
+        parsedOutput: { conclusion: "Deep Search conclusion" },
+      });
+    });
+
+    it("rejects additionalQueries for non-deep search modes", async () => {
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_search_advanced_exa");
+
+      const result = await executePortableTool(
+        tool,
+        {
+          query: "rust async runtime",
+          type: "auto",
+          additionalQueries: ["tokio runtime"],
+        },
+        { host: "test" },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("additionalQueries is only supported");
+      expect(mockSearch).not.toHaveBeenCalled();
     });
 
     it("surfaces validation throws as isError:true with the advanced-search prefix", async () => {

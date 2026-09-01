@@ -2,16 +2,13 @@
  * Shared Exa constants.
  */
 
-// Canonical values per the live hosted MCP at mcp.exa.ai/mcp are `auto`,
-// `fast`, and `instant`. The legacy `keyword`, `neural`, and `hybrid` values
-// are still accepted by Exa's /search endpoint, so we keep them for
-// backwards compatibility. Hard-removing them would be a breaking change.
-export const ADVANCED_SEARCH_TYPES = ["auto", "fast", "instant", "keyword", "neural", "hybrid"] as const;
+// Canonical values from Exa's public OpenAPI specification. Deep Search stays
+// on /search; asynchronous Agent research uses the separate /agent/runs API.
+export const ADVANCED_SEARCH_TYPES = ["instant", "fast", "auto", "deep-lite", "deep", "deep-reasoning"] as const;
 export type AdvancedSearchType = (typeof ADVANCED_SEARCH_TYPES)[number];
 
-/**
- * Tool-level output mode for research. Agent Runs always produce
- * `output.text`, so this sentinel is not sent to Exa; object schemas are sent
- * and their values are read from `output.structured`.
- */
+export const DEEP_SEARCH_TYPES = ["deep-lite", "deep", "deep-reasoning"] as const;
+export type DeepSearchType = (typeof DEEP_SEARCH_TYPES)[number];
+
+/** Default text synthesis mode shared by Deep Search and Agent research. */
 export const DEFAULT_RESEARCH_OUTPUT_SCHEMA = { type: "text" } as const;

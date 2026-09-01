@@ -42,7 +42,7 @@ describeLive("pi-exa live integration", () => {
     // Exa renames or drops one of these fields, not to spec their behavior.
     const result = await performAdvancedSearch(apiKey, "rust async runtime tokio", {
       numResults: 2,
-      type: "auto",
+      type: "deep-lite",
       userLocation: "US",
       includeText: ["rust"],
       additionalQueries: ["tokio runtime"],

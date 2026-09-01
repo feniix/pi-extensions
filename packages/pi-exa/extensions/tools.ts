@@ -44,7 +44,7 @@ export interface ExaToolsOptions {
   planner?: ResearchPlanner;
   /**
    * Per-call timeout overrides in ms. Precedence: per-tool entry → `default` →
-   * built-in per-tool default (60_000ms; 180_000ms for web_research_exa).
+   * built-in per-tool default (60_000ms; 180_000ms for advanced search and research).
    * Resolved at execute time so config can change after construction.
    *
    * For ordinary SDK calls, the timeout bounds only the JS-side wait because
@@ -78,7 +78,9 @@ export function resolveExaToolTimeoutMs(toolName: string, timeouts?: ExaToolTime
     if (typeof perTool === "number" && perTool > 0) return perTool;
     if (typeof timeouts.default === "number" && timeouts.default > 0) return timeouts.default;
   }
-  return toolName === "web_research_exa" ? DEFAULT_RESEARCH_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+  return toolName === "web_research_exa" || toolName === "web_search_advanced_exa"
+    ? DEFAULT_RESEARCH_TIMEOUT_MS
+    : DEFAULT_TIMEOUT_MS;
 }
 
 class ExaTimeoutError extends Error {
@@ -630,16 +632,17 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
           name: "web_search_advanced_exa",
           title: "Exa Advanced Search",
           description:
-            "Advanced web search with full Exa API control: category filters, domain restrictions, date ranges, text-content filters (includeText/excludeText), location targeting (userLocation), highlights, LLM summaries, freshness controls (maxAgeHours, livecrawlTimeout), and subpage crawling (subpages, subpageTarget).",
+            "Advanced Exa /search with filters and synchronous Deep Search. Supports instant, fast, auto, deep-lite, deep, and deep-reasoning plus synthesized text or structured output.",
           parameters: webSearchAdvancedParams,
           pendingMessage: "Performing advanced search via Exa...",
           errorPrefix: "Exa advanced search error",
           hostExtras: {
             pi: {
-              promptSnippet: "Advanced search with category, domain, and date filters.",
+              promptSnippet:
+                "Filtered search and synchronous Deep Search; higher deep modes cost more and take longer.",
               promptGuidelines: [
-                "Use web_search_advanced_exa when you need category, domain, or date filters; use web_search_exa for simpler lookups.",
-                "Use web_search_advanced_exa for retrieval with constraints; use web_research_exa for deep synthesis and comparisons.",
+                "Use web_search_advanced_exa when you need filters or synchronous deep, deep-lite, or deep-reasoning search; use web_search_exa for simpler lookups.",
+                "Use web_search_advanced_exa for controlled /search synthesis; use web_research_exa when you need an asynchronous Agent run with lifecycle and cancellation.",
                 "Use web_search_advanced_exa to find filtered result sets; use web_fetch_exa to read the selected URLs.",
               ],
             },
@@ -650,6 +653,8 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
               numResults: args.numResults,
               category: args.category,
               type: args.type,
+              systemPrompt: args.systemPrompt,
+              outputSchema: args.outputSchema,
               startPublishedDate: args.startPublishedDate,
               endPublishedDate: args.endPublishedDate,
               includeDomains: args.includeDomains,

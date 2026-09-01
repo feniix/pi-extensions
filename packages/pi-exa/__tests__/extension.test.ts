@@ -384,7 +384,7 @@ describe("pi-exa extension", () => {
       "call-1",
       {
         query: "advanced query",
-        type: "neural",
+        type: "fast",
         category: "news",
         numResults: 7,
         includeDomains: ["example.com"],
@@ -399,7 +399,7 @@ describe("pi-exa extension", () => {
     expect(mockSearch).toHaveBeenCalledWith(
       "advanced query",
       expect.objectContaining({
-        type: "neural",
+        type: "fast",
         numResults: 7,
         category: "news",
         includeDomains: ["example.com"],
@@ -411,11 +411,7 @@ describe("pi-exa extension", () => {
     );
   });
 
-  it("forwards additionalQueries for non-deep type:auto in web_search_advanced_exa", async () => {
-    // The SDK's discriminated union marks additionalQueries as deep-only, but
-    // the Exa /search endpoint and the live hosted MCP both accept it for
-    // advanced search with type:auto. Pin the SDK-bypass behavior here so a
-    // future SDK revision can't silently strip it.
+  it("forwards additionalQueries for deep search in web_search_advanced_exa", async () => {
     const configPath = writeTempConfig({
       enabledTools: [
         "web_search_exa",
@@ -435,7 +431,7 @@ describe("pi-exa extension", () => {
       "call-1",
       {
         query: "rust async runtime tokio",
-        type: "auto",
+        type: "deep",
         additionalQueries: ["q1", "q2"],
       },
       { aborted: false } as AbortSignal,
@@ -446,7 +442,7 @@ describe("pi-exa extension", () => {
     expect(mockSearch).toHaveBeenCalledWith(
       "rust async runtime tokio",
       expect.objectContaining({
-        type: "auto",
+        type: "deep",
         additionalQueries: ["q1", "q2"],
       }),
     );
@@ -472,6 +468,7 @@ describe("pi-exa extension", () => {
       "call-1",
       {
         query: "advanced query",
+        type: "deep-lite",
         includeText: ["rust"],
         excludeText: ["legacy"],
         userLocation: "US",
@@ -626,7 +623,7 @@ describe("pi-exa extension", () => {
     expect(opts.contents.subpageTarget).toEqual(["about", "pricing"]);
   });
 
-  it("rejects deep search types in web_search_advanced_exa", async () => {
+  it("accepts deep search types in web_search_advanced_exa", async () => {
     const configPath = writeTempConfig({
       enabledTools: [
         "web_search_exa",
@@ -642,10 +639,6 @@ describe("pi-exa extension", () => {
     exaExtension(mockPi as unknown as ExtensionAPI);
 
     const tool = getRegisteredTool(mockPi, "web_search_advanced_exa");
-    // The TypeBox schema for webSearchAdvancedParams.type accepts only
-    // ADVANCED_SEARCH_TYPES, so bridgekit rejects deep types at the validation
-    // layer. performAdvancedSearch.validateAdvancedType is kept as defense in
-    // depth but is now unreachable on this path.
     const result = await tool.execute(
       "call-1",
       { query: "advanced query", type: "deep" },
@@ -653,9 +646,11 @@ describe("pi-exa extension", () => {
       vi.fn(),
       undefined as never,
     );
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Invalid arguments");
-    expect(result.details).toMatchObject({ kind: "validation", tool: "web_search_advanced_exa" });
+    expect(result.isError).toBe(false);
+    expect(mockSearch).toHaveBeenCalledWith(
+      "advanced query",
+      expect.objectContaining({ type: "deep", outputSchema: { type: "text" } }),
+    );
   });
 
   it("executes web_research_exa through the Agent Runs API", async () => {

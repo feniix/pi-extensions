@@ -40,6 +40,16 @@ const agentOutputSchema = Type.Object(
   { additionalProperties: true },
 );
 
+const searchOutputSchema = Type.Object(
+  {
+    type: Type.Union([Type.Literal("object"), Type.Literal("text")], {
+      description:
+        'Synthesis mode. "text" returns prose in output.content; "object" returns output matching this JSON Schema.',
+    }),
+  },
+  { additionalProperties: true },
+);
+
 const advancedSearchType = Type.Union([
   Type.Literal(ADVANCED_SEARCH_TYPES[0]),
   Type.Literal(ADVANCED_SEARCH_TYPES[1]),
@@ -207,10 +217,14 @@ export const webSearchAdvancedParams = Type.Object(
     numResults: Type.Optional(Type.Integer({ description: "Number of results (1-100)", minimum: 1, maximum: 100 })),
     category: Type.Optional(
       Type.String({
-        description: "Category filter: company, research paper, financial report, people, news, etc.",
+        description: "Category filter: company, publication, financial report, people, news, etc.",
       }),
     ),
     type: Type.Optional(advancedSearchType),
+    systemPrompt: Type.Optional(
+      Type.String({ description: "Instructions guiding search behavior, source selection, and synthesized output." }),
+    ),
+    outputSchema: Type.Optional(searchOutputSchema),
     startPublishedDate: Type.Optional(Type.String({ description: "ISO date filter (e.g., 2024-01-01)" })),
     endPublishedDate: Type.Optional(Type.String({ description: "ISO date filter (e.g., 2024-12-31)" })),
     includeDomains: Type.Optional(Type.Array(Type.String())),
@@ -233,7 +247,10 @@ export const webSearchAdvancedParams = Type.Object(
     moderation: Type.Optional(Type.Boolean({ description: "Filter unsafe content when true." })),
     additionalQueries: Type.Optional(
       Type.Array(Type.String(), {
-        description: "Alternative query formulations to broaden coverage.",
+        description:
+          "Alternative query formulations for deep-lite, deep, or deep-reasoning search. Additional branches increase cost and latency.",
+        minItems: 1,
+        maxItems: 10,
       }),
     ),
     textMaxCharacters: Type.Optional(Type.Integer({ minimum: 1 })),
