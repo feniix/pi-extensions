@@ -24,6 +24,12 @@ An asynchronous Exa research job with a stable run ID and a lifecycle of queued,
 
 *Avoid:* search request (ordinary Exa search is synchronous and has no independently managed lifecycle).
 
+## Deep Search
+
+A synchronous Exa `/search` request using `deep-lite`, `deep`, or `deep-reasoning`. Deep Search supports search filters, additional query branches, and text or structured synthesis through `web_search_advanced_exa`.
+
+*Avoid:* Agent run. Deep Search has no independently managed run ID, polling lifecycle, continuation, or remote cancellation.
+
 ## Research plan
 
 The in-memory state accumulated by `exa_research_step` calls — topic, criteria, sources, gaps, assumptions, branches, and warnings — that `exa_research_summary.mode === "payload"` translates into a suggested `web_research_exa` invocation. The plan is a per-process singleton built by `createResearchPlanner()`; resetting is explicit via `exa_research_reset`.

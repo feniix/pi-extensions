@@ -50,7 +50,7 @@ Opt-in tools:
 
 Warn clearly when an important tool is unavailable:
 
-- If `web_research_exa` is unavailable, say deep synthesis cannot be executed in this session. Fall back to cheap discovery and a polished draft payload for later use.
+- If `web_research_exa` is unavailable, say Agent research cannot be executed in this session. Use a deep mode in `web_search_advanced_exa` when synchronous synthesis is sufficient.
 - If `web_search_advanced_exa` is unavailable, say advanced filters are unavailable and fall back to `web_search_exa` with better query wording.
 - If a common default tool is missing, mention it briefly and adapt without dwelling on it.
 
@@ -118,7 +118,7 @@ Use available tools selectively:
 | Goal | Preferred Tool | Notes |
 |---|---|---|
 | Broad discovery and vocabulary | `web_search_exa` | Best first pass for reconnaissance. |
-| Domain/category/date constrained discovery | `web_search_advanced_exa` | Use when available and constraints are known. |
+| Filtered retrieval or synchronous Deep Search | `web_search_advanced_exa` | Use known constraints; select deep modes when `/search` synthesis is needed. |
 | Inspect a few strong URLs | `web_fetch_exa` | Fetch 1-3 high-signal pages. |
 | Expand from one strong seed URL | `web_find_similar_exa` | Use only with a clearly representative source. |
 | Resolve a narrow sub-question cheaply | `web_answer_exa` | Use when it may avoid deeper research. |

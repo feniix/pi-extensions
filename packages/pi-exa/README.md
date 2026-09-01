@@ -6,7 +6,7 @@
 
 - **web_search_exa**: default web search (highlights + short text snippets).
 - **web_fetch_exa**: fetch page content by URL.
-- **web_search_advanced_exa**: advanced search options and category filters (disabled by default).
+- **web_search_advanced_exa**: filtered search and synchronous Deep Search through `/search` (disabled by default).
 - **web_research_exa**: asynchronous Agent research with polling and remote cancellation once a run ID is known (disabled by default).
 - **web_answer_exa**: quick grounded answers.
 - **web_find_similar_exa**: discover related URLs.
@@ -161,14 +161,16 @@ Params:
 
 - `query` (required)
 - `numResults` (1-100, default 10)
-- `category`: one of `company`, `research paper`, `news`, `pdf`, `personal site`, `financial report`, `people`
-- `type`: canonical `auto | fast | instant`; legacy `keyword | neural | hybrid` still accepted (Exa's `/search` endpoint continues to accept them).
+- `category`: one of `company`, `publication`, `research paper`, `news`, `pdf`, `personal site`, `financial report`, `people`
+- `type`: `instant | fast | auto | deep-lite | deep | deep-reasoning`.
+- `systemPrompt`: instructions guiding search behavior, source selection, and synthesis.
+- `outputSchema`: `{ "type": "text" }` for prose or an object JSON Schema for structured synthesis.
 - Date filters: `startPublishedDate`, `endPublishedDate` (ISO dates).
 - Domain filters: `includeDomains`, `excludeDomains`.
 - Text filters: `includeText` (single-element array; only return results whose text contains this string, up to 5 words), `excludeText` (single-element array; exclude results whose text contains this string, up to 5 words). The Exa API accepts at most one string per filter.
 - `userLocation`: two-letter ISO country code (e.g., `US`, `GB`, `DE`).
 - `moderation`: when `true`, filter unsafe content.
-- `additionalQueries`: alternative query formulations to broaden coverage.
+- `additionalQueries`: alternative query formulations for `deep-lite`, `deep`, or `deep-reasoning` only.
 - `textMaxCharacters`: max chars of page text per result (default 3000).
 - `contextMaxCharacters`: max chars for the aggregated context string. Maps to Exa's deprecated `context` option and may be removed in a future Exa API release.
 - Highlights: `enableHighlights` (gate), `highlightsMaxCharacters` (preferred), `highlightsNumSentences` (legacy fallback), `highlightsQuery` (overrides the search query for highlight ranking). Providing `highlightsQuery` or `highlightsMaxCharacters` implies `enableHighlights: true`; passing `enableHighlights: false` explicitly always disables highlights.
@@ -177,7 +179,8 @@ Params:
 - Subpages: `subpages` (1-10), `subpageTarget` (single keyword or list of keywords used to select which subpages to crawl, e.g. `'about'` or `['about', 'pricing']`).
 
 Notes:
-- Deep Search types are rejected here. Use `web_research_exa` for Agent-based synthesis.
+- Deep Search is synchronous `/search` synthesis. Deep modes default to text synthesis when `outputSchema` is omitted.
+- Use `web_research_exa` instead when the task needs an asynchronous Agent run, continuation, Connect data sources, effort/budget controls, or remote cancellation.
 - Invalid categories return an error instead of silently falling back to an unfiltered search.
 - The `company` and `people` categories do not support `startPublishedDate`, `endPublishedDate`, or `excludeDomains`; the `people` category only accepts LinkedIn domains for `includeDomains`. These are enforced pre-flight.
 - `startCrawlDate` / `endCrawlDate` are intentionally not exposed — Exa silently ignores them as of 2026-04-15.
@@ -206,9 +209,11 @@ Params include `query` (required), `systemPrompt`, `text`, and `outputSchema`.
 
 Params include `url` (required), `numResults`, `textMaxCharacters`, `excludeSourceDomain`, date filters, and domain filters.
 
+Exa marks `/findSimilar` deprecated and recommends `/search` for new discovery flows. This compatibility tool remains available for URL-seeded similarity workflows.
+
 ## Integration tests
 
-Live integration coverage is available for `web_search_exa`, `web_fetch_exa`, and `web_research_exa`.
+Live integration coverage is available for `web_search_exa`, `web_fetch_exa`, `web_search_advanced_exa`, and `web_research_exa`.
 
 These tests are:
 - skipped by default
@@ -218,14 +223,10 @@ These tests are:
 Run them locally with a real API key:
 
 ```bash
-EXA_API_KEY=your-key npx vitest run packages/pi-exa/__tests__/integration.test.ts -- --exa-live
-```
-
-You can also enable them with an environment variable instead of the CLI flag:
-
-```bash
 PI_EXA_LIVE=1 EXA_API_KEY=your-key npx vitest run packages/pi-exa/__tests__/integration.test.ts
 ```
+
+The live suite incurs real Exa usage and is never enabled in CI.
 
 ## MCP server
 
@@ -247,7 +248,7 @@ npx pi-exa
 | `EXA_ENABLED_TOOLS`  | Comma-separated allowlist. Highest precedence. Empty/whitespace-only values emit a warning and fall through to the per-tool toggle defaults.                                    |
 | `EXA_CONFIG_FILE`    | Path to a JSON config file (same shape as the CLI `--exa-config-file`). Use for `apiKey`, `enabledTools`, `advancedEnabled`, `researchEnabled`.                                 |
 | `EXA_CONFIG`         | Deprecated alias for `EXA_CONFIG_FILE`. Still read; prefer `EXA_CONFIG_FILE`.                                                                                                   |
-| `EXA_TIMEOUT_MS`     | Default per-call timeout in ms for Exa-backed tools. Built-in 60000. Underlying HTTP request continues until Exa resolves it; see [exa-labs/exa-js#158](https://github.com/exa-labs/exa-js/issues/158). |
+| `EXA_TIMEOUT_MS`     | Default per-call timeout in ms for Exa-backed tools. Built-in 60000, or 180000 for advanced search and Agent research. Underlying HTTP request continues until Exa resolves it; see [exa-labs/exa-js#158](https://github.com/exa-labs/exa-js/issues/158). |
 | `EXA_RESEARCH_TIMEOUT_MS` | Override for `web_research_exa` only. Built-in 180000.                                                                                                                     |
 
 ### Precedence

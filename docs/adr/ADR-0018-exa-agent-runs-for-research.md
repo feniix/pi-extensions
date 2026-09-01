@@ -26,7 +26,8 @@ Keep `web_research_exa` as the dedicated synthesis tool, but back it with Exa Ag
 2. Attempt remote cancellation when the host aborts or the research deadline expires after a run ID is known.
 3. Replace the Deep Search parameter schema with the Agent-native schema rather than silently translating or ignoring old fields.
 4. Default to `medium` effort and text output. Send object-mode JSON Schema to Exa and read the result from structured output.
-5. Keep filtered retrieval in `web_search_advanced_exa`.
+5. Keep synchronous Deep Search and filtered retrieval in `web_search_advanced_exa`, including `deep-lite`, `deep`, and `deep-reasoning`.
+6. Do not expose `/monitors`; recurring webhook-driven searches are outside this extension's one-shot search and research scope.
 
 `max` effort opts into Exa's required beta token. Metered budgets are accepted only with `auto` or `max`.
 
