@@ -50,14 +50,20 @@ const searchOutputSchema = Type.Object(
   { additionalProperties: true },
 );
 
-const advancedSearchType = Type.Union([
-  Type.Literal(ADVANCED_SEARCH_TYPES[0]),
-  Type.Literal(ADVANCED_SEARCH_TYPES[1]),
-  Type.Literal(ADVANCED_SEARCH_TYPES[2]),
-  Type.Literal(ADVANCED_SEARCH_TYPES[3]),
-  Type.Literal(ADVANCED_SEARCH_TYPES[4]),
-  Type.Literal(ADVANCED_SEARCH_TYPES[5]),
-]);
+const advancedSearchType = Type.Union(
+  [
+    Type.Literal(ADVANCED_SEARCH_TYPES[0]),
+    Type.Literal(ADVANCED_SEARCH_TYPES[1]),
+    Type.Literal(ADVANCED_SEARCH_TYPES[2]),
+    Type.Literal(ADVANCED_SEARCH_TYPES[3]),
+    Type.Literal(ADVANCED_SEARCH_TYPES[4]),
+    Type.Literal(ADVANCED_SEARCH_TYPES[5]),
+  ],
+  {
+    description:
+      "Search mode: instant minimizes latency; fast prioritizes speed; auto balances quality and speed; deep-lite provides lightweight synthesis; deep performs comprehensive multi-step synthesis; deep-reasoning adds maximum reasoning for difficult analysis.",
+  },
+);
 
 const researchStage = Type.Union([
   Type.Literal(RESEARCH_STAGES[0]),
@@ -330,7 +336,7 @@ export const webResearchParams = Type.Object(
         ],
         {
           description:
-            "Agent cost/reasoning tier (default: medium). Fixed tiers are minimal, low, medium, high, and xhigh; auto and max are metered.",
+            "Agent cost/reasoning tier (default: medium). Use minimal/low for narrow inexpensive work, medium for normal research, high/xhigh for difficult work, and metered auto/max only when adaptive or maximum depth justifies a budget cap.",
         },
       ),
     ),

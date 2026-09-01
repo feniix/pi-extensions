@@ -448,7 +448,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
                 "Use web_search_exa for quick lookups and finding pages; use web_answer_exa for direct factual questions with citations.",
                 "Use web_search_exa for simple searches; use web_search_advanced_exa when you need category, domain, or date filters.",
                 "Use web_search_exa to discover candidate URLs; use web_fetch_exa to read a known page in full.",
-                "Use web_search_exa for retrieval; use web_research_exa for comparisons, synthesis, and recommendations.",
+                "Use web_search_exa for retrieval; use web_search_advanced_exa for controlled one-shot synthesis or web_research_exa for autonomous multi-step research.",
               ],
             },
             // External network call; results may drift between calls
@@ -516,7 +516,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             pi: {
               promptSnippet: "Grounded answers with citations for direct questions.",
               promptGuidelines: [
-                "Use web_answer_exa for direct factual questions with sources; use web_research_exa for broader synthesis and comparisons.",
+                "Use web_answer_exa for direct factual questions; use web_search_advanced_exa for controlled one-shot synthesis or web_research_exa for autonomous research.",
                 "Use web_answer_exa when the user wants a concise answer; use web_search_exa when you first need to discover candidate pages.",
                 "Use web_answer_exa for a cited response; use web_fetch_exa when you need the full source text.",
               ],
@@ -543,7 +543,8 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
         {
           name: "web_find_similar_exa",
           title: "Exa Similar Pages",
-          description: "Find web pages similar to a given URL.",
+          description:
+            "Deprecated Exa URL-similarity search. Use only when a known URL is the essential seed; prefer web_search_exa or web_search_advanced_exa for new discovery workflows.",
           parameters: webFindSimilarParams,
           pendingMessage: "Finding similar pages via Exa...",
           errorPrefix: "Exa similar search error",
@@ -551,8 +552,8 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             pi: {
               promptSnippet: "Find pages similar to a known source URL.",
               promptGuidelines: [
-                "Use web_find_similar_exa when you have a good page and want more like it; use web_search_exa for keyword-based discovery.",
-                "Use web_find_similar_exa to expand from a source URL; use web_search_advanced_exa when you need explicit category, domain, or date filters.",
+                "Use deprecated web_find_similar_exa only when a known URL is an essential similarity seed; prefer web_search_exa for query-based discovery.",
+                "Use web_find_similar_exa for legacy URL-seeded expansion; prefer web_search_advanced_exa when filters or Deep Search can express the goal.",
                 "Use web_find_similar_exa to discover related pages; use web_fetch_exa to inspect the returned URLs in full.",
               ],
             },
@@ -583,9 +584,9 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
           name: "web_research_exa",
           title: "Exa Agent Research",
           description:
-            "Asynchronous Exa Agent research with synthesized, grounded output for complex topics. " +
+            "Asynchronous autonomous Exa Agent research for complex multi-step work, row enrichment, continuation, or Connect data sources. Polls a cancellable run to completion. " +
             'Returns the synthesis as plain text by default; pass `outputSchema: { "type": "object", "properties": {...} }` ' +
-            "to receive structured output.",
+            "to receive structured output. Prefer web_search_advanced_exa Deep Search for controlled one-shot synthesis.",
           parameters: webResearchParams,
           pendingMessage: "Performing deep research via Exa...",
           errorPrefix: "Exa research error",
@@ -594,10 +595,11 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             pi: {
               promptSnippet: "Agent research; higher cost/latency. Choose effort and output schema deliberately.",
               promptGuidelines: [
-                "Use web_research_exa for conclusions, comparisons, and recommendations; use web_search_exa for simple lookups.",
+                "Use web_research_exa for autonomous multi-step work; for controlled one-shot synthesis with explicit filters, prefer web_search_advanced_exa Deep Search.",
                 "Use web_research_exa for open-ended synthesis; use web_answer_exa for direct questions needing a concise cited answer.",
-                "web_research_exa defaults to medium-effort text synthesis; select low/minimal for cheaper research, or use web_answer_exa for a concise answer.",
-                "web_research_exa accepts Agent-native input, continuation, dataSources, budget, metadata, and object outputSchema fields; use web_search_advanced_exa for filtered retrieval without synthesis.",
+                "web_research_exa defaults to medium effort; use minimal/low for narrow work and high/xhigh for difficult work, or use web_answer_exa for a cheaper concise answer.",
+                "Choose web_research_exa when you need input rows, exclusions, continuation, Connect data sources, or an explicit Agent budget; use web_search_advanced_exa when those Agent-only capabilities are unnecessary.",
+                "For metered auto/max effort in web_research_exa, set budget.maxCostDollars; prefer web_search_exa when simple retrieval can answer the question.",
               ],
             },
             mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
@@ -632,7 +634,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
           name: "web_search_advanced_exa",
           title: "Exa Advanced Search",
           description:
-            "Advanced Exa /search with filters and synchronous Deep Search. Supports instant, fast, auto, deep-lite, deep, and deep-reasoning plus synthesized text or structured output.",
+            "Synchronous Deep Search through one Exa /search call with filters and optional synthesis. Use instant/fast/auto for retrieval; deep-lite for lightweight synthesis, deep for comprehensive synthesis, and deep-reasoning only for difficult analysis. Supports text or structured output.",
           parameters: webSearchAdvancedParams,
           pendingMessage: "Performing advanced search via Exa...",
           errorPrefix: "Exa advanced search error",
@@ -641,9 +643,9 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
               promptSnippet:
                 "Filtered search and synchronous Deep Search; higher deep modes cost more and take longer.",
               promptGuidelines: [
-                "Use web_search_advanced_exa when you need filters or synchronous deep, deep-lite, or deep-reasoning search; use web_search_exa for simpler lookups.",
-                "Use web_search_advanced_exa for controlled /search synthesis; use web_research_exa when you need an asynchronous Agent run with lifecycle and cancellation.",
-                "Use web_search_advanced_exa to find filtered result sets; use web_fetch_exa to read the selected URLs.",
+                "In web_search_advanced_exa, use instant for minimum latency, fast for speed, and auto for balanced retrieval; prefer web_search_exa when explicit mode or filters are unnecessary.",
+                "In web_search_advanced_exa, use deep-lite for lightweight synthesis, deep for comprehensive synthesis, and deep-reasoning only for difficult analysis; use web_research_exa for autonomous asynchronous work.",
+                "With web_search_advanced_exa, constrain authoritative sources with includeDomains, use outputSchema for extraction, and add additionalQueries only when deep-mode breadth justifies extra cost and latency; use web_fetch_exa to inspect decisive sources.",
               ],
             },
             mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },

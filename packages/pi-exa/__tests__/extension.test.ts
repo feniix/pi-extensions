@@ -1113,8 +1113,27 @@ describe("pi-exa extension", () => {
     );
     expect(researchTool.promptSnippet).toMatch(/cost|latency|higher/);
     expect(researchTool.promptGuidelines).toEqual(
-      expect.arrayContaining([expect.stringMatching(/simple lookups.*web_search_exa|web_search_exa.*simple lookups/)]),
+      expect.arrayContaining([
+        expect.stringMatching(/simple retrieval.*web_search_exa|web_search_exa.*simple retrieval/),
+      ]),
     );
+  });
+
+  it("teaches agents the synchronous Deep Search versus asynchronous Agent decision", () => {
+    const mockPi = createMockPi({ "--exa-enable-advanced": true, "--exa-enable-research": true });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+
+    const advancedTool = getRegisteredTool(mockPi, "web_search_advanced_exa");
+    const researchTool = getRegisteredTool(mockPi, "web_research_exa");
+    const similarTool = getRegisteredTool(mockPi, "web_find_similar_exa");
+
+    expect(advancedTool.description).toMatch(/synchronous Deep Search/i);
+    expect(advancedTool.promptGuidelines.join("\n")).toMatch(/deep-lite.*deep.*deep-reasoning/i);
+    expect(advancedTool.promptGuidelines.join("\n")).toMatch(/additionalQueries.*cost|cost.*additionalQueries/i);
+    expect(researchTool.description).toMatch(/asynchronous.*Agent/i);
+    expect(researchTool.promptGuidelines.join("\n")).toMatch(/one-shot.*web_search_advanced_exa/i);
+    expect(researchTool.promptGuidelines.join("\n")).toMatch(/continuation|input rows|data sources/i);
+    expect(similarTool.description).toMatch(/deprecated/i);
   });
 
   it("returns isError with missing-key details when authentication is absent", async () => {

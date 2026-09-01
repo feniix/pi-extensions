@@ -123,6 +123,24 @@ Use available tools selectively:
 | Expand from one strong seed URL | `web_find_similar_exa` | Use only with a clearly representative source. |
 | Resolve a narrow sub-question cheaply | `web_answer_exa` | Use when it may avoid deeper research. |
 
+### Choose the Synthesis Engine Deliberately
+
+Use synchronous Deep Search in `web_search_advanced_exa` when the task is one bounded request and benefits from explicit domain, date, category, or result-count controls:
+
+- `deep-lite`: lightweight, lower-latency synthesis.
+- `deep`: default for comprehensive one-shot synthesis.
+- `deep-reasoning`: only for difficult analysis where extra reasoning justifies additional cost and latency.
+
+Use asynchronous `web_research_exa` when the task benefits from autonomous multi-step exploration or Agent-only capabilities:
+
+- processing or enriching `input.data` rows,
+- excluding known entities through `input.exclusion`,
+- continuing a completed run with `previousRunId`,
+- querying Connect `dataSources`,
+- or controlling Agent effort and spend with `effort` and `budget`.
+
+Do not choose Agent research merely because the user requested a comparison or synthesis. Prefer the cheaper bounded Deep Search path when one controlled `/search` request is sufficient.
+
 Each discovery round must have a purpose. After each round, call `exa_research_step` to record what changed:
 
 - better terminology,
