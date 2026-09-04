@@ -240,21 +240,11 @@ Then call `web_fetch_exa` on URLs that look promising for full text.
 
 ## Implications for `pi-exa`
 
-The package is structurally well-aligned with these findings. The deep types are routed through `web_research_exa` (separate from `web_search_advanced_exa`), all the steering levers are exposed, and the default `type` is `deep-reasoning`. The improvements worth making are mostly documentation and default tuning:
+The findings apply to synchronous Deep Search through `web_search_advanced_exa`. That tool owns `/search` controls such as deep type, domain/date filters, `additionalQueries`, `systemPrompt`, and `outputSchema`.
 
-1. **promptGuidelines on `web_research_exa`** should explicitly call out the `includeDomains` pattern for spec lookup against known authoritative sources. This is the single highest-leverage parameter and the current guidelines don't mention it.
+`web_research_exa` now uses the separate asynchronous Agent Runs API. Agent research has a run ID, polling/cancellation lifecycle, effort and budget controls, continuation, input rows, and Connect data sources. It intentionally does not accept Deep Search parameters.
 
-2. **Update `highlights` config**: `web-research.ts` and `web-search.ts` both use `numSentences: 3` or `4`, which the Exa docs flag as deprecated. Switch to `highlights: true` for the best-quality default.
-
-3. **Reconsider `textMaxCharacters: 12000` default** in `web-research.ts`. Per the Exa docs, agent workflows should prefer highlights over full text. With `outputSchema` set, the synthesized output is the load-bearing artifact and the raw text per result is mostly noise. Lower to 3000 or omit text entirely when `outputSchema` is provided.
-
-4. **Add a README section / parameter description** explaining the source-pollution gotcha and the `includeDomains` mitigation. Same warning that's in this doc — somewhere a downstream caller will encounter it.
-
-5. **Document the `additionalQueries` cost-scaling** in the schema description. Callers should understand that each query roughly multiplies cost.
-
-6. **Consider `stream: true` support** for long deep-reasoning calls. Quality-of-life improvement; lets pi show progress instead of a frozen pendingMessage during 30-70 second waits.
-
-7. **Verify `research-planner.ts`'s `additionalQueries.slice(0, 5)` cap is intentional**. 5-7 is a reasonable range; the Exa docs don't document an upper bound.
+Use `includeDomains` whenever authoritative sources are known, avoid broad `additionalQueries` fan-out unless the extra cost and latency are justified, and prefer `deep` over `deep-reasoning` unless maximum reasoning depth is specifically needed.
 
 ---
 

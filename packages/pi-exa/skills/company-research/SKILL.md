@@ -13,7 +13,7 @@ Use this skill for company discovery, competitor scans, vendor profiles, funding
 | Intent | Primary Tool | Notes |
 |---|---|---|
 | Broad company or competitor discovery | `web_search_exa` | Best first pass when terminology, category fit, or target companies are unclear. |
-| Company-profile style results | `web_search_advanced_exa` with `category: "company"` | Use when available; do not use deep search types here. |
+| Company-profile style results or controlled Deep Search | `web_search_advanced_exa` | Use category/filter controls for retrieval and deep modes for synchronous synthesis. |
 | Comparative write-up across companies | `web_research_exa` | Use when enabled and the user needs synthesis or recommendations. |
 | Direct factual question about one company | `web_answer_exa` | Good for concise cited answers. |
 | Read selected company pages, filings, or posts | `web_fetch_exa` | Fetch 1-3 high-signal URLs after discovery. |
@@ -24,7 +24,7 @@ If `web_search_advanced_exa` is unavailable, use `web_search_exa` with stronger 
 ## Category Behavior
 
 - `category: "company"` focuses on company-facing pages and profile-like structure.
-- Deep search types (`deep-reasoning`, `deep-lite`, `deep`) belong to `web_research_exa`, not `web_search_advanced_exa`.
+- `web_search_advanced_exa` owns filtered retrieval and synchronous Deep Search; `web_research_exa` owns asynchronous Agent research.
 
 ## Filter Restrictions
 

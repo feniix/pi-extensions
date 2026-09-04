@@ -30,14 +30,40 @@ const outputSchema = Type.Object(
   { additionalProperties: true },
 );
 
-const advancedSearchType = Type.Union([
-  Type.Literal(ADVANCED_SEARCH_TYPES[0]),
-  Type.Literal(ADVANCED_SEARCH_TYPES[1]),
-  Type.Literal(ADVANCED_SEARCH_TYPES[2]),
-  Type.Literal(ADVANCED_SEARCH_TYPES[3]),
-  Type.Literal(ADVANCED_SEARCH_TYPES[4]),
-  Type.Literal(ADVANCED_SEARCH_TYPES[5]),
-]);
+const agentOutputSchema = Type.Object(
+  {
+    type: Type.Union([Type.Literal("object"), Type.Literal("text")], {
+      description:
+        'Output mode. "text" reads the Agent run\'s natural-language output; "object" sends this JSON Schema to Exa and returns output.structured.',
+    }),
+  },
+  { additionalProperties: true },
+);
+
+const searchOutputSchema = Type.Object(
+  {
+    type: Type.Union([Type.Literal("object"), Type.Literal("text")], {
+      description:
+        'Synthesis mode. "text" returns prose in output.content; "object" returns output matching this JSON Schema.',
+    }),
+  },
+  { additionalProperties: true },
+);
+
+const advancedSearchType = Type.Union(
+  [
+    Type.Literal(ADVANCED_SEARCH_TYPES[0]),
+    Type.Literal(ADVANCED_SEARCH_TYPES[1]),
+    Type.Literal(ADVANCED_SEARCH_TYPES[2]),
+    Type.Literal(ADVANCED_SEARCH_TYPES[3]),
+    Type.Literal(ADVANCED_SEARCH_TYPES[4]),
+    Type.Literal(ADVANCED_SEARCH_TYPES[5]),
+  ],
+  {
+    description:
+      "Search mode: instant minimizes latency; fast prioritizes speed; auto balances quality and speed; deep-lite provides lightweight synthesis; deep performs comprehensive multi-step synthesis; deep-reasoning adds maximum reasoning for difficult analysis.",
+  },
+);
 
 const researchStage = Type.Union([
   Type.Literal(RESEARCH_STAGES[0]),
@@ -197,10 +223,14 @@ export const webSearchAdvancedParams = Type.Object(
     numResults: Type.Optional(Type.Integer({ description: "Number of results (1-100)", minimum: 1, maximum: 100 })),
     category: Type.Optional(
       Type.String({
-        description: "Category filter: company, research paper, financial report, people, news, etc.",
+        description: "Category filter: company, publication, financial report, people, news, etc.",
       }),
     ),
     type: Type.Optional(advancedSearchType),
+    systemPrompt: Type.Optional(
+      Type.String({ description: "Instructions guiding search behavior, source selection, and synthesized output." }),
+    ),
+    outputSchema: Type.Optional(searchOutputSchema),
     startPublishedDate: Type.Optional(Type.String({ description: "ISO date filter (e.g., 2024-01-01)" })),
     endPublishedDate: Type.Optional(Type.String({ description: "ISO date filter (e.g., 2024-12-31)" })),
     includeDomains: Type.Optional(Type.Array(Type.String())),
@@ -223,7 +253,10 @@ export const webSearchAdvancedParams = Type.Object(
     moderation: Type.Optional(Type.Boolean({ description: "Filter unsafe content when true." })),
     additionalQueries: Type.Optional(
       Type.Array(Type.String(), {
-        description: "Alternative query formulations to broaden coverage.",
+        description:
+          "Alternative query formulations for deep-lite, deep, or deep-reasoning search. Additional branches increase cost and latency.",
+        minItems: 1,
+        maxItems: 10,
       }),
     ),
     textMaxCharacters: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -288,22 +321,57 @@ export const webSearchAdvancedParams = Type.Object(
 export const webResearchParams = Type.Object(
   {
     query: Type.String({ description: "Research question to synthesize" }),
-    type: Type.Optional(Type.Union([Type.Literal("deep-reasoning"), Type.Literal("deep-lite"), Type.Literal("deep")])),
     systemPrompt: Type.Optional(Type.String({ description: "Guidance for source selection and synthesis style" })),
-    outputSchema: Type.Optional(outputSchema),
-    additionalQueries: Type.Optional(
-      Type.Array(Type.String({ description: "Alternative query formulations" }), { maxItems: 5 }),
+    outputSchema: Type.Optional(agentOutputSchema),
+    effort: Type.Optional(
+      Type.Union(
+        [
+          Type.Literal("minimal"),
+          Type.Literal("low"),
+          Type.Literal("medium"),
+          Type.Literal("high"),
+          Type.Literal("xhigh"),
+          Type.Literal("auto"),
+          Type.Literal("max"),
+        ],
+        {
+          description:
+            "Agent cost/reasoning tier (default: medium). Use minimal/low for narrow inexpensive work, medium for normal research, high/xhigh for difficult work, and metered auto/max only when adaptive or maximum depth justifies a budget cap.",
+        },
+      ),
     ),
-    numResults: Type.Optional(Type.Integer({ description: "Number of source results", minimum: 1, maximum: 20 })),
-    textMaxCharacters: Type.Optional(
-      Type.Integer({ description: "Maximum characters to extract for synthesis", minimum: 1 }),
+    input: Type.Optional(
+      Type.Object({
+        data: Type.Optional(Type.Array(Type.Object({}, { additionalProperties: true }))),
+        exclusion: Type.Optional(Type.Array(Type.Object({}, { additionalProperties: true }))),
+      }),
     ),
-    includeDomains: Type.Optional(Type.Array(Type.String())),
-    excludeDomains: Type.Optional(Type.Array(Type.String())),
-    startPublishedDate: Type.Optional(Type.String()),
-    endPublishedDate: Type.Optional(Type.String()),
+    previousRunId: Type.Optional(
+      Type.String({ description: "Completed Agent run ID to continue from", minLength: 1, maxLength: 200 }),
+    ),
+    metadata: Type.Optional(
+      Type.Object(
+        {},
+        { description: "String metadata stored with the Agent run", additionalProperties: Type.String() },
+      ),
+    ),
+    dataSources: Type.Optional(
+      Type.Array(
+        Type.Object({
+          provider: Type.String({ description: "Exa Connect provider identifier", minLength: 1 }),
+        }),
+        { maxItems: 5 },
+      ),
+    ),
+    budget: Type.Optional(
+      Type.Object({
+        maxCostDollars: Type.Optional(
+          Type.Number({ description: "Per-run spend ceiling for auto or max effort", minimum: 1 }),
+        ),
+      }),
+    ),
   },
-  { additionalProperties: true },
+  { additionalProperties: false },
 );
 
 export const webAnswerParams = Type.Object(

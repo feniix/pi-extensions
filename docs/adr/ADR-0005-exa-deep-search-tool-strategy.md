@@ -1,7 +1,7 @@
 ---
 title: "Exa Deep Search Tool Strategy"
 adr: ADR-0005
-status: Accepted
+status: Superseded by ADR-0018
 date: 2026-04-20
 prd: "PRD-005-pi-exa-api-alignment"
 decision: "New dedicated web_research_exa tool"
@@ -11,7 +11,7 @@ decision: "New dedicated web_research_exa tool"
 
 ## Status
 
-Accepted
+Superseded by `ADR-0018`
 
 ## Date
 

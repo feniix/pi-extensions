@@ -42,7 +42,7 @@ describeLive("pi-exa live integration", () => {
     // Exa renames or drops one of these fields, not to spec their behavior.
     const result = await performAdvancedSearch(apiKey, "rust async runtime tokio", {
       numResults: 2,
-      type: "auto",
+      type: "deep-lite",
       userLocation: "US",
       includeText: ["rust"],
       additionalQueries: ["tokio runtime"],
@@ -70,20 +70,17 @@ describeLive("pi-exa live integration", () => {
     expect(result.text).toMatch(/https?:\/\//);
   });
 
-  it("runs a real deep research request through Exa", { timeout: 60_000 }, async () => {
+  it("runs a real Agent research request through Exa", { timeout: 120_000 }, async () => {
     const result = await performResearch(apiKey, {
       query: "What is the purpose of the Example Domain page?",
-      type: "deep-lite",
       systemPrompt: "Use concise wording and rely on the most relevant public web sources.",
-      numResults: 3,
-      textMaxCharacters: 4000,
+      effort: "minimal",
       outputSchema: {
         type: "object",
         properties: {
           summary: { type: "string" },
         },
       },
-      includeDomains: ["example.com", "iana.org"],
     });
 
     expect(result.text.length).toBeGreaterThan(0);
