@@ -51,7 +51,7 @@
   "bugs": {
     "url": "https://github.com/feniix/pi-extensions/issues"
   },
-  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-devtools#readme",
+  "homepage": "https://feniix-hq.net/projects/pi-extensions/",
   "peerDependenciesMeta": {
     "@earendil-works/pi-ai": {
       "optional": true

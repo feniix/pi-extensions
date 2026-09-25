@@ -50,7 +50,7 @@
   "bugs": {
     "url": "https://github.com/feniix/pi-extensions/issues"
   },
-  "homepage": "https://github.com/feniix/pi-extensions/tree/main/packages/pi-notion#readme",
+  "homepage": "https://feniix-hq.net/projects/pi-extensions/",
   "devDependencies": {
     "@types/node": "^22.19.17"
   },
