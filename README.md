@@ -5,6 +5,8 @@ A monorepo of extensions, tools, and integrations for
 published independently under the [`@feniix`](https://www.npmjs.com/~feniix)
 npm scope.
 
+More about why this exists and where it is useful: [feniix-hq.net/projects/pi-extensions](https://feniix-hq.net/projects/pi-extensions/).
+
 ## Packages
 
 | Package | What it adds |
