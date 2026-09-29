@@ -4,7 +4,7 @@ All notable changes to `@feniix/pi-exa` are recorded in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [6.0.0] - Unreleased
 
 ### Breaking changes
 
@@ -18,6 +18,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`exa-js` upgraded to `^2.19.0`** for the stable `exa.agent.runs` client.
 - **Research defaults to `medium` effort and text output.** Object-mode `outputSchema` values are sent to Exa and read from `output.structured`; text mode reads `output.text`.
 - **`max` effort opts into Exa's required beta automatically.**
+- **`exa-js` lockfile repinned to `2.23.0`.** The declared compatibility range remains `^2.19.0`.
+
+### Fixed
+
+- **Pi startup warning about host-provided TypeBox.** Declared `typebox` as a wildcard peer dependency instead of a runtime dependency, so Pi supplies its own module without installing a duplicate copy.
+
+## [5.1.1] - 2026-07-12
+
+### Changed
+
+- **Workspace patch version bump.** No pi-exa runtime changes from 5.1.0.
 
 ## [5.1.0] - 2026-07-12
 
