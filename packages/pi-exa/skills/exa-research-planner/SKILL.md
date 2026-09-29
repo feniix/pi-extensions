@@ -50,7 +50,7 @@ Opt-in tools:
 
 Warn clearly when an important tool is unavailable:
 
-- If `web_research_exa` is unavailable, say deep synthesis cannot be executed in this session. Fall back to cheap discovery and a polished draft payload for later use.
+- If `web_research_exa` is unavailable, say Agent research cannot be executed in this session. Use a deep mode in `web_search_advanced_exa` when synchronous synthesis is sufficient.
 - If `web_search_advanced_exa` is unavailable, say advanced filters are unavailable and fall back to `web_search_exa` with better query wording.
 - If a common default tool is missing, mention it briefly and adapt without dwelling on it.
 
@@ -68,7 +68,7 @@ When the user explicitly asks for deep research:
    - timeframe,
    - comparison criteria,
    - output format.
-4. Use `deep-reasoning` by default for careful synthesis; use `deep-lite` for exploratory or cost-sensitive requests; use `deep` when speed matters more than maximum reasoning depth.
+4. Use `medium` effort by default. Use `minimal`/`low` for exploratory or cost-sensitive work and `high`/`xhigh` when depth justifies the fixed price.
 5. Return a concise report with sources, uncertainty, and practical next steps.
 
 A direct user request to run deep research counts as approval. Do not ask “should I run it?” again unless the request is dangerously ambiguous or the tool may incur unexpected scope/cost.
@@ -87,9 +87,9 @@ Ask the smallest number of questions that will meaningfully improve the research
 - **Criteria:** what factors matter most?
 - **Sources:** official docs, filings, GitHub, academic papers, news, practitioner blogs, company pages.
 - **Time horizon:** current snapshot, last 12 months, historical context.
-- **Filters:** domains to include or exclude.
+- **Source constraints:** preferred or excluded domains, expressed in the query or system prompt.
 - **Output shape:** narrative report or structured object.
-- **Depth/speed/cost:** `deep-reasoning`, `deep`, or `deep-lite`.
+- **Depth/speed/cost:** `minimal`, `low`, `medium`, `high`, `xhigh`, or metered `auto`.
 
 If the user already gave enough detail, move directly to a plan or execution.
 
@@ -118,10 +118,28 @@ Use available tools selectively:
 | Goal | Preferred Tool | Notes |
 |---|---|---|
 | Broad discovery and vocabulary | `web_search_exa` | Best first pass for reconnaissance. |
-| Domain/category/date constrained discovery | `web_search_advanced_exa` | Use when available and constraints are known. |
+| Filtered retrieval or synchronous Deep Search | `web_search_advanced_exa` | Use known constraints; select deep modes when `/search` synthesis is needed. |
 | Inspect a few strong URLs | `web_fetch_exa` | Fetch 1-3 high-signal pages. |
 | Expand from one strong seed URL | `web_find_similar_exa` | Use only with a clearly representative source. |
 | Resolve a narrow sub-question cheaply | `web_answer_exa` | Use when it may avoid deeper research. |
+
+### Choose the Synthesis Engine Deliberately
+
+Use synchronous Deep Search in `web_search_advanced_exa` when the task is one bounded request and benefits from explicit domain, date, category, or result-count controls:
+
+- `deep-lite`: lightweight, lower-latency synthesis.
+- `deep`: default for comprehensive one-shot synthesis.
+- `deep-reasoning`: only for difficult analysis where extra reasoning justifies additional cost and latency.
+
+Use asynchronous `web_research_exa` when the task benefits from autonomous multi-step exploration or Agent-only capabilities:
+
+- processing or enriching `input.data` rows,
+- excluding known entities through `input.exclusion`,
+- continuing a completed run with `previousRunId`,
+- querying Connect `dataSources`,
+- or controlling Agent effort and spend with `effort` and `budget`.
+
+Do not choose Agent research merely because the user requested a comparison or synthesis. Prefer the cheaper bounded Deep Search path when one controlled `/search` request is sufficient.
 
 Each discovery round must have a purpose. After each round, call `exa_research_step` to record what changed:
 
@@ -218,16 +236,14 @@ The internal `web_research_exa` payload still matters, but it should be derived 
 Produce a proposed `web_research_exa` call when useful. Include relevant fields:
 
 - `query`
-- `type`
 - `systemPrompt`
-- `additionalQueries`
-- `numResults`
-- `textMaxCharacters`
-- `includeDomains`
-- `excludeDomains`
-- `startPublishedDate`
-- `endPublishedDate`
+- `effort`
 - `outputSchema`
+- `input`
+- `previousRunId`
+- `metadata`
+- `dataSources`
+- `budget`
 
 Make `query` a clear research objective, not keywords.
 
@@ -255,11 +271,13 @@ Avoid:
 
 ## Deep Research Defaults
 
-### Search Type
+### Effort
 
-- `deep-reasoning`: default for comparisons, recommendations, careful trade-off analysis, market scans, and due diligence.
-- `deep`: use when faster turnaround matters more than maximum reasoning depth.
-- `deep-lite`: use for exploratory passes, lower-cost iteration, or when the user asks for a lighter scan.
+- `medium`: default for standard research.
+- `minimal` or `low`: exploratory passes and cost-sensitive iteration.
+- `high` or `xhigh`: difficult comparisons, diligence, and work where completeness justifies the fixed price.
+- `auto`: unknown-scope work; set `budget.maxCostDollars`.
+- `max`: exceptional thoroughness; set a budget and make the potential cost explicit.
 
 ### System Prompt
 
@@ -279,16 +297,6 @@ Good pattern:
   "systemPrompt": "Prefer official docs, maintainer-authored sources, reputable technical writeups, and recent primary sources. Focus on trade-offs, quality of evidence, and practical recommendations. Call out uncertainty and conflicting evidence."
 }
 ```
-
-### Additional Queries
-
-Use `additionalQueries` for alternate terminology, competitor names, synonyms, and comparison variants.
-
-Rules:
-
-- Maximum 5 entries.
-- Prefer the strongest 3-5, not exhaustive lists.
-- Fold extra variants into `query` or `systemPrompt`.
 
 ### Output Schema
 
@@ -326,10 +334,8 @@ Do not manually add citation or confidence fields unless the user specifically n
 ```json
 {
   "query": "<clear research objective with evaluation criteria>",
-  "type": "deep-reasoning",
+  "effort": "medium",
   "systemPrompt": "Prefer primary sources, official docs, reputable reporting, and expert writeups. Focus on trade-offs, quality of evidence, practical recommendations, uncertainty, and conflicting evidence.",
-  "additionalQueries": [],
-  "numResults": 10,
   "outputSchema": { "type": "text" }
 }
 ```

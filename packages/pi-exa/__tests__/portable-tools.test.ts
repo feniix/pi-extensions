@@ -14,6 +14,10 @@ const mockSearch = vi.fn();
 const mockGetContents = vi.fn();
 const mockAnswer = vi.fn();
 const mockFindSimilar = vi.fn();
+const mockAgentCreate = vi.fn();
+const mockAgentGet = vi.fn();
+const mockAgentCancel = vi.fn();
+const mockBetaAgentCreate = vi.fn();
 
 // Structurally typing the mock against the real Exa surface means a future
 // exa-js rename of search/getContents/answer/findSimilar surfaces as a
@@ -26,6 +30,20 @@ vi.mock("exa-js", () => ({
     getContents = mockGetContents as unknown as ExaMockShape["getContents"];
     answer = mockAnswer as unknown as ExaMockShape["answer"];
     findSimilar = mockFindSimilar as unknown as ExaMockShape["findSimilar"];
+    agent = {
+      runs: {
+        create: mockAgentCreate,
+        get: mockAgentGet,
+        cancel: mockAgentCancel,
+      },
+    };
+    beta = {
+      agent: {
+        runs: {
+          create: mockBetaAgentCreate,
+        },
+      },
+    };
   },
 }));
 
@@ -61,6 +79,10 @@ describe("portable Exa tools", () => {
     mockGetContents.mockReset();
     mockAnswer.mockReset();
     mockFindSimilar.mockReset();
+    mockAgentCreate.mockReset();
+    mockAgentGet.mockReset();
+    mockAgentCancel.mockReset();
+    mockBetaAgentCreate.mockReset();
     resetExaClientCache();
   });
 
@@ -335,8 +357,8 @@ describe("portable Exa tools", () => {
         {
           query: "rust async runtime",
           numResults: 5,
-          category: "research paper",
-          type: "auto",
+          category: "publication",
+          type: "deep-lite",
           startPublishedDate: "2024-01-01",
           includeDomains: ["arxiv.org"],
           includeText: ["rust"],
@@ -364,8 +386,8 @@ describe("portable Exa tools", () => {
         "rust async runtime",
         expect.objectContaining({
           numResults: 5,
-          category: "research paper",
-          type: "auto",
+          category: "publication",
+          type: "deep-lite",
           startPublishedDate: "2024-01-01",
           includeDomains: ["arxiv.org"],
           includeText: ["rust"],
@@ -384,6 +406,72 @@ describe("portable Exa tools", () => {
           }),
         }),
       );
+    });
+
+    it("supports deep-reasoning search with synthesized structured output", async () => {
+      mockSearch.mockResolvedValue({
+        ...defaultSearchResponse,
+        output: {
+          content: { conclusion: "Deep Search conclusion" },
+          grounding: [],
+        },
+      });
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_search_advanced_exa");
+      const outputSchema = {
+        type: "object",
+        properties: {
+          conclusion: { type: "string" },
+        },
+      };
+
+      const result = await executePortableTool(
+        tool,
+        {
+          query: "compare the leading approaches",
+          type: "deep-reasoning",
+          additionalQueries: ["approach tradeoffs", "primary evidence"],
+          systemPrompt: "Prefer primary sources.",
+          outputSchema,
+        },
+        { host: "test" },
+      );
+
+      expect(mockSearch).toHaveBeenCalledWith(
+        "compare the leading approaches",
+        expect.objectContaining({
+          type: "deep-reasoning",
+          additionalQueries: ["approach tradeoffs", "primary evidence"],
+          systemPrompt: "Prefer primary sources.",
+          outputSchema,
+        }),
+      );
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toContain('"conclusion": "Deep Search conclusion"');
+      expect(result.text).toContain("Example Result");
+      expect(result.structuredContent).toMatchObject({
+        tool: "web_search_advanced_exa",
+        parsedOutput: { conclusion: "Deep Search conclusion" },
+      });
+    });
+
+    it("rejects additionalQueries for non-deep search modes", async () => {
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_search_advanced_exa");
+
+      const result = await executePortableTool(
+        tool,
+        {
+          query: "rust async runtime",
+          type: "auto",
+          additionalQueries: ["tokio runtime"],
+        },
+        { host: "test" },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("additionalQueries is only supported");
+      expect(mockSearch).not.toHaveBeenCalled();
     });
 
     it("surfaces validation throws as isError:true with the advanced-search prefix", async () => {
@@ -413,12 +501,31 @@ describe("portable Exa tools", () => {
   });
 
   describe("web_research_exa", () => {
-    it("forwards deep-search options and returns synthesized text", async () => {
-      mockSearch.mockResolvedValue({
-        requestId: "req-2",
-        costDollars: { total: 0.12 },
-        searchTime: 4500,
-        output: { content: "Synthesized research summary about example.com.", grounding: [] },
+    it("submits an Agent run, polls it to completion, and returns the grounded synthesis", async () => {
+      mockAgentCreate.mockResolvedValue({
+        id: "agent_run_1",
+        status: "queued",
+        createdAt: "2026-08-13T22:52:08.000Z",
+      });
+      mockAgentGet.mockResolvedValue({
+        id: "agent_run_1",
+        status: "completed",
+        stopReason: "schema_satisfied",
+        createdAt: "2026-08-13T22:52:08.000Z",
+        completedAt: "2026-08-13T22:52:10.500Z",
+        output: {
+          text: "Agent research synthesis.",
+          structured: null,
+          grounding: [
+            {
+              field: "text",
+              citations: [{ url: "https://example.com/source", title: "Primary source" }],
+              confidence: "high",
+            },
+          ],
+        },
+        costDollars: { total: 0.1 },
+        usage: { searches: 3 },
       });
       const tools = createExaTools({ resolveApiKey: () => "test-key" });
       const tool = findTool(tools, "web_research_exa");
@@ -426,78 +533,178 @@ describe("portable Exa tools", () => {
       const result = await executePortableTool(
         tool,
         {
-          query: "What is example.com?",
-          type: "deep-lite",
-          systemPrompt: "Be concise.",
-          textMaxCharacters: 4000,
-          additionalQueries: ["example domain"],
-          numResults: 3,
-          includeDomains: ["example.com"],
-          startPublishedDate: "2024-01-01",
+          query: "What is the future of AI?",
+          systemPrompt: "Prefer primary sources.",
+          effort: "high",
+          metadata: { requestId: "pi-call-1" },
         },
         { host: "test" },
       );
 
+      expect(mockAgentCreate).toHaveBeenCalledWith({
+        query: "What is the future of AI?",
+        systemPrompt: "Prefer primary sources.",
+        effort: "high",
+        metadata: { requestId: "pi-call-1" },
+      });
+      expect(mockAgentGet).toHaveBeenCalledWith("agent_run_1");
+      expect(mockSearch).not.toHaveBeenCalled();
       expect(result.isError).toBeUndefined();
-      expect(result.text).toContain("Synthesized research summary");
+      expect(result.text).toContain("Agent research synthesis.");
+      expect(result.text).toContain("https://example.com/source");
       expect(result.structuredContent).toMatchObject({
         tool: "web_research_exa",
-        costDollars: { total: 0.12 },
-        searchTime: 4500,
+        runId: "agent_run_1",
+        status: "completed",
+        stopReason: "schema_satisfied",
+        searchTime: 2500,
+        costDollars: { total: 0.1 },
+        usage: { searches: 3 },
       });
-      expect(mockSearch).toHaveBeenCalledWith(
-        "What is example.com?",
-        expect.objectContaining({
-          type: "deep-lite",
-          systemPrompt: "Be concise.",
-          additionalQueries: ["example domain"],
-          numResults: 3,
-          includeDomains: ["example.com"],
-          startPublishedDate: "2024-01-01",
-          // Issue #115: omitting outputSchema must default to text-mode
-          // synthesis so the backend actually runs synthesis and returns
-          // an `output` field. The Exa API only synthesizes when an
-          // outputSchema is provided; without a default, callers always
-          // hit the canned "no synthesized output" fallback.
-          outputSchema: { type: "text" },
-          contents: expect.objectContaining({ text: { maxCharacters: 4000 } }),
-        }),
-      );
     });
 
-    it("defaults outputSchema to text-mode synthesis when the caller omits it (issue #115)", async () => {
-      // Regression pin for issue #115: web_research_exa returned the
-      // canned "no synthesized output was returned" message for every
-      // call because the implementation passed `undefined` to
-      // exa.search(...), and the backend only returns an `output` field
-      // when an outputSchema is provided. The fix is to default to
-      // text-mode synthesis when the caller doesn't pass an explicit
-      // outputSchema.
-      mockSearch.mockResolvedValue({
-        requestId: "req-default-text",
-        output: { content: "Synthesized prose answer.", grounding: [] },
+    it("retries a transient poll failure instead of abandoning the Agent run", async () => {
+      vi.useFakeTimers();
+      try {
+        mockAgentCreate.mockResolvedValue({ id: "agent_run_retry", status: "queued" });
+        mockAgentGet.mockRejectedValueOnce(new Error("temporary connection reset")).mockResolvedValueOnce({
+          id: "agent_run_retry",
+          status: "completed",
+          output: { text: "Recovered result.", grounding: [] },
+        });
+        const tools = createExaTools({
+          resolveApiKey: () => "test-key",
+          timeouts: { web_research_exa: 5_000 },
+        });
+        const tool = findTool(tools, "web_research_exa");
+
+        const resultPromise = executePortableTool(tool, { query: "Retry transient polls" }, { host: "test" });
+        await vi.waitFor(() => expect(mockAgentGet).toHaveBeenCalledTimes(1));
+        await vi.advanceTimersByTimeAsync(1_000);
+        const result = await resultPromise;
+
+        expect(mockAgentGet).toHaveBeenCalledTimes(2);
+        expect(mockAgentCancel).not.toHaveBeenCalled();
+        expect(result.text).toBe("Recovered result.");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("cancels the remote Agent run when the host aborts during polling", async () => {
+      mockAgentCreate.mockResolvedValue({ id: "agent_run_abort", status: "queued" });
+      mockAgentGet.mockResolvedValue({ id: "agent_run_abort", status: "running" });
+      mockAgentCancel.mockResolvedValue({ id: "agent_run_abort", status: "cancelled" });
+      const tools = createExaTools({
+        resolveApiKey: () => "test-key",
+        timeouts: { web_research_exa: 10_000 },
+      });
+      const tool = findTool(tools, "web_research_exa");
+      const controller = new AbortController();
+
+      const resultPromise = executePortableTool(
+        tool,
+        { query: "Long-running research" },
+        { host: "test", signal: controller.signal },
+      );
+      await vi.waitFor(() => expect(mockAgentGet).toHaveBeenCalledWith("agent_run_abort"));
+      controller.abort();
+      const result = await resultPromise;
+
+      expect(mockAgentCancel).toHaveBeenCalledWith("agent_run_abort");
+      expect(result.isError).toBeUndefined();
+      expect(result.text).toBe("Cancelled.");
+      expect(result.structuredContent).toMatchObject({
+        tool: "web_research_exa",
+        cancelled: true,
+        runId: "agent_run_abort",
+      });
+    });
+
+    it("cancels the remote Agent run when the research timeout expires", async () => {
+      mockAgentCreate.mockResolvedValue({ id: "agent_run_timeout", status: "queued" });
+      mockAgentGet.mockResolvedValue({ id: "agent_run_timeout", status: "running" });
+      mockAgentCancel.mockResolvedValue({ id: "agent_run_timeout", status: "cancelled" });
+      const tools = createExaTools({
+        resolveApiKey: () => "test-key",
+        timeouts: { web_research_exa: 40 },
+      });
+      const tool = findTool(tools, "web_research_exa");
+
+      const result = await executePortableTool(tool, { query: "Bounded research" }, { host: "test" });
+
+      expect(mockAgentCancel).toHaveBeenCalledWith("agent_run_timeout");
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("timed out after 40ms");
+      expect(result.structuredContent).toMatchObject({
+        kind: "domain",
+        tool: "web_research_exa",
+        error: "timeout",
+        timeoutMs: 40,
+        runId: "agent_run_timeout",
+      });
+    });
+
+    it("cancels the remote Agent run when an in-flight poll stalls past the deadline", { timeout: 500 }, async () => {
+      mockAgentCreate.mockResolvedValue({ id: "agent_run_stalled", status: "queued" });
+      mockAgentGet.mockReturnValue(new Promise(() => {}));
+      mockAgentCancel.mockResolvedValue({ id: "agent_run_stalled", status: "cancelled" });
+      const tools = createExaTools({
+        resolveApiKey: () => "test-key",
+        timeouts: { web_research_exa: 40 },
+      });
+      const tool = findTool(tools, "web_research_exa");
+
+      const result = await executePortableTool(tool, { query: "Stalled research" }, { host: "test" });
+
+      expect(mockAgentCancel).toHaveBeenCalledWith("agent_run_stalled");
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        error: "timeout",
+        runId: "agent_run_stalled",
+      });
+    });
+
+    it("returns a bounded timeout when Exa never returns a run ID", { timeout: 500 }, async () => {
+      mockAgentCreate.mockReturnValue(new Promise(() => {}));
+      const tools = createExaTools({
+        resolveApiKey: () => "test-key",
+        timeouts: { web_research_exa: 40 },
+      });
+      const tool = findTool(tools, "web_research_exa");
+
+      const result = await executePortableTool(tool, { query: "Stalled submit" }, { host: "test" });
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("before Exa returned a run ID");
+      expect(result.structuredContent).toMatchObject({ error: "timeout", timeoutMs: 40 });
+      expect(result.structuredContent).not.toHaveProperty("runId");
+      expect(mockAgentCancel).not.toHaveBeenCalled();
+    });
+
+    it("uses medium effort and text output by default without sending an output schema", async () => {
+      mockAgentCreate.mockResolvedValue({
+        id: "agent_run_text",
+        status: "completed",
+        output: { text: "Default text answer.", structured: null, grounding: [] },
       });
       const tools = createExaTools({ resolveApiKey: () => "test-key" });
       const tool = findTool(tools, "web_research_exa");
 
-      await executePortableTool(tool, { query: "default behavior test" }, { host: "test" });
+      const result = await executePortableTool(tool, { query: "default behavior test" }, { host: "test" });
 
-      expect(mockSearch).toHaveBeenCalledWith(
-        "default behavior test",
-        expect.objectContaining({
-          outputSchema: { type: "text" },
-        }),
-      );
+      expect(mockAgentCreate).toHaveBeenCalledWith({
+        query: "default behavior test",
+        effort: "medium",
+      });
+      expect(result.text).toBe("Default text answer.");
     });
 
-    it("defaults to text-mode when outputSchema is an object without a type field", async () => {
-      // The schema layer accepts { properties: {...} } without a top-level
-      // type (Type.Object + additionalProperties: true). parseOutputSchema
-      // must treat that as "no type provided" and default to text mode,
-      // matching the omitted-outputSchema path.
-      mockSearch.mockResolvedValue({
-        requestId: "req-no-type",
-        output: { content: "Defaulted to text.", grounding: [] },
+    it("forwards Agent-native input, continuation, data-source, and budget fields", async () => {
+      mockAgentCreate.mockResolvedValue({
+        id: "agent_run_native",
+        status: "completed",
+        output: { text: "Native Agent answer.", grounding: [] },
       });
       const tools = createExaTools({ resolveApiKey: () => "test-key" });
       const tool = findTool(tools, "web_research_exa");
@@ -505,38 +712,75 @@ describe("portable Exa tools", () => {
       await executePortableTool(
         tool,
         {
-          query: "no-type test",
-          outputSchema: { properties: { summary: { type: "string" } } } as never,
+          query: "Enrich these companies",
+          effort: "auto",
+          input: {
+            data: [{ company: "Acme" }],
+            exclusion: [{ company: "Example" }],
+          },
+          previousRunId: "agent_run_previous",
+          metadata: { callId: "call-1" },
+          dataSources: [{ provider: "similarweb" }],
+          budget: { maxCostDollars: 3 },
         },
         { host: "test" },
       );
 
-      expect(mockSearch).toHaveBeenCalledWith(
-        "no-type test",
-        expect.objectContaining({
-          outputSchema: { type: "text" },
-        }),
-      );
+      expect(mockAgentCreate).toHaveBeenCalledWith({
+        query: "Enrich these companies",
+        effort: "auto",
+        input: {
+          data: [{ company: "Acme" }],
+          exclusion: [{ company: "Example" }],
+        },
+        previousRunId: "agent_run_previous",
+        metadata: { callId: "call-1" },
+        dataSources: [{ provider: "similarweb" }],
+        budget: { maxCostDollars: 3 },
+      });
     });
 
-    it("passes explicit object-mode outputSchema through unchanged and renders parsedOutput", async () => {
-      // The default-to-text fix must not override an explicit object
-      // schema the caller passes. Object mode is the LLM's escape hatch
-      // for structured extraction, and the formatter should still set
-      // `details.parsedOutput` so the caller can consume the structured
-      // result without re-parsing `result.text`.
-      mockSearch.mockResolvedValue({
-        requestId: "req-obj",
-        output: {
-          content: { summary: "Structured answer", risks: ["risk-1", "risk-2"] },
-          grounding: [
-            { field: "summary", citations: [{ url: "https://example.com", title: "src" }], confidence: "high" },
-          ],
-        },
+    it("rejects a metered budget on fixed-price effort before submitting a run", async () => {
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_research_exa");
+
+      const result = await executePortableTool(
+        tool,
+        { query: "Invalid budget combination", effort: "high", budget: { maxCostDollars: 3 } },
+        { host: "test" },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("budget.maxCostDollars is only supported with auto or max effort");
+      expect(mockAgentCreate).not.toHaveBeenCalled();
+    });
+
+    it("opts into the required beta when max effort is requested", async () => {
+      mockBetaAgentCreate.mockResolvedValue({
+        id: "agent_run_max",
+        status: "completed",
+        output: { text: "Maximum-effort answer.", grounding: [] },
       });
       const tools = createExaTools({ resolveApiKey: () => "test-key" });
       const tool = findTool(tools, "web_research_exa");
 
+      const result = await executePortableTool(
+        tool,
+        { query: "Research this thoroughly", effort: "max", budget: { maxCostDollars: 10 } },
+        { host: "test" },
+      );
+
+      expect(mockBetaAgentCreate).toHaveBeenCalledWith({
+        query: "Research this thoroughly",
+        effort: "max",
+        budget: { maxCostDollars: 10 },
+        betas: ["agent-max-effort-2026-07-27"],
+      });
+      expect(mockAgentCreate).not.toHaveBeenCalled();
+      expect(result.text).toBe("Maximum-effort answer.");
+    });
+
+    it("passes object outputSchema to the Agent API and renders output.structured", async () => {
       const explicitSchema = {
         type: "object" as const,
         properties: {
@@ -545,6 +789,17 @@ describe("portable Exa tools", () => {
         },
         required: ["summary"],
       };
+      mockAgentCreate.mockResolvedValue({
+        id: "agent_run_structured",
+        status: "completed",
+        output: {
+          text: "Structured answer",
+          structured: { summary: "Structured answer", risks: ["risk-1"] },
+          grounding: [],
+        },
+      });
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_research_exa");
 
       const result = await executePortableTool(
         tool,
@@ -552,94 +807,48 @@ describe("portable Exa tools", () => {
         { host: "test" },
       );
 
-      expect(mockSearch).toHaveBeenCalledWith(
-        "structured please",
-        expect.objectContaining({ outputSchema: explicitSchema }),
-      );
+      expect(mockAgentCreate).toHaveBeenCalledWith({
+        query: "structured please",
+        effort: "medium",
+        outputSchema: explicitSchema,
+      });
       expect(result.structuredContent).toMatchObject({
         tool: "web_research_exa",
-        parsedOutput: { summary: "Structured answer", risks: ["risk-1", "risk-2"] },
+        parsedOutput: { summary: "Structured answer", risks: ["risk-1"] },
       });
     });
 
-    it("surfaces diagnostic context when the response omits output (issue #115 fallback)", async () => {
-      // When the backend returns no `output` field, the tool must
-      // surface *why* (synthesis was expected but the response lacked
-      // the field) and *what shape* it got, not the generic "try a
-      // different query" message. This pins the diagnostic contract:
-      // requestId, resultsCount, what schema was sent, and the
-      // top-level response keys (which lack `output` is the proof of
-      // the contract issue).
-      mockSearch.mockResolvedValue({
-        requestId: "req-no-output",
-        resolvedSearchType: "deep",
-        results: [
-          { title: "Hit 1", url: "https://example.com/1" },
-          { title: "Hit 2", url: "https://example.com/2" },
-        ],
-        searchTime: 1234,
-        costDollars: { total: 0.015 },
-        // No `output` key — matches the bug scenario from issue #115.
+    it.each(["failed", "cancelled"] as const)("returns an error when the Agent run ends as %s", async (status) => {
+      mockAgentCreate.mockResolvedValue({
+        id: `agent_run_${status}`,
+        status,
+        error: { message: "upstream verdict" },
       });
       const tools = createExaTools({ resolveApiKey: () => "test-key" });
       const tool = findTool(tools, "web_research_exa");
 
-      const result = await executePortableTool(tool, { query: "synthesis will not run" }, { host: "test" });
+      const result = await executePortableTool(tool, { query: "terminal failure" }, { host: "test" });
 
-      // Not flagged as an error — this is a contract gotcha, not a
-      // transport failure. The model gets a readable text and structured
-      // details to act on.
-      expect(result.isError).toBeFalsy();
-      // User-facing text is honest about what happened: a schema was
-      // sent, the response lacked the field.
-      expect(result.text).toMatch(/outputSchema was sent/i);
-      expect(result.text).toMatch(/outputSchema/);
-      // Diagnostic details pin the failure shape.
-      const details = result.structuredContent as Record<string, unknown>;
-      expect(details).toMatchObject({
-        tool: "web_research_exa",
-        kind: "domain",
-        error: "no_synthesized_output",
-        requestId: "req-no-output",
-        resultsCount: 2,
-        outputSchemaSent: { type: "text" },
-        costDollars: { total: 0.015 },
-        searchTime: 1234,
-      });
-      // responseKeys is the diagnostic surface: assert semantically (the
-      // useful keys are present, `output` is absent) rather than pinning
-      // exact insertion order — Object.keys order is stable per the
-      // JS spec, but the value of the diagnostic is the set membership.
-      const responseKeys = details.responseKeys as string[];
-      expect(responseKeys).toEqual(expect.arrayContaining(["requestId", "results", "searchTime", "costDollars"]));
-      expect(responseKeys).not.toContain("output");
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain(`ended with status ${status}`);
+      expect(result.text).toContain("upstream verdict");
+      expect(mockAgentCancel).not.toHaveBeenCalled();
     });
 
-    it("surfaces diagnostic context even when exa.search resolves to null or undefined", async () => {
-      // Defensive coverage: if the SDK ever resolves to a nullish
-      // response (unusual but documented in the exa-js types as
-      // possible during cancellation/timeout edges), the diagnostic
-      // path must not throw. Without the null guard, toMetadata would
-      // dereference response.costDollars on a null value and the
-      // fallback would crash before the model-visible diagnostic is
-      // returned.
-      mockSearch.mockResolvedValueOnce(null);
+    it("returns an error when a completed Agent run has no requested output", async () => {
+      mockAgentCreate.mockResolvedValue({
+        id: "agent_run_empty",
+        status: "completed",
+        output: { text: "", structured: null, grounding: [] },
+      });
       const tools = createExaTools({ resolveApiKey: () => "test-key" });
       const tool = findTool(tools, "web_research_exa");
 
-      const result = await executePortableTool(tool, { query: "null response test" }, { host: "test" });
+      const result = await executePortableTool(tool, { query: "empty output" }, { host: "test" });
 
-      expect(result.isError).toBeFalsy();
-      const details = result.structuredContent as Record<string, unknown>;
-      expect(details).toMatchObject({
-        tool: "web_research_exa",
-        kind: "domain",
-        error: "no_synthesized_output",
-        requestId: "unknown",
-        resultsCount: 0,
-        outputSchemaSent: { type: "text" },
-        responseKeys: [],
-      });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("completed without synthesized output");
+      expect(result.text).toContain("agent_run_empty");
     });
 
     it("rejects outputSchema.type other than object|text at the validation layer", async () => {
@@ -663,7 +872,22 @@ describe("portable Exa tools", () => {
         kind: "validation",
         tool: "web_research_exa",
       });
-      expect(mockSearch).not.toHaveBeenCalled();
+      expect(mockAgentCreate).not.toHaveBeenCalled();
+    });
+
+    it("rejects retired Deep Search parameters at the validation layer", async () => {
+      const tools = createExaTools({ resolveApiKey: () => "test-key" });
+      const tool = findTool(tools, "web_research_exa");
+
+      const result = await executePortableTool(
+        tool,
+        { query: "old payload", type: "deep-reasoning", numResults: 10 } as never,
+        { host: "test" },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("Invalid arguments");
+      expect(mockAgentCreate).not.toHaveBeenCalled();
     });
 
     it("is hidden when isToolEnabled returns false for web_research_exa", () => {
@@ -846,7 +1070,9 @@ describe("portable Exa tools", () => {
     });
 
     it("honors per-tool web_research_exa override even when generic default would be shorter", async () => {
-      mockSearch.mockReturnValue(new Promise(() => {}));
+      mockAgentCreate.mockResolvedValue({ id: "agent_run_override", status: "queued" });
+      mockAgentGet.mockResolvedValue({ id: "agent_run_override", status: "running" });
+      mockAgentCancel.mockResolvedValue({ id: "agent_run_override", status: "cancelled" });
       const tools = createExaTools({
         resolveApiKey: () => "test-key",
         isToolEnabled: () => true,

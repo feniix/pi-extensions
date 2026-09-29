@@ -58,8 +58,7 @@ function registerFlags(pi: ExtensionAPI): void {
     type: "string",
   });
   pi.registerFlag("--exa-research-timeout-ms", {
-    description:
-      "Per-call timeout in ms for web_research_exa (deep-reasoning legitimately runs longer). Overrides the built-in 180000 default.",
+    description: "Per-call timeout in ms for web_research_exa Agent runs. Overrides the built-in 180000 default.",
     type: "string",
   });
 }

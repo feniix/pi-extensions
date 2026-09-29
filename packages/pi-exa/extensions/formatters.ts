@@ -450,7 +450,7 @@ export function formatResearchOutput(
 ): FormattedResearch {
   if (!output) {
     return {
-      text: "Deep search completed, but no synthesized output was returned. Try a different query or avoid unsupported filters.",
+      text: "Research completed, but no synthesized output was returned.",
     };
   }
 

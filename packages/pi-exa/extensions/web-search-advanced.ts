@@ -4,6 +4,7 @@
 
 import type {
   ContextOptions,
+  DeepOutputSchema,
   HighlightsContentsOptions,
   SearchResponse,
   SearchResult,
@@ -11,12 +12,14 @@ import type {
   TextContentsOptions,
 } from "exa-js";
 import type { AdvancedSearchType } from "./constants.js";
+import { DEEP_SEARCH_TYPES, DEFAULT_RESEARCH_OUTPUT_SCHEMA } from "./constants.js";
 import { getExaClient } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
-import { formatSearchResults, toMetadata } from "./formatters.js";
+import { formatResearchOutput, formatSearchResults, toMetadata } from "./formatters.js";
 
 const SEARCH_CATEGORIES = [
   "company",
+  "publication",
   "research paper",
   "news",
   "pdf",
@@ -57,6 +60,8 @@ type AdvancedSearchOptions = {
   numResults?: number;
   category?: string;
   type?: AdvancedSearchType;
+  systemPrompt?: string;
+  outputSchema?: DeepOutputSchema;
   startPublishedDate?: string;
   endPublishedDate?: string;
   includeDomains?: string[];
@@ -132,14 +137,14 @@ type AdvancedContents = {
 };
 
 // Local mirror of the SDK's RegularSearchOptions surface, kept narrow so we
-// only forward fields pi-exa supports. The SDK's discriminated union marks
-// `additionalQueries` as deep-search-only, but the live hosted MCP advertises
-// it for advanced search and the Exa /search endpoint accepts it — so we
-// describe the field here and skip the SDK's compile-time gate.
+// only forward fields pi-exa supports. We validate the deep-search-only
+// additionalQueries field before assembling the payload incrementally.
 type AdvancedSearchPayload = {
   numResults: number;
   category?: SearchCategory;
   type?: AdvancedSearchType;
+  systemPrompt?: string;
+  outputSchema?: DeepOutputSchema;
   startPublishedDate?: string;
   endPublishedDate?: string;
   includeDomains?: string[];
@@ -232,8 +237,13 @@ export async function performAdvancedSearch(
 ): Promise<ToolPerformResult> {
   const category = validateCategory(options.category);
   validateCategoryFilters(category, options);
+  const isDeepSearch = DEEP_SEARCH_TYPES.some((type) => type === options.type);
+  if (options.additionalQueries?.length && !isDeepSearch) {
+    throw new Error("additionalQueries is only supported with deep-lite, deep, or deep-reasoning search.");
+  }
 
   const exa = getExaClient(apiKey);
+  const outputSchema = options.outputSchema ?? (isDeepSearch ? DEFAULT_RESEARCH_OUTPUT_SCHEMA : undefined);
 
   const payload: AdvancedSearchPayload = {
     numResults: options.numResults ?? 10,
@@ -241,6 +251,8 @@ export async function performAdvancedSearch(
   };
   if (category) payload.category = category;
   if (options.type) payload.type = options.type;
+  if (options.systemPrompt) payload.systemPrompt = options.systemPrompt;
+  if (outputSchema) payload.outputSchema = outputSchema;
   if (options.startPublishedDate) payload.startPublishedDate = options.startPublishedDate;
   if (options.endPublishedDate) payload.endPublishedDate = options.endPublishedDate;
   if (options.includeDomains && options.includeDomains.length > 0) payload.includeDomains = options.includeDomains;
@@ -258,7 +270,11 @@ export async function performAdvancedSearch(
     payload as unknown as { contents: AdvancedResultContents } & Record<string, unknown>,
   );
 
-  if (!result?.results || result.results.length === 0) {
+  const hasResults = Boolean(result?.results?.length);
+  const formattedResearch =
+    result.output && outputSchema ? formatResearchOutput(result.output, outputSchema) : undefined;
+
+  if (!hasResults && !formattedResearch) {
     return {
       text: "No search results found. Please try a different query.",
       details: { tool: "web_search_advanced_exa" },
@@ -266,10 +282,16 @@ export async function performAdvancedSearch(
   }
 
   return {
-    text: formatSearchResults(result.results as AdvancedResult[]),
+    text: [
+      formattedResearch?.text,
+      hasResults ? `## Search results\n\n${formatSearchResults(result.results as AdvancedResult[])}` : undefined,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
     details: {
       tool: "web_search_advanced_exa",
       ...toMetadata(result),
+      ...(formattedResearch?.parsedOutput === undefined ? {} : { parsedOutput: formattedResearch.parsedOutput }),
     },
   };
 }

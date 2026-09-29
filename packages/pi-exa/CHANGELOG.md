@@ -4,6 +4,32 @@ All notable changes to `@feniix/pi-exa` are recorded in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0] - Unreleased
+
+### Breaking changes
+
+- **`web_research_exa` now uses Exa Agent Runs.** The tool submits an asynchronous run, polls it to a terminal status, and attempts remote cancellation when the host aborts or the configured research timeout expires after a run ID is known.
+- **Agent-native research parameters replace Deep Search parameters.** Removed `type`, `additionalQueries`, `numResults`, `textMaxCharacters`, domain filters, and publication-date filters from `web_research_exa`. Added `effort`, `input`, `previousRunId`, `metadata`, `dataSources`, and `budget`. Filtered retrieval remains available through `web_search_advanced_exa`.
+- **Research output metadata now carries the Agent lifecycle.** Successful results include `runId`, terminal `status`, `stopReason`, usage, cost, and run timestamps.
+- **Deep Search remains available through `web_search_advanced_exa`.** The advanced tool follows Exa's current `/search` modes (`instant`, `fast`, `auto`, `deep-lite`, `deep`, `deep-reasoning`) and supports `systemPrompt`, `outputSchema`, deep-only `additionalQueries`, and synthesized output.
+
+### Changed
+
+- **`exa-js` upgraded to `^2.19.0`** for the stable `exa.agent.runs` client.
+- **Research defaults to `medium` effort and text output.** Object-mode `outputSchema` values are sent to Exa and read from `output.structured`; text mode reads `output.text`.
+- **`max` effort opts into Exa's required beta automatically.**
+- **`exa-js` lockfile repinned to `2.23.0`.** The declared compatibility range remains `^2.19.0`.
+
+### Fixed
+
+- **Pi startup warning about host-provided TypeBox.** Declared `typebox` as a wildcard peer dependency instead of a runtime dependency, so Pi supplies its own module without installing a duplicate copy.
+
+## [5.1.1] - 2026-07-12
+
+### Changed
+
+- **Workspace patch version bump.** No pi-exa runtime changes from 5.1.0.
+
 ## [5.1.0] - 2026-07-12
 
 ### Added

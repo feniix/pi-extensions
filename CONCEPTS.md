@@ -12,11 +12,23 @@ The Pi host surfaces `hostExtras.pi.*` fields — `promptSnippet`, `promptGuidel
 
 ## Synthesis
 
-The LLM-generated answer text returned by Exa's deep search types (`deep`, `deep-lite`, `deep-reasoning`) in `output.content`, as distinct from retrieved results (the `results` array). Synthesized answers are always returned alongside per-field `grounding` citations and a list of retrieved source URLs.
+The evidence-grounded text or structured result produced by an Exa Agent run, as distinct from the individual pages found during ordinary search. A synthesis may be natural-language text or an object shaped by a caller-provided schema, with per-field grounding citations.
 
 *Avoid:* answer (used by Exa's `/answer` endpoint with different semantics — see the `web_answer_exa` tool).
 
-Synthesis requires `outputSchema` to be sent in the request; without it, Exa omits the `output` field entirely and the `web_research_exa` tool returns a diagnostic fallback. This contract is the bug behind issue #115. Default mode is text (`{ type: "text" }`); object mode (`{ type: "object", properties: {...} }`) is an explicit override for structured extraction.
+Default mode is text. Object mode is an explicit request for schema-shaped structured extraction.
+
+## Agent run
+
+An asynchronous Exa research job with a stable run ID and a lifecycle of queued, running, completed, failed, or cancelled. The run ID is the handle for polling and remote cancellation.
+
+*Avoid:* search request (ordinary Exa search is synchronous and has no independently managed lifecycle).
+
+## Deep Search
+
+A synchronous Exa `/search` request using `deep-lite`, `deep`, or `deep-reasoning`. Deep Search supports search filters, additional query branches, and text or structured synthesis through `web_search_advanced_exa`.
+
+*Avoid:* Agent run. Deep Search has no independently managed run ID, polling lifecycle, continuation, or remote cancellation.
 
 ## Research plan
 

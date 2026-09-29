@@ -12,7 +12,7 @@ Use this skill for discovering academic papers, arXiv/preprint work, methods com
 
 | Intent | Primary Tool | Notes |
 |---|---|---|
-| Paper discovery | `web_search_advanced_exa` with `category: "research paper"` | Use when available; domain filters such as `arxiv.org` can improve signal. |
+| Paper discovery | `web_search_advanced_exa` with `category: "publication"` | Use when available; domain filters such as `arxiv.org` can improve signal. |
 | Broad discovery when advanced search is unavailable | `web_search_exa` | Include topic, method names, and paper/source terms. |
 | Evidence-weighted synthesis across papers | `web_research_exa` | Use when enabled; specify evidence quality and caveat requirements. |
 | One-off definition or quick answer | `web_answer_exa` | Keep it concise and citation-focused. |
