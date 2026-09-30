@@ -54,22 +54,55 @@ Replace `pi-devtools` with any package name from the table above.
 
 ## Develop
 
-This repository is an npm workspace. It requires Node.js 22.19.0 or newer.
+This repository is a pnpm workspace. It requires Node.js 22.19.0 or newer
+and pnpm 12.8.1 (pinned in `package.json`).
+
+Provision the pinned package manager separately from repository dependencies:
 
 ```bash
-npm ci
-npm run check
-npm test
+npm install --global pnpm@12.8.1
+pnpm --version
+```
+
+An already configured Corepack/mise installation of the same version also works.
+
+```bash
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm test
 ```
 
 Useful commands:
 
 ```bash
-npm run lint
-npm run typecheck
-npm run test:coverage
-npm run audit:workspaces
+pnpm run lint
+pnpm run typecheck
+pnpm run test:coverage
+pnpm run audit:workspaces
 ```
+
+The audit command covers the entire shared lockfile, including root development
+dependencies, and preserves pnpm's vulnerability/registry error exit status.
+It does not add an audit gate to the release workflow.
+
+Tools fail when dependencies are stale instead of automatically reinstalling.
+After editing dependencies, run `pnpm install` and review `pnpm-lock.yaml`.
+Dependency install scripts are reviewed per version in `pnpm-workspace.yaml`;
+new script-bearing versions require an explicit approval or denial.
+
+To bump only one package without creating a Git tag/commit:
+
+```bash
+pnpm --filter @feniix/pi-devtools --fail-if-no-match -r version patch --no-git-tag-version
+pnpm install --lockfile-only
+pnpm install --frozen-lockfile
+```
+
+Review the targeted manifest and any lockfile changes before committing. npm
+registry lookup and provenance publication remain npm operations; the bridgekit
+CLI wrapper also retains its upstream npm-based missing-build fallback. Public
+`pi install npm:...` selectors are unchanged. Release dry-run skips publishing
+but does not validate packed artifacts or publication authorization.
 
 To load one package directly from a checkout:
 

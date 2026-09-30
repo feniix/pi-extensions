@@ -1,2 +1,16 @@
 packages:
-  - "packages/*"
+  - packages/*
+
+overrides:
+  fast-xml-parser: ^5.7.0
+  uuid: ^14.0.0
+
+# Fail rather than silently reinstall when running tools against stale dependencies.
+verifyDepsBeforeRun: error
+
+# Reviewed install hooks: esbuild validates its platform binary; the other
+# hooks only print a no-op/version warning and do not generate runtime assets.
+allowBuilds:
+  esbuild@0.28.2: true
+  '@google/genai@2.21.0': false
+  protobufjs@7.6.6: false

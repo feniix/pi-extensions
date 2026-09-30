@@ -122,8 +122,8 @@ Behavior:
 Run from the repo root:
 
 ```bash
-npm run test
-npm run typecheck
+pnpm run test
+pnpm run typecheck
 ```
 
 For quick manual testing from this monorepo:

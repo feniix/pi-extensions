@@ -56,24 +56,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: npm
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: npx biome ci packages/${{ matrix.package }}
+        run: pnpm exec biome ci packages/${{ matrix.package }}
 
       - name: Typecheck
-        run: npx tsc --noEmit --pretty false --project packages/${{ matrix.package }}/tsconfig.json
+        run: pnpm exec tsc --noEmit --pretty false --project packages/${{ matrix.package }}/tsconfig.json
 
       - name: Test with coverage
         run: >-
-          npx vitest run packages/${{ matrix.package }}/__tests__
+          pnpm exec vitest run packages/${{ matrix.package }}/__tests__
           --coverage.enabled
           --coverage.reportsDirectory=coverage/${{ matrix.package }}
           --coverage.include=packages/${{ matrix.package }}/extensions/**/*.ts

@@ -9,7 +9,7 @@ if [[ -z "$BASE" ]]; then
 	exit 1
 fi
 
-ALL_PACKAGES=$(find packages -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)
+ALL_PACKAGES=$(find packages -mindepth 2 -maxdepth 2 -type f -name package.json | cut -d/ -f2 | sort)
 
 if [[ "$BASE" == "0000000000000000000000000000000000000000" ]]; then
 	FILES=$(git ls-files)
@@ -20,7 +20,7 @@ fi
 printf 'Changed files:\n'
 printf '%s\n' "$FILES"
 
-if echo "$FILES" | grep -Eq '^(package\.json|package-lock\.json|tsconfig\.json|vitest\.config\.ts|biome\.json|\.github/workflows/)'; then
+if echo "$FILES" | grep -Eq '^((package\.json|package-lock\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|tsconfig\.json|vitest\.config\.ts|biome\.json)$|\.github/workflows/|scripts/)'; then
 	CHANGED="$ALL_PACKAGES"
 else
 	CHANGED=$(echo "$FILES" | grep '^packages/' | cut -d/ -f2 | sort -u || true)

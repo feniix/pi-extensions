@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-exa",
-  "version": "6.0.0",
+  "version": "6.0.1",
   "description": "Exa API extension for pi — web search, content fetching, and advanced search via Exa AI",
   "keywords": [
     "pi",
@@ -60,7 +60,7 @@
   },
   "scripts": {
     "build:mcp": "tsc --project tsconfig.mcp.json && node -e \"require('node:fs').chmodSync('dist/extensions/mcp-server.js', 0o755)\"",
-    "prepack": "npm run build:mcp"
+    "prepack": "pnpm run build:mcp"
   },
   "engines": {
     "node": ">=22.19.0"
