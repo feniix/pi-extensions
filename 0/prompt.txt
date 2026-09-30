@@ -1,0 +1,17 @@
+could we migrate from npm to pnpm?
+
+---
+
+draft a gh issue for this work, it should be shaped as an ai goal with grounded acceptance criteria and grounded requirements
+
+---
+
+do an in depth research to make sure we have all the facts correct
+
+---
+
+does it make sense to migrate to pnpm?
+
+---
+
+go for it
