@@ -1,0 +1,52 @@
+{
+  "cli_version": "0.11.3",
+  "checkpoint_id": "01M3QT90WR99WTWDFJMZNT3C2J",
+  "session_id": "faf1c33f-4fbd-45a8-bef5-af6859981330",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-30T00:08:53.392166Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-fable-5-1",
+  "turn_id": "8b115e33691f",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 4,
+    "cache_creation_tokens": 31624,
+    "cache_read_tokens": 73757,
+    "output_tokens": 836,
+    "api_call_count": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 966,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.json": 88,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/baseline-metrics.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-001/metrics-final.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-001/metrics.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-001/result.yaml": 31,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-002/metrics.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-002/result.yaml": 33,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-003/metrics.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-003/result.yaml": 31,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-004/metrics.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-004/result.yaml": 31,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-005/metrics.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-005/result.yaml": 31,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-log.yaml": 222,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/measure-maintainability.mjs": 128,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/spec.yaml": 85,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/strategy-digest.md": 19,
+        ".pi/extensions/entire/index.ts": 147,
+        "AGENTS.md": 7,
+        "CLAUDE.md": 1
+      }
+    }
+  ]
+}
