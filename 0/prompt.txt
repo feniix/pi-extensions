@@ -1,0 +1,9 @@
+create a pr
+
+---
+
+do we bump the patch version on each extension to try the release with pnpm?
+
+---
+
+lets do it
