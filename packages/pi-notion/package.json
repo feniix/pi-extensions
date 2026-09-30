@@ -15,6 +15,7 @@
   "files": [
     "extensions/",
     "skills/",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],

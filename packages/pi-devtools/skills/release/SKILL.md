@@ -10,7 +10,10 @@ Automates release: analyze commits, bump version, generate changelog, commit, pu
 
 ## Tool Restrictions (Critical)
 
-Use ONLY these tools:
+Use these tools:
+- `read` - Inspect the target package manifest and changelog
+- `apply_patch` - Maintain the target package's CHANGELOG.md
+- `bash` - Run repository changelog validation and workspace lockfile reconciliation when applicable
 - `devtools_get_repo_info` - Verify the active worktree branch and status
 - `devtools_check_ci` - Check CI status on the default branch
 - `devtools_get_latest_tag` - Get current version
@@ -46,8 +49,9 @@ Present to user:
 ### Step 2: Bump Version
 
 After user confirms:
-1. Call `devtools_bump_version` with new version
-2. Show the change to user
+1. Identify the target package's manifest; in a workspace, select exactly one child package rather than the private root. Ask the user if the target is ambiguous.
+2. Call `devtools_bump_version` with new version and the target manifest's relative `file` path. In this pnpm workspace, reconcile with `pnpm install --lockfile-only` and verify `pnpm install --frozen-lockfile`.
+3. Show the change to user
 
 ### Step 3: Generate Changelog
 
@@ -56,11 +60,17 @@ Create changelog from commit analysis:
 - Capitalize first letter
 - Keep concise
 
-Present for user review and approval.
+Write the notes to `CHANGELOG.md` beside the target manifest before committing:
+- Create the file if absent.
+- Move pending notes from `## [Unreleased]` into `## [X.Y.Z] - YYYY-MM-DD`, using the intended release date; preserve all historical entries.
+- Include at least one substantive bullet describing the release.
+- In this repository, run `node scripts/check-release-changelog.mjs <package-directory>` and require success.
+
+Present the file entry for user review and approval. Use those same notes as the GitHub release body.
 
 ### Step 4: Commit and Push
 
-1. Commit with message: `chore: bump version to vX.Y.Z`
+1. Commit the manifest, package changelog, and any reconciled lockfile together with message: `chore: bump version to vX.Y.Z`
 2. Call `devtools_push`
 
 ### Step 5: Create Release
@@ -118,4 +128,5 @@ User: Cut a new release
 
 - Tags are created via `gh release create` (not `git tag`)
 - Always create a GitHub Release with changelog
+- A GitHub release body supplements the committed package changelog; completion requires both.
 - Wait for user confirmation before each destructive/important step

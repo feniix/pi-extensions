@@ -4,13 +4,19 @@ All notable changes to `@feniix/pi-exa` are recorded in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [6.0.1] - Unreleased
+Entries before 5.0.0 are reconstructed from package-scoped Git history and npm
+publication metadata. Dates are npm publication dates (UTC); early manifest and
+publication version mismatches are called out explicitly.
+
+## [Unreleased]
+
+## [6.0.1] - 2026-09-30
 
 ### Changed
 
 - Build release artifacts with the repository's pinned pnpm toolchain during prepack. This patch is the release canary for the workspace migration; no Exa runtime behavior changes.
 
-## [6.0.0] - Unreleased
+## [6.0.0] - 2026-09-29
 
 ### Breaking changes
 
@@ -72,7 +78,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`web_answer_exa` description clarified** to state that it returns a plain string by default (a `/answer` endpoint default, not a tool behavior change) and that passing `outputSchema` switches to structured output. No runtime change.
 - **`web_research_exa` `promptSnippet`** shortened and updated to mention structured output ("Deep research; higher cost/latency. Use `outputSchema: { type: 'object' }` for structured output.") while preserving the cost/latency signal that the cross-tool routing test asserts on.
 
-## [5.0.0] - 2026-05-25
+## [5.0.0] - 2026-05-28
 
 The 5.0 line ports pi-exa onto bridgekit's portable-tool surface and ships a first-class MCP stdio server. The user-visible tool semantics are unchanged for the Pi host, but the error contract, package layout, and runtime requirements all shift.
 
@@ -121,6 +127,173 @@ The 5.0 line ports pi-exa onto bridgekit's portable-tool surface and ships a fir
 - Module-level planner facade (`recordResearchStep`, `getResearchStatus`, `getResearchSummary`, `resetResearchPlanner`). Use `createResearchPlanner()` instead.
 - Internal `defineTool()` wrapper in the Pi adapter — `pi.registerTool` now consumes the registration object directly.
 
-## [4.1.0] - earlier
+## [4.1.0] - 2026-05-25
 
-See git history for the 4.x line.
+### Added
+
+- Advanced-search schema parity with the Exa API.
+
+### Changed
+
+- Remove `resolvedSearchType` and clarify tool differentiation in the README.
+
+## [4.0.1] - 2026-05-15
+
+### Changed
+
+- Workspace package version bump and documentation of Exa API endpoint findings.
+
+## [4.0.0] - 2026-05-11
+
+### Changed
+
+- Migrate Pi dependencies to the `@earendil-works` namespace.
+
+## [3.5.0] - 2026-05-03
+
+### Added
+
+- Stateful research planner tools (#97).
+
+### Changed
+
+- Consolidate tool execution and strengthen research skills and planner documentation.
+
+## [3.4.2] - 2026-04-27
+
+### Fixed
+
+- Remove noisy session-start auth logging that interfered with Pi's TUI and remove a stale auth import.
+
+## [3.4.1] - 2026-04-22
+
+### Changed
+
+- Migrate schemas to `typebox` for Pi 0.69 compatibility.
+
+## [3.4.0] - 2026-04-22
+
+### Changed
+
+- Version-only publication; the corresponding manifest records 3.4.0 despite the commit subject naming 3.3.2.
+
+## [3.3.2] - 2026-04-22
+
+### Fixed
+
+- Refine Exa skills.
+
+## [3.3.1] - 2026-04-22
+
+### Fixed
+
+- Refine the research planner skill.
+
+## [3.3.0] - 2026-04-22
+
+### Added
+
+- Exa research planner skill.
+
+## [3.2.0] - 2026-04-21
+
+### Fixed
+
+- Address API integration follow-up review feedback and clarify integration documentation.
+
+## [3.1.1] - 2026-04-21
+
+### Changed
+
+- Tighten cross-tool prompt routing and align personal-site-search with find-similar guidance.
+
+## [3.1.0] - 2026-04-21
+
+### Added
+
+- Surface entity properties for category searches.
+
+### Fixed
+
+- Validate category/filter combinations to prevent API 400 errors and cover tool error paths.
+
+## [3.0.0] - 2026-04-20
+
+### Added
+
+- SDK-aligned research, answer, and find-similar tools and gated live integration coverage.
+
+### Changed
+
+- Split the extension into modules, reuse Exa clients across calls, normalize research metadata, improve output formatting, and warn about secrets in settings.
+
+## [2.1.0] - 2026-04-19
+
+### Changed
+
+- Standardize settings and secret handling, rename config path flags/environment variables, drop legacy config fallbacks, and warn when legacy files are ignored.
+- Update author/license metadata.
+
+## [2.0.4] - 2026-04-19
+
+### Changed
+
+- Reduce session-start cognitive complexity (#23) and align tests/formatting with package-scoped CI.
+
+## [2.0.3] - 2026-04-17
+
+### Fixed
+
+- Correct test mocks and repository metadata.
+
+## [2.0.2] - 2026-04-16
+
+### Changed
+
+- Improve test coverage; includes the changes prepared under the unpublished 2.0.1 version.
+
+## [2.0.0] - 2026-04-15
+
+### Fixed
+
+- Harden config parsing and normalization.
+
+### Changed
+
+- Align committed package versions with published npm majors after a workspace version reset.
+
+## [1.0.5] - 2026-04-15
+
+### Added
+
+- Check authentication status at session start. npm published this as 1.0.5 although the corresponding Git manifest was prepared as 1.1.0.
+
+## [1.0.4] - 2026-04-07
+
+### Fixed
+
+- Resolve lint issues and type errors.
+
+## [1.0.3] - 2026-04-06
+
+### Changed
+
+- Expand unit and integration test coverage.
+
+## [1.0.2] - 2026-04-06
+
+### Fixed
+
+- Match skill names to directory names and update workspace packaging.
+
+## [1.0.1] - 2026-04-06
+
+### Added
+
+- Declare the skills manifest in package metadata.
+
+## [1.0.0] - 2026-04-06
+
+### Added
+
+- Initial native TypeScript Exa search extension.

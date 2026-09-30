@@ -104,6 +104,14 @@ CLI wrapper also retains its upstream npm-based missing-build fallback. Public
 `pi install npm:...` selectors are unchanged. Release dry-run skips publishing
 but does not validate packed artifacts or publication authorization.
 
+Every package release requires a `CHANGELOG.md` entry headed
+`## [X.Y.Z] - YYYY-MM-DD` matching its manifest version, with nonempty release
+notes. Keep pending changes under `## [Unreleased]`, then move them to a dated
+version entry in the same commit as the version bump. The release workflow
+validates this during checks (including dry runs) and again before npm publication.
+To validate locally: `node scripts/check-release-changelog.mjs packages/pi-exa`
+(or pass multiple maintained package directories).
+
 To load one package directly from a checkout:
 
 ```bash

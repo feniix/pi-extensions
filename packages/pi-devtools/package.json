@@ -19,6 +19,7 @@
     "extensions/",
     "skills/",
     "prompts/",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],

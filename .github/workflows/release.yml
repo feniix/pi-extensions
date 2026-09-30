@@ -188,6 +188,9 @@ jobs:
       - name: Typecheck
         run: pnpm exec tsc --noEmit --project "${{ matrix.package }}/tsconfig.json"
 
+      - name: Validate release changelog
+        run: node scripts/check-release-changelog.mjs "${{ matrix.package }}"
+
       - name: Ensure new version is not already published
         shell: bash
         run: |
@@ -240,6 +243,7 @@ jobs:
           set -euo pipefail
 
           for pkg in $(echo '${{ needs.checks.outputs.matrix }}' | jq -r '.[]'); do
+            node scripts/check-release-changelog.mjs "$pkg"
             echo "Publishing $pkg"
             (cd "$pkg" && npm publish --access public --provenance)
           done
