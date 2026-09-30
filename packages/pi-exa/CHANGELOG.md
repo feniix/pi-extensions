@@ -4,6 +4,12 @@ All notable changes to `@feniix/pi-exa` are recorded in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.1] - Unreleased
+
+### Changed
+
+- Build release artifacts with the repository's pinned pnpm toolchain during prepack. This patch is the release canary for the workspace migration; no Exa runtime behavior changes.
+
 ## [6.0.0] - Unreleased
 
 ### Breaking changes
