@@ -101,3 +101,10 @@ Both tools support optional `piMaxBytes` and `piMaxLines` integer parameters to 
 - Do not commit API keys. Use environment variables or the config file locations documented in each package README (e.g., under `~/.pi/agent/extensions/`).
 - If you change defaults or CLI flags, update the package README accordingly.
 - Tool schemas: avoid `Type.Unknown()` in tool parameters. It serializes to `{}`, which some inference backends reject as invalid JSON Schema. Prefer `Type.Object({}, { additionalProperties: true })`.
+
+<!-- entire-graph:begin -->
+This repo has the entire-graph code graph installed. Before exploring code with
+grep/find/whole-file reads, read .entire/graph-agent.md — resolution-first guidance
+for using graph retrieval, focused source inspection, and verification.
+@.entire/graph-agent.md
+<!-- entire-graph:end -->
