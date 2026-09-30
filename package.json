@@ -2,21 +2,22 @@
   "name": "pi-packages",
   "version": "2.2.1",
   "private": true,
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "description": "Extensions for pi, the AI coding agent",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "check": "npm run lint && npm run typecheck",
+    "check": "pnpm run lint && pnpm run typecheck",
     "check:ci": "biome ci . && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "audit:workspaces": "./scripts/audit-workspaces.sh",
     "ci:detect": "./scripts/detect-ci-packages.sh"
   },
-  "workspaces": [
-    "packages/*"
-  ],
   "keywords": [
     "pi",
     "pi-package",
@@ -47,10 +48,6 @@
     "vitest": "^4.0.18"
   },
   "license": "MIT",
-  "overrides": {
-    "fast-xml-parser": "^5.7.0",
-    "uuid": "^14.0.0"
-  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0"
   }

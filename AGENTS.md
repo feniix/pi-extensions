@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- This repo is an npm workspace with independent packages in `packages/*`.
+- This repo is a pnpm workspace with independent packages in `packages/*`; use the exact root `packageManager` pin.
 - Each package follows a consistent layout:
   - `extensions/index.ts` for the pi extension entry point.
   - `__tests__/` for Vitest tests (e.g., `index.test.ts`, `helpers.test.ts`).
@@ -12,26 +12,29 @@
 
 ## Build, Test, and Development Commands
 Run these from the repo root unless noted:
-- `npm run lint` — Biome lint/format checks.
-- `npm run lint:fix` — auto-fixable Biome issues.
-- `npm run typecheck` — TypeScript type checking only.
-- `npm run test` — Vitest test suite.
-- `npm run test:coverage` — Vitest coverage run with repo-wide thresholds.
-- `npm run check` — lint + typecheck.
-- `npm run check:ci` — CI-friendly Biome + typecheck.
-- `npm run ci:detect -- <base> <head>` — show which packages the CI workflow will check for a given diff.
+- `pnpm install --frozen-lockfile` — install the committed dependency graph.
+- `pnpm run lint` — Biome lint/format checks.
+- `pnpm run lint:fix` — auto-fixable Biome issues.
+- `pnpm run typecheck` — TypeScript type checking only.
+- `pnpm run test` — Vitest test suite.
+- `pnpm run test:coverage` — Vitest coverage run with repo-wide thresholds.
+- `pnpm run check` — lint + typecheck.
+- `pnpm run check:ci` — CI-friendly Biome + typecheck.
+- `pnpm run ci:detect <base> <head>` — show which packages the CI workflow will check for a given diff.
+- `pnpm run audit:workspaces` — audit the shared lockfile, including root dependencies; preserve failures.
+- When changing dependencies, run `pnpm install` and review the lock and version-scoped build approvals in `pnpm-workspace.yaml`. Tool execution fails on stale dependencies rather than silently reinstalling.
 
 Local package testing:
 - `cd packages/<package-name>`
 - `pi -e .` — run the package in pi without installing.
-- `npx biome ci packages/<package-name>` — lint a single package.
-- `npx tsc --noEmit --project packages/<package-name>/tsconfig.json` — typecheck a single package using the shared root TS config via the package wrapper tsconfig.
-- `npx vitest run packages/<package-name>/__tests__` — run tests for a single package.
+- From the repo root: `pnpm exec biome ci packages/<package-name>` — lint a single package.
+- From the repo root: `pnpm exec tsc --noEmit --project packages/<package-name>/tsconfig.json` — typecheck a single package using the shared root TS config via the package wrapper tsconfig.
+- From the repo root: `pnpm exec vitest run packages/<package-name>/__tests__` — run tests for a single package.
 
 Workspace version bumps:
-- Use npm workspace versioning from the repo root: `npm version [<newversion> | major | minor | patch | premajor | preminor | prepatch | prerelease | from-git]`
-- Prefer targeting a single package with `--workspace` / `-w`, for example: `npm version --workspace packages/pi-devtools minor`
-- `-w, --workspace` runs the command in the context of the configured workspace(s).
+- Target exactly one child from the root: `pnpm --filter @feniix/pi-devtools --fail-if-no-match -r version minor --no-git-tag-version`.
+- Reconcile with `pnpm install --lockfile-only`, then verify `pnpm install --frozen-lockfile`; review the child manifest, unchanged sibling versions, and lock diff.
+- Keep npm registry lookup/publication and public `pi install npm:` selectors. See README for bootstrap and release validation limits.
 
 ## Coding Style & Naming Conventions
 - Language: TypeScript.
@@ -45,7 +48,7 @@ Workspace version bumps:
 - Keep unit tests focused on extension behavior and helpers; prefer fast, isolated tests.
 - CI uses a single GitHub Actions workflow at `.github/workflows/ci.yml` that detects changed packages and runs package-scoped lint, typecheck, test, and coverage summary jobs.
 - Package-scoped CI coverage is enforced per extension with the same thresholds for every package: lines 70, statements 70, functions 70, branches 60.
-- Changes to shared files such as `package.json`, `package-lock.json`, `tsconfig.json`, `vitest.config.ts`, `biome.json`, or `.github/workflows/**` should be treated as affecting all packages.
+- Changes to shared files such as `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.npmrc`, `scripts/**`, `tsconfig.json`, `vitest.config.ts`, `biome.json`, or `.github/workflows/**` should be treated as affecting all packages.
 - Each package must keep its `tsconfig.json` aligned by extending the shared root `tsconfig.json`; do not introduce divergent compiler options in individual package configs unless the repo-wide config is intentionally updated.
 - Coverage thresholds are enforced in `vitest.config.ts` at: lines 70, statements 70, functions 70, branches 60.
 - Follow **test-first development**: write or update the failing test first, then implement the minimal code needed to make it pass.
@@ -54,7 +57,7 @@ Workspace version bumps:
 - Commit messages follow Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`.
 - PRs should include:
   - A short summary and the affected package(s).
-  - Tests run (e.g., `npm run test`, `npm run check`).
+  - Tests run (e.g., `pnpm run test`, `pnpm run check`).
   - Linked issues or context for behavior changes.
   - Notes on any new configuration or environment variables.
 

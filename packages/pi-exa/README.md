@@ -223,7 +223,7 @@ These tests are:
 Run them locally with a real API key:
 
 ```bash
-PI_EXA_LIVE=1 EXA_API_KEY=your-key npx vitest run packages/pi-exa/__tests__/integration.test.ts
+PI_EXA_LIVE=1 EXA_API_KEY=your-key pnpm exec vitest run packages/pi-exa/__tests__/integration.test.ts
 ```
 
 The live suite incurs real Exa usage and is never enabled in CI.

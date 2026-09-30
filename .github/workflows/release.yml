@@ -169,20 +169,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: npm
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: npm run lint -- "${{ matrix.package }}"
+        run: pnpm exec biome ci "${{ matrix.package }}"
 
       - name: Typecheck
-        run: npx tsc --noEmit --project "${{ matrix.package }}/tsconfig.json"
+        run: pnpm exec tsc --noEmit --project "${{ matrix.package }}/tsconfig.json"
 
       - name: Ensure new version is not already published
         shell: bash
@@ -198,7 +202,7 @@ jobs:
           fi
 
       - name: Test
-        run: npm run test -- "${{ matrix.package }}"
+        run: pnpm exec vitest run "${{ matrix.package }}/__tests__"
 
   checks_skipped:
     needs: detect
@@ -218,14 +222,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org/
+          package-manager-cache: false
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Publish changed packages
         run: |
@@ -244,4 +252,3 @@ jobs:
       - name: Explain skip
         run: |
           echo "::notice::Publish skipped because dry_run=true"
-
