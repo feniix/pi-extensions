@@ -1,5 +1,5 @@
-now that pi is 1.x stable, are there improvements we can make to @packages/pi-statusline/ ?
+create a detailed gh issue and address all of the items
 
 ---
 
-create a detailed gh issue and address all of the items
+make discrete incremental commits, create a pr, and this will be release 1.0.0 of statusline
