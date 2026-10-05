@@ -1,0 +1,5 @@
+create a detailed gh issue and address all of the items
+
+---
+
+make discrete incremental commits, create a pr, and this will be release 1.0.0 of statusline
