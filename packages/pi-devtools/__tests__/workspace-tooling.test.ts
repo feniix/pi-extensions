@@ -55,6 +55,7 @@ describe("workspace CI detection", () => {
     "package-lock.json",
     "biome.json",
     "vitest.config.ts",
+    "vitest.terminal.config.ts",
     ".github/workflows/ci.yml",
   ])("checks all packages when %s changes", (file) => {
     const cwd = fixture();

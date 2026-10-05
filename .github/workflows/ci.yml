@@ -92,6 +92,19 @@ jobs:
           coverage/${{ matrix.package }}/coverage-summary.json
           ${{ matrix.package }}
 
+      - name: Terminal smoke tests
+        if: matrix.package == 'pi-statusline'
+        timeout-minutes: 3
+        run: pnpm run test:terminal
+
+      - name: Upload terminal failure artifacts
+        if: failure() && matrix.package == 'pi-statusline'
+        uses: actions/upload-artifact@v7
+        with:
+          name: terminal-failure-${{ matrix.package }}
+          path: coverage/terminal/
+          if-no-files-found: ignore
+
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
         with:

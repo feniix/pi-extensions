@@ -20,7 +20,7 @@ fi
 printf 'Changed files:\n'
 printf '%s\n' "$FILES"
 
-if echo "$FILES" | grep -Eq '^((package\.json|package-lock\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|tsconfig\.json|vitest\.config\.ts|biome\.json)$|\.github/workflows/|scripts/)'; then
+if echo "$FILES" | grep -Eq '^((package\.json|package-lock\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|\.npmrc|tsconfig\.json|vitest(\.terminal)?\.config\.ts|biome\.json)$|\.github/workflows/|scripts/)'; then
 	CHANGED="$ALL_PACKAGES"
 else
 	CHANGED=$(echo "$FILES" | grep '^packages/' | cut -d/ -f2 | sort -u || true)

@@ -23,6 +23,7 @@ publication metadata. Dates are npm publication dates (UTC).
 - Show waiting-for-user activity during extension prompts, restoring the underlying activity afterward.
 - Optional `showCost` and `showCache` settings for cumulative cost and cache-read/cache-write totals.
 - Immediate refreshes after thinking-level changes, compaction, and session-tree navigation.
+- A TypeScript real-terminal smoke suite for macOS/Linux, run in the statusline CI job with isolated offline sessions and failure artifacts; no native npm addons or additional test languages.
 
 ### Fixed
 

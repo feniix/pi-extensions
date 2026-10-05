@@ -169,6 +169,31 @@ pnpm run test
 pnpm run typecheck
 ```
 
+### Automated terminal smoke tests
+
+Run the separate TypeScript/Vitest integration suite from the repo root:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm run test:terminal
+```
+
+The suite launches the **workspace-installed pi** in real pseudo-terminals using the OS's existing `script` and `stty` utilities.
+It interprets output with the pure-JavaScript `@xterm/headless` and Unicode 11 addon; no native npm addons, downloaded native binaries, build approvals, or Python test environment are needed.
+Supported test hosts are **macOS and Linux**, with Node, Git, `script`, `stty`, and a POSIX shell on PATH.
+
+Tests cover fullscreen/regular modes with dark/light themes, 20–140-column resizing, Unicode/status display and removal, prompt waiting/idle transitions, thinking refreshes, and distinct native theme colors.
+Each session uses a temporary Git repo, isolated home/config, offline mode, and a fake provider that rejects model requests.
+No user credentials/settings are inherited and no real provider calls are made.
+A deliberate negative-control test verifies the request guard; another verifies timeout diagnostics.
+
+`pnpm run test` remains the fast unit suite. CI additionally runs `test:terminal` in the statusline package job whenever that package is selected.
+Changes to the terminal test config also trigger package validation.
+Screen snapshots and raw ANSI logs are saved under `coverage/terminal/`, and uploaded as CI artifacts on failure.
+Temporary processes/repos/configs are cleaned up after each test.
+
+The emulator checks terminal cells and colors, not actual font rendering or subjective readability; those remain visual checks.
+
 For quick manual testing from this monorepo:
 
 ```bash
