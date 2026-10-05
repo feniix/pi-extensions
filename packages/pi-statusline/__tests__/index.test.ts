@@ -45,8 +45,9 @@ describe("pi-statusline extension", () => {
       {
         cwd: "/tmp/project",
         hasUI: true,
+        mode: "tui",
         model: { id: "opus", contextWindow: 1_000_000 },
-        sessionManager: { getBranch: () => [] },
+        sessionManager: { getBranch: () => [], getLeafId: () => "leaf", getSessionId: () => "session" },
         getContextUsage: () => ({ percent: 11 }),
         ui: { setFooter: vi.fn() },
       },
@@ -89,8 +90,9 @@ describe("pi-statusline extension", () => {
       {
         cwd: "/tmp/project",
         hasUI: true,
+        mode: "tui",
         model: { id: "opus", contextWindow: 1_000_000 },
-        sessionManager: { getBranch: () => [] },
+        sessionManager: { getBranch: () => [], getLeafId: () => "leaf", getSessionId: () => "session" },
         getContextUsage: () => ({ percent: 11 }),
         ui: { setFooter },
       },

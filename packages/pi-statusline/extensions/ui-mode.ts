@@ -1,4 +1,6 @@
-export type UiAvailability = { hasUI: boolean };
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+
+export type UiAvailability = Pick<ExtensionContext, "hasUI" | "mode">;
 
 const STALE_EXTENSION_CONTEXT_MESSAGE = "This extension ctx is stale after session replacement or reload";
 
@@ -11,7 +13,7 @@ export function createUiOnlyHandler<Event, Ctx extends UiAvailability, Result>(
 ): (event: Event, ctx: Ctx) => Promise<Result | undefined> {
   return async (event, ctx) => {
     try {
-      if (!ctx.hasUI) {
+      if (!ctx.hasUI || ctx.mode !== "tui") {
         return undefined;
       }
 

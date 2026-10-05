@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stripAnsi } from "../extensions/format.js";
 import statuslineExtension, {
@@ -10,6 +11,9 @@ import statuslineExtension, {
   getDirtyLabel,
   getWorktreeLabel,
 } from "../extensions/index.js";
+
+const sessionIdentity = { getLeafId: () => "leaf", getSessionId: () => "session" };
+const testTheme = { style: (text: string) => text };
 
 function createMockPi() {
   return {
@@ -73,8 +77,8 @@ describe("pi-statusline runtime helpers", () => {
     );
 
     expect(lines).toHaveLength(2);
-    expect(stripAnsi(lines[0] ?? "").length).toBeLessThanOrEqual(30);
-    expect(stripAnsi(lines[1] ?? "").length).toBeLessThanOrEqual(30);
+    expect(visibleWidth(lines[0] ?? "")).toBeLessThanOrEqual(30);
+    expect(visibleWidth(lines[1] ?? "")).toBeLessThanOrEqual(30);
   });
 
   it("extracts and ignores skill commands", () => {
@@ -126,8 +130,9 @@ describe("pi-statusline extension runtime", () => {
       {
         cwd: "/tmp/project",
         hasUI: true,
+        mode: "tui",
         model: { id: "opus", contextWindow: 1000000 },
-        sessionManager: { getBranch: () => [] },
+        sessionManager: { ...sessionIdentity, getBranch: () => [] },
         getContextUsage: () => ({ percent: 12 }),
         ui: { setFooter },
       },
@@ -147,8 +152,9 @@ describe("pi-statusline extension runtime", () => {
     const ctx = {
       cwd: "/tmp/project",
       hasUI: true,
+      mode: "tui",
       model: { id: "opus", contextWindow: 1000000 },
-      sessionManager: { getBranch: () => [] },
+      sessionManager: { ...sessionIdentity, getBranch: () => [] },
       getContextUsage: () => ({ percent: 12 }),
       ui: { setFooter },
     };
@@ -157,14 +163,11 @@ describe("pi-statusline extension runtime", () => {
 
     const footerFactory = setFooter.mock.calls[0]?.[0];
     const requestRender = vi.fn();
-    footerFactory?.(
-      { requestRender },
-      {},
-      {
-        getGitBranch: () => "main",
-        onBranchChange: () => vi.fn(),
-      },
-    );
+    footerFactory?.({ requestRender }, testTheme, {
+      getGitBranch: () => "main",
+      getExtensionStatuses: () => new Map(),
+      onBranchChange: () => vi.fn(),
+    });
 
     await messageUpdateHandler?.(
       { message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta" } },
@@ -196,7 +199,8 @@ describe("pi-statusline extension runtime", () => {
     let stale = false;
     const ctx = {
       hasUI: true,
-      sessionManager: { getBranch: () => [] },
+      mode: "tui",
+      sessionManager: { ...sessionIdentity, getBranch: () => [] },
       getContextUsage: () => ({ percent: 12 }),
       ui: { setFooter },
       get model() {
@@ -223,14 +227,11 @@ describe("pi-statusline extension runtime", () => {
     await sessionStartHandler?.({}, ctx);
 
     const footerFactory = setFooter.mock.calls[0]?.[0];
-    const footer = footerFactory?.(
-      { requestRender: vi.fn() },
-      {},
-      {
-        getGitBranch: () => "main",
-        onBranchChange: () => vi.fn(),
-      },
-    );
+    const footer = footerFactory?.({ requestRender: vi.fn() }, testTheme, {
+      getGitBranch: () => "main",
+      getExtensionStatuses: () => new Map(),
+      onBranchChange: () => vi.fn(),
+    });
     expect(footer).toBeDefined();
 
     stale = true;
@@ -295,8 +296,9 @@ describe("pi-statusline extension runtime", () => {
       {
         cwd: "/tmp/slow",
         hasUI: true,
+        mode: "tui",
         model: { id: "opus", contextWindow: 1000000 },
-        sessionManager: { getBranch: () => [] },
+        sessionManager: { ...sessionIdentity, getBranch: () => [] },
         getContextUsage: () => ({ percent: 12 }),
         ui: { setFooter },
       },
@@ -312,8 +314,9 @@ describe("pi-statusline extension runtime", () => {
       {
         cwd: "/tmp/fast",
         hasUI: true,
+        mode: "tui",
         model: { id: "opus", contextWindow: 1000000 },
-        sessionManager: { getBranch: () => [] },
+        sessionManager: { ...sessionIdentity, getBranch: () => [] },
         getContextUsage: () => ({ percent: 12 }),
         ui: { setFooter },
       },
@@ -324,14 +327,11 @@ describe("pi-statusline extension runtime", () => {
     await slowStart;
 
     const footerFactory = setFooter.mock.calls[0]?.[0];
-    const footer = footerFactory?.(
-      { requestRender: vi.fn() },
-      {},
-      {
-        getGitBranch: () => "fast-branch",
-        onBranchChange: () => vi.fn(),
-      },
-    );
+    const footer = footerFactory?.({ requestRender: vi.fn() }, testTheme, {
+      getGitBranch: () => "fast-branch",
+      getExtensionStatuses: () => new Map(),
+      onBranchChange: () => vi.fn(),
+    });
 
     const text = stripAnsi(footer?.render(120).join("\n") ?? "");
     expect(text).toContain("fast-repo");
@@ -347,8 +347,9 @@ describe("pi-statusline extension runtime", () => {
     const ctx = {
       cwd: "/tmp/project",
       hasUI: true,
+      mode: "tui",
       model: { id: "opus", contextWindow: 1000000 },
-      sessionManager: { getBranch: () => [] },
+      sessionManager: { ...sessionIdentity, getBranch: () => [] },
       getContextUsage: () => ({ percent: 12 }),
       ui: { setFooter },
     };
@@ -400,8 +401,9 @@ describe("pi-statusline extension runtime", () => {
     const ctx = {
       cwd: "/tmp/project",
       hasUI: true,
+      mode: "tui",
       model: { id: "opus", contextWindow: 1000000 },
-      sessionManager: { getBranch: () => [] },
+      sessionManager: { ...sessionIdentity, getBranch: () => [] },
       getContextUsage: () => ({ percent: 12 }),
       ui: { setFooter },
     };
@@ -409,14 +411,11 @@ describe("pi-statusline extension runtime", () => {
     await sessionStartHandler?.({}, ctx);
     const footerFactory = setFooter.mock.calls[0]?.[0];
     const requestRender = vi.fn();
-    footerFactory?.(
-      { requestRender },
-      {},
-      {
-        getGitBranch: () => "main",
-        onBranchChange: () => vi.fn(),
-      },
-    );
+    footerFactory?.({ requestRender }, testTheme, {
+      getGitBranch: () => "main",
+      getExtensionStatuses: () => new Map(),
+      onBranchChange: () => vi.fn(),
+    });
 
     blockNextGitRefresh = true;
     const result = agentEndHandler?.({}, ctx);
@@ -461,6 +460,7 @@ describe("pi-statusline extension runtime", () => {
 
     let stale = false;
     const ctx = {
+      mode: "tui",
       get cwd() {
         if (stale) throw new Error("This extension ctx is stale after session replacement or reload");
         return "/tmp/project";
@@ -474,6 +474,7 @@ describe("pi-statusline extension runtime", () => {
         return { id: "opus", contextWindow: 1000000 };
       },
       sessionManager: {
+        ...sessionIdentity,
         getBranch: () => {
           if (stale) throw new Error("This extension ctx is stale after session replacement or reload");
           return [];
@@ -518,8 +519,9 @@ describe("pi-statusline extension runtime", () => {
       {
         cwd: "/tmp/project",
         hasUI: true,
+        mode: "tui",
         model: { id: "opus", contextWindow: 1000000 },
-        sessionManager: { getBranch: () => [] },
+        sessionManager: { ...sessionIdentity, getBranch: () => [] },
         getContextUsage: () => ({ percent: 12 }),
         ui: { setFooter },
       },
@@ -561,8 +563,9 @@ describe("pi-statusline extension runtime", () => {
     const ctx = {
       cwd: "/tmp/project",
       hasUI: true,
+      mode: "tui",
       model: { id: "opus", contextWindow: 1000000 },
-      sessionManager: { getBranch: () => branchEntries },
+      sessionManager: { ...sessionIdentity, getBranch: () => branchEntries },
       getContextUsage: () => ({ percent: 12 }),
       ui: { setFooter: vi.fn() },
     };
@@ -585,6 +588,6 @@ describe("pi-statusline extension runtime", () => {
     const text = stripAnsi(result.content[0]?.text ?? "");
     expect(text).toContain("Skill: release");
     expect(text).toContain("Act: bash");
-    expect(text).toContain("↑125/↓49");
+    expect(text).toContain("↑135/↓54");
   });
 });

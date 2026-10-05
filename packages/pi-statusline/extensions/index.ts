@@ -1,13 +1,13 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { loadStatuslinePalette } from "./config.js";
+import { loadStatuslineSettings } from "./config.js";
+import { stripAnsi } from "./format.js";
 import { getGitSnapshot } from "./git.js";
 import { buildLines } from "./lines.js";
-import { defaultPalette } from "./palette.js";
 import { createRenderScheduler } from "./render-scheduler.js";
-import { getContextLabel, getModelLabel, getThinkingLabel, getTokenLabel } from "./session.js";
+import { createUsageTracker, formatUsageLabel, getContextLabel, getModelLabel, getThinkingLabel } from "./session.js";
 import { createInitialState, getActivityLabel } from "./state.js";
-import type { ActivityPhase, AssistantUsageLike, CommandLike, GitSnapshot } from "./types.js";
+import type { ActivityPhase, AssistantUsageLike, CommandLike, GitSnapshot, StatuslineSettings } from "./types.js";
 import { createUiOnlyHandler } from "./ui-mode.js";
 
 export { buildLines, getBranchLabel, getDirtyLabel, getWorktreeLabel } from "./lines.js";
@@ -16,7 +16,7 @@ export { createInitialGitSnapshot, createInitialState, getActivityLabel } from "
 const FOOTER_RENDER_THROTTLE_MS = 100;
 const STALE_EXTENSION_CONTEXT_MESSAGE = "This extension ctx is stale after session replacement or reload";
 
-type DynamicCtx = Pick<ExtensionContext, "model" | "sessionManager" | "getContextUsage" | "hasUI">;
+type DynamicCtx = Pick<ExtensionContext, "model" | "sessionManager" | "getContextUsage" | "hasUI" | "mode">;
 type GitCtx = Pick<ExtensionContext, "cwd" | "hasUI">;
 type SkillToolEvent = { args?: { skill?: string }; tool_input?: { skill?: string } };
 type AssistantMessageEventLike = { type?: string };
@@ -54,10 +54,13 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   let state = createInitialState();
   let footerRegistered = false;
   const footerRenderScheduler = createRenderScheduler(FOOTER_RENDER_THROTTLE_MS, isStaleExtensionContextError);
-  let currentPalette = defaultPalette;
+  let settings: StatuslineSettings = { palette: {}, showCost: false, showCache: false };
   let footerCwd = "";
   let sessionEpoch = 0;
   let statuslineToolRegistered = false;
+  let promptDepth = 0;
+  const activeTools = new Map<string, string>();
+  const usageTracker = createUsageTracker();
 
   const updateActivity = (
     phase: ActivityPhase,
@@ -69,14 +72,21 @@ export default function statuslineExtension(pi: ExtensionAPI) {
       activityPhase: phase,
       activeToolName,
       activeToolCount,
-      activityLabel: getActivityLabel(phase, activeToolName, activeToolCount),
+      activityLabel:
+        promptDepth > 0 ? "Act: waiting for user" : getActivityLabel(phase, activeToolName, activeToolCount),
     };
+  };
+
+  const updateToolActivity = () => {
+    const toolName = [...activeTools.values()].at(-1) ?? null;
+    updateActivity(activeTools.size > 0 ? "tool" : "running", toolName, activeTools.size);
   };
 
   const updateLiveUsage = (message?: AssistantMessageLike) => {
     if (message?.role !== "assistant" || !message.usage) {
       return;
     }
+    usageTracker.update(message);
 
     state = {
       ...state,
@@ -88,18 +98,22 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   };
 
   const clearLiveUsage = () => {
+    usageTracker.clear();
     state = {
       ...state,
       liveAssistantUsage: null,
     };
   };
 
-  const readDynamicState = (ctx: Pick<ExtensionContext, "model" | "sessionManager" | "getContextUsage">) => ({
-    modelLabel: getModelLabel(ctx.model),
-    thinkingLabel: getThinkingLabel(pi.getThinkingLevel()),
-    contextLabel: getContextLabel(ctx.getContextUsage(), ctx.model),
-    tokenLabel: getTokenLabel(ctx.sessionManager.getBranch(), state.liveAssistantUsage),
-  });
+  const readDynamicState = (ctx: Pick<ExtensionContext, "model" | "sessionManager" | "getContextUsage">) => {
+    const totals = usageTracker.read(ctx.sessionManager);
+    return {
+      modelLabel: getModelLabel(ctx.model),
+      thinkingLabel: getThinkingLabel(pi.getThinkingLevel()),
+      contextLabel: getContextLabel(ctx.getContextUsage(), ctx.model),
+      tokenLabel: formatUsageLabel(totals, settings),
+    };
+  };
 
   const refreshDynamicState = (ctx: Pick<ExtensionContext, "model" | "sessionManager" | "getContextUsage">) => {
     state = {
@@ -206,7 +220,9 @@ export default function statuslineExtension(pi: ExtensionAPI) {
           return unavailable();
         }
 
-        const text = buildLines(cwd, state, state.gitSnapshot.branch, undefined, currentPalette).join("\n");
+        const text = stripAnsi(
+          buildLines(cwd, state, state.gitSnapshot.branch, undefined, settings.palette).join("\n"),
+        );
         return {
           content: [{ type: "text", text }],
           details: {},
@@ -219,9 +235,14 @@ export default function statuslineExtension(pi: ExtensionAPI) {
     const epoch = ++sessionEpoch;
     const cwd = ctx.cwd;
     const hasUI = ctx.hasUI;
+    const mode = ctx.mode;
     const ui = ctx.ui;
 
     state = createInitialState();
+    settings = { palette: {}, showCost: false, showCache: false };
+    usageTracker.clear();
+    promptDepth = 0;
+    activeTools.clear();
     footerCwd = cwd;
     footerRegistered = false;
     footerRenderScheduler.clear();
@@ -230,23 +251,30 @@ export default function statuslineExtension(pi: ExtensionAPI) {
       return;
     }
 
-    refreshDynamicState(ctx);
     registerStatuslineTool();
+    if (mode !== "tui") {
+      const loadedSettings = await loadStatuslineSettings(cwd);
+      if (epoch === sessionEpoch) settings = loadedSettings;
+      return;
+    }
+    refreshDynamicState(ctx);
+    const usage = usageTracker.read(ctx.sessionManager);
 
-    const [palette, gitSnapshot] = await Promise.all([loadStatuslinePalette(cwd), getGitSnapshot(pi, cwd)]);
+    const [loadedSettings, gitSnapshot] = await Promise.all([loadStatuslineSettings(cwd), getGitSnapshot(pi, cwd)]);
     if (epoch !== sessionEpoch) {
       return;
     }
 
-    currentPalette = palette;
+    settings = loadedSettings;
     applyGitSnapshot(gitSnapshot);
+    state = { ...state, tokenLabel: formatUsageLabel(usage, settings) };
 
     if (footerRegistered) {
       return;
     }
 
     footerRegistered = true;
-    ui.setFooter((tui, _theme, footerData) => {
+    ui.setFooter((tui, theme, footerData) => {
       footerRenderScheduler.setRenderCallback(() => tui.requestRender());
       const disposeBranchChange = footerData.onBranchChange(() => {
         const branchChangeEpoch = sessionEpoch;
@@ -265,7 +293,15 @@ export default function statuslineExtension(pi: ExtensionAPI) {
         },
         invalidate() {},
         render(width: number): string[] {
-          return buildLines(footerCwd, state, footerData.getGitBranch(), width, currentPalette);
+          return buildLines(
+            footerCwd,
+            state,
+            footerData.getGitBranch(),
+            width,
+            settings.palette,
+            footerData.getExtensionStatuses(),
+            theme,
+          );
         },
       };
     });
@@ -276,7 +312,27 @@ export default function statuslineExtension(pi: ExtensionAPI) {
     footerRegistered = false;
     footerRenderScheduler.clear();
     footerCwd = "";
+    usageTracker.clear();
+    promptDepth = 0;
+    activeTools.clear();
   });
+
+  pi.on(
+    "ui_prompt_start",
+    createUiOnlyHandler(async (_event, ctx) => {
+      promptDepth += 1;
+      updateActivity(state.activityPhase);
+      refreshDynamicFooter(ctx, true);
+    }),
+  );
+  pi.on(
+    "ui_prompt_end",
+    createUiOnlyHandler(async (_event, ctx) => {
+      promptDepth = Math.max(0, promptDepth - 1);
+      updateActivity(state.activityPhase);
+      refreshDynamicFooter(ctx, true);
+    }),
+  );
 
   const handleUiInput = createUiOnlyHandler(async (event: { text: string }, ctx: DynamicCtx) => {
     clearLiveUsage();
@@ -301,6 +357,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
     "agent_start",
     createUiOnlyHandler(async (_event, ctx) => {
       clearLiveUsage();
+      activeTools.clear();
       updateActivity("running", null, 0);
       refreshDynamicFooter(ctx, true);
     }),
@@ -348,7 +405,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   pi.on(
     "message_end",
     createUiOnlyHandler(async (event, ctx) => {
-      updateLiveUsage((event as { message?: AssistantMessageLike }).message);
+      usageTracker.finish(event.message);
       updateActivity(state.activeToolCount > 0 ? "tool" : "running", state.activeToolName, state.activeToolCount);
       refreshDynamicFooter(ctx, true);
     }),
@@ -357,7 +414,8 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   pi.on(
     "tool_execution_start",
     createUiOnlyHandler(async (event, ctx) => {
-      updateActivity("tool", event.toolName, state.activeToolCount + 1);
+      activeTools.set(event.toolCallId, event.toolName);
+      updateToolActivity();
       refreshDynamicFooter(ctx, true);
 
       if (event.toolName !== "Skill" && event.toolName !== "skill") {
@@ -376,8 +434,10 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   pi.on(
     "tool_execution_update",
     createUiOnlyHandler(async (event, ctx) => {
-      const activeToolCount = state.activeToolCount > 0 ? state.activeToolCount : 1;
-      updateActivity("tool", event.toolName, activeToolCount);
+      if (!activeTools.has(event.toolCallId)) {
+        return;
+      }
+      updateToolActivity();
       refreshDynamicFooter(ctx);
     }),
   );
@@ -385,10 +445,10 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   pi.on(
     "tool_execution_end",
     createUiOnlyHandler(async (event, ctx) => {
-      const activeToolCount = Math.max(0, state.activeToolCount - 1);
-      const nextPhase = activeToolCount > 0 ? "tool" : "running";
-      const nextToolName = activeToolCount > 0 ? event.toolName : null;
-      updateActivity(nextPhase, nextToolName, activeToolCount);
+      if (!activeTools.delete(event.toolCallId)) {
+        return;
+      }
+      updateToolActivity();
       refreshDynamicFooter(ctx, true);
       await refreshGitFooter(ctx);
     }),
@@ -398,6 +458,19 @@ export default function statuslineExtension(pi: ExtensionAPI) {
     "agent_end",
     createUiOnlyHandler(async (_event, ctx) => {
       clearLiveUsage();
+      activeTools.clear();
+      updateActivity("running", null, 0);
+      if (await refreshState(ctx)) {
+        rerenderFooter(true);
+      }
+    }),
+  );
+
+  pi.on(
+    "agent_settled",
+    createUiOnlyHandler(async (_event, ctx) => {
+      clearLiveUsage();
+      activeTools.clear();
       updateActivity("idle", null, 0);
       if (await refreshState(ctx)) {
         rerenderFooter(true);
@@ -413,4 +486,17 @@ export default function statuslineExtension(pi: ExtensionAPI) {
       }
     }),
   );
+
+  pi.on(
+    "thinking_level_select",
+    createUiOnlyHandler(async (_event, ctx) => {
+      refreshDynamicFooter(ctx, true);
+    }),
+  );
+  const refreshContext = createUiOnlyHandler(async (_event: unknown, ctx: ExtensionContext) => {
+    clearLiveUsage();
+    refreshDynamicFooter(ctx, true);
+  });
+  pi.on("session_compact", refreshContext);
+  pi.on("session_tree", refreshContext);
 }
