@@ -81,11 +81,11 @@ describe("pi-ref-tools registration", () => {
     expect(mockPi2.registerTool).toHaveBeenCalledTimes(2);
   });
 
-  it("registers a session_start handler", () => {
+  it("does not register a startup banner handler", () => {
     const mockPi = createMockPi();
     refTools(mockPi as unknown as ExtensionAPI);
 
-    expect(mockPi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
+    expect(mockPi.on).not.toHaveBeenCalledWith("session_start", expect.any(Function));
   });
 
   it("can be initialized with a config flag", () => {

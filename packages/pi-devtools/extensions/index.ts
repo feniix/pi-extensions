@@ -5,7 +5,6 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getGitContext, getWorktreeContext } from "./git.js";
 import { checkCiTool, createPrTool, mergePrTool } from "./pull-request-tools.js";
 import {
   analyzeCommitsTool,
@@ -260,14 +259,6 @@ export const toolDefinitions = [
 ] as const;
 
 export default function devtoolsExtension(pi: ExtensionAPI) {
-  pi.on("session_start", async (_event, ctx) => {
-    const context = getGitContext(ctx.cwd);
-    if (context) {
-      const worktree = getWorktreeContext(ctx.cwd);
-      console.log(`${context} | Worktree: ${worktree.worktreeRoot} | Linked: ${worktree.isLinkedWorktree}`);
-    }
-  });
-
   for (const tool of toolDefinitions) {
     pi.registerTool(tool);
   }

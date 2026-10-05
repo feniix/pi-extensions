@@ -2,6 +2,8 @@
 
 [Ref.tools](https://ref.tools/) MCP extension for [pi](https://pi.dev/) — token-efficient documentation search and URL reading via Ref's Model Context Protocol.
 
+Startup is silent in both regular and fullscreen modes. The MCP connection initializes lazily on the first tool call.
+
 ## Features
 
 - **Documentation Search** (`ref_search_documentation`): Search indexed technical documentation for APIs, libraries, and frameworks

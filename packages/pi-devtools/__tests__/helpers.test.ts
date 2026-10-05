@@ -313,12 +313,12 @@ describe("pi-devtools extension", () => {
       expect(mockPi2.registerTool).toHaveBeenCalledTimes(12);
     });
 
-    it("registers session_start handler", () => {
+    it("does not register a startup banner handler", () => {
       const mockPi = createMockPi();
       devtoolsExtension(mockPi as unknown as ExtensionAPI);
 
       const events = mockPi.on.mock.calls.map(([event]) => event);
-      expect(events).toContain("session_start");
+      expect(events).not.toContain("session_start");
     });
   });
 });

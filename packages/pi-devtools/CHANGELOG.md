@@ -9,8 +9,11 @@ uncertain release boundaries are noted rather than inferred.
 
 ## [Unreleased]
 
+## [3.1.3] - 2026-10-05
+
 ### Fixed
 
+- Remove direct console output during session startup to avoid corrupting Pi's fullscreen UI.
 - Require dated, nonempty package changelogs before npm publication and maintain the file in the release skill.
 
 ## [3.1.2] - 2026-09-30

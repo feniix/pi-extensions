@@ -143,7 +143,7 @@ describe("pi-devtools", () => {
       }
     });
 
-    it("uses the session event cwd for Git and worktree context", async () => {
+    it("keeps extension loading and session startup silent without probing Git", async () => {
       const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
       const pi = {
         registerTool: vi.fn(),
@@ -155,9 +155,9 @@ describe("pi-devtools", () => {
 
       await handlers.get("session_start")?.({}, { cwd: sentinelCwd });
 
-      expect(getGitContext).toHaveBeenCalledWith(sentinelCwd);
-      expect(getWorktreeContext).toHaveBeenCalledWith(sentinelCwd);
-      expect(log).toHaveBeenCalledWith(expect.stringContaining("Worktree: /repo"));
+      expect(getGitContext).not.toHaveBeenCalled();
+      expect(getWorktreeContext).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
       log.mockRestore();
     });
   });
