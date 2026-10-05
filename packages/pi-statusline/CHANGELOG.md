@@ -7,6 +7,31 @@ publication metadata. Dates are npm publication dates (UTC).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-05
+
+### Changed
+
+- Require pi 1.x; validate against pi 1.0.3 and declare the host-provided pi-tui peer.
+- Follow the active pi theme by default while preserving explicit global/project hex palette overrides and terminal color capability handling.
+- Prioritize context, activity, and other extensions' status messages when terminal space is limited.
+- Cache completed active-branch usage across streaming updates and count live/finalized usage exactly once.
+- Install the terminal footer only in TUI mode; provide plain-text status snapshots through the `statusline` tool in TUI and RPC sessions.
+
+### Added
+
+- Display other extensions' `ctx.ui.setStatus()` messages in deterministic key order within the two-line footer.
+- Show waiting-for-user activity during extension prompts, restoring the underlying activity afterward.
+- Optional `showCost` and `showCache` settings for cumulative cost and cache-read/cache-write totals.
+- Immediate refreshes after thinking-level changes, compaction, and session-tree navigation.
+
+### Fixed
+
+- Measure and truncate terminal columns correctly for ANSI text, emoji, CJK, and combining characters.
+- Report idle only after `agent_settled`, rather than prematurely at `agent_end`.
+- Track parallel and nested tools by call identity; ignore duplicate starts and unknown/duplicate completion updates.
+- Include tool-result, compaction, branch-summary, and standalone usage entries in active-branch totals without subtracting previous completed assistant usage.
+- Keep print/JSON sessions inert and preserve stale-session guards and shutdown cleanup.
+
 ## [0.5.4] - 2026-09-30
 
 ### Changed

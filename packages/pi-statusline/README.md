@@ -2,9 +2,13 @@
 
 A fixed two-line status display for pi.
 
-By default it renders in the footer in interactive/RPC mode and stays inert in non-UI modes (`-p`, JSON mode).
+Requires **pi 1.x** (tested with pi 1.0.3).
+
+It renders in the footer in interactive TUI mode, including both fullscreen and regular terminal modes.
+RPC clients cannot render custom terminal footers; in RPC mode only the explicit `statusline` tool is available.
+It stays inert in non-UI modes (`-p`, JSON mode).
 It is not injected into model context and is not sent as messages.
-In UI-capable sessions, it also exposes a `/statusline` tool for explicit retrieval.
+In TUI/RPC sessions, it exposes a model-callable `statusline` tool for explicit plain-text retrieval (not a slash command).
 
 ## Display
 
@@ -12,6 +16,11 @@ In UI-capable sessions, it also exposes a `/statusline` tool for explicit retrie
 Model: ... | Thinking: ... | Ctx: ... | ⎇ ... | dirty: +... | ↑.../↓...
 <repo> | cwd: ... | 𖠰 ... | Skill: ... | Act: ...
 ```
+
+Other extensions' status messages are appended to the second line in status-key order, preserving their ANSI styling.
+On narrow terminals, context moves to the front of the first line, and activity/status messages move to the front of the second.
+Remaining fields are truncated to the available terminal columns; the footer always uses exactly two lines.
+Emoji, wide characters, combining characters, and ANSI escape sequences are measured using pi-tui's column-aware helpers.
 
 ## Included fields
 
@@ -26,6 +35,8 @@ Model: ... | Thinking: ... | Ctx: ... | ⎇ ... | dirty: +... | ↑.../↓...
 - Git worktree label
 - Last explicitly invoked skill
 - Live activity indicator
+- Other extensions' status messages
+- Optional cost and cache-read/cache-write totals
 
 ## Live updates
 
@@ -37,6 +48,7 @@ This includes:
 - while assistant messages are streaming
 - while tools are starting, streaming updates, and finishing
 - when the agent returns control to the user
+- after thinking-level changes, compaction, or session-tree navigation
 
 To avoid excessive redraws, streaming-triggered footer renders are throttled.
 
@@ -51,6 +63,12 @@ Examples:
 - `Act: bash`
 - `Act: bash x2`
 - `Act: idle`
+- `Act: waiting for user`
+
+`agent_end` means one agent loop ended, not necessarily that pi is done: retries, compaction, or queued continuations may follow.
+The footer reports idle only after `agent_settled`.
+Blocking extension prompts temporarily show waiting-for-user activity.
+Parallel and nested tool calls are tracked by call ID; the label names the most recently started still-active tool and shows the total active-call count.
 
 ## Skill behavior
 
@@ -61,8 +79,28 @@ Examples:
 
 ## Token behavior
 
-Token totals are based on assistant usage in the session branch.
-During active streaming, the extension also uses the latest live assistant usage when available so the token display can update before the turn fully finishes.
+Token totals follow the **active session branch**, not abandoned alternative histories.
+They include assistant and tool-result usage, compaction, branch summaries, and standalone usage entries.
+Nested model usage propagated into a tool result is counted through that result, not separately through nested tool execution events.
+
+Completed usage is cached across streaming deltas. Live assistant usage is added to completed totals without replacing the previous assistant message.
+Finalized messages are retained until pi persists them, so the display does not drop or double-count usage across `message_end`.
+Compaction, navigation, finalized messages, and session lifecycle boundaries invalidate the cache.
+
+Enable optional detail in global or project settings:
+
+```json
+{
+  "pi-statusline": {
+    "showCost": true,
+    "showCache": true
+  }
+}
+```
+
+Example: `↑18.2k/↓14.2k R120.0k W5.0k $0.125`.
+Both flags default to `false`; project booleans override global booleans, and invalid values are ignored.
+Cost is the model-reported cumulative estimate, not a subscription bill.
 
 ## Worktree behavior
 
@@ -72,7 +110,10 @@ During active streaming, the extension also uses the latest live assistant usage
 
 ## Palette configuration
 
-`pi-statusline` uses a built-in `defaultPalette`, but you can override any subset of colors through pi's standard settings files.
+The footer uses **pi's active theme** by default and follows theme changes without caching colored strings.
+You can override individual foreground colors through pi's standard settings files.
+Pi converts colors to truecolor or 256-color output according to terminal capabilities.
+The exported `defaultPalette` remains the fallback for standalone formatting without a supplied pi theme.
 
 Settings locations:
 
@@ -96,7 +137,6 @@ Use the `pi-statusline` key for non-secret configuration:
 
 Supported palette keys:
 
-- `background`
 - `model`
 - `repo`
 - `thinking`
@@ -113,9 +153,12 @@ Supported palette keys:
 Behavior:
 
 - project settings override global settings
-- missing keys fall back to `defaultPalette`
+- missing keys use the active pi theme in the footer
 - invalid color values are ignored
 - colors must be 6-digit hex values like `#008787`
+- the legacy `background` key remains accepted for compatibility but does not paint the footer
+
+Settings are loaded at session start; use `/reload` after editing them.
 
 ## Development
 
