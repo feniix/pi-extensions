@@ -1,0 +1,5 @@
+now that pi is 1.x stable, are there improvements we can make to @packages/pi-statusline/ ?
+
+---
+
+create a detailed gh issue and address all of the items
