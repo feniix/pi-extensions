@@ -1,0 +1,46 @@
+{
+  "cli_version": "0.11.3",
+  "checkpoint_id": "01M46506B8BT916SXC845MP83Z",
+  "session_id": "01a10c38-cede-74e6-b646-26f29f3ec13a",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-05T13:45:38.716254Z",
+  "branch": "feat/147-statusline-1x",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "packages/pi-statusline/__tests__/index.runtime.test.ts",
+    "packages/pi-statusline/__tests__/index.test.ts",
+    "packages/pi-statusline/__tests__/pi1.runtime.test.ts",
+    "packages/pi-statusline/__tests__/ui-mode.test.ts",
+    "packages/pi-statusline/extensions/index.ts",
+    "packages/pi-statusline/extensions/lines.ts",
+    "packages/pi-statusline/extensions/ui-mode.ts"
+  ],
+  "agent": "Pi",
+  "model": "gpt-6.1-sol",
+  "turn_id": "4092a69cee07",
+  "checkpoint_transcript_start": 243,
+  "transcript_lines_at_start": 243,
+  "compact_transcript_start": 106,
+  "token_usage": {
+    "input_tokens": 3336,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 524160,
+    "output_tokens": 2219,
+    "api_call_count": 4
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-05T13:45:38.686591Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 0,
+    "total_lines_changed": 0,
+    "agent_percentage": 0,
+    "metric_version": 2
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.11.3",
+  "checkpoint_id": "01M46506B8BT916SXC845MP83Z",
+  "strategy": "manual-commit",
+  "branch": "feat/147-statusline-1x",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "packages/pi-statusline/__tests__/index.runtime.test.ts",
+    "packages/pi-statusline/__tests__/index.test.ts",
+    "packages/pi-statusline/__tests__/pi1.runtime.test.ts",
+    "packages/pi-statusline/__tests__/ui-mode.test.ts",
+    "packages/pi-statusline/extensions/index.ts",
+    "packages/pi-statusline/extensions/lines.ts",
+    "packages/pi-statusline/extensions/ui-mode.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 3336,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 524160,
+    "output_tokens": 2219,
+    "api_call_count": 4
+  }
+}
