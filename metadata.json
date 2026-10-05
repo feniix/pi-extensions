@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.11.3",
+  "checkpoint_id": "01M4637PG2AN3TFFFCCK7KGNTB",
+  "strategy": "manual-commit",
+  "branch": "bugfix/silent-extension-startup",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "packages/pi-devtools/CHANGELOG.md",
+    "packages/pi-devtools/package.json",
+    "packages/pi-ref-tools/CHANGELOG.md",
+    "packages/pi-ref-tools/package.json"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 3692,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 386560,
+    "output_tokens": 694,
+    "api_call_count": 6
+  }
+}
