@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.11.3",
+  "checkpoint_id": "01M4655S978PATBM3GNGRN3WRE",
+  "strategy": "manual-commit",
+  "branch": "feat/147-statusline-1x",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "packages/pi-statusline/CHANGELOG.md",
+    "packages/pi-statusline/README.md",
+    "packages/pi-statusline/package.json",
+    "pnpm-lock.yaml"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 23112,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1121280,
+    "output_tokens": 3793,
+    "api_call_count": 8
+  }
+}
