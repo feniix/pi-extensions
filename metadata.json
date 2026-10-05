@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.11.3",
+  "checkpoint_id": "01M46TZ4G1Z400Z9XEDF755TQ4",
+  "strategy": "manual-commit",
+  "branch": "feat/147-statusline-1x",
+  "checkpoints_count": 9,
+  "files_touched": [
+    ".github/workflows/ci.yml",
+    "packages/pi-devtools/__tests__/workspace-tooling.test.ts",
+    "packages/pi-statusline/CHANGELOG.md",
+    "packages/pi-statusline/README.md",
+    "scripts/detect-ci-packages.sh"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 305,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 63616,
+    "output_tokens": 75,
+    "api_call_count": 1
+  }
+}
