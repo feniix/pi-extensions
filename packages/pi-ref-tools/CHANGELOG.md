@@ -9,6 +9,12 @@ are noted rather than inferred.
 
 ## [Unreleased]
 
+## [3.0.4] - 2026-10-05
+
+### Fixed
+
+- Remove the startup connection banner to avoid writing outside Pi's fullscreen renderer; MCP initialization remains lazy.
+
 ## [3.0.3] - 2026-09-30
 
 ### Changed
