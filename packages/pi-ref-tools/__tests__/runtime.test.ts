@@ -42,21 +42,19 @@ describe("pi-ref-tools runtime", () => {
     else process.env.REF_MCP_URL = originalUrl;
   });
 
-  it("logs connected session status from config", async () => {
+  it("keeps extension loading and session startup silent with configured credentials", async () => {
     const base = mkdtempSync(join(tmpdir(), "pi-ref-runtime-"));
     const configPath = join(base, "ref-tools.json");
     writeFileSync(configPath, JSON.stringify({ url: "https://docs.example.test/mcp", apiKey: "config-key" }), "utf-8");
 
     const mockPi = createMockPi({ "--ref-mcp-config-file": configPath });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     refTools(mockPi as unknown as ExtensionAPI);
 
     const sessionStart = getEventHandler(mockPi, "session_start");
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await sessionStart?.();
 
-    expect(logSpy).toHaveBeenCalledWith(
-      "[ref-tools] Connected to https://docs.example.test/mcp (API key: config file)",
-    );
+    expect(logSpy).not.toHaveBeenCalled();
   });
 
   it("executes ref_search_documentation successfully", async () => {

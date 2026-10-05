@@ -6,7 +6,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { formatSessionStartMessage, resolveRuntimeSettings } from "./config.js";
+import { resolveRuntimeSettings } from "./config.js";
 import { DEFAULT_CONFIG_FILE } from "./constants.js";
 import { RefMcpClient } from "./mcp-client.js";
 import { registerRefFlags, registerRefTools } from "./tool-registration.js";
@@ -35,10 +35,6 @@ export { extractMatchingSseResponse, extractSseData, parseMatchingSseMessage } f
 export { DEFAULT_CONFIG_FILE };
 
 export default function refTools(pi: ExtensionAPI) {
-  pi.on("session_start", async () => {
-    console.log(formatSessionStartMessage(resolveRuntimeSettings(pi)));
-  });
-
   registerRefFlags(pi);
 
   const getRuntimeSettings = () => resolveRuntimeSettings(pi);
