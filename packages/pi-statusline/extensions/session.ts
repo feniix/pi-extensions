@@ -1,34 +1,115 @@
 import { formatCompactNumber, formatModelLabel, formatTokenPair } from "./format.js";
-import type { AssistantUsageLike, ContextUsageLike, MinimalModel, SessionEntryLike, TokenTotals } from "./types.js";
+import type {
+  AssistantUsageLike,
+  ContextUsageLike,
+  MinimalModel,
+  SessionEntryLike,
+  TokenTotals,
+  UsageTotals,
+} from "./types.js";
+
+function addUsage(totals: UsageTotals, usage?: AssistantUsageLike) {
+  totals.input += usage?.input ?? 0;
+  totals.output += usage?.output ?? 0;
+  totals.cacheRead += usage?.cacheRead ?? 0;
+  totals.cacheWrite += usage?.cacheWrite ?? 0;
+  totals.cost += usage?.cost?.total ?? 0;
+}
+
+export function getUsageTotals(entries: ReadonlyArray<SessionEntryLike>): UsageTotals {
+  const totals: UsageTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+  for (const entry of entries) {
+    if (entry.type === "message" && (entry.message?.role === "assistant" || entry.message?.role === "toolResult")) {
+      addUsage(totals, entry.message.usage);
+    } else if (entry.type === "usage" || entry.type === "compaction" || entry.type === "branch_summary") {
+      addUsage(totals, entry.usage);
+    }
+  }
+  return totals;
+}
+
+export function formatUsageLabel(
+  totals: UsageTotals,
+  options: { showCost?: boolean; showCache?: boolean } = {},
+): string {
+  const parts = [formatTokenPair(totals.input, totals.output)];
+  if (options.showCache) {
+    parts.push(`R${formatCompactNumber(totals.cacheRead)}`, `W${formatCompactNumber(totals.cacheWrite)}`);
+  }
+  if (options.showCost) parts.push(`$${totals.cost.toFixed(3)}`);
+  return parts.join(" ");
+}
+
+type UsageMessage = NonNullable<SessionEntryLike["message"]>;
+type UsageManager = {
+  getBranch(): ReadonlyArray<SessionEntryLike>;
+  getLeafId(): string | null;
+  getSessionId(): string;
+};
+
+/** Cache branch accounting; message_end fires before persistence, so retain uncommitted results. */
+export function createUsageTracker() {
+  let cachedManager: UsageManager | undefined;
+  let cachedSession: string | undefined;
+  let cachedLeaf: string | null | undefined;
+  let totals = getUsageTotals([]);
+  let persistedMessages = new Set<UsageMessage>();
+  let live: UsageMessage | undefined;
+  const pending = new Map<UsageMessage, AssistantUsageLike>();
+  const invalidate = () => {
+    cachedManager = undefined;
+  };
+  return {
+    invalidate,
+    clear() {
+      invalidate();
+      pending.clear();
+      live = undefined;
+    },
+    update(message: UsageMessage) {
+      if (message.role === "assistant") live = message;
+    },
+    finish(message: UsageMessage) {
+      if ((message.role === "assistant" || message.role === "toolResult") && message.usage) {
+        pending.set(message, message.usage);
+      }
+      if (message.role === "assistant") live = undefined;
+      invalidate();
+    },
+    read(manager: UsageManager): UsageTotals {
+      const sessionId = manager.getSessionId();
+      const leafId = manager.getLeafId();
+      if (cachedManager !== manager || cachedSession !== sessionId || cachedLeaf !== leafId) {
+        const entries = manager.getBranch();
+        totals = getUsageTotals(entries);
+        persistedMessages = new Set(entries.flatMap((entry) => (entry.message ? [entry.message] : [])));
+        for (const message of pending.keys()) {
+          if (persistedMessages.has(message)) pending.delete(message);
+        }
+        cachedManager = manager;
+        cachedSession = sessionId;
+        cachedLeaf = leafId;
+      }
+      const result = { ...totals };
+      for (const usage of pending.values()) addUsage(result, usage);
+      if (live && !persistedMessages.has(live)) addUsage(result, live.usage);
+      return result;
+    },
+  };
+}
 
 export function getTokenTotals(
   entries: ReadonlyArray<SessionEntryLike>,
   liveAssistantUsage?: AssistantUsageLike | null,
 ): TokenTotals {
-  let input = 0;
-  let output = 0;
-
-  for (const entry of entries) {
-    if (entry.type !== "message" || entry.message?.role !== "assistant") {
-      continue;
-    }
-
-    input += entry.message.usage?.input ?? 0;
-    output += entry.message.usage?.output ?? 0;
-  }
+  let { input, output } = getUsageTotals(entries);
 
   if (!liveAssistantUsage) {
     return { input, output };
   }
 
-  const lastEntry = entries.at(-1);
   const liveInput = liveAssistantUsage.input ?? 0;
   const liveOutput = liveAssistantUsage.output ?? 0;
-
-  if (lastEntry?.type === "message" && lastEntry.message?.role === "assistant") {
-    input -= lastEntry.message.usage?.input ?? 0;
-    output -= lastEntry.message.usage?.output ?? 0;
-  }
 
   input += liveInput;
   output += liveOutput;
