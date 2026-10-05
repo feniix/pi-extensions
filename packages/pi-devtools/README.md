@@ -2,6 +2,8 @@
 
 Devtools extension for [pi](https://pi.dev/) — branch and PR workflow, release automation, and merge commands.
 
+Startup is silent in both regular and fullscreen modes. Use `devtools_get_repo_info` for repository and worktree details.
+
 ## Features
 
 - **Git Workflow Tools**: Create branches, commit, push, create PRs
