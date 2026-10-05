@@ -1,0 +1,24 @@
+when pi starts it is doing this:
+
+[devtools] Branch: main | Status: clean | Tag: v2.2.0 (281 unreleased commits) | Worktree: /Users/feniix/src/personal/pi/pi-extensions | Linked: false
+[ref-tools] Connected to https://api.ref.tools/mcp (API key: REF_API_KEY env var)────────────────────────────────────────────────────────────────────────────
+Model: GPT-6.1 Sol (272.0k context) | Thinking: medium | Ctx: 0.0% | ⎇ main | dirty: +0 | ↑0/↓0
+pi-extensions | cwd: /Users/feniix/src/personal/pi/pi-extensions | 𖠰 main | Skill: none | Act: idle
+
+
+instead of just 
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Model: GPT-6.1 Sol (272.0k context) | Thinking: medium | Ctx: 14.3% | ⎇ main | dirty: +0 | ↑59.2k/↓1.9k
+website | cwd: /Users/feniix/src/personal/website | 𖠰 main | Skill: none | Act: idle
+
+---
+
+pi --tui-mode regular fixes it, can you set that setting globally?
+
+---
+
+either way I want to fix the root cause
+
+---
+
+make discrete commits in a pr and bump the patch versions of the extensions
