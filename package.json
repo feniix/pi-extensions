@@ -14,6 +14,7 @@
     "check": "pnpm run lint && pnpm run typecheck",
     "check:ci": "biome ci . && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:terminal": "vitest run --config vitest.terminal.config.ts",
     "test:coverage": "vitest run --coverage",
     "audit:workspaces": "./scripts/audit-workspaces.sh",
     "ci:detect": "./scripts/detect-ci-packages.sh"
@@ -43,6 +44,8 @@
     "@earendil-works/pi-tui": "^1.0.3",
     "@types/node": "^22.19.17",
     "@vitest/coverage-v8": "^4.1.2",
+    "@xterm/addon-unicode11": "0.9.0",
+    "@xterm/headless": "6.0.0",
     "typebox": "^1.0.0",
     "typescript": "^5.5.0",
     "vitest": "^4.0.18"

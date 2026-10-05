@@ -15,6 +15,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["packages/*/__tests__/**/*.test.ts"],
+    exclude: ["**/node_modules/**", "**/*.terminal.test.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text-summary", "json-summary", "html"],
