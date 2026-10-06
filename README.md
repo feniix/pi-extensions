@@ -54,7 +54,7 @@ Replace `pi-devtools` with any package name from the table above.
 
 ## Develop
 
-This repository is a pnpm workspace. It requires Node.js 22.19.0 or newer
+This repository is a pnpm workspace. It requires Node.js 22.23.0 or newer
 and pnpm 12.8.1 (pinned in `package.json`).
 
 Provision the pinned package manager separately from repository dependencies:
