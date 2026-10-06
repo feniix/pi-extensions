@@ -7,6 +7,7 @@ import {
   getStatuslineConfigPaths,
   isValidHexColor,
   loadStatuslinePalette,
+  loadStatuslineSettings,
   resolvePalette,
   sanitizePaletteInput,
 } from "../extensions/config.js";
@@ -25,6 +26,34 @@ afterEach(async () => {
 });
 
 describe("pi-statusline config helpers", () => {
+  it("loads explicit theme overrides and validates optional usage display flags", async () => {
+    const homeDir = await createTempDir();
+    const cwd = await createTempDir();
+    await mkdir(join(homeDir, ".pi", "agent"), { recursive: true });
+    await mkdir(join(cwd, ".pi"), { recursive: true });
+    await writeFile(
+      join(homeDir, ".pi", "agent", "settings.json"),
+      JSON.stringify({
+        "pi-statusline": { palette: { model: "#111111" }, showCost: true, showCache: true },
+      }),
+    );
+    await writeFile(
+      join(cwd, ".pi", "settings.json"),
+      JSON.stringify({
+        "pi-statusline": { palette: { model: "#222222", repo: "bad" }, showCost: false, showCache: "bad" },
+      }),
+    );
+    expect(await loadStatuslineSettings(cwd, homeDir)).toEqual({
+      palette: { model: "#222222" },
+      showCost: false,
+      showCache: true,
+    });
+    expect(await loadStatuslineSettings(await createTempDir(), await createTempDir())).toEqual({
+      palette: {},
+      showCost: false,
+      showCache: false,
+    });
+  });
   it("validates hex colors", () => {
     expect(isValidHexColor("#008787")).toBe(true);
     expect(isValidHexColor("#abc")).toBe(false);

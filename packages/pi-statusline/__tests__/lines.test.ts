@@ -4,6 +4,22 @@ import { buildLines, getBranchLabel, getDirtyLabel, getWorktreeLabel } from "../
 import { createInitialState } from "../extensions/state.js";
 
 describe("statusline line helpers", () => {
+  it("normalizes status whitespace without stripping ANSI styles or retaining blank statuses", () => {
+    const lines = buildLines(
+      "/tmp/project",
+      createInitialState(),
+      "main",
+      500,
+      {},
+      new Map([
+        ["a", "\u001B[31mReady\nSecond\r\tDone\u001B[0m"],
+        ["b", " \n\t "],
+      ]),
+    );
+    expect(lines[1]).toContain("\u001B[31mReady Second Done\u001B[0m");
+    expect(stripAnsi(lines.join("\n")).split("\n")).toHaveLength(2);
+    expect(stripAnsi(lines[1] ?? "")).not.toMatch(/\| $/);
+  });
   it("formats git labels", () => {
     expect(getBranchLabel("main")).toBe("⎇ main");
     expect(getBranchLabel(null)).toBe("⎇ no git");

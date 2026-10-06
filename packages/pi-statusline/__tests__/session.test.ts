@@ -1,7 +1,105 @@
-import { describe, expect, it } from "vitest";
-import { getContextLabel, getThinkingLabel, getTokenLabel, getTokenTotals } from "../extensions/session.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  createUsageTracker,
+  formatUsageLabel,
+  getContextLabel,
+  getThinkingLabel,
+  getTokenLabel,
+  getTokenTotals,
+  getUsageTotals,
+} from "../extensions/session.js";
+import type { SessionEntryLike } from "../extensions/types.js";
 
 describe("pi-statusline session helpers", () => {
+  it("shows optional cumulative cost and cache detail without changing the default token label", () => {
+    const totals = { input: 100, output: 40, cacheRead: 2000, cacheWrite: 500, cost: 0.125 };
+    expect(formatUsageLabel(totals)).toBe("↑100/↓40");
+    expect(formatUsageLabel(totals, { showCost: true, showCache: true })).toBe("↑100/↓40 R2.0k W500 $0.125");
+  });
+  it("caches completed totals and counts a finalized message once across persistence", () => {
+    const tracker = createUsageTracker();
+    const entries: SessionEntryLike[] = [
+      { type: "message", message: { role: "assistant", usage: { input: 100, output: 40 } } },
+    ];
+    let leaf = "a";
+    const manager = { getBranch: vi.fn(() => entries), getLeafId: () => leaf, getSessionId: () => "session" };
+    expect(tracker.read(manager).input).toBe(100);
+    const message = { role: "assistant", usage: { input: 25, output: 9 } };
+    tracker.update(message);
+    expect(tracker.read(manager)).toMatchObject({ input: 125, output: 49 });
+    message.usage.output = 12;
+    tracker.update(message);
+    expect(tracker.read(manager).output).toBe(52);
+    expect(manager.getBranch).toHaveBeenCalledTimes(1);
+    tracker.finish(message, manager);
+    expect(tracker.read(manager).output).toBe(52);
+    entries.push({ type: "message", message });
+    leaf = "b";
+    expect(tracker.read(manager)).toMatchObject({ input: 125, output: 52 });
+    expect(manager.getBranch).toHaveBeenCalledTimes(3);
+    entries.splice(0, 2, { type: "usage", usage: { input: 3, output: 1 } });
+    leaf = "other-branch";
+    tracker.clear();
+    expect(tracker.read(manager)).toMatchObject({ input: 3, output: 1 });
+  });
+  it("accounts for all model-attributed usage sources on the selected branch", () => {
+    const usage = { input: 10, output: 2, cacheRead: 30, cacheWrite: 4, cost: { total: 0.5 } };
+    expect(
+      getUsageTotals([
+        { type: "message", message: { role: "assistant", usage } },
+        { type: "message", message: { role: "toolResult", usage } },
+        { type: "compaction", usage },
+        { type: "branch_summary", usage },
+        { type: "usage", usage },
+        { type: "custom", usage },
+        { type: "message", message: { role: "user", usage } },
+      ]),
+    ).toEqual({ input: 50, output: 10, cacheRead: 150, cacheWrite: 20, cost: 2.5 });
+  });
+  it.each(["assistant", "toolResult"])("reconciles replacement %s usage using the pre-persistence leaf", (role) => {
+    for (const initialLeaf of [null, "root"]) {
+      const tracker = createUsageTracker();
+      const usage = { input: 10, output: 2, cacheRead: 30, cacheWrite: 4, cost: { total: 0.5 } };
+      const entries: SessionEntryLike[] =
+        initialLeaf === null ? [] : [{ id: "root", type: "message", message: { role, usage } }];
+      let leaf = initialLeaf;
+      const manager = { getBranch: () => entries, getLeafId: () => leaf, getSessionId: () => "session" };
+      const message = { role, usage };
+      tracker.finish(message, manager);
+      const previous = initialLeaf === null ? 0 : 10;
+      // An identical older message must not retire the uncommitted result.
+      expect(tracker.read(manager).input).toBe(previous + 10);
+      entries.push({ id: "custom", type: "custom" });
+      leaf = "custom";
+      expect(tracker.read(manager).input).toBe(previous + 10);
+      const replacement = { ...message, usage: { ...usage, input: 20, cost: { total: 0.75 } } };
+      entries.push({ id: "replacement", type: "message", message: replacement });
+      leaf = "replacement";
+      expect(tracker.read(manager)).toEqual({
+        input: previous + 20,
+        output: initialLeaf === null ? 2 : 4,
+        cacheRead: initialLeaf === null ? 30 : 60,
+        cacheWrite: initialLeaf === null ? 4 : 8,
+        cost: initialLeaf === null ? 0.75 : 1.25,
+      });
+    }
+  });
+  it("retires pending usage when a replacement removes usage or the session changes", () => {
+    const tracker = createUsageTracker();
+    let leaf: string | null = null;
+    let session = "first";
+    const entries: SessionEntryLike[] = [];
+    const manager = { getBranch: () => entries, getLeafId: () => leaf, getSessionId: () => session };
+    tracker.finish({ role: "assistant", usage: { input: 10 } }, manager);
+    expect(tracker.read(manager).input).toBe(10);
+    entries.push({ id: "replacement", type: "message", message: { role: "assistant" } });
+    leaf = "replacement";
+    expect(tracker.read(manager).input).toBe(0);
+    tracker.finish({ role: "toolResult", usage: { input: 5 } }, manager);
+    expect(tracker.read(manager).input).toBe(5);
+    session = "second";
+    expect(tracker.read(manager).input).toBe(0);
+  });
   it("sums assistant token usage", () => {
     const totals = getTokenTotals([
       { type: "message", message: { role: "assistant", usage: { input: 1200, output: 300 } } },
@@ -12,7 +110,7 @@ describe("pi-statusline session helpers", () => {
     expect(totals).toEqual({ input: 2000, output: 800 });
   });
 
-  it("replaces the trailing assistant usage with live usage", () => {
+  it("adds uncommitted live usage without replacing the previous completed assistant", () => {
     const totals = getTokenTotals(
       [
         { type: "message", message: { role: "assistant", usage: { input: 1200, output: 300 } } },
@@ -21,7 +119,7 @@ describe("pi-statusline session helpers", () => {
       { input: 950, output: 700 },
     );
 
-    expect(totals).toEqual({ input: 2150, output: 1000 });
+    expect(totals).toEqual({ input: 2950, output: 1500 });
   });
 
   it("formats token label from session entries", () => {
@@ -36,7 +134,7 @@ describe("pi-statusline session helpers", () => {
       [{ type: "message", message: { role: "assistant", usage: { input: 18_000, output: 4_200 } } }],
       { input: 18_500, output: 4_400 },
     );
-    expect(label).toBe("↑18.5k/↓4.4k");
+    expect(label).toBe("↑36.5k/↓8.6k");
   });
 
   it("formats context label from explicit percent", () => {

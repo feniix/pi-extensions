@@ -1,5 +1,4 @@
-import { buildStatusLines } from "./format.js";
-import { defaultPalette } from "./palette.js";
+import { buildStatusLines, type StatuslineTheme } from "./format.js";
 import { getCwdLabel, getRepoFallbackLabel } from "./session.js";
 import type { StatuslinePalette, StatuslineState } from "./types.js";
 
@@ -34,7 +33,9 @@ export function buildLines(
   state: StatuslineState,
   branchLabel: string | null,
   width?: number,
-  palette: StatuslinePalette = defaultPalette,
+  palette: Partial<StatuslinePalette> = {},
+  extensionStatuses: ReadonlyMap<string, string> = new Map(),
+  theme?: StatuslineTheme,
 ): string[] {
   const input: StatuslineInput = {
     modelLabel: state.modelLabel,
@@ -50,5 +51,21 @@ export function buildLines(
     activityLabel: state.activityLabel,
   };
 
-  return buildStatusLines(input, width, palette);
+  return buildStatusLines(
+    {
+      ...input,
+      extensionStatuses: [...extensionStatuses.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([, text]) =>
+          text
+            .replace(/[\r\n\t]/g, " ")
+            .replace(/ +/g, " ")
+            .trim(),
+        )
+        .filter(Boolean),
+    },
+    width,
+    palette,
+    theme,
+  );
 }

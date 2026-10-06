@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defaultPalette } from "./palette.js";
-import type { StatuslineConfig, StatuslinePalette, StatuslinePaletteInput } from "./types.js";
+import type { StatuslineConfig, StatuslinePalette, StatuslinePaletteInput, StatuslineSettings } from "./types.js";
 
 const STATUSLINE_CONFIG_KEY = "pi-statusline";
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
@@ -77,11 +77,24 @@ async function readSettingsFile(path: string): Promise<unknown | null> {
 }
 
 export async function loadStatuslinePalette(cwd: string, homeDir = homedir()): Promise<StatuslinePalette> {
+  const settings = await loadStatuslineSettings(cwd, homeDir);
+  return { ...defaultPalette, ...settings.palette };
+}
+
+export async function loadStatuslineSettings(cwd: string, homeDir = homedir()): Promise<StatuslineSettings> {
   const { globalPath, projectPath } = getStatuslineConfigPaths(cwd, homeDir);
   const [globalSettings, projectSettings] = await Promise.all([
     readSettingsFile(globalPath),
     readSettingsFile(projectPath),
   ]);
 
-  return resolvePalette(extractStatuslineConfig(globalSettings), extractStatuslineConfig(projectSettings));
+  const global = extractStatuslineConfig(globalSettings);
+  const project = extractStatuslineConfig(projectSettings);
+  const flag = (key: "showCost" | "showCache") =>
+    typeof project?.[key] === "boolean" ? project[key] : typeof global?.[key] === "boolean" ? global[key] : false;
+  return {
+    palette: { ...sanitizePaletteInput(global?.palette), ...sanitizePaletteInput(project?.palette) },
+    showCost: flag("showCost"),
+    showCache: flag("showCache"),
+  };
 }

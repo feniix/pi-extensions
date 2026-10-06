@@ -16,7 +16,7 @@ describe("UI-mode event helpers", () => {
     const handler = vi.fn(async () => "handled");
     const uiOnly = createUiOnlyHandler(handler);
 
-    const result = await uiOnly({ type: "event" }, { hasUI: true });
+    const result = await uiOnly({ type: "event" }, { hasUI: true, mode: "tui" });
 
     expect(result).toBe("handled");
     expect(handler).toHaveBeenCalledOnce();
@@ -55,7 +55,7 @@ describe("UI-mode event helpers", () => {
     });
     const uiOnly = createUiOnlyHandler(handler);
 
-    await expect(uiOnly({ type: "event" }, { hasUI: true })).resolves.toBeUndefined();
+    await expect(uiOnly({ type: "event" }, { hasUI: true, mode: "tui" })).resolves.toBeUndefined();
     expect(handler).toHaveBeenCalledOnce();
   });
 
@@ -65,6 +65,6 @@ describe("UI-mode event helpers", () => {
     });
     const uiOnly = createUiOnlyHandler(handler);
 
-    await expect(uiOnly({ type: "event" }, { hasUI: true })).rejects.toThrow("boom");
+    await expect(uiOnly({ type: "event" }, { hasUI: true, mode: "tui" })).rejects.toThrow("boom");
   });
 });

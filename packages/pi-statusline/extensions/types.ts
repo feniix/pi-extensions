@@ -3,6 +3,12 @@ export interface TokenTotals {
   output: number;
 }
 
+export interface UsageTotals extends TokenTotals {
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+}
+
 export interface GitSnapshot {
   repoName: string | null;
   branch: string | null;
@@ -13,6 +19,9 @@ export interface GitSnapshot {
 export interface AssistantUsageLike {
   input?: number;
   output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  cost?: { total?: number };
 }
 
 export type ActivityPhase = "idle" | "queued" | "running" | "thinking" | "responding" | "tool";
@@ -37,6 +46,14 @@ export type StatuslinePaletteInput = Partial<Record<keyof StatuslinePalette, unk
 
 export interface StatuslineConfig {
   palette?: StatuslinePaletteInput;
+  showCost?: boolean;
+  showCache?: boolean;
+}
+
+export interface StatuslineSettings {
+  palette: Partial<StatuslinePalette>;
+  showCost: boolean;
+  showCache: boolean;
 }
 
 export interface StatuslineState {
@@ -54,6 +71,7 @@ export interface StatuslineState {
 }
 
 export interface StatuslineLinesInput {
+  extensionStatuses?: string[];
   modelLabel: string;
   thinkingLabel: string;
   contextLabel: string;
@@ -80,7 +98,9 @@ export interface ContextUsageLike {
 }
 
 export interface SessionEntryLike {
+  id?: string;
   type?: string;
+  usage?: AssistantUsageLike;
   message?: {
     role?: string;
     usage?: AssistantUsageLike;

@@ -2,9 +2,13 @@
 
 A fixed two-line status display for pi.
 
-By default it renders in the footer in interactive/RPC mode and stays inert in non-UI modes (`-p`, JSON mode).
+Requires **pi 1.x** (tested with pi 1.0.3).
+
+It renders in the footer in interactive TUI mode, including both fullscreen and regular terminal modes.
+RPC clients cannot render custom terminal footers; in RPC mode only the explicit `statusline` tool is available.
+It stays inert in non-UI modes (`-p`, JSON mode).
 It is not injected into model context and is not sent as messages.
-In UI-capable sessions, it also exposes a `/statusline` tool for explicit retrieval.
+In TUI/RPC sessions, it exposes a model-callable `statusline` tool for explicit plain-text retrieval (not a slash command).
 
 ## Display
 
@@ -12,6 +16,12 @@ In UI-capable sessions, it also exposes a `/statusline` tool for explicit retrie
 Model: ... | Thinking: ... | Ctx: ... | ⎇ ... | dirty: +... | ↑.../↓...
 <repo> | cwd: ... | 𖠰 ... | Skill: ... | Act: ...
 ```
+
+Other extensions' status messages are appended to the second line in status-key order, preserving their ANSI styling.
+Newlines, carriage returns, and tabs in statuses are normalized to spaces so the footer remains two physical rows.
+On narrow terminals, context moves to the front of the first line, and activity/status messages move to the front of the second.
+Remaining fields are truncated to the available terminal columns; the footer always uses exactly two lines.
+Emoji, wide characters, combining characters, and ANSI escape sequences are measured using pi-tui's column-aware helpers.
 
 ## Included fields
 
@@ -26,6 +36,8 @@ Model: ... | Thinking: ... | Ctx: ... | ⎇ ... | dirty: +... | ↑.../↓...
 - Git worktree label
 - Last explicitly invoked skill
 - Live activity indicator
+- Other extensions' status messages
+- Optional cost and cache-read/cache-write totals
 
 ## Live updates
 
@@ -37,6 +49,7 @@ This includes:
 - while assistant messages are streaming
 - while tools are starting, streaming updates, and finishing
 - when the agent returns control to the user
+- after thinking-level changes, compaction, or session-tree navigation
 
 To avoid excessive redraws, streaming-triggered footer renders are throttled.
 
@@ -51,6 +64,12 @@ Examples:
 - `Act: bash`
 - `Act: bash x2`
 - `Act: idle`
+- `Act: waiting for user`
+
+`agent_end` means one agent loop ended, not necessarily that pi is done: retries, compaction, or queued continuations may follow.
+The footer reports idle only after `agent_settled`.
+Blocking extension prompts temporarily show waiting-for-user activity.
+Parallel and nested tool calls are tracked by call ID; the label names the most recently started still-active tool and shows the total active-call count.
 
 ## Skill behavior
 
@@ -61,8 +80,29 @@ Examples:
 
 ## Token behavior
 
-Token totals are based on assistant usage in the session branch.
-During active streaming, the extension also uses the latest live assistant usage when available so the token display can update before the turn fully finishes.
+Token totals follow the **active session branch**, not abandoned alternative histories.
+They include assistant and tool-result usage, compaction, branch summaries, and standalone usage entries.
+Nested model usage propagated into a tool result is counted through that result, not separately through nested tool execution events.
+
+Completed usage is cached across streaming deltas. Live assistant usage is added to completed totals without replacing the previous assistant message.
+Finalized messages are retained until pi persists them, so the display does not drop or double-count usage across `message_end`.
+Later extensions can replace finalized messages; persisted replacement usage supersedes the pending usage.
+Compaction, navigation, finalized messages, and session lifecycle boundaries invalidate the cache.
+
+Enable optional detail in global or project settings:
+
+```json
+{
+  "pi-statusline": {
+    "showCost": true,
+    "showCache": true
+  }
+}
+```
+
+Example: `↑18.2k/↓14.2k R120.0k W5.0k $0.125`.
+Both flags default to `false`; project booleans override global booleans, and invalid values are ignored.
+Cost is the model-reported cumulative estimate, not a subscription bill.
 
 ## Worktree behavior
 
@@ -72,7 +112,10 @@ During active streaming, the extension also uses the latest live assistant usage
 
 ## Palette configuration
 
-`pi-statusline` uses a built-in `defaultPalette`, but you can override any subset of colors through pi's standard settings files.
+The footer uses **pi's active theme** by default and follows theme changes without caching colored strings.
+You can override individual foreground colors through pi's standard settings files.
+Pi converts colors to truecolor or 256-color output according to terminal capabilities.
+The exported `defaultPalette` remains the fallback for standalone formatting without a supplied pi theme.
 
 Settings locations:
 
@@ -96,7 +139,6 @@ Use the `pi-statusline` key for non-secret configuration:
 
 Supported palette keys:
 
-- `background`
 - `model`
 - `repo`
 - `thinking`
@@ -113,9 +155,12 @@ Supported palette keys:
 Behavior:
 
 - project settings override global settings
-- missing keys fall back to `defaultPalette`
+- missing keys use the active pi theme in the footer
 - invalid color values are ignored
 - colors must be 6-digit hex values like `#008787`
+- the legacy `background` key remains accepted for compatibility but does not paint the footer
+
+Settings are loaded at session start; use `/reload` after editing them.
 
 ## Development
 
@@ -125,6 +170,31 @@ Run from the repo root:
 pnpm run test
 pnpm run typecheck
 ```
+
+### Automated terminal smoke tests
+
+Run the separate TypeScript/Vitest integration suite from the repo root:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm run test:terminal
+```
+
+The suite launches the **workspace-installed pi** in real pseudo-terminals using the OS's existing `script` and `stty` utilities.
+It interprets output with the pure-JavaScript `@xterm/headless` and Unicode 11 addon; no native npm addons, downloaded native binaries, build approvals, or Python test environment are needed.
+Supported test hosts are **macOS and Linux**, with Node, Git, `script`, `stty`, and a POSIX shell on PATH.
+
+Tests cover fullscreen/regular modes with dark/light themes, 20–140-column resizing, Unicode/status display and removal, prompt waiting/idle transitions, thinking refreshes, and distinct native theme colors.
+Each session uses a temporary Git repo, isolated home/config, offline mode, and a fake provider that rejects model requests.
+No user credentials/settings are inherited and no real provider calls are made.
+A deliberate negative-control test verifies the request guard; another verifies timeout diagnostics.
+
+`pnpm run test` remains the fast unit suite. CI additionally runs `test:terminal` in the statusline package job whenever that package is selected.
+Changes to the terminal test config also trigger package validation.
+Screen snapshots and raw ANSI logs are saved under `coverage/terminal/`, and uploaded as CI artifacts on failure.
+Temporary processes/repos/configs are cleaned up after each test.
+
+The emulator checks terminal cells and colors, not actual font rendering or subjective readability; those remain visual checks.
 
 For quick manual testing from this monorepo:
 
