@@ -63,7 +63,7 @@
     "prepack": "pnpm run build:mcp"
   },
   "engines": {
-    "node": ">=24.21.0"
+    "node": ">=22.19.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

@@ -29,7 +29,7 @@
     ]
   },
   "engines": {
-    "node": ">=24.21.0"
+    "node": ">=22.19.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
@@ -56,7 +56,7 @@
   },
   "homepage": "https://feniix-hq.net/projects/pi-extensions/",
   "devDependencies": {
-    "@types/node": "^24.19.1"
+    "@types/node": "22.19.19"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-ai": {
