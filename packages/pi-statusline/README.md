@@ -18,6 +18,7 @@ Model: ... | Thinking: ... | Ctx: ... | ⎇ ... | dirty: +... | ↑.../↓...
 ```
 
 Other extensions' status messages are appended to the second line in status-key order, preserving their ANSI styling.
+Newlines, carriage returns, and tabs in statuses are normalized to spaces so the footer remains two physical rows.
 On narrow terminals, context moves to the front of the first line, and activity/status messages move to the front of the second.
 Remaining fields are truncated to the available terminal columns; the footer always uses exactly two lines.
 Emoji, wide characters, combining characters, and ANSI escape sequences are measured using pi-tui's column-aware helpers.
@@ -85,6 +86,7 @@ Nested model usage propagated into a tool result is counted through that result,
 
 Completed usage is cached across streaming deltas. Live assistant usage is added to completed totals without replacing the previous assistant message.
 Finalized messages are retained until pi persists them, so the display does not drop or double-count usage across `message_end`.
+Later extensions can replace finalized messages; persisted replacement usage supersedes the pending usage.
 Compaction, navigation, finalized messages, and session lifecycle boundaries invalidate the cache.
 
 Enable optional detail in global or project settings:

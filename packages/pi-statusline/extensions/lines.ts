@@ -56,7 +56,12 @@ export function buildLines(
       ...input,
       extensionStatuses: [...extensionStatuses.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([, text]) => text)
+        .map(([, text]) =>
+          text
+            .replace(/[\r\n\t]/g, " ")
+            .replace(/ +/g, " ")
+            .trim(),
+        )
         .filter(Boolean),
     },
     width,

@@ -72,6 +72,17 @@ it.each(cases)("waits, restores idle, and refreshes thinking: $mode / $theme", a
   expect(session.footer()[0]).toContain("↑0/↓0");
 });
 
+it.each(cases)("normalizes multiline statuses into the footer: $mode / $theme", async (options) => {
+  session = await TerminalSession.start({ ...options, name: "multiline" });
+  await session.waitFor("startup", (screen) => screen.includes("Act: idle"));
+  await session.command("/smoke-multiline");
+  await session.waitFor("multiline", () => session?.footer()[1]?.includes("MULTILINE SECOND DONE") ?? false);
+  expect(session.footer()).toHaveLength(2);
+  expect(session.screen().filter((line) => line.includes("MULTILINE SECOND DONE"))).toHaveLength(1);
+  await session.resize(40);
+  expect(session.footer()[1]).toContain("MULTILINE SECOND DONE");
+});
+
 it.each(modes)("uses distinct native dark/light footer colors in %s mode", async (mode) => {
   const colors: number[] = [];
   for (const theme of themes) {

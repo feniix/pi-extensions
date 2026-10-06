@@ -98,6 +98,7 @@ export interface ContextUsageLike {
 }
 
 export interface SessionEntryLike {
+  id?: string;
   type?: string;
   usage?: AssistantUsageLike;
   message?: {

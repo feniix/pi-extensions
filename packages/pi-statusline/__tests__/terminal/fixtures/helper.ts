@@ -55,6 +55,12 @@ export default function terminalSmokeHelper(pi: ExtensionAPI) {
       ctx.ui.setStatus("smoke-b", undefined);
     },
   });
+  pi.registerCommand("smoke-multiline", {
+    description: "Publish a styled multiline status",
+    handler: async (_args, ctx) => {
+      ctx.ui.setStatus("smoke-a", "\u001B[31mMULTILINE\nSECOND\r\tDONE\u001B[0m");
+    },
+  });
   pi.registerCommand("smoke-prompt", {
     description: "Open a real extension confirmation prompt",
     handler: async (_args, ctx) => {

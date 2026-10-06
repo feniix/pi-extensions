@@ -27,6 +27,8 @@ publication metadata. Dates are npm publication dates (UTC).
 
 ### Fixed
 
+- Reconcile finalized usage after later extensions replace a `message_end` object or its usage.
+- Normalize multiline extension statuses into one terminal-safe footer row while preserving ANSI styling.
 - Measure and truncate terminal columns correctly for ANSI text, emoji, CJK, and combining characters.
 - Report idle only after `agent_settled`, rather than prematurely at `agent_end`.
 - Track parallel and nested tools by call identity; ignore duplicate starts and unknown/duplicate completion updates.

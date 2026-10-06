@@ -55,7 +55,7 @@ export function createUsageTracker() {
   let totals = getUsageTotals([]);
   let persistedMessages = new Set<UsageMessage>();
   let live: UsageMessage | undefined;
-  const pending = new Map<UsageMessage, AssistantUsageLike>();
+  const pending = new Map<UsageMessage, { usage: AssistantUsageLike; leafId: string | null; sessionId: string }>();
   const invalidate = () => {
     cachedManager = undefined;
   };
@@ -69,9 +69,13 @@ export function createUsageTracker() {
     update(message: UsageMessage) {
       if (message.role === "assistant") live = message;
     },
-    finish(message: UsageMessage) {
+    finish(message: UsageMessage, manager: UsageManager) {
       if ((message.role === "assistant" || message.role === "toolResult") && message.usage) {
-        pending.set(message, message.usage);
+        pending.set(message, {
+          usage: message.usage,
+          leafId: manager.getLeafId(),
+          sessionId: manager.getSessionId(),
+        });
       }
       if (message.role === "assistant") live = undefined;
       invalidate();
@@ -83,15 +87,24 @@ export function createUsageTracker() {
         const entries = manager.getBranch();
         totals = getUsageTotals(entries);
         persistedMessages = new Set(entries.flatMap((entry) => (entry.message ? [entry.message] : [])));
-        for (const message of pending.keys()) {
-          if (persistedMessages.has(message)) pending.delete(message);
+        for (const [message, result] of pending) {
+          // Later message_end handlers can replace the object (and its usage).
+          // Reconcile against new branch entries after the pre-persistence leaf,
+          // not against matching token totals or the previous completed message.
+          const parentIndex = result.leafId === null ? -1 : entries.findIndex((entry) => entry.id === result.leafId);
+          const replaced =
+            (result.leafId === null || parentIndex >= 0) &&
+            entries
+              .slice(parentIndex + 1)
+              .some((entry) => entry.type === "message" && entry.message?.role === message.role);
+          if (result.sessionId !== sessionId || persistedMessages.has(message) || replaced) pending.delete(message);
         }
         cachedManager = manager;
         cachedSession = sessionId;
         cachedLeaf = leafId;
       }
       const result = { ...totals };
-      for (const usage of pending.values()) addUsage(result, usage);
+      for (const { usage } of pending.values()) addUsage(result, usage);
       if (live && !persistedMessages.has(live)) addUsage(result, live.usage);
       return result;
     },

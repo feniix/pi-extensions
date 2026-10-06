@@ -135,6 +135,39 @@ describe("pi 1.x statusline lifecycle", () => {
     statuses.delete("a");
     expect(text()).not.toContain("Review running");
   });
+  it.each(["assistant", "toolResult"])("reconciles replaced %s usage after message_end", async (role) => {
+    const { ctx, emit, text } = await setup();
+    const entries = [{ id: "root", type: "message", message: { role: "assistant", usage: { input: 10, output: 4 } } }];
+    ctx.sessionManager.getBranch.mockReturnValue(entries);
+    await emit("session_tree");
+    const message = { role, usage: { input: 100, output: 40 } };
+    await emit("message_end", { message });
+    expect(text()).toContain("↑110/↓44");
+    // A later pi message_end handler replaces the object and may change its usage.
+    entries.push({ id: "replaced", type: "message", message: { ...message, usage: { input: 120, output: 50 } } });
+    ctx.sessionManager.getLeafId.mockReturnValue("replaced");
+    await emit("thinking_level_select");
+    expect(text()).toContain("↑130/↓54");
+    await emit("message_update", {
+      message: { role: "assistant", usage: { input: 5, output: 2 } },
+      assistantMessageEvent: { type: "text_delta" },
+    });
+    expect(text()).toContain("↑135/↓56");
+  });
+  it("normalizes multiline extension statuses into exactly two bounded footer rows", async () => {
+    const { text, statuses } = await setup();
+    statuses.set("a", "\u001B[31mReady\nSecond row\r\tDone\u001B[0m");
+    statuses.set("b", " \n\t ");
+    for (const width of [20, 40, 80, 500]) {
+      const rows = text(width).split("\n");
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row).not.toMatch(/[\r\t]/);
+        expect(visibleWidth(row)).toBeLessThanOrEqual(width);
+      }
+    }
+    expect(text()).toContain("Ready Second row Done");
+  });
   it("refreshes thinking, compaction context, and tree navigation immediately", async () => {
     const { pi, ctx, emit, text } = await setup();
     pi.getThinkingLevel.mockReturnValue("high");

@@ -31,7 +31,7 @@ describe("pi-statusline session helpers", () => {
     tracker.update(message);
     expect(tracker.read(manager).output).toBe(52);
     expect(manager.getBranch).toHaveBeenCalledTimes(1);
-    tracker.finish(message);
+    tracker.finish(message, manager);
     expect(tracker.read(manager).output).toBe(52);
     entries.push({ type: "message", message });
     leaf = "b";
@@ -55,6 +55,50 @@ describe("pi-statusline session helpers", () => {
         { type: "message", message: { role: "user", usage } },
       ]),
     ).toEqual({ input: 50, output: 10, cacheRead: 150, cacheWrite: 20, cost: 2.5 });
+  });
+  it.each(["assistant", "toolResult"])("reconciles replacement %s usage using the pre-persistence leaf", (role) => {
+    for (const initialLeaf of [null, "root"]) {
+      const tracker = createUsageTracker();
+      const usage = { input: 10, output: 2, cacheRead: 30, cacheWrite: 4, cost: { total: 0.5 } };
+      const entries: SessionEntryLike[] =
+        initialLeaf === null ? [] : [{ id: "root", type: "message", message: { role, usage } }];
+      let leaf = initialLeaf;
+      const manager = { getBranch: () => entries, getLeafId: () => leaf, getSessionId: () => "session" };
+      const message = { role, usage };
+      tracker.finish(message, manager);
+      const previous = initialLeaf === null ? 0 : 10;
+      // An identical older message must not retire the uncommitted result.
+      expect(tracker.read(manager).input).toBe(previous + 10);
+      entries.push({ id: "custom", type: "custom" });
+      leaf = "custom";
+      expect(tracker.read(manager).input).toBe(previous + 10);
+      const replacement = { ...message, usage: { ...usage, input: 20, cost: { total: 0.75 } } };
+      entries.push({ id: "replacement", type: "message", message: replacement });
+      leaf = "replacement";
+      expect(tracker.read(manager)).toEqual({
+        input: previous + 20,
+        output: initialLeaf === null ? 2 : 4,
+        cacheRead: initialLeaf === null ? 30 : 60,
+        cacheWrite: initialLeaf === null ? 4 : 8,
+        cost: initialLeaf === null ? 0.75 : 1.25,
+      });
+    }
+  });
+  it("retires pending usage when a replacement removes usage or the session changes", () => {
+    const tracker = createUsageTracker();
+    let leaf: string | null = null;
+    let session = "first";
+    const entries: SessionEntryLike[] = [];
+    const manager = { getBranch: () => entries, getLeafId: () => leaf, getSessionId: () => session };
+    tracker.finish({ role: "assistant", usage: { input: 10 } }, manager);
+    expect(tracker.read(manager).input).toBe(10);
+    entries.push({ id: "replacement", type: "message", message: { role: "assistant" } });
+    leaf = "replacement";
+    expect(tracker.read(manager).input).toBe(0);
+    tracker.finish({ role: "toolResult", usage: { input: 5 } }, manager);
+    expect(tracker.read(manager).input).toBe(5);
+    session = "second";
+    expect(tracker.read(manager).input).toBe(0);
   });
   it("sums assistant token usage", () => {
     const totals = getTokenTotals([

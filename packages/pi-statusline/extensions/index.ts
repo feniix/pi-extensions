@@ -405,7 +405,7 @@ export default function statuslineExtension(pi: ExtensionAPI) {
   pi.on(
     "message_end",
     createUiOnlyHandler(async (event, ctx) => {
-      usageTracker.finish(event.message);
+      usageTracker.finish(event.message, ctx.sessionManager);
       updateActivity(state.activeToolCount > 0 ? "tool" : "running", state.activeToolName, state.activeToolCount);
       refreshDynamicFooter(ctx, true);
     }),
