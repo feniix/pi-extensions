@@ -1,0 +1,13 @@
+go for it
+
+---
+
+was it raised for each extension?
+
+---
+
+ok do it in each of the packages
+
+---
+
+and will everything in those extensions continue to work? are we matching the node types to the correct version?
