@@ -235,6 +235,15 @@ jobs:
           registry-url: https://registry.npmjs.org/
           package-manager-cache: false
 
+      - name: Setup npm for trusted publishing
+        run: |
+          set -euo pipefail
+          # Node 22 bundles npm 10; npm OIDC publishing requires npm >=11.5.1.
+          npm install --global npm@11.21.0
+          node --version
+          npm --version
+          test "$(npm --version)" = "11.21.0"
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
