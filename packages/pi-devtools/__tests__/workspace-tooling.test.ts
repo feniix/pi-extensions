@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -93,5 +93,44 @@ describe("workspace audit", () => {
     const result = run(cwd, "audit-workspaces.sh");
     expect(result.status).toBe(status);
     expect(result.stdout.trim()).toBe("audit");
+  });
+});
+
+describe("release publication tooling", () => {
+  it("installs and verifies an OIDC-capable npm CLI after Node setup and before publishing", () => {
+    const workflow = readFileSync(join(repo, ".github/workflows/release.yml"), "utf8");
+    const publish = workflow.split("\n  publish:\n")[1]?.split("\n  publish_skipped:\n")[0] ?? "";
+    const setup = publish.match(
+      / {6}- name: Setup npm for trusted publishing\n {8}run: \|\n([\s\S]*?)(?=\n {6}- name:)/,
+    );
+    expect(setup, "publish must not rely on Node 22's bundled npm 10").not.toBeNull();
+    const body = setup?.[1] ?? "";
+    expect(body).toContain("npm install --global npm@11.21.0");
+    expect(body).toContain('test "$(npm --version)" = "11.21.0"');
+    expect(publish.indexOf("Setup npm for trusted publishing")).toBeGreaterThan(publish.indexOf("Setup Node.js"));
+    expect(publish.indexOf("Setup npm for trusted publishing")).toBeLessThan(
+      publish.indexOf("Publish changed packages"),
+    );
+    expect(publish).toContain('node-version: "22"');
+    expect(publish).toContain("pnpm install --frozen-lockfile");
+    expect(publish).toContain("npm publish --access public --provenance");
+    expect(publish).toContain("environment: npm-release");
+    expect(workflow).toContain("id-token: write");
+  });
+  it.each(["11.21.0", "10.9.9"])("verifies the npm binary actually selected on PATH (%s)", (version) => {
+    const workflow = readFileSync(join(repo, ".github/workflows/release.yml"), "utf8");
+    const body = workflow.match(
+      / {6}- name: Setup npm for trusted publishing\n {8}run: \|\n([\s\S]*?)(?=\n {6}- name:)/,
+    )?.[1];
+    expect(body).toBeDefined();
+    const cwd = fixture();
+    executable(cwd, "npm", 'if [ "$1" = "--version" ]; then printf "%s\\n" "$NPM_VERSION"; else exit 0; fi');
+    const result = spawnSync("bash", ["-c", body ?? ""], {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${join(cwd, "bin")}:${process.env.PATH}`, NPM_VERSION: version },
+    });
+    expect(result.status).toBe(version === "11.21.0" ? 0 : 1);
+    expect(result.stdout).toContain(version);
   });
 });

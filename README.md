@@ -103,6 +103,15 @@ registry lookup and provenance publication remain npm operations; the bridgekit
 CLI wrapper also retains its upstream npm-based missing-build fallback. Public
 `pi install npm:...` selectors are unchanged. Release dry-run skips publishing
 but does not validate packed artifacts or publication authorization.
+The publish job explicitly installs and verifies npm **11.21.0** for trusted
+publishing (OIDC requires npm >=11.5.1); Node 22's bundled npm 10 is insufficient.
+Dependency installation still uses the pinned pnpm version and frozen lockfile.
+Merging a package version bump to `main` automatically triggers publication.
+After a publication-tooling fix is merged, recover an unpublished version by
+dispatching `release.yml` on `main` with `package_filter=pi-statusline` (or the
+affected package) and `dry_run=false`; do not rerun an old job that uses the
+broken workflow. A `dry_run=true` dispatch can validate package checks first,
+but it skips the publish job, including npm setup and OIDC authentication.
 
 Every package release requires a `CHANGELOG.md` entry headed
 `## [X.Y.Z] - YYYY-MM-DD` matching its manifest version, with nonempty release
