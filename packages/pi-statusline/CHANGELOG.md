@@ -33,6 +33,13 @@ publication metadata. Dates are npm publication dates (UTC).
 - Include tool-result, compaction, branch-summary, and standalone usage entries in active-branch totals without subtracting previous completed assistant usage.
 - Keep print/JSON sessions inert and preserve stale-session guards and shutdown cleanup.
 
+## [0.5.5] - 2026-10-06
+
+### Changed
+
+- Declare Node.js 22.19.0 or newer, matching Pi's runtime requirement.
+- Align shared CI and release tooling with Pi upstream's Node 22 runtime and typings; extension behavior is unchanged.
+
 ## [0.5.4] - 2026-09-30
 
 ### Changed

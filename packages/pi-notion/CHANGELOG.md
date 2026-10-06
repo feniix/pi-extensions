@@ -9,6 +9,13 @@ uncertain release boundaries are noted rather than inferred.
 
 ## [Unreleased]
 
+## [3.0.5] - 2026-10-06
+
+### Changed
+
+- Declare Node.js 22.19.0 or newer, matching Pi's runtime requirement.
+- Pin Node typings to 22.19.19 and align shared CI and release tooling with Pi upstream's Node 22 runtime; extension behavior is unchanged.
+
 ## [3.0.4] - 2026-09-30
 
 ### Changed

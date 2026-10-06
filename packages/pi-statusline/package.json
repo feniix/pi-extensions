@@ -23,6 +23,9 @@
       "./extensions/index.ts"
     ]
   },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=1.0.0 <2",
     "@earendil-works/pi-coding-agent": ">=1.0.0 <2",
