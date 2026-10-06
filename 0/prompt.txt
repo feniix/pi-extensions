@@ -1,0 +1,5 @@
+are we sure we are ready for the 1.0.0 of statusline?
+
+---
+
+yes
