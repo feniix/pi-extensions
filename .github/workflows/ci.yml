@@ -52,7 +52,6 @@ jobs:
       fail-fast: false
       matrix:
         package: ${{ fromJson(needs.detect.outputs.matrix) }}
-        node: ["22.23.0", "24"]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -63,7 +62,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node }}
+          node-version: "24.21.0"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -96,5 +95,5 @@ jobs:
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-${{ matrix.package }}-node-${{ matrix.node }}
+          name: coverage-${{ matrix.package }}
           path: coverage/${{ matrix.package }}

@@ -54,7 +54,7 @@ Replace `pi-devtools` with any package name from the table above.
 
 ## Develop
 
-This repository is a pnpm workspace. It requires Node.js 22.23.0 or newer
+This repository is a pnpm workspace. It requires Node.js 24.21.0 or newer
 and pnpm 12.8.1 (pinned in `package.json`).
 
 Provision the pinned package manager separately from repository dependencies:
@@ -120,9 +120,9 @@ pi -e ./packages/pi-devtools
 
 Package tests live alongside their extension under
 `packages/<package>/__tests__/`. Shared CI detects affected packages and runs
-package-scoped lint, type checking, tests, and coverage checks on Node.js 22.23.0
-and 24. Every published extension declares the same Node.js 22.23.0 minimum.
-Development typings stay on the Node.js 22 line; `@types/node` patch versions
+package-scoped lint, type checking, tests, and coverage checks on Node.js 24.21.0.
+Every published extension declares the same Node.js 24.21.0 minimum.
+Development typings stay on the Node.js 24 line; `@types/node` patch versions
 are independent of Node.js runtime patch versions.
 
 ## Repository structure

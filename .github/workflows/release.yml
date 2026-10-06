@@ -175,7 +175,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: "24.21.0"
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -231,7 +231,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: "24.21.0"
           registry-url: https://registry.npmjs.org/
           package-manager-cache: false
 
