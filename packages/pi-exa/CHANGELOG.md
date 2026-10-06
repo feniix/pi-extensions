@@ -10,6 +10,13 @@ publication version mismatches are called out explicitly.
 
 ## [Unreleased]
 
+## [6.0.2] - 2026-10-06
+
+### Changed
+
+- Align shared CI and release tooling with Pi upstream's Node 22 runtime and typings.
+- Validate the extension and MCP build on Node.js 22.19.0 and the latest Node 22; the existing Node.js minimum and Exa runtime behavior are unchanged.
+
 ## [6.0.1] - 2026-09-30
 
 ### Changed

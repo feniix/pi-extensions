@@ -7,6 +7,13 @@ publication metadata. Dates are npm publication dates (UTC).
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-10-06
+
+### Changed
+
+- Declare Node.js 22.19.0 or newer, matching Pi's runtime requirement.
+- Align shared CI and release tooling with Pi upstream's Node 22 runtime and typings; extension behavior is unchanged.
+
 ## [0.5.4] - 2026-09-30
 
 ### Changed
