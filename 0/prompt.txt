@@ -1,3 +1,15 @@
+read https://github.com/feniix/pi-extensions/pull/148
+
+---
+
+how can we continue this work?
+
+---
+
+reslve the issues
+
+---
+
 are we sure we are ready for the 1.0.0 of statusline?
 
 ---
