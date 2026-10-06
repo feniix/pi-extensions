@@ -120,7 +120,10 @@ pi -e ./packages/pi-devtools
 
 Package tests live alongside their extension under
 `packages/<package>/__tests__/`. Shared CI detects affected packages and runs
-package-scoped lint, type checking, tests, and coverage checks.
+package-scoped lint, type checking, tests, and coverage checks on Node.js 22.23.0
+and 24. Every published extension declares the same Node.js 22.23.0 minimum.
+Development typings stay on the Node.js 22 line; `@types/node` patch versions
+are independent of Node.js runtime patch versions.
 
 ## Repository structure
 
