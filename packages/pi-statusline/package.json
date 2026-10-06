@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-statusline",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Fixed two-line status footer for pi with model, thinking, context, git, token, worktree, and skill indicators",
   "keywords": [
     "pi",
@@ -22,6 +22,9 @@
     "extensions": [
       "./extensions/index.ts"
     ]
+  },
+  "engines": {
+    "node": ">=22.19.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-notion",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "description": "Notion API extension for pi — read, search, and manage Notion pages, databases, and content",
   "keywords": [
     "pi",
@@ -28,6 +28,9 @@
       "./skills"
     ]
   },
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
@@ -53,7 +56,7 @@
   },
   "homepage": "https://feniix-hq.net/projects/pi-extensions/",
   "devDependencies": {
-    "@types/node": "^22.19.17"
+    "@types/node": "22.19.19"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-ai": {
