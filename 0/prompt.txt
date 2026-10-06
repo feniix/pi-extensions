@@ -1,0 +1,17 @@
+actually lets only support 24.21+
+
+---
+
+what is the runtime requirement of pi?
+
+---
+
+if I were to match the pi runtime requierements, could I just have ci with lts 22 of node or do I still need both?
+
+---
+
+are the pi guys do matrix ci builds?
+
+---
+
+lets match pi
