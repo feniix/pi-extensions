@@ -1,0 +1,61 @@
+run the manual terminal smoke test
+
+---
+
+you should have a way to verify it when running on the operator workstation, no?
+
+---
+
+I restarted the session after authorizing
+
+---
+
+did you update the pr body?
+
+---
+
+merge it
+
+---
+
+so now it is actually ready for 1.0 ?
+
+---
+
+what is pending of https://github.com/feniix/pi-extensions/issues/147 ?
+
+---
+
+https://github.com/feniix/pi-extensions/issues/147, what is the status of each item/acceptance criteria?
+
+---
+
+whats up with parentToolCallId.
+
+---
+
+so fully ready to merge and release 1.0?
+
+---
+
+merge it
+
+---
+
+then update the gh issue appropriately
+
+---
+
+wtf https://github.com/feniix/pi-extensions/actions/runs/37533808269/job/112509794301
+
+---
+
+how do I fix the release?
+
+---
+
+but I had migrated to pnpm didnt I?
+
+---
+
+can you fix it or not?
