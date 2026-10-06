@@ -1,3 +1,23 @@
+read https://github.com/feniix/pi-extensions/pull/148
+
+---
+
+how can we continue this work?
+
+---
+
+reslve the issues
+
+---
+
+are we sure we are ready for the 1.0.0 of statusline?
+
+---
+
+yes
+
+---
+
 run the manual terminal smoke test
 
 ---
@@ -22,10 +42,6 @@ so now it is actually ready for 1.0 ?
 
 ---
 
-what is pending of https://github.com/feniix/pi-extensions/issues/147 ?
-
----
-
 https://github.com/feniix/pi-extensions/issues/147, what is the status of each item/acceptance criteria?
 
 ---
@@ -39,10 +55,6 @@ so fully ready to merge and release 1.0?
 ---
 
 merge it
-
----
-
-then update the gh issue appropriately
 
 ---
 
