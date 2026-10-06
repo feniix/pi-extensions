@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.11.3",
+  "checkpoint_id": "01M49DYSNXV4ZJP1KE3H6SV04B",
+  "strategy": "manual-commit",
+  "branch": "chore/align-node-with-pi",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "packages/pi-devtools/CHANGELOG.md",
+    "packages/pi-devtools/package.json",
+    "packages/pi-exa/CHANGELOG.md",
+    "packages/pi-exa/package.json",
+    "packages/pi-notion/CHANGELOG.md",
+    "packages/pi-notion/package.json",
+    "packages/pi-ref-tools/CHANGELOG.md",
+    "packages/pi-ref-tools/package.json",
+    "packages/pi-statusline/CHANGELOG.md",
+    "packages/pi-statusline/package.json"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 14528,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1827968,
+    "output_tokens": 3652,
+    "api_call_count": 21
+  }
+}

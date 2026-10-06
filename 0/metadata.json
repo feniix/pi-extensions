@@ -1,0 +1,76 @@
+{
+  "cli_version": "0.11.3",
+  "checkpoint_id": "01M49DYSNXV4ZJP1KE3H6SV04B",
+  "session_id": "01a11299-b4f2-7308-945e-93ca06b5e7e1",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-06T20:19:53.378812Z",
+  "branch": "chore/align-node-with-pi",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "packages/pi-devtools/CHANGELOG.md",
+    "packages/pi-devtools/package.json",
+    "packages/pi-exa/CHANGELOG.md",
+    "packages/pi-exa/package.json",
+    "packages/pi-notion/CHANGELOG.md",
+    "packages/pi-notion/package.json",
+    "packages/pi-ref-tools/CHANGELOG.md",
+    "packages/pi-ref-tools/package.json",
+    "packages/pi-statusline/CHANGELOG.md",
+    "packages/pi-statusline/package.json"
+  ],
+  "agent": "Pi",
+  "model": "gpt-6.1-sol",
+  "turn_id": "99f7b9f1ab54",
+  "checkpoint_transcript_start": 206,
+  "transcript_lines_at_start": 206,
+  "compact_transcript_start": 105,
+  "token_usage": {
+    "input_tokens": 14528,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1827968,
+    "output_tokens": 3652,
+    "api_call_count": 21
+  },
+  "session_metrics": {
+    "turn_count": 13
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-06T20:19:53.357782Z",
+    "agent_lines": 40,
+    "agent_removed": 5,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 40,
+    "total_lines_changed": 45,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 723,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/baseline-metrics.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-001/metrics-final.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-001/metrics.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-001/result.yaml": 31,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-002/metrics.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-002/result.yaml": 33,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-003/metrics.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-003/result.yaml": 31,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-004/metrics.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-004/result.yaml": 31,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-005/metrics.json": 16,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-005/result.yaml": 31,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/experiment-log.yaml": 222,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/measure-maintainability.mjs": 128,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/spec.yaml": 85,
+        ".context/compound-engineering/ce-optimize/pi-conductor-maintainability/strategy-digest.md": 19
+      }
+    }
+  ]
+}
