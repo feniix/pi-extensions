@@ -32,11 +32,35 @@ A synchronous Exa `/search` request using `deep-lite`, `deep`, or `deep-reasonin
 
 ## Research plan
 
-The in-memory state accumulated by `exa_research_step` calls — topic, criteria, sources, gaps, assumptions, branches, and warnings — that `exa_research_summary.mode === "payload"` translates into a suggested `web_research_exa` invocation. The plan is a per-process singleton built by `createResearchPlanner()`; resetting is explicit via `exa_research_reset`.
+The in-memory state accumulated by `exa_research_step` calls — topic, criteria, sources, gaps, assumptions, branches, and warnings — that `exa_research_summary.mode === "payload"` translates into a suggested `web_research_exa` invocation. The plan belongs to a planner instance built by `createResearchPlanner()`; resetting is explicit via `exa_research_reset`.
 
 *Avoid:* research project, research task.
 
 The planner never calls Exa network APIs internally — it only tracks and summarizes planning state, leaving the actual retrieval to an explicit later call (typically `web_research_exa` with the suggested payload, which produces a synthesis).
+
+## Research cycle
+
+A research plan together with curated evidence, spending authorization, execution
+attempts, results, and liabilities. A cycle targets one successful Agent run;
+retrying a confirmed failure does not start a new cycle.
+
+*Avoid:* Agent run (one remote execution, not the planning and approval history).
+
+Proposed domain concept in PRD-010; not yet shipped.
+
+## Execution attempt
+
+A recorded submission intent for an Agent run and its remote or unknown outcome.
+An unknown attempt may have incurred spending even without a known run ID.
+
+*Avoid:* retry (another attempt does not erase the earlier one).
+
+## Spending grant
+
+Operator-issued permission for a cycle's budget and scope, including specifically
+named uncertainty or replacement exceptions. Cost evidence is not permission.
+
+*Avoid:* budget argument (an assistant-supplied number is not verified consent).
 
 ## Agent work journal
 

@@ -1,10 +1,10 @@
 ---
 title: "pi-exa Integrated Research Cycle"
 prd: PRD-010
-status: "Design agreed; feasibility verification pending"
+status: "Contract settled; implementation pending"
 owner: "Sebastian Otaegui"
 issue: "N/A"
-version: "1.1"
+version: "1.2"
 ---
 
 # PRD: pi-exa Integrated Research Cycle
@@ -28,6 +28,8 @@ Related documents:
 - [Existing planner architecture](../architecture/plan-pi-exa-research-planning-tools.md)
 - [Existing planner decision](../adr/ADR-0016-stateful-exa-research-planning-tools.md)
 - [Shared vocabulary](../../CONCEPTS.md)
+- [Feasibility and Jev decision record](../research/pi-exa-integrated-cycle-feasibility.md)
+- [Settled Pi-first execution contract](../architecture/plan-pi-exa-integrated-research-cycle.md)
 
 This proposal revises the earlier in-memory-only, manually bridged design.
 It does not authorize implementation or change existing tool defaults.
@@ -131,11 +133,11 @@ inside the package.
 
 Without an active plan, standalone `web_research_exa` remains available.
 Explicit parameters must not silently override conflicting active-plan fields.
-Parameters that add compatible information may be incorporated into the artifact;
-conflicting values require plan reconciliation before execution. Compilation and
-validation happen before any paid submission.
-Exact tool parameter names, schema representation, and mappings to Exa's API
-require technical design and verification before implementation.
+The plan is authoritative. Explicit execution fields must match persisted values;
+additions/mismatches require a planner update, not implicit merging or hidden
+execution-time mutation. Compilation/validation precede paid submission.
+The linked execution contract settles routing, schema ownership, mapping and
+revision/conflict behavior.
 
 ## Evidence capture
 
@@ -159,8 +161,9 @@ Cost estimates and API-reported usage must not be represented as interchangeable
 
 Before every attributable paid Exa call, including exploratory calls and retries:
 
-1. Assess confirmed spend, estimated liabilities for prior calls with unresolved
-   costs, outstanding calls, and the estimated cost of the proposed call.
+1. Assess recorded spend by evidence class (retrieval estimates, Agent-reported
+   cost, or independently verified billing), estimated unresolved liabilities,
+   outstanding calls, and the proposed call's estimated cost.
 2. Record the assessment and its uncertainty; do not treat unknown costs as zero.
 3. Permit autonomous execution only when the combined assessment fits the
    approved budget and unresolved liabilities have a defensible estimate.
@@ -287,26 +290,34 @@ Use test-first implementation once the remaining contracts are agreed.
 Test the Pi lifecycle and session isolation contracts and regress existing MCP
 behavior; cross-host integrated-cycle parity is outside this release.
 
-## Feasibility checks and remaining design work
+## Feasibility outcome and remaining implementation verification
 
-Before implementation, verify against source and current primary API docs:
+Issue #152's linked research/contract settle gating interface decisions.
+Operator choices were retained; Jev selected remaining bounded design options
+at the operator's request. Jev is not a runtime dependency.
+Rollout is Pi-only opt-in; retrieval API costs remain classified as estimates,
+not invoices. Initial cycle efforts are fixed efforts plus auto; cycle max/ultra
+are deferred without changing standalone/MCP behavior.
+
+During dependent implementation, verify against source and current primary API docs:
 
 - Exa Agent support for row inputs, exclusions, structured outputs, and existing
    source context; do not assume a local source pack maps directly to `input.data`.
-- Which tools report actual costs and what accounting remains unknown.
+- Which tools report estimates versus Agent usage/cost and what remains unknown.
 - Remote status recovery, cancellation races, and submission idempotency support.
 - How source provenance and citations survive structured result handling.
 - How Pi exposes identity, lifecycle, restart, and concurrent tool calls; how
   shared tool wiring preserves the explicitly unchanged MCP behavior.
 - Storage schema, atomic attempt/ownership writes, version migration, and explicit
   resume interface implementing the required submission-safety invariants.
-- Exact structured conflict rules, compatible-parameter merging, output schema
-  ownership, and tool parameters for the compiled artifact.
+- Implementation of exact structured equality/conflict rules, task-schema
+  validation, and the settled tool parameters for the compiled artifact.
 - Cost-estimation sources, uncertainty approval representation, and reconciliation
   implementing the required pre-call budget assessment.
 - Candidate attribution, archive inspection/resume interfaces, and result curation.
-- How budget approval is represented without claiming the package can verify
-   consent merely because an assistant supplies a numeric budget.
+- Durable grant issuance from operator commands/dialogs, never an
+  assistant-supplied numeric budget as proof of consent.
 
-These are deliberately unresolved, not implicit permission to choose an
-architecture. Reopen consequential interface decisions with the operator.
+These checks do not reopen settled contracts. Unsupported vendor/account
+capabilities use documented fail-closed/uncertainty paths, not invented guarantees.
+Reopen consequential changes to the agreed contract with the operator.
