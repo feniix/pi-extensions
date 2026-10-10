@@ -10,6 +10,13 @@ version: "1.0"
 
 # PRD: pi-exa Research Planning Tools
 
+> **Superseded in part for opt-in Pi cycles:** [PRD-010](PRD-010-pi-exa-integrated-research-cycle.md)
+> and its [execution contract](../architecture/plan-pi-exa-integrated-research-cycle.md)
+> replace in-memory-only retention, manual payload transfer, destructive reset,
+> and absent execution/budget tracking. Original requirements remain historical
+> and apply to legacy standalone/MCP planning. Planner calls remain local and never
+> silently launch paid research. The replacement contract is not yet shipped.
+
 ---
 
 ## 1. Problem & Context
