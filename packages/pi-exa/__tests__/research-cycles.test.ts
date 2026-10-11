@@ -295,6 +295,25 @@ describe("durable research cycles", () => {
     await controller.detach();
   });
 
+  it("keeps recovery usable as an extracted controller method without a receiver", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const execution = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await execution.beforeCreate())();
+    await execution.raw("create", { id: "agent_run_saved", status: "running" });
+    const recover = controller.prepareAgentRecovery;
+    const recovery = await recover({ cycleId: cycle.id });
+    (await recovery.observer.beforeGet())();
+    await recovery.observer.raw("get", {
+      id: recovery.runId,
+      status: "completed",
+      output: { structured: { answer: "recovered" } },
+      costDollars: { total: 0 },
+    });
+    expect(await controller.inspect(cycle.id)).toMatchObject({ status: "completed" });
+    await controller.detach();
+  });
+
   it("recovers existing completed output after explicit resume without a new attempt, grant or reservation", async () => {
     const { controller, cycle, hash, root } = await readyAgent();
     const prepared = await controller.reserveAgent();

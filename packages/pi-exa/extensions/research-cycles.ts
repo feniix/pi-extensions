@@ -484,7 +484,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     });
   }
 
-  return {
+  const cycles = {
     projectId,
     async start(topic: string) {
       if (!topic.trim()) throw new Error("Research topic must not be empty.");
@@ -694,7 +694,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             );
           if (attempt.status === "not-dispatched" || operation.status === "not-dispatched")
             throw new Error("RECOVERY_UNAVAILABLE: This saved attempt was not dispatched.");
-          const original = this.agentLifecycleObserver(record.id, attempt.id, attempt.requestHash);
+          const original = cycles.agentLifecycleObserver(record.id, attempt.id, attempt.requestHash);
           let prepared = false;
           let consumed = false;
           let observed = false;
@@ -1274,5 +1274,6 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
       );
     },
   };
+  return cycles;
 }
 export type ResearchCycles = Awaited<ReturnType<typeof createResearchCycles>>;
