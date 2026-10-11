@@ -10,6 +10,43 @@ const provenance: EvidenceProvenance = {
 };
 
 describe("metadata-first candidate evidence", () => {
+  it("preserves explicit external source metadata when a candidate reuses that source URL", () => {
+    const candidates = captureCandidates(
+      { results: [{ url: "https://example.com/source", title: "SDK title" }] },
+      provenance,
+    );
+    const external = {
+      id: "external",
+      title: "Curated external title",
+      url: candidates[0].url,
+      sourceType: "other" as const,
+      retrievalStatus: "fetched" as const,
+      retrievalEvidence: "Explicit external read",
+      usedFor: [],
+      inspectionIssues: [],
+    };
+    const selected = curateEvidence(
+      candidates,
+      [
+        {
+          candidateId: candidates[0].id,
+          decision: "select",
+          label: "External evidence",
+        },
+      ],
+      [external],
+      [],
+    );
+    expect(selected.sourceUpdates).toEqual([
+      {
+        id: "external",
+        title: "Curated external title",
+        url: candidates[0].url,
+        retrievalStatus: "fetched",
+        retrievalEvidence: "Explicit external read",
+      },
+    ]);
+  });
   it.each(["sig", "SIG", "oauth_sig"])("rejects signed URL credential parameter %s before retention", (parameter) => {
     const candidates = captureCandidates(
       {

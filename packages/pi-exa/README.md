@@ -338,6 +338,8 @@ Select a candidate explicitly through a normal `exa_research_step`:
 Selection records a planner source and labeled selected evidence, with frozen
 provenance. Later retrieval of the same URL enriches candidate metadata but does
 not silently change the selected artifact; reselect explicitly to refresh it.
+Reselection refreshes candidate-created source title/retrieval metadata while
+preserving curated notes. Reused external sources retain their explicit metadata.
 Use `{ "candidateId": "...", "decision": "reject" }` to remove that candidate's
 selection while preserving its metadata/history. Use `evidence` decisions or
 `executionPlan.selectedEvidence` in a single step, not both. Duplicate/unknown

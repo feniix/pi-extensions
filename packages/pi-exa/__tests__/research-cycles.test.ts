@@ -172,6 +172,82 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it("refreshes candidate-owned metadata on explicit reselection while preserving curated source and selection notes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1);
+    const first = await controller.reserveExploration("web_search_exa", { query: "discover" });
+    await controller.explorationEvidenceObserver(
+      cycle.id,
+      first.operation.id,
+      first.operation.requestHash,
+    )({
+      results: [{ url: "https://example.com/source", title: "Old title" }],
+    });
+    const candidate = (await controller.status())?.candidates?.[0];
+    if (!candidate) throw new Error("Missing candidate");
+    await controller.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Select",
+      thought_number: 1,
+      total_thoughts: 3,
+      next_step_needed: true,
+      evidence: [{ candidateId: candidate.id, decision: "select", label: "Source", notes: "Curated selection note" }],
+      executionPlan: { goal: "question", taskSchema: { type: "object" } },
+    });
+    await controller.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Record source notes",
+      thought_number: 2,
+      total_thoughts: 3,
+      next_step_needed: true,
+      sources: [
+        {
+          id: candidate.id,
+          title: "Old title",
+          url: candidate.url,
+          contentNotes: "Curated content note",
+          qualityNotes: "Curated quality note",
+        },
+      ],
+    });
+    const before = await controller.preview();
+    const second = await controller.reserveExploration("web_search_exa", { query: "fetch" });
+    await controller.explorationEvidenceObserver(
+      cycle.id,
+      second.operation.id,
+      second.operation.requestHash,
+    )({
+      results: [{ url: candidate.url, title: "New title", text: "Unarchived body" }],
+    });
+    expect((await controller.preview()).hash).toBe(before.hash);
+    await controller.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Refresh selection",
+      thought_number: 3,
+      total_thoughts: 3,
+      next_step_needed: false,
+      evidence: [{ candidateId: candidate.id, decision: "select", label: "Source" }],
+    });
+    const selected = (await controller.preview()).selectedEvidence[0];
+    expect(selected).toMatchObject({
+      title: "New title",
+      retrievalStatus: "fetched",
+      notes: "Curated selection note",
+      contentNotes: "Curated content note",
+      qualityNotes: "Curated quality note",
+      provenance: [{ operationId: first.operation.id }, { operationId: second.operation.id }],
+    });
+    expect(selected.retrievalEvidence).toContain(second.operation.id);
+    expect(selected.retrievalEvidence).toContain("fetched");
+    expect(selected.retrievalEvidence).not.toContain("discovered_only");
+    await controller.detach();
+  });
   it("rejects a same-step source collision without committing an unreadable cycle or consuming the step", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);

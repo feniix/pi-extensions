@@ -73,6 +73,9 @@ export function curateEvidence(
       continue;
     }
     const existing = sources.find((source) => source.url === candidate.url);
+    // Candidate-created sources use the stable candidate ID. Reused external
+    // sources retain their explicit metadata rather than inheriting SDK claims.
+    const preserveExternal = existing !== undefined && existing.id !== candidate.id;
     const sourceId = existing?.id ?? candidate.sourceId ?? candidate.id;
     if (sources.some((source) => source.id === sourceId && source.url !== candidate.url))
       throw new Error("Evidence source identity conflict.");
@@ -81,12 +84,12 @@ export function curateEvidence(
     candidate.selectedProvenance = structuredClone(candidate.provenance);
     sourceUpdates.push({
       id: sourceId,
-      title: existing?.title ?? candidate.title,
+      title: preserveExternal ? existing.title : candidate.title,
       url: candidate.url,
-      retrievalStatus: candidate.retrievalStatus,
-      retrievalEvidence:
-        existing?.retrievalEvidence ??
-        `Exa metadata from operations ${candidate.provenance.map((entry) => entry.operationId).join(", ")}: ${candidate.retrievalStatus}; source bodies not retained or independently verified.`,
+      retrievalStatus: preserveExternal ? existing.retrievalStatus : candidate.retrievalStatus,
+      retrievalEvidence: preserveExternal
+        ? existing.retrievalEvidence
+        : `Exa metadata from operations ${candidate.provenance.map((entry) => entry.operationId).join(", ")}: ${candidate.retrievalStatus}; source bodies not retained or independently verified.`,
     });
     const prior = selectedEvidence.find((entry) => entry.sourceId === sourceId);
     selectedEvidence = selectedEvidence.filter((entry) => entry.sourceId !== sourceId);
