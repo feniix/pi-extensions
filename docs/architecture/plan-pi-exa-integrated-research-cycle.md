@@ -159,6 +159,45 @@ and transport mechanics are implementation choices subject to these invariants
 and repository dependency policy. Unavailable vendor guarantees use the defined
 fail-closed/uncertainty paths, not invented support.
 
+## #157 delegated execution decisions
+
+The operator delegated design questions to Jev while authorizing continuation
+through the backlog. Design-time `jev-1.13.0` selected these six decisions;
+request/response evidence is retained outside git in
+`/tmp/pi-exa-157-jev-{request,response}.json`. This is design evidence, not runtime
+permission or proof of correctness.
+
+- Extend the approved policy/compiler, real-filesystem controller and registered
+  Pi testing seams with the public SDK lifecycle boundary. Mock only external
+  create/get/cancel and filesystem crash points.
+- Require explicit `web_research_exa` scope in a lifetime grant **and** one-use
+  operator `approve-request` permission for the complete immutable compiled
+  request. This binds effort, providers, continuation and contact-capable work
+  without guessing intent from prose. The total assessment must cover any known
+  fixed-effort base price; add-ons/auto remain scoped uncertainty, not vendor caps.
+  Default exploratory grants still exclude Agent.
+- Use call-local optional before-create/raw lifecycle observers, including late
+  create/get/cancel replies. No global current-cycle state or inferred failure
+  from formatted tool errors.
+- Queued/running cost totals are provisional. Preserve the reservation until
+  terminal receipts; interruption/missing terminal cost remains unknown.
+- Remote completion irrevocably prevents another automatic run, even when local
+  parsing/validation/persistence fails. Retain only validated structured task
+  output, normalized credential-free citation metadata, numeric usage/cost and
+  bounded processing diagnostics; never the full SDK response or invalid output.
+  Exploration retains its separate metadata-only contract.
+- Compile/assess/freeze/reserve durable intent in one owned transaction, then
+  synchronize before create. Dispatch the exact preview request with a final
+  synchronous ownership/generation/budget fence. Attempt identity is local, not
+  an invented server idempotency key. #157 blocks replacement after any saved
+  attempt; recovery/retry remain separate #158/#159 slices.
+
+Agent price basis: [published pricing](https://exa.ai/docs/reference/pricing)
+(last modified August 20, 2026): minimal $0.012, low $0.025, medium $0.10,
+high $0.50, xhigh $1.00; contacts/providers are additional. SDK 2.23.0 and
+the guide document beta `max`, while newer create docs list `ultra`; both remain
+excluded from cycles. No live Agent call is authorized by these decisions.
+
 ## #156 evidence implementation decisions
 
 The operator approved metadata-first candidate retention and the public testing
