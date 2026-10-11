@@ -1,9 +1,1 @@
-make discrete commits and create the pr
-
----
-
-what issue should be worked next?
-
----
-
 start working on it as the next layer
