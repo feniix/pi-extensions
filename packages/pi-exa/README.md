@@ -216,6 +216,8 @@ are outside the Exa ledger. These are best-effort estimates, **not vendor billin
 caps or independently verified invoices**.
 
 `researchMode: "standalone"` explicitly selects unrelated legacy retrieval.
+Standalone requests must omit `cycleId`, `expectedRevision` and `artifactHash`;
+combining standalone mode with cycle references is rejected before dispatch.
 With no active cycle, normal standalone web tools remain available.
 Continuations identifying a saved cycle attempt and requests carrying a saved
 cycle's `metadata.cycleId` remain blocked even with a standalone override or after archival.

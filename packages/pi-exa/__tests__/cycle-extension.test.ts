@@ -157,6 +157,28 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it.each([
+    "cycleId",
+    "expectedRevision",
+    "artifactHash",
+  ])("rejects standalone requests carrying %s without dispatch or ledger mutation", async (field) => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const before = (await pi.call("exa_research_status")).details;
+    const reference = field === "cycleId" ? before.id : field === "expectedRevision" ? before.revision : "a".repeat(64);
+    const response = await pi.call("web_search_exa", {
+      query: "topic",
+      researchMode: "standalone",
+      [field]: reference,
+    });
+    expect(response.isError).toBe(true);
+    expect(response.content[0]).toMatchObject({
+      text: expect.stringContaining("Standalone requests must omit cycle references"),
+    });
+    expect(offlineSearch).not.toHaveBeenCalled();
+    expect((await pi.call("exa_research_status")).details).toEqual(before);
+  });
+
   it("retries the original genuine total after a transient write failure rather than replacing it with missing evidence", async () => {
     const pi = await host();
     await pi.command?.handler("start topic", pi.context);

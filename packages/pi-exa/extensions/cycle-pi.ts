@@ -253,6 +253,13 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
               }
               const reference = { cycleId, expectedRevision, artifactHash };
               if (!Value.Check(referenceParams, reference)) throw new Error("Invalid artifact reference.");
+              if (
+                researchMode === "standalone" &&
+                (cycleId !== undefined || expectedRevision !== undefined || artifactHash !== undefined)
+              )
+                throw new Error(
+                  "Standalone requests must omit cycle references; use active research for cycle-attributed spending.",
+                );
               if (!record && (cycleId !== undefined || expectedRevision !== undefined))
                 throw new Error("No active research cycle.");
               if (researchMode === "active" && !record) throw new Error("No active research cycle.");
