@@ -187,6 +187,37 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("marks an unassessable aggregate-liability status fallback as assessment-only, never dispatch permission", async () => {
+    const pi = await host();
+    await pi.command?.handler("start question", pi.context);
+    const started = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${started.id} 1`, pi.context);
+    await pi.call("web_search_exa", { query: "offline", cycleId: started.id });
+    const status = (await pi.call("exa_research_status")).details;
+    const path = join(pi.context.cwd, "agent", "research-cycles", String(status.projectId), `${status.id}.json`);
+    const record = JSON.parse(await readFile(path, "utf8"));
+    record.ledger = [
+      { ...record.ledger[0], status: "reported", reportedMicros: Number.MAX_SAFE_INTEGER },
+      {
+        ...record.ledger[0],
+        id: "second-reported-operation",
+        status: "reported",
+        reportedMicros: Number.MAX_SAFE_INTEGER,
+      },
+    ];
+    await writeFile(path, JSON.stringify(record));
+    const response = await pi.call("exa_research_status");
+    expect(response.details.accounting).toMatchObject({
+      ledgerHealthy: false,
+      assessmentOnly: true,
+      reason: "UNKNOWN_LIABILITY",
+      error: expect.any(String),
+    });
+    expect(response.details.accounting).not.toHaveProperty("canDispatch");
+    expect(offlineCreate).not.toHaveBeenCalled();
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
   async function readyAgentHost() {
     const pi = await host();
     await pi.command?.handler("start question", pi.context);

@@ -60,6 +60,7 @@ function view(record: ResearchCycle) {
   } catch (error) {
     accounting = {
       ledgerHealthy: false,
+      assessmentOnly: true,
       billingVerified: false,
       reason: "UNKNOWN_LIABILITY",
       error: error instanceof Error ? error.message : String(error),
