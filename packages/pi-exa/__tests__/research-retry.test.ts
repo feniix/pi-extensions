@@ -20,6 +20,7 @@ const permission = (id: string) => ({
   duplicateWorkAcknowledged: true,
   additionalChargesAcknowledged: true,
   issuedAt: "2026-10-11",
+  source: "command",
 });
 
 it("assesses confirmed failure/nondispatch retry history without claiming spending consent", () => {
@@ -87,6 +88,16 @@ it("rejects duplicate replacement permission IDs instead of authorizing multiple
       "replace",
     ),
   ).toThrow("Replacement permission identity conflict.");
+});
+
+it("requires recorded command provenance instead of treating tool-shaped risk objects as operator consent", () => {
+  const { source: _source, ...unattributed } = permission("unknown");
+  for (const grant of [unattributed, { ...permission("unknown"), source: "tool" }]) {
+    expect(assessRetryHistory([fact("unknown", "unknown")], [grant], identity, requestHash, "replace")).toMatchObject({
+      eligible: false,
+      reason: "REPLACEMENT_APPROVAL_REQUIRED",
+    });
+  }
 });
 
 it.each([

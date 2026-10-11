@@ -6,6 +6,7 @@ import type { AccountingIdentity } from "./research-accounting.js";
 export const replacementPermissionSchema = Type.Object(
   {
     kind: Type.Literal("exa-replacement-permission-v1"),
+    source: Type.Literal("command"),
     id: Type.String({ minLength: 1 }),
     cycleId: Type.String({ minLength: 1 }),
     projectId: Type.String({ minLength: 1 }),
