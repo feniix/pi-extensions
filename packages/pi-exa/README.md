@@ -129,6 +129,45 @@ Example:
 
 ## Tools
 
+### Opt-in durable Pi planning
+
+Start Pi with `--exa-enable-cycles` to use durable research planning:
+
+- `/exa-research start <topic>` creates an isolated cycle without paid work.
+- `/exa-research list` lists saved cycles in this project.
+- `/exa-research resume <cycle-id>` explicitly acquires ownership after restart.
+- `/exa-research archive [cycle-id]` detaches and archives without deleting history.
+
+The four `exa_research_*` tools then update, inspect, summarize, and archive the
+active cycle. Reset does not cancel remote work or clear liabilities.
+Session switches, forks, tree navigation, reload/shutdown detach the active cycle;
+restart never automatically resumes it. Live owners prevent competing resumes.
+Related Git worktrees share a project namespace, not active session ownership.
+
+Curated JSON lives under the configured Pi agent directory's
+`research-cycles/<project-id>/`, outside git, with private permissions.
+Per-step raw notes/update payloads are not retained; selected source notes,
+criteria, assumptions, gaps and revision metadata are retained.
+Credentials and full raw retrieval archives are not written by this planner.
+Corrupt/unsupported records fail closed. Unknown execution remains unknown after
+resume; completed records cannot be edited back into executable planning.
+
+This release implements **local persistence only**. Integrated paid retrieval/
+Agent execution and `/exa-research approve` are unavailable until their safety
+slices land. Active-cycle web calls fail before dispatch; `researchMode:
+"standalone"` explicitly selects unrelated legacy retrieval.
+With no active cycle, normal standalone web tools remain available.
+
+The storage uses short exclusive filesystem transactions and durable replacement.
+An interrupted transaction may leave a `.lock` file; do not infer remote failure
+or delete it automatically. After verifying no process is using that project
+store, an operator may recover the orphaned lock. On filesystem write/sync failure,
+inspect the durable record before resuming; a reported failure may occur after
+replacement. Do not use shared/network filesystems that cannot honor these
+locking/durability guarantees.
+
+Without the flag, existing Pi planning stays in memory. MCP behavior is unchanged.
+
 ### exa_research_step
 
 Records one step in an in-memory research-planning session. Params include `topic`, `stage`, `note`, optional `criteria`, `sources`, `gaps`, `assumptions`, `nextAction`, branch/revision metadata, `thought_number`, `total_thoughts`, and `next_step_needed`.
