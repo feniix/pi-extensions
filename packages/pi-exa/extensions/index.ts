@@ -17,7 +17,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPiTools } from "@feniix/bridgekit/pi";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
-import { type CycleRetrievalFactory, cyclePiRegistration } from "./cycle-pi.js";
+import { type CycleAgentFactory, type CycleRetrievalFactory, cyclePiRegistration } from "./cycle-pi.js";
 import { createExaTools, type ExaToolTimeouts } from "./tools.js";
 import { getExaRenderers } from "./tui-renderers.js";
 
@@ -36,7 +36,7 @@ export { DEFAULT_NUM_RESULTS } from "./web-search.js";
 function registerFlags(pi: ExtensionAPI): void {
   pi.registerFlag("exa-enable-cycles", {
     description:
-      "Opt in to durable Pi research cycles with operator-approved exploratory spending; Agent synthesis remains gated.",
+      "Opt in to durable Pi research cycles with operator-approved exploration and one scoped Agent attempt; recovery/replacement remain gated.",
     type: "boolean",
   });
   pi.registerFlag("--exa-api-key", {
@@ -137,7 +137,24 @@ export default function exaExtension(pi: ExtensionAPI) {
         );
         return selected;
       };
-      registerPiTools(cyclePiRegistration(pi, retrievalFactory), tools);
+      const agentFactory: CycleAgentFactory = (agentObserver) => {
+        let selected: ReturnType<CycleAgentFactory>;
+        registerPiTools(
+          {
+            registerTool: (tool) => {
+              selected = tool;
+            },
+          },
+          createExaTools({
+            resolveApiKey: () => resolveAuth(pi).apiKey || undefined,
+            isToolEnabled: (name) => name === "web_research_exa" && isToolEnabledForConfig(pi, resolvedConfig, name),
+            timeouts: resolvePiTimeouts(pi),
+            agentObserver,
+          }),
+        );
+        return selected;
+      };
+      registerPiTools(cyclePiRegistration(pi, retrievalFactory, agentFactory), tools);
       cyclesInstalled = true;
     }
   });

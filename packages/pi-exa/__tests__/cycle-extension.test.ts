@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { createEventBus, createExtensionRuntime } from "@earendil-works/pi-coding-agent";
 import type { PiToolRegistration } from "@feniix/bridgekit/pi";
+import type { AgentRun } from "exa-js";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -26,7 +27,9 @@ vi.mock("node:fs", async (importOriginal) => {
 const offlineSearch = vi.hoisted(() =>
   vi.fn<(...args: unknown[]) => Promise<Record<string, unknown>>>(async () => ({ results: [], requestId: "offline" })),
 );
-const offlineCreate = vi.hoisted(() => vi.fn(async () => ({ id: "offline", status: "completed" })));
+const offlineCreate = vi.hoisted(() =>
+  vi.fn<(params: unknown) => Promise<AgentRun>>(async () => ({ id: "offline", status: "completed" })),
+);
 const offlineEndpoints = vi.hoisted(() => ({
   search: vi.fn(),
   getContents: vi.fn(),
@@ -61,7 +64,7 @@ afterEach(async () => {
   vi.mocked(fs.rename).mockReset();
   vi.mocked(nativeFs.renameSync).mockReset();
   offlineSearch.mockReset().mockResolvedValue({ results: [], requestId: "offline" });
-  offlineCreate.mockClear();
+  offlineCreate.mockReset().mockResolvedValue({ id: "offline", status: "completed" });
   for (const endpoint of Object.values(offlineEndpoints)) endpoint.mockClear();
   vi.unstubAllEnvs();
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
@@ -184,6 +187,172 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  async function readyAgentHost() {
+    const pi = await host();
+    await pi.command?.handler("start question", pi.context);
+    await pi.call("exa_research_step", {
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Prepare",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+      executionPlan: {
+        goal: "answer",
+        taskSchema: {
+          type: "object",
+          required: ["answer"],
+          properties: { answer: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+    });
+    const preview = await pi.call("exa_research_summary");
+    const artifact = preview.details.artifact as { cycleId: string; revision: number; hash: string; request: object };
+    await pi.command?.handler(`approve ${artifact.cycleId} 1 web_research_exa`, pi.context);
+    const pause = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    await pi.command?.handler(`approve-request ${artifact.cycleId} ${pause.details.requestHash} 0.2`, pi.context);
+    return { pi, artifact };
+  }
+
+  it("does not submit when the frozen Agent intent cannot be published durably", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    vi.mocked(nativeFs.renameSync).mockImplementationOnce(() => {
+      throw new Error("intent publication denied");
+    });
+    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    expect(offlineCreate).not.toHaveBeenCalled();
+    expect((await pi.call("exa_research_status")).details).toMatchObject({
+      status: "planning",
+      attempts: [],
+      ledger: [],
+    });
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
+  it("surfaces completed invalid output as local processing failure rather than buying a replacement", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    offlineCreate.mockResolvedValueOnce({
+      id: "agent_run_invalid",
+      status: "completed",
+      output: { structured: { answer: 7 } },
+      costDollars: { total: 0.1 },
+    });
+    const response = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    expect(response.isError).toBe(true);
+    expect(response.details).toMatchObject({
+      status: "completed",
+      execution: { result: { processing: "failed" } },
+      accounting: { reportedDollars: 0.1 },
+    });
+    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    const override = await pi.call("web_research_exa", {
+      query: "continue it",
+      previousRunId: "agent_run_invalid",
+      researchMode: "standalone",
+    });
+    expect(override.isError).toBe(true);
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
+  it("retains a missing-ID interruption and settles a late original create without a duplicate submission", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    let enter!: () => void;
+    let resolve!: (run: AgentRun) => void;
+    const entered = new Promise<void>((done) => {
+      enter = done;
+    });
+    offlineCreate.mockImplementationOnce(() => {
+      enter();
+      return new Promise((done) => {
+        resolve = done;
+      });
+    });
+    const signal = new AbortController();
+    const call = pi.call("web_research_exa", { cycleId: artifact.cycleId }, signal.signal);
+    await entered;
+    signal.abort();
+    expect((await call).isError).toBe(true);
+    expect((await pi.call("exa_research_status")).details).toMatchObject({
+      status: "unknown",
+      attempts: [{ status: "unknown" }],
+      ledger: [{ status: "unknown" }],
+    });
+    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    resolve({
+      id: "agent_run_late",
+      status: "completed",
+      output: { structured: { answer: "late" } },
+      costDollars: { total: 0.1 },
+    });
+    await vi.waitFor(async () => {
+      expect((await pi.call("exa_research_status")).details).toMatchObject({
+        status: "completed",
+        accounting: { reportedDollars: 0.1 },
+      });
+    });
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+  it("executes the exact compiled request only after scoped operator approval, then stops at one successful Agent result", async () => {
+    const pi = await host();
+    await pi.command?.handler("start question", pi.context);
+    await pi.call("exa_research_step", {
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Prepare",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+      executionPlan: {
+        goal: "answer",
+        taskSchema: {
+          type: "object",
+          required: ["answer"],
+          properties: { answer: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+    });
+    const preview = await pi.call("exa_research_summary", { mode: "execution_plan" });
+    const artifact = preview.details.artifact as { cycleId: string; revision: number; hash: string; request: object };
+    await pi.command?.handler(`approve ${artifact.cycleId} 1 web_research_exa`, pi.context);
+    const paused = await pi.call("web_research_exa", {
+      cycleId: artifact.cycleId,
+      expectedRevision: artifact.revision,
+      artifactHash: artifact.hash,
+    });
+    expect(paused.isError).toBe(true);
+    expect(paused.details.assessment).toMatchObject({ reason: "UNCERTAINTY_APPROVAL_REQUIRED" });
+    expect(offlineCreate).not.toHaveBeenCalled();
+    await pi.command?.handler(`approve-request ${artifact.cycleId} ${paused.details.requestHash} 0.2`, pi.context);
+    offlineCreate.mockResolvedValueOnce({
+      id: "agent_run_final",
+      status: "completed",
+      stopReason: "schema_satisfied",
+      output: { structured: { answer: "result" } },
+      costDollars: { total: 0.1 },
+    });
+    const finished = await pi.call("web_research_exa", {
+      cycleId: artifact.cycleId,
+      expectedRevision: artifact.revision,
+      artifactHash: artifact.hash,
+    });
+    expect(finished.isError).not.toBe(true);
+    expect(offlineCreate).toHaveBeenCalledExactlyOnceWith(artifact.request);
+    expect(await pi.call("exa_research_status")).toMatchObject({
+      details: {
+        status: "completed",
+        attempts: [{ result: { processing: "validated", taskOutput: { answer: "result" } } }],
+        accounting: { reportedDollars: 0.1 },
+      },
+    });
+    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
   it("does not persist a signed URL signature from SDK results or expose it as selectable candidate metadata", async () => {
     const pi = await host();
     await pi.command?.handler("start topic", pi.context);
@@ -470,12 +639,12 @@ describe("Pi cycle commands and tools", () => {
     await pi.call("web_search_exa", { query: "unrelated", researchMode: "standalone" });
     expect((await pi.call("exa_research_status")).details).toEqual(curated.details.cycle);
   });
-  it("describes approved exploratory spending separately from gated Agent synthesis in flag help", async () => {
+  it("describes scoped Agent execution separately from still-gated recovery/replacement in flag help", async () => {
     const pi = await host();
     expect(pi.flags).toHaveBeenCalledWith("exa-enable-cycles", {
       type: "boolean",
       description:
-        "Opt in to durable Pi research cycles with operator-approved exploratory spending; Agent synthesis remains gated.",
+        "Opt in to durable Pi research cycles with operator-approved exploration and one scoped Agent attempt; recovery/replacement remain gated.",
     });
   });
 
@@ -940,7 +1109,8 @@ describe("Pi cycle commands and tools", () => {
         }
       } else {
         expect(preview.isError).toBe(true);
-        expect(preview.content[0]).toMatchObject({ text: expect.stringContaining("no request was dispatched") });
+        expect(preview.content[0]).toMatchObject({ text: expect.stringContaining("APPROVAL_REQUIRED") });
+        expect(offlineCreate).not.toHaveBeenCalled();
         expect(preview.details).not.toHaveProperty("issues");
       }
     } else {
@@ -1011,7 +1181,8 @@ describe("Pi cycle commands and tools", () => {
     });
     const gated = await pi.call("web_research_exa", { artifactHash: artifact.hash });
     expect(gated.isError).toBe(true);
-    expect(gated.content[0]).toMatchObject({ text: expect.stringContaining("no request was dispatched") });
+    expect(gated.content[0]).toMatchObject({ text: expect.stringContaining("APPROVAL_REQUIRED") });
+    expect(offlineCreate).not.toHaveBeenCalled();
     expect((await pi.call("exa_research_summary", { mode: "payload", expectedRevision: 0 })).details).toMatchObject({
       issues: [expect.objectContaining({ code: "STALE_REVISION" })],
     });

@@ -108,8 +108,8 @@ const snapshotSchema = Type.Object(
   strict,
 );
 const ownerSchema = Type.Object({ sessionId: Type.String(), token: Type.String(), pid: count }, strict);
-// Operational records are reserved for later slices and preserved verbatim.
-// This slice cannot issue grants, start attempts, or alter accounting.
+// Known versioned operational records are validated by their policy modules.
+// Opaque legacy records remain inspectable, never inferred as consent or no liability.
 const objects = Type.Array(Type.Object({}, { additionalProperties: true }));
 const recordSchema = Type.Object(
   {

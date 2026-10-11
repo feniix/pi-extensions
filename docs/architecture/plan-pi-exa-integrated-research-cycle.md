@@ -15,9 +15,11 @@ Operator choices and delegated Jev selections below are not shipped code.
 ## Activation and host separation
 
 Pi-only `--exa-enable-cycles` is initially disabled by default. When enabled,
-an explicitly started/resumed cycle integrates automatically. Until all safety
-slices land, integrated paid execution fails closed rather than silently falling
-back to standalone. Existing standalone/MCP defaults remain unchanged.
+an explicitly started/resumed cycle integrates automatically. Each incomplete
+execution/recovery/replacement path fails closed rather than silently falling
+back to standalone. #157 exposes only independently safe one-attempt execution;
+recovery/replacement remain gated until their safety layers. Existing
+standalone/MCP defaults remain unchanged; #160 delivers the complete workflow.
 
 Use a thin Pi registration/execution decorator to capture host context.
 Inject optional host-neutral per-call raw-response/lifecycle observers into shared
@@ -204,6 +206,12 @@ on its attempt. Local interruption remains `unknown`; cost liability is separate
 The #157 replacement block remains even after confirmed failure. Planning/grant
 amendments for retries are a deliberate #159 change, not implicitly enabled here.
 Evidence: `/tmp/pi-exa-157-jev-terminal-{request,response}.json`.
+
+A third delegated Jev round reconciled the #157 explicit-call acceptance with
+#160 complete-workflow rollout: expose only the safe single-attempt subset now
+under the existing opt-in flag and exact operator permissions, with all
+unavailable recovery/replacement paths failing closed. Do not invent a new flag
+or test-only bypass. Evidence: `/tmp/pi-exa-157-jev-activation-{request,response}.json`.
 
 ## #156 evidence implementation decisions
 

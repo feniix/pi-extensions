@@ -21,8 +21,10 @@ import {
   type ResearchCycles,
 } from "./research-cycles.js";
 import { evidenceDecisionSchema } from "./research-evidence.js";
+import { agentAttemptSchema } from "./research-execution.js";
 import { createResearchPlanner } from "./research-planner.js";
 import { exaResearchStepParams, exaResearchSummaryParams } from "./schemas.js";
+import type { AgentLifecycleObserver } from "./web-research.js";
 
 const targetProperties = {
   cycleId: Type.Optional(Type.String()),
@@ -89,8 +91,15 @@ export type CycleRetrievalFactory = (
   name: string,
   observer: ExaUsageObserver,
 ) => Parameters<PiToolRegistration["registerTool"]>[0] | undefined;
+export type CycleAgentFactory = (
+  observer: AgentLifecycleObserver,
+) => Parameters<PiToolRegistration["registerTool"]>[0] | undefined;
 
-export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRetrievalFactory): PiToolRegistration {
+export function cyclePiRegistration(
+  pi: ExtensionAPI,
+  retrievalFactory?: CycleRetrievalFactory,
+  agentFactory?: CycleAgentFactory,
+): PiToolRegistration {
   const controllers = new Map<string, Promise<ResearchCycles>>();
   const get = (ctx: ExtensionContext) => {
     const key = JSON.stringify([ctx.cwd, ctx.sessionManager.getSessionId()]);
@@ -120,7 +129,7 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
 
   pi.registerCommand("exa-research", {
     description:
-      "Manage research cycles: start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling> [tool,tool...], approve-request <cycle-id> <request-hash> <assessed-dollars>, approve-liability <cycle-id> <operation-id> <assessed-dollars>, archive [id]. Agent synthesis remains gated.",
+      "Manage research cycles: start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling> [tool,tool...], approve-request <cycle-id> <request-hash> <assessed-dollars>, approve-liability <cycle-id> <operation-id> <assessed-dollars>, archive [id]. Agent requires explicit tool scope and exact-request approval; recovery/replacement remain gated.",
     handler: async (args, ctx) => {
       try {
         const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(args.trim());
@@ -272,9 +281,62 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
               if (researchMode === "active" && !record) throw new Error("No active research cycle.");
               if (record && researchMode !== "standalone") {
                 if (tool.name === "web_research_exa") {
-                  await cycles.preview({ ...reference, executionFields: standalone });
-                  throw new Error(
-                    "Integrated paid research is not available in this slice; no request was dispatched.",
+                  if (!agentFactory) {
+                    await cycles.preview({ ...reference, executionFields: standalone });
+                    throw new Error(
+                      "Integrated paid research is not available in this slice; no request was dispatched.",
+                    );
+                  }
+                  const prepared = await cycles.reserveAgent({ ...reference, executionFields: standalone });
+                  const { attempt, artifact, assessment } = prepared;
+                  const observer = cycles.agentLifecycleObserver(attempt.cycleId, attempt.id, attempt.requestHash);
+                  const callObserver: AgentLifecycleObserver = {
+                    beforeCreate: observer.beforeCreate,
+                    raw: async (phase, reply) => {
+                      const remoteId = reply.id;
+                      const remoteStatus = reply.status;
+                      await observer.raw(phase, reply);
+                      try {
+                        onUpdate?.(
+                          result(
+                            { cycleId: attempt.cycleId, attemptId: attempt.id, phase, remoteId, remoteStatus },
+                            `Exa Agent ${remoteId}: ${remoteStatus}. Progress is not final billing or criterion verification.`,
+                          ),
+                        );
+                      } catch {
+                        /* Display failure never authorizes replacement research. */
+                      }
+                    },
+                  };
+                  let response: Awaited<ReturnType<typeof tool.execute>>;
+                  try {
+                    const agent = agentFactory(callObserver);
+                    if (!agent) throw new Error("Agent research is not enabled; no SDK request was dispatched.");
+                    response = await agent.execute(id, artifact.request, signal, onUpdate, ctx);
+                  } finally {
+                    await observer.finish();
+                  }
+                  const current = await cycles.inspect(attempt.cycleId);
+                  const execution = current.attempts.find(
+                    (entry) => Value.Check(agentAttemptSchema, entry) && entry.id === attempt.id,
+                  );
+                  const accounting = view(current).accounting;
+                  const incompleteOrInvalid =
+                    !Value.Check(agentAttemptSchema, execution) || execution.result?.processing !== "validated";
+                  return result(
+                    {
+                      tool: "web_research_exa",
+                      cycleId: attempt.cycleId,
+                      attemptId: attempt.id,
+                      artifactHash: artifact.hash,
+                      requestHash: attempt.requestHash,
+                      assessment,
+                      execution,
+                      accounting,
+                      status: current.status,
+                    },
+                    `Exa cycle ${attempt.cycleId}; Agent attempt ${attempt.id}; status ${current.status}.\n${JSON.stringify(execution, null, 2)}\nUsage classification: ${JSON.stringify(accounting)}\nRemote completion stops further submissions even when local processing failed. Findings do not satisfy criteria automatically. Recover/inspect the existing attempt; do not buy replacement research. Estimates are not vendor caps; API-reported costs are not independently verified invoices.`,
+                    response.isError || incompleteOrInvalid,
                   );
                 }
                 if (!retrievalFactory || !EXPLORATION_TOOLS.some((name) => name === tool.name))
@@ -415,7 +477,12 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                 }
                 if (
                   saved.some((cycle) =>
-                    cycle.attempts.some((attempt) => "runId" in attempt && attempt.runId === standalone.previousRunId),
+                    cycle.attempts.some(
+                      (attempt) =>
+                        ("runId" in attempt && attempt.runId === standalone.previousRunId) ||
+                        (Value.Check(agentAttemptSchema, attempt) &&
+                          attempt.result?.remoteId === standalone.previousRunId),
+                    ),
                   )
                 ) {
                   throw new Error("Recorded cycle attempts cannot be continued as unrelated standalone work.");
@@ -438,7 +505,7 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                 if (!Value.Check(summaryParams, params)) throw new Error("Invalid research summary arguments.");
                 if (params.mode === undefined || params.mode === "payload" || params.mode === "execution_plan") {
                   const artifact = await cycles.preview(params);
-                  return result({ artifact, canExecute: false });
+                  return result({ artifact, previewOnly: true });
                 }
                 {
                   const current = await cycles.status(params);
@@ -465,7 +532,7 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                       request: error.request,
                       assessment: error.assessment,
                       operatorCommands: [
-                        `/exa-research approve ${error.cycleId} <total-dollar-ceiling>`,
+                        `/exa-research approve ${error.cycleId} <total-dollar-ceiling>${error.tool === "web_research_exa" ? " web_research_exa" : ""}`,
                         ...(error.assessment.reason === "UNCERTAINTY_APPROVAL_REQUIRED"
                           ? [`/exa-research approve-request ${error.cycleId} ${error.requestHash} <assessed-dollars>`]
                           : []),

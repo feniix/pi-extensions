@@ -51,7 +51,7 @@ export function assessAgent(
     assessment.proposedMicros < moneyMicros(fixedBaseDollars)
   ) {
     assessment.canDispatch = false;
-    assessment.reason = "INSUFFICIENT_BALANCE";
+    assessment.reason = "UNCERTAINTY_APPROVAL_REQUIRED";
   }
   return { ...assessment, fixedBaseDollars, rateProfile: AGENT_RATE_PROFILE };
 }

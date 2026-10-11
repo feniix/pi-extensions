@@ -32,13 +32,20 @@ import { PLANNER_GUIDELINES } from "./tool-guidance.js";
 import { performAnswer } from "./web-answer.js";
 import { performWebFetch } from "./web-fetch.js";
 import { performFindSimilar } from "./web-find-similar.js";
-import { AgentResearchCancelledError, AgentResearchTimeoutError, performResearch } from "./web-research.js";
+import {
+  type AgentLifecycleObserver,
+  AgentResearchCancelledError,
+  AgentResearchTimeoutError,
+  performResearch,
+} from "./web-research.js";
 import { DEFAULT_NUM_RESULTS, performWebSearch } from "./web-search.js";
 import { performAdvancedSearch } from "./web-search-advanced.js";
 
 export interface ExaToolsOptions {
   /** Optional operation-bound raw/late retrieval hooks. Never installed by MCP. */
   usageObserver?: ExaUsageObserver;
+  /** Optional original-attempt-bound create/get/cancel observations; Pi cycles only. */
+  agentObserver?: AgentLifecycleObserver;
   /** Resolve the Exa API key at execute time. Return undefined when unconfigured. */
   resolveApiKey?: () => string | undefined;
   /** Host-agnostic gating; tools whose names return false are omitted from the returned array. */
@@ -636,7 +643,7 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
                 dataSources: args.dataSources,
                 budget: args.budget,
               },
-              context,
+              { ...context, ...(opts.agentObserver ? { observer: opts.agentObserver } : {}) },
             ),
         },
         resolveApiKey,

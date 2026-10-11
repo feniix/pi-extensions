@@ -295,7 +295,54 @@ assert the intended snapshot. Active Agent `query` may be omitted. Explicit
 execution fields must equal the compiled authoritative values: scalars exactly,
 JSON objects ignoring key order, arrays retaining order. Conflicts identify the
 field to update; execution never adds fields, deep-merges or mutates the plan.
-Even a valid artifact has `canExecute: false` in this rollout.
+Compilation returns `previewOnly: true`; it never establishes spending permission.
+
+#### One compiled Agent attempt
+
+With cycles enabled, an active `web_research_exa` call executes the exact current
+artifact after **both** operator permissions:
+
+1. `/exa-research approve <cycle-id> <total-dollar-ceiling> web_research_exa`
+   explicitly includes Agent in the lifetime tool scope (include other desired
+   tools in the comma-separated scope; amendments replace the scope/ceiling).
+2. `/exa-research approve-request <cycle-id> <request-hash> <assessed-dollars>`
+   names the full immutable request displayed by the permission pause, including
+   effort, providers, continuation and contact-capable query/output contract.
+
+The request hash is distinct from the preview artifact hash. Request permission
+is single-use; plan changes require a new exact-request assessment. An assessment
+below the published fixed-effort base price fails closed. Contact/Connect extras
+and metered work need the explicit full-request assessment; neither the estimate
+nor the cycle ceiling is a vendor-enforced billing cap. Generic exploratory
+grants still exclude Agent. No assistant-supplied flags or numbers grant consent.
+
+Before create, the controller atomically freezes the artifact, permission/budget
+assessment and unique attempt/operation, persists intent, and claims one SDK
+dispatch capability. Write/sync failure prevents submission. Progress includes
+the remote ID as it becomes available; queued/running costs are provisional,
+not final receipts. Terminal explicit totals (including zero) reconcile once.
+Missing/malformed costs and local interruption remain unknown, not free work.
+
+Status exposes attempts and the curated execution `result`: validated structured
+task output, normalized credential-free citation metadata, numeric usage and
+processing diagnostics. This explicitly requested synthesis is retained privately;
+the exploration metadata-only policy is unchanged. Full SDK responses, request
+headers, unrequested generated prose, source excerpts and invalid task outputs
+are not archived automatically. Artifacts/explicit rows must remain nonsecret.
+
+Confirmed remote completion marks the cycle `completed` even if local schema
+validation fails. Findings never satisfy criteria automatically or buy more
+research. Confirmed remote failed/cancelled runs are `failed`; local timeout/error
+without terminal confirmation is `unknown`. Every saved attempt blocks another
+submission in this slice, even after proven nondispatch. Inspect the existing
+attempt rather than repeat the paid call; recovery/replacement are still gated
+until the following safety layers. Archive retains liabilities and never cancels
+the run. Late observations can settle only their original attempt, not reactivate
+it or mutate another cycle's plan/ownership.
+
+Standalone/default-opt-out and MCP remain unchanged. Recorded cycle run IDs
+cannot be continued through an unrelated standalone override. This is the
+independently safe one-attempt subset, not the completed workflow rollout.
 
 #### Candidate evidence and curation
 
