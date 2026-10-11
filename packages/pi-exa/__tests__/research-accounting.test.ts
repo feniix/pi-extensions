@@ -87,6 +87,25 @@ describe("exploratory accounting policy", () => {
     ).toMatchObject({ canDispatch: false, reason: "UNKNOWN_LIABILITY", unresolvedOperationIds: ["unknown-1"] });
   });
 
+  it("counts retained reported usage even in an already-restored unknown operation", () => {
+    const restored = {
+      kind: "exa-exploration-v1",
+      id: "restored-1",
+      cycleId: "cycle",
+      revision: 0,
+      tool: "web_search_exa",
+      requestHash: "c".repeat(64),
+      estimateMicros: 7_000,
+      reportedMicros: 2_000,
+      basis: "fixture",
+      status: "unknown",
+      createdAt: "2026-10-10T00:00:00Z",
+    };
+    expect(
+      assessExploration([grant], [restored], estimateExploration("web_search_exa", {}), "web_search_exa"),
+    ).toMatchObject({ reportedDollars: 0.002, canDispatch: false, reason: "UNKNOWN_LIABILITY" });
+  });
+
   it("rejects malformed or duplicate recognized grants rather than falling back to an older approval", () => {
     const estimate = estimateExploration("web_search_exa", {});
     expect(() =>

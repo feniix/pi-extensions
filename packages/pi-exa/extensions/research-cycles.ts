@@ -515,9 +515,9 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           }
           if (operation.status === "reported" && operation.reportedMicros === total) return record;
           if (operation.reportedMicros !== undefined) {
-            if (total === undefined) {
-              operation.status = "unknown";
-            } else if (operation.reportedMicros === total) {
+            // Missing evidence cannot revoke a genuine prior usage receipt.
+            if (total === undefined) return record;
+            if (operation.reportedMicros === total) {
               operation.status = "reported";
             } else {
               operation.status = "reported";

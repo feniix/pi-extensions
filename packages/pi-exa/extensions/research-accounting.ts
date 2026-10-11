@@ -130,9 +130,9 @@ export function assessExploration(
   const unresolvedOperationIds: string[] = [];
   for (const operation of ledger) {
     if (!Value.Check(explorationOperationSchema, operation)) throw new Error("Unclassified or invalid liability.");
+    if (operation.reportedMicros !== undefined) reported = addMoney(reported, operation.reportedMicros);
     if (operation.status === "reported") {
       if (operation.reportedMicros === undefined) throw new Error("Reported usage requires a total.");
-      reported = addMoney(reported, operation.reportedMicros);
       if (operation.conflictingMicros?.length) unresolvedOperationIds.push(operation.id);
     } else if (operation.status === "reserved") pending = addMoney(pending, operation.estimateMicros);
     else if (operation.status === "unknown") unresolvedOperationIds.push(operation.id);

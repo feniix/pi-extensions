@@ -245,6 +245,24 @@ describe("durable research cycles", () => {
     await controller.detach();
   });
 
+  it("preserves genuine reported usage when later receipts are missing or malformed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-preserve-cost-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "operator" });
+    const cycle = await controller.start("topic");
+    await controller.grantBudget(cycle.id, 1);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "first" });
+    await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.002 });
+    const reported = await controller.inspect(cycle.id);
+    for (const receipt of [{}, { totalDollars: -1 }, { totalDollars: Number.NaN }, { totalDollars: Infinity }]) {
+      await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, receipt);
+      expect(await controller.inspect(cycle.id)).toEqual(reported);
+    }
+    const next = await controller.reserveExploration("web_search_exa", { query: "second" });
+    expect(next.assessment.reportedDollars).toBe(0.002);
+    await controller.detach();
+  });
+
   it("does not persist stale, rejected or invalid structured planning edits", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);
