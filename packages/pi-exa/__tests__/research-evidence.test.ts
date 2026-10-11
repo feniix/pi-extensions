@@ -3,6 +3,7 @@ import { captureCandidates, type EvidenceProvenance } from "../extensions/resear
 
 const provenance: EvidenceProvenance = {
   operationId: "operation-one",
+  revision: 0,
   requestHash: "a".repeat(64),
   tool: "web_search_exa",
   retrievedAt: "2026-10-11T00:00:00.000Z",

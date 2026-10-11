@@ -172,6 +172,80 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it("does not let an old capture capability modify archived or reattached evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
+    const capture = controller.explorationEvidenceObserver(cycle.id, operation.id, operation.requestHash);
+    await controller.archive();
+    await capture({ results: [{ url: "https://example.com/late", text: "late" }] });
+    await controller.resume(cycle.id);
+    await capture({ results: [{ url: "https://example.com/reattached", text: "late" }] });
+    expect((await controller.status())?.candidates ?? []).toEqual([]);
+    await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.01 });
+    expect((await controller.status())?.ledger).toMatchObject([{ status: "reported", reportedMicros: 10_000 }]);
+    await controller.detach();
+  });
+  it("rejects restored candidate provenance copied from a different operation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const options = { root: join(root, "store"), cwd: root, sessionId: "one" };
+    const controller = await createResearchCycles(options);
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
+    await controller.explorationEvidenceObserver(
+      cycle.id,
+      operation.id,
+      operation.requestHash,
+    )({
+      results: [{ url: "https://example.com/source" }],
+    });
+    await controller.detach();
+    const saved = await controller.inspect(cycle.id);
+    if (!saved.candidates?.[0]) throw new Error("Candidate missing");
+    saved.candidates[0].provenance[0].requestHash = "f".repeat(64);
+    await writeFile(join(options.root, controller.projectId, `${cycle.id}.json`), JSON.stringify(saved), {
+      mode: 0o600,
+    });
+    const resumed = await createResearchCycles({ ...options, sessionId: "two" });
+    await expect(resumed.resume(cycle.id)).rejects.toThrow("Invalid candidate provenance");
+  });
+  it("persists only operation-bound candidate metadata across explicit resume, without selecting or satisfying criteria", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const options = { root: join(root, "store"), cwd: root, sessionId: "one" };
+    const controller = await createResearchCycles(options);
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
+    const capture = controller.explorationEvidenceObserver(cycle.id, operation.id, operation.requestHash);
+    await capture({ results: [{ url: "https://example.com/source", title: "Source", text: "never persist me" }] });
+    const captured = await controller.status();
+    expect(captured?.candidates).toMatchObject([
+      {
+        url: "https://example.com/source",
+        decision: "candidate",
+        retrievalStatus: "fetched",
+        provenance: [
+          { operationId: operation.id, tool: "web_search_exa", requestHash: operation.requestHash, revision: 0 },
+        ],
+      },
+    ]);
+    expect(captured?.plan.sources).toEqual([]);
+    expect(captured?.executionPlan).toBeUndefined();
+    expect(captured?.revision).toBe(0);
+    await controller.detach();
+    const resumed = await createResearchCycles({ ...options, sessionId: "two" });
+    expect(await resumed.status()).toBeUndefined();
+    expect((await resumed.resume(cycle.id)).candidates).toEqual(captured?.candidates);
+    const stored = await readFile(join(options.root, controller.projectId, `${cycle.id}.json`), "utf8");
+    expect(stored).not.toContain("never persist me");
+    await resumed.detach();
+  });
   it("retries directory durability even when the failed receipt replacement is already visible", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);

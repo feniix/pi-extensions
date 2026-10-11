@@ -8,6 +8,7 @@ const strict = { additionalProperties: false };
 export const evidenceProvenanceSchema = Type.Object(
   {
     operationId: Type.String({ minLength: 1 }),
+    revision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
     requestHash: Type.String({ pattern: "^[a-f0-9]{64}$" }),
     tool: spendingGrantSchema.properties.tools.items,
     retrievedAt: Type.String({ minLength: 1 }),

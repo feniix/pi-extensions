@@ -32,6 +32,7 @@ import {
   type ResearchCycleStepInput,
   validateExecutionPlan,
 } from "./research-artifacts.js";
+import { candidateSchema, captureCandidates, evidenceProvenanceSchema } from "./research-evidence.js";
 import { createResearchPlanner, type ResearchPlannerSnapshot } from "./research-planner.js";
 import type { ResearchSummaryParams } from "./research-planner-types.js";
 import { withResearchStorageLock } from "./research-storage-lock.js";
@@ -116,6 +117,7 @@ const recordSchema = Type.Object(
     owner: Type.Optional(ownerSchema),
     plan: snapshotSchema,
     executionPlan: Type.Optional(executionPlanSchema),
+    candidates: Type.Optional(Type.Array(candidateSchema)),
     attempts: objects,
     ledger: objects,
     grants: objects,
@@ -311,6 +313,31 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     // not cached evidence/inspection flags from disk.
     record.plan = createResearchPlanner(record.plan).snapshot();
     validateAccountingRecords(record.grants, record.ledger, { cycleId: record.id, projectId: record.projectId });
+    const candidateIds = new Set<string>();
+    for (const candidate of record.candidates ?? []) {
+      if (
+        candidateIds.has(candidate.id) ||
+        captureCandidates({ results: [{ url: candidate.url }] }, candidate.provenance[0])[0]?.id !== candidate.id
+      )
+        throw new Error("Invalid candidate identity.");
+      candidateIds.add(candidate.id);
+      const operationIds = new Set<string>();
+      for (const provenance of candidate.provenance) {
+        const operation = record.ledger.find((entry) => "id" in entry && entry.id === provenance.operationId);
+        if (
+          operationIds.has(provenance.operationId) ||
+          !Value.Check(explorationOperationSchema, operation) ||
+          operation.status === "not-dispatched" ||
+          operation.tool !== provenance.tool ||
+          operation.requestHash !== provenance.requestHash ||
+          operation.revision !== provenance.revision
+        )
+          throw new Error("Invalid candidate provenance.");
+        operationIds.add(provenance.operationId);
+      }
+      if (candidate.sourceId !== undefined && !record.plan.sources.some((source) => source.id === candidate.sourceId))
+        throw new Error("Invalid candidate source reference.");
+    }
     return record;
   }
 
@@ -531,6 +558,40 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           return { operation, assessment };
         }),
       );
+    },
+    explorationEvidenceObserver(cycleId: string, operationId: string, requestHash: string) {
+      const captureGeneration = generation;
+      const current = () => captureGeneration === generation && activeId === cycleId;
+      return async (response: unknown) =>
+        ordered(() =>
+          transaction(async () => {
+            if (!current()) return { captured: false };
+            const record = await owned();
+            if (!current() || record.archived || record.status !== "planning") return { captured: false };
+            const operation = record.ledger.find((entry) => "id" in entry && entry.id === operationId);
+            if (
+              !Value.Check(explorationOperationSchema, operation) ||
+              operation.cycleId !== cycleId ||
+              operation.requestHash !== requestHash ||
+              operation.status === "not-dispatched"
+            )
+              throw new Error("Operation identity conflict.");
+            const provenance = {
+              operationId,
+              requestHash,
+              tool: operation.tool,
+              revision: operation.revision,
+              retrievedAt: new Date().toISOString(),
+            };
+            if (!Value.Check(evidenceProvenanceSchema, provenance)) throw new Error("Invalid evidence provenance.");
+            const candidates = captureCandidates(response, provenance, record.candidates);
+            if (canonicalResearchJson(candidates) !== canonicalResearchJson(record.candidates ?? [])) {
+              record.candidates = candidates;
+              await write(record);
+            }
+            return { captured: current(), candidateCount: candidates.length };
+          }),
+        );
     },
     async grantUncertainty(cycleId: string, targetType: "request" | "liability", subjectId: string, dollars: number) {
       return activate((assertCurrent) =>
