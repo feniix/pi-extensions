@@ -1,23 +1,212 @@
 import * as fs from "node:fs/promises";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createResearchCycles, researchProjectId } from "../extensions/research-cycles.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof fs>();
-  return { ...original, rename: vi.fn(original.rename) };
+  return { ...original, rename: vi.fn(original.rename), open: vi.fn(original.open) };
 });
 
 const roots: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.mocked(fs.open).mockReset();
+  vi.mocked(fs.rename).mockReset();
+  vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 describe("durable research cycles", () => {
+  it("retains a failed-start lease until explicit cleanup, even after replacement", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const options = { root: join(root, "store"), cwd: root, sessionId: "one" };
+    const controller = await createResearchCycles(options);
+    const competitor = await createResearchCycles({ ...options, sessionId: "two" });
+    const existing = await competitor.start("existing");
+    await competitor.archive();
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    let fail = true;
+    vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const handle = await original.open(...args);
+      const sync = handle.sync.bind(handle);
+      vi.spyOn(handle, "sync").mockImplementation(async () => {
+        if (fail && String(args[0]) === join(options.root, controller.projectId)) {
+          fail = false;
+          throw new Error("post-replacement sync failure");
+        }
+        await sync();
+      });
+      return handle;
+    });
+    await expect(controller.start("first")).rejects.toThrow("post-replacement sync failure");
+    expect(await controller.status()).toBeUndefined();
+    const records = await controller.list();
+    expect(records).toHaveLength(2);
+    const failed = records.find((record) => record.plan.topic === "first");
+    if (!failed) throw new Error("Missing failed-start record");
+    await expect(controller.start("second")).rejects.toThrow("detach");
+    await expect(controller.resume(existing.id)).rejects.toThrow("Detach");
+    await controller.detach();
+    expect((await competitor.resume(failed.id)).id).toBe(failed.id);
+  });
+
+  it("fails before overflowing generated IDs or changing the durable plan", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("topic");
+    const fixture = await controller.archive();
+    fixture.plan.nextCriterionId = Number.MAX_SAFE_INTEGER;
+    await writeFile(join(root, "store", controller.projectId, `${cycle.id}.json`), JSON.stringify(fixture));
+    await controller.resume(cycle.id);
+    await expect(
+      controller.recordStep({
+        topic: "topic",
+        stage: "framing",
+        note: "",
+        thought_number: 1,
+        total_thoughts: 1,
+        next_step_needed: false,
+        criteria: [{ label: "A" }, { label: "B" }, { label: "C" }],
+      }),
+    ).rejects.toThrow("ID");
+    expect((await controller.status())?.plan.criteria).toEqual([]);
+    expect((await controller.status())?.plan.nextCriterionId).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it("fences pending start and resume when detached", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const options = { root: join(root, "store"), cwd: root, sessionId: "one" };
+    const controller = await createResearchCycles(options);
+    const pending = controller.start("topic");
+    const detached = controller.detach();
+    await Promise.allSettled([pending, detached]);
+    expect(await controller.status()).toBeUndefined();
+    const records = await controller.list();
+    expect(records.every((record) => !record.owner)).toBe(true);
+    const cycle = await controller.start("resume");
+    await controller.detach();
+    const resume = controller.resume(cycle.id);
+    const detachment = controller.detach();
+    await Promise.allSettled([resume, detachment]);
+    expect(await controller.status()).toBeUndefined();
+    expect((await controller.inspect(cycle.id)).owner).toBeUndefined();
+    const competitor = await createResearchCycles({ ...options, sessionId: "two" });
+    expect((await competitor.resume(cycle.id)).id).toBe(cycle.id);
+  });
+
+  it("fences resume already inside durable replacement when detached", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("topic");
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    let entered!: () => void;
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(fs.rename).mockImplementationOnce(async (...args) => {
+      entered();
+      await released;
+      return original.rename(...args);
+    });
+    const resume = controller.resume(cycle.id);
+    await barrier;
+    const detached = controller.detach();
+    release();
+    await Promise.allSettled([resume, detached]);
+    expect(await controller.status()).toBeUndefined();
+    expect((await controller.inspect(cycle.id)).owner).toBeUndefined();
+  });
+
+  it("syncs storage ancestors and fails closed when a directory sync fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    const synced: string[] = [];
+    let fail = false;
+    vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const handle = await original.open(...args);
+      const sync = handle.sync.bind(handle);
+      vi.spyOn(handle, "sync").mockImplementation(async () => {
+        synced.push(String(args[0]));
+        if (fail && String(args[0]) === root) throw new Error("directory sync failed");
+        await sync();
+      });
+      return handle;
+    });
+    const store = join(root, "new", "nested", "store");
+    const controller = await createResearchCycles({ root: store, cwd: root, sessionId: "one" });
+    await controller.start("topic");
+    expect(synced).toEqual(expect.arrayContaining([root, join(root, "new"), dirname(store), store]));
+    await controller.detach();
+    fail = true;
+    await expect(controller.start("unsafe")).rejects.toThrow("directory sync failed");
+    expect(await controller.status()).toBeUndefined();
+  });
+
+  it("ignores inherited Git repository-location overrides", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const a = join(root, "a");
+    const b = join(root, "b");
+    await mkdir(a);
+    await mkdir(b);
+    const exec = promisify(execFile);
+    await exec("git", ["init", "--quiet", a]);
+    await exec("git", ["init", "--quiet", b]);
+    const expected = await Promise.all([researchProjectId(a), researchProjectId(b), researchProjectId(root)]);
+    vi.stubEnv("GIT_DIR", join(a, ".git"));
+    vi.stubEnv("GIT_WORK_TREE", a);
+    vi.stubEnv("GIT_COMMON_DIR", join(a, ".git"));
+    expect(await Promise.all([researchProjectId(a), researchProjectId(b), researchProjectId(root)])).toEqual(expected);
+  });
+
+  it("rejects stale counters before ownership writes and recomputes restored diagnostics", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("topic");
+    await controller.recordStep({
+      topic: "topic",
+      stage: "framing",
+      note: "",
+      thought_number: 1,
+      total_thoughts: 2,
+      next_step_needed: true,
+      criteria: [{ label: "Original", status: "supported", evidenceRefs: ["S1"] }],
+      sources: [{ id: "S1", title: "Evidence", url: "https://example.test" }],
+    });
+    const fixture = await controller.archive();
+    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+    fixture.plan.nextCriterionId = 1;
+    const invalid = JSON.stringify(fixture);
+    await writeFile(path, invalid);
+    await expect(controller.resume(cycle.id)).rejects.toThrow("snapshot");
+    expect(await readFile(path, "utf8")).toBe(invalid);
+    fixture.plan.nextCriterionId = 2;
+    fixture.plan.criteria.push({ ...fixture.plan.criteria[0], label: "Duplicate identity" });
+    await writeFile(path, JSON.stringify(fixture));
+    await expect(controller.resume(cycle.id)).rejects.toThrow("snapshot");
+    fixture.plan.criteria.pop();
+    fixture.plan.sources = [];
+    fixture.plan.criteria[0].evidenceIssues = [];
+    await writeFile(path, JSON.stringify(fixture));
+    const restored = await controller.resume(cycle.id);
+    expect(restored.plan.criteria[0].evidenceIssues).toContain("Unresolved evidence ref: S1");
+    expect(await controller.summary()).toContain("0/1 supported");
+  });
+
   it("serializes racing step writes and explicitly rejects a duplicate sequence", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);

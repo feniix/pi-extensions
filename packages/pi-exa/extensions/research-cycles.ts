@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, type FileHandle, lstat, mkdir, open, readdir, realpath, rename, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
@@ -111,8 +111,10 @@ export async function researchProjectId(cwd: string): Promise<string> {
   const directory = await realpath(cwd);
   let identity = directory;
   try {
+    // Do not let a shell/hook's repository or discovery overrides redefine cwd.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")));
     const result = await exec("git", ["-C", directory, "rev-parse", "--path-format=absolute", "--git-common-dir"], {
-      env: { ...process.env, LC_ALL: "C" },
+      env: { ...env, LC_ALL: "C" },
     });
     identity = await realpath(result.stdout.trim());
   } catch (error) {
@@ -141,6 +143,29 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
   const directory = join(options.root, projectId);
   const owner = { sessionId: options.sessionId, token: randomUUID(), pid: process.pid };
   let activeId: string | undefined;
+  let leasedId: string | undefined;
+  let generation = 0;
+  let localQueue: Promise<void> = Promise.resolve();
+
+  function ordered<T>(action: () => Promise<T>): Promise<T> {
+    const job = localQueue.then(action);
+    localQueue = job.then(
+      () => {},
+      () => {},
+    );
+    return job;
+  }
+
+  function activate<T>(action: (assertCurrent: () => void) => Promise<T>) {
+    const captured = generation;
+    const assertCurrent = () => {
+      if (captured !== generation) throw new Error("Research cycle activation was detached.");
+    };
+    return ordered(() => {
+      assertCurrent();
+      return action(assertCurrent);
+    });
+  }
 
   function filename(id: string) {
     if (!uuid.test(id)) throw new Error("Invalid research cycle ID.");
@@ -152,6 +177,23 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     await privateDirectory(options.root);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await privateDirectory(directory);
+    // Sync every containing parent, even when another controller created the
+    // hierarchy concurrently. Existing entries do not prove durable publication.
+    let child = resolve(directory);
+    while (dirname(child) !== child) {
+      const parent = dirname(child);
+      await syncDirectory(parent);
+      child = parent;
+    }
+  }
+
+  async function syncDirectory(path: string) {
+    const handle = await open(path, constants.O_RDONLY);
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
   }
 
   async function privateDirectory(path: string) {
@@ -200,7 +242,11 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     if (!Value.Check(recordSchema, value) || value.id !== id || value.projectId !== projectId) {
       throw new Error("Invalid or unsupported research cycle record; no state changed.");
     }
-    return value as ResearchCycle;
+    const record = value as ResearchCycle;
+    // Validate semantic identity invariants and derive diagnostics from facts,
+    // not cached evidence/inspection flags from disk.
+    record.plan = createResearchPlanner(record.plan).snapshot();
+    return record;
   }
 
   async function write(record: ResearchCycle) {
@@ -214,12 +260,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
       await file.close();
       file = undefined;
       await rename(temporary, target);
-      const parent = await open(directory, constants.O_RDONLY);
-      try {
-        await parent.sync();
-      } finally {
-        await parent.close();
-      }
+      await syncDirectory(directory);
     } finally {
       await file?.close();
       await unlink(temporary).catch((error: unknown) => {
@@ -240,16 +281,27 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
   }
 
   async function detach() {
-    if (!activeId) return;
-    const id = activeId;
+    generation++;
     // Detach locally even if disk becomes unavailable; do not act on stale state.
     activeId = undefined;
-    await transaction(async () => {
-      const record = await read(id);
-      if (owns(record)) {
-        delete record.owner;
-        await write(record);
-      }
+    return ordered(async () => {
+      if (!leasedId) return;
+      const id = leasedId;
+      await transaction(async () => {
+        let record: ResearchCycle;
+        try {
+          record = await read(id);
+        } catch (error) {
+          if (code(error) !== "ENOENT") throw error;
+          leasedId = undefined;
+          return;
+        }
+        if (owns(record)) {
+          delete record.owner;
+          await write(record);
+        }
+        leasedId = undefined;
+      });
     });
   }
 
@@ -257,26 +309,31 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     projectId,
     async start(topic: string) {
       if (!topic.trim()) throw new Error("Research topic must not be empty.");
-      return transaction(async () => {
-        if (activeId) throw new Error("Archive or detach the active cycle before starting another.");
-        const planner = createResearchPlanner();
-        const record: ResearchCycle = {
-          schemaVersion: 1,
-          id: randomUUID(),
-          projectId,
-          revision: 0,
-          status: "planning",
-          archived: false,
-          owner,
-          plan: { ...planner.snapshot(), topic: topic.trim() },
-          attempts: [],
-          ledger: [],
-          grants: [],
-        };
-        await write(record);
-        activeId = record.id;
-        return structuredClone(record);
-      });
+      return activate((assertCurrent) =>
+        transaction(async () => {
+          assertCurrent();
+          if (activeId || leasedId) throw new Error("Archive or detach the owned cycle before starting another.");
+          const planner = createResearchPlanner();
+          const record: ResearchCycle = {
+            schemaVersion: 1,
+            id: randomUUID(),
+            projectId,
+            revision: 0,
+            status: "planning",
+            archived: false,
+            owner,
+            plan: { ...planner.snapshot(), topic: topic.trim() },
+            attempts: [],
+            ledger: [],
+            grants: [],
+          };
+          leasedId = record.id;
+          await write(record);
+          assertCurrent();
+          activeId = record.id;
+          return structuredClone(record);
+        }),
+      );
     },
     async inspect(id: string) {
       return transaction(() => read(id));
@@ -292,23 +349,30 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
       });
     },
     async resume(id: string) {
-      return transaction(async () => {
-        if (activeId && activeId !== id) throw new Error("Detach the active cycle before resuming another.");
-        const record = await read(id);
-        if (record.owner && !owns(record)) {
-          try {
-            process.kill(record.owner.pid, 0);
-            throw new Error("Research cycle is owned by another live session/runtime.");
-          } catch (error) {
-            if (code(error) !== "ESRCH") throw error;
+      return activate((assertCurrent) =>
+        transaction(async () => {
+          assertCurrent();
+          if ((activeId && activeId !== id) || (leasedId && leasedId !== id)) {
+            throw new Error("Detach the owned cycle before resuming another.");
           }
-        }
-        record.owner = { ...owner };
-        record.archived = false;
-        await write(record);
-        activeId = id;
-        return record;
-      });
+          const record = await read(id);
+          if (record.owner && !owns(record)) {
+            try {
+              process.kill(record.owner.pid, 0);
+              throw new Error("Research cycle is owned by another live session/runtime.");
+            } catch (error) {
+              if (code(error) !== "ESRCH") throw error;
+            }
+          }
+          record.owner = { ...owner };
+          record.archived = false;
+          leasedId = id;
+          await write(record);
+          assertCurrent();
+          activeId = id;
+          return record;
+        }),
+      );
     },
     detach,
     async status() {
@@ -338,15 +402,19 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     },
     async archive(id = activeId) {
       if (!id) throw new Error("No active research cycle to archive.");
-      return transaction(async () => {
-        const record = await read(id);
-        if (record.owner && !owns(record)) throw new Error("Cannot archive another owner's research cycle.");
-        record.archived = true;
-        delete record.owner;
-        await write(record);
-        if (activeId === id) activeId = undefined;
-        return record;
-      });
+      generation++;
+      return ordered(() =>
+        transaction(async () => {
+          const record = await read(id);
+          if (record.owner && !owns(record)) throw new Error("Cannot archive another owner's research cycle.");
+          record.archived = true;
+          delete record.owner;
+          await write(record);
+          if (activeId === id) activeId = undefined;
+          if (leasedId === id) leasedId = undefined;
+          return record;
+        }),
+      );
     },
   };
 }

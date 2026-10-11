@@ -237,15 +237,34 @@ export function createResearchPlanner(initial?: ResearchPlannerSnapshot): Resear
         steps: initial.steps.map((step) => ({ ...structuredClone(step), note: "" })),
       }
     : createEmptyState();
+  if (initial) {
+    const groups = [
+      { records: state.criteria, prefix: "C", next: state.nextCriterionId },
+      { records: state.sources, prefix: "S", next: state.nextSourceId },
+      { records: state.gaps, prefix: "G", next: state.nextGapId },
+    ];
+    for (const { records, prefix, next } of groups) {
+      const ids = records.map((record) => record.id);
+      if (
+        !Number.isSafeInteger(next) ||
+        next < 1 ||
+        new Set(ids).size !== ids.length ||
+        ids.some((id) => {
+          const suffix = id.startsWith(prefix) ? Number(id.slice(1)) : NaN;
+          return Number.isInteger(suffix) && suffix >= 1 && suffix >= next;
+        })
+      ) {
+        throw new Error("Invalid research planner snapshot ID/counter invariants.");
+      }
+    }
+    validateSources();
+    validateEvidence();
+  }
 
   function nextId(prefix: "C" | "S" | "G"): string {
-    if (prefix === "C") {
-      return `${prefix}${state.nextCriterionId++}`;
-    }
-    if (prefix === "S") {
-      return `${prefix}${state.nextSourceId++}`;
-    }
-    return `${prefix}${state.nextGapId++}`;
+    const counter = prefix === "C" ? "nextCriterionId" : prefix === "S" ? "nextSourceId" : "nextGapId";
+    if (state[counter] >= Number.MAX_SAFE_INTEGER) throw new Error("Research planner ID space exhausted.");
+    return `${prefix}${state[counter]++}`;
   }
 
   function reserveExplicitId(prefix: "C" | "S" | "G", id?: string): void {
@@ -255,6 +274,9 @@ export function createResearchPlanner(initial?: ResearchPlannerSnapshot): Resear
     const numericSuffix = Number(id.slice(1));
     if (!Number.isInteger(numericSuffix) || numericSuffix < 1) {
       return;
+    }
+    if (!Number.isSafeInteger(numericSuffix) || numericSuffix >= Number.MAX_SAFE_INTEGER) {
+      throw new Error("Explicit research planner ID exceeds the safe counter range.");
     }
     if (prefix === "C") {
       state.nextCriterionId = Math.max(state.nextCriterionId, numericSuffix + 1);
