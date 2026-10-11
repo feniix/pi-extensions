@@ -46,7 +46,7 @@ import { createResearchPlanner, type ResearchPlannerSnapshot } from "./research-
 import type { ResearchSummaryParams } from "./research-planner-types.js";
 import { withResearchStorageLock } from "./research-storage-lock.js";
 import { exaResearchStepParams, researchCriterion, researchGap, researchSource } from "./schemas.js";
-import type { AgentLifecycleObserver } from "./web-research.js";
+import type { AgentInspectionOptions, AgentLifecycleObserver } from "./web-research.js";
 
 const strict = { additionalProperties: false };
 const strings = Type.Array(Type.String());
@@ -523,7 +523,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         throw new Error("Research cycle attribution is incomplete; unreadable records require repair.");
       return found.cycles;
     },
-    async resume(id: string) {
+    async resume(id: string, assertions: ArtifactAssertions = {}) {
       return activate((assertCurrent) =>
         transaction(async () => {
           assertCurrent();
@@ -531,6 +531,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             throw new Error("Detach the owned cycle before resuming another.");
           }
           const record = await read(id);
+          assertArtifactTarget(record, { ...assertions, cycleId: assertions.cycleId ?? id });
           if (!owns(record)) orphanExplorations(record);
           if (record.owner && !owns(record)) {
             try {
@@ -653,6 +654,96 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           await write(record, assertCurrent);
           assertCurrent();
           return { attempt: structuredClone(attempt), artifact: structuredClone(artifact), assessment };
+        }),
+      );
+    },
+    async prepareAgentRecovery(assertions: ArtifactAssertions & { attemptId?: string } = {}): Promise<{
+      attempt: AgentAttempt;
+      runId: string;
+      observer: NonNullable<AgentInspectionOptions["observer"]>;
+      onUnavailable: () => Promise<void>;
+    }> {
+      const reference = structuredClone(assertions);
+      const captured = generation;
+      const assertCurrent = (cycleId: string) => {
+        if (captured !== generation || activeId !== cycleId)
+          throw new Error("Agent inspection capability was detached.");
+      };
+      return activate((assertActivation) =>
+        transaction(async () => {
+          const record = await owned();
+          assertActivation();
+          assertCurrent(record.id);
+          assertArtifactTarget(record, reference);
+          const entry =
+            reference.attemptId === undefined
+              ? record.attempts.at(-1)
+              : record.attempts.find((item) => "id" in item && item.id === reference.attemptId);
+          if (!Value.Check(agentAttemptSchema, entry))
+            throw new Error(
+              "RECOVERY_UNAVAILABLE: No controlled saved Agent attempt with a frozen artifact; inspect history, never submit replacement research.",
+            );
+          const attempt = savedAgent(record, entry.id, entry.requestHash);
+          const operation = agentOperation(record, attempt);
+          const runId = attempt.result?.remoteId;
+          if (!runId)
+            throw new Error(
+              "RECOVERY_UNAVAILABLE: No saved remote ID; preserve the possible submission as unknown, never create replacement research.",
+            );
+          if (attempt.status === "not-dispatched" || operation.status === "not-dispatched")
+            throw new Error("RECOVERY_UNAVAILABLE: This saved attempt was not dispatched.");
+          const original = this.agentLifecycleObserver(record.id, attempt.id, attempt.requestHash);
+          let prepared = false;
+          let consumed = false;
+          return {
+            attempt: structuredClone(attempt),
+            runId,
+            observer: {
+              beforeGet: async () =>
+                activate((assertInspection) =>
+                  transaction(async () => {
+                    assertCurrent(record.id);
+                    const current = await owned();
+                    assertArtifactTarget(current, reference);
+                    const saved = savedAgent(current, attempt.id, attempt.requestHash);
+                    if (saved.result?.remoteId !== runId) throw new Error("Agent inspection remote identity conflict.");
+                    if (prepared) throw new Error("Agent inspection capability was already prepared.");
+                    prepared = true;
+                    assertInspection();
+                    assertCurrent(record.id);
+                    return () => {
+                      assertInspection();
+                      assertCurrent(record.id);
+                      if (consumed) throw new Error("Agent inspection capability was already consumed.");
+                      consumed = true;
+                    };
+                  }),
+                ),
+              raw: async (phase, reply) => {
+                if (!consumed || phase !== "get" || reply.id !== runId)
+                  throw new Error("Agent inspection remote identity conflict.");
+                // Late original facts can reconcile after detach/archive, never reacquire ownership.
+                await original.raw("get", reply);
+              },
+            },
+            onUnavailable: async () => {
+              if (!consumed) return;
+              await ordered(() =>
+                transaction(async () => {
+                  const current = await read(record.id);
+                  const saved = savedAgent(current, attempt.id, attempt.requestHash);
+                  const liability = agentOperation(current, saved);
+                  // A failed local inspection never undoes confirmed remote completion/failure.
+                  if (saved.result?.terminal) return;
+                  saved.status = "unknown";
+                  saved.localInterruption = "Local wait ended; remote outcome must be inspected, not replaced.";
+                  if (liability.status === "reserved") liability.status = "unknown";
+                  if (current.status === "running") current.status = "unknown";
+                  await writeReceipt(current, liability.id);
+                }),
+              );
+            },
+          };
         }),
       );
     },

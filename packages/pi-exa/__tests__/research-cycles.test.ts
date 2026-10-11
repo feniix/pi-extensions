@@ -248,6 +248,143 @@ describe("durable research cycles", () => {
     await controller.detach();
   });
 
+  it("recovers existing completed output after explicit resume without a new attempt, grant or reservation", async () => {
+    const { controller, cycle, hash, root } = await readyAgent();
+    const prepared = await controller.reserveAgent();
+    const execution = controller.agentLifecycleObserver(cycle.id, prepared.attempt.id, hash);
+    (await execution.beforeCreate())();
+    await execution.raw("create", { id: "agent_run_saved", status: "running", costDollars: { total: 0.02 } });
+    await execution.finish();
+    const original = await controller.inspect(cycle.id);
+    await controller.detach();
+    const resumed = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "two" });
+    expect(await resumed.status()).toBeUndefined();
+    await resumed.resume(cycle.id);
+    const recovery = await resumed.prepareAgentRecovery({ cycleId: cycle.id });
+    expect(recovery.runId).toBe("agent_run_saved");
+    (await recovery.observer.beforeGet())();
+    await recovery.observer.raw("get", {
+      id: recovery.runId,
+      status: "completed",
+      output: { structured: { answer: "recovered" } },
+      costDollars: { total: 0 },
+    });
+    const record = await resumed.inspect(cycle.id);
+    expect(record).toMatchObject({
+      status: "completed",
+      attempts: [{ status: "completed", result: { processing: "validated", taskOutput: { answer: "recovered" } } }],
+      ledger: [{ status: "reported", reportedMicros: 0 }],
+    });
+    expect(record.grants).toEqual(original.grants);
+    expect(record.attempts).toHaveLength(1);
+    expect(record.ledger).toHaveLength(1);
+    await expect(resumed.reserveAgent()).rejects.toThrow(/CYCLE_NOT_EXECUTABLE|AGENT_ATTEMPT_EXISTS/);
+    await resumed.detach();
+  });
+
+  it("keeps possibly dispatched attempts without a saved remote ID unknown across resume and recovery", async () => {
+    const { controller, cycle, hash, root } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const execution = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await execution.beforeCreate())();
+    await execution.finish();
+    await controller.detach();
+    const resumed = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "two" });
+    await resumed.resume(cycle.id);
+    await expect(resumed.prepareAgentRecovery({ cycleId: cycle.id })).rejects.toThrow(
+      /RECOVERY_UNAVAILABLE.*saved remote ID/,
+    );
+    expect(await resumed.inspect(cycle.id)).toMatchObject({
+      status: "unknown",
+      attempts: [{ status: "unknown" }],
+      ledger: [{ status: "unknown" }],
+    });
+    await expect(resumed.reserveAgent()).rejects.toThrow(/CYCLE_NOT_EXECUTABLE|AGENT_ATTEMPT_EXISTS/);
+    await resumed.detach();
+  });
+
+  it("revalidates remotely completed but locally invalid output with the frozen task schema", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const execution = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await execution.beforeCreate())();
+    await execution.raw("create", {
+      id: "agent_run_invalid",
+      status: "completed",
+      output: { structured: { answer: 42 } },
+      costDollars: { total: 0.1 },
+    });
+    expect(await controller.inspect(cycle.id)).toMatchObject({
+      status: "completed",
+      attempts: [{ result: { processing: "failed" } }],
+    });
+    const recovery = await controller.prepareAgentRecovery({ cycleId: cycle.id, attemptId: attempt.id });
+    (await recovery.observer.beforeGet())();
+    await recovery.observer.raw("get", {
+      id: recovery.runId,
+      status: "completed",
+      output: { structured: { answer: "valid" } },
+      costDollars: { total: 0.1 },
+    });
+    await recovery.onUnavailable();
+    const record = await controller.inspect(cycle.id);
+    expect(record).toMatchObject({
+      status: "completed",
+      attempts: [{ result: { processing: "validated", taskOutput: { answer: "valid" } } }],
+      ledger: [{ status: "reported", reportedMicros: 100_000 }],
+    });
+    expect(record.attempts).toHaveLength(1);
+    await controller.detach();
+  });
+
+  it("fences recovery GET ownership but retains a late original outcome after archive", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const execution = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await execution.beforeCreate())();
+    await execution.raw("create", { id: "agent_run_saved", status: "running" });
+    await execution.finish();
+    const revoked = await controller.prepareAgentRecovery({ cycleId: cycle.id });
+    const guard = await revoked.observer.beforeGet();
+    await controller.detach();
+    expect(guard).toThrow(/detached/);
+    await controller.resume(cycle.id);
+    const recovery = await controller.prepareAgentRecovery({ cycleId: cycle.id });
+    (await recovery.observer.beforeGet())();
+    await controller.archive();
+    await recovery.observer.raw("get", {
+      id: recovery.runId,
+      status: "completed",
+      output: { structured: { answer: "late" } },
+      costDollars: { total: 0.03 },
+    });
+    expect(await controller.inspect(cycle.id)).toMatchObject({
+      archived: true,
+      status: "completed",
+      attempts: [{ result: { processing: "validated" } }],
+      ledger: [{ reportedMicros: 30_000 }],
+    });
+    expect(await controller.status()).toBeUndefined();
+  });
+
+  it("marks unavailable existing-run inspection unknown without fabricating remote failure or releasing liability", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const execution = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await execution.beforeCreate())();
+    await execution.raw("create", { id: "agent_run_saved", status: "running" });
+    const recovery = await controller.prepareAgentRecovery({ cycleId: cycle.id });
+    (await recovery.observer.beforeGet())();
+    await recovery.onUnavailable();
+    expect(await controller.inspect(cycle.id)).toMatchObject({
+      status: "unknown",
+      attempts: [{ status: "unknown", result: { remoteStatus: "running" } }],
+      ledger: [{ status: "unknown" }],
+    });
+    await expect(controller.reserveAgent()).rejects.toThrow(/CYCLE_NOT_EXECUTABLE|AGENT_ATTEMPT_EXISTS/);
+    await controller.detach();
+  });
+
   it("serializes competing Agent intents and competing dispatch claims without granting a second SDK capability", async () => {
     const { controller, cycle, hash } = await readyAgent();
     const attempts = await Promise.allSettled([controller.reserveAgent(), controller.reserveAgent()]);
