@@ -46,7 +46,12 @@ import {
 } from "./research-execution.js";
 import { createResearchPlanner, type ResearchPlannerSnapshot } from "./research-planner.js";
 import type { ResearchSummaryParams } from "./research-planner-types.js";
-import { replacementPermissionSchema, retryAttemptFacts, validateReplacementRecords } from "./research-retry.js";
+import {
+  assessRetryHistory,
+  replacementPermissionSchema,
+  retryAttemptFacts,
+  validateReplacementRecords,
+} from "./research-retry.js";
 import { withResearchStorageLock } from "./research-storage-lock.js";
 import { exaResearchStepParams, researchCriterion, researchGap, researchSource } from "./schemas.js";
 import type { AgentInspectionOptions, AgentLifecycleObserver } from "./web-research.js";
@@ -509,6 +514,14 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     assertDraft(record);
     return compileResearchArtifact({ ...record, status: "planning" }, assertions);
   };
+  const updateAttemptLifecycle = (record: ResearchCycle) => {
+    const facts = retryAttemptFacts(record.attempts, record.ledger, { cycleId: record.id, projectId });
+    if (record.status === "completed" || facts.some((fact) => fact.state === "completed")) record.status = "completed";
+    else if (facts.some((fact) => fact.state === "live")) record.status = "running";
+    else if (facts.some((fact) => fact.state === "unknown" || fact.state === "unclassified")) record.status = "unknown";
+    else if (facts.some((fact) => fact.state === "failed")) record.status = "failed";
+    else record.status = "planning";
+  };
   const cycles = {
     projectId,
     async start(topic: string) {
@@ -621,7 +634,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         }),
       );
     },
-    async reserveAgent(assertions: ArtifactAssertions = {}) {
+    async reserveAgent(assertions: ArtifactAssertions = {}, transitionMode?: "retry" | "replace") {
       const reference = structuredClone(assertions);
       return activate((assertCurrent) =>
         transaction(async () => {
@@ -629,13 +642,47 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           assertCurrent();
           assertAccountingAvailable(record.id);
           const artifact = draftArtifact(record, reference);
-          if (record.attempts.length)
+          if (record.attempts.length && !transitionMode)
             throw new Error("AGENT_ATTEMPT_EXISTS: inspect/recover the existing attempt; replacement is gated.");
+          const requestHash = agentRequestHash(artifact.request);
+          const retryHistory = transitionMode
+            ? assessRetryHistory(
+                retryAttemptFacts(record.attempts, record.ledger, { cycleId: record.id, projectId }),
+                record.grants,
+                { cycleId: record.id, projectId },
+                requestHash,
+                transitionMode,
+              )
+            : undefined;
+          if (retryHistory && !retryHistory.eligible) throw new Error(retryHistory.reason);
+          for (const id of retryHistory?.replacementPermissionIds ?? []) {
+            const permission = record.grants.find((entry) => "id" in entry && entry.id === id);
+            if (!Value.Check(replacementPermissionSchema, permission)) throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
+            const latest = [...record.grants]
+              .reverse()
+              .find(
+                (entry) =>
+                  Value.Check(uncertaintyPermissionSchema, entry) &&
+                  entry.targetType === "liability" &&
+                  entry.subjectId === permission.operationId,
+              );
+            const source = record.attempts.find((entry) => "id" in entry && entry.id === permission.attemptId);
+            if (!Value.Check(agentAttemptSchema, source)) throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
+            if (
+              !Value.Check(uncertaintyPermissionSchema, latest) ||
+              latest.id !== permission.liabilityPermissionId ||
+              permission.originalAllowanceMicros <
+                Math.max(
+                  agentOperation(record, source).reportedMicros ?? 0,
+                  moneyMicros(source.result?.provisionalTotalDollars ?? 0),
+                )
+            )
+              throw new Error("REPLACEMENT_LIABILITY_CHANGED");
+          }
           const assessment = assessAgent(record.grants, record.ledger, artifact.request, {
             cycleId: record.id,
             projectId,
           });
-          const requestHash = agentRequestHash(artifact.request);
           if (!assessment.canDispatch)
             throw new ExplorationApprovalError(
               record.id,
@@ -669,7 +716,14 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             revision: record.revision,
             requestHash,
             artifact,
-            assessment,
+            assessment: retryHistory ? { ...assessment, retryHistory } : assessment,
+            ...(transitionMode && retryHistory
+              ? {
+                  transitionMode,
+                  sourceAttemptIds: retryHistory.sourceAttemptIds,
+                  replacementPermissionIds: retryHistory.replacementPermissionIds,
+                }
+              : {}),
             status: "intent",
             createdAt,
           };
@@ -870,6 +924,8 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
               assertCurrent();
               const record = await owned();
               const attempt = savedAgent(record, attemptId, requestHash);
+              if (attempt.transitionMode)
+                throw new Error("RETRY_DISPATCH_GATED: final retry submission guards are not activated.");
               const operation = agentOperation(record, attempt);
               assertAccountingAvailable(record.id);
               if (
@@ -1008,6 +1064,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                     operation.status = "reported";
                   } else if (operation.reportedMicros === undefined) operation.status = "unknown";
                 }
+                updateAttemptLifecycle(record);
                 if (
                   before === canonicalResearchJson({ attempt, operation, status: record.status }) &&
                   !failedReceiptWrites.has(`${record.id}/${operation.id}`)
@@ -1049,6 +1106,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                 if (operation.status === "reserved") operation.status = "unknown";
                 if (record.status === "running") record.status = "unknown";
               }
+              updateAttemptLifecycle(record);
               await writeReceipt(record, operation.id);
             }),
           );

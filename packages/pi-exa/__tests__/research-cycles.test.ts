@@ -418,6 +418,103 @@ describe("durable research cycles", () => {
     await controller.detach();
   });
 
+  it("reserves explicit failed-history retry only with a fresh exact-request nonce, preserving both contracts", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const first = (await controller.reserveAgent()).attempt;
+    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+    (await original.beforeCreate())();
+    await original.raw("create", { id: "agent_run_failure", status: "failed", costDollars: { total: 0.01 } });
+    const before = await controller.inspect(cycle.id);
+    await expect(controller.reserveAgent({}, "retry")).rejects.toThrow("UNCERTAINTY_APPROVAL_REQUIRED");
+    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const second = (await controller.reserveAgent({}, "retry")).attempt;
+    expect(second).toMatchObject({
+      transitionMode: "retry",
+      sourceAttemptIds: [first.id],
+      replacementPermissionIds: [],
+    });
+    expect(second.operationId).not.toBe(first.operationId);
+    expect(second.assessment).toMatchObject({ retryHistory: { assessmentOnly: true, eligible: true } });
+    const saved = await controller.inspect(cycle.id);
+    expect(saved.attempts[0]).toEqual(before.attempts[0]);
+    expect(saved.ledger[0]).toEqual(before.ledger[0]);
+    expect(saved.attempts).toHaveLength(2);
+    await original.raw("get", { id: "agent_run_failure", status: "failed", costDollars: { total: 0.01 } });
+    expect((await controller.status())?.status).toBe("running");
+    await expect(controller.agentLifecycleObserver(cycle.id, second.id, hash).beforeCreate()).rejects.toThrow(
+      "RETRY_DISPATCH_GATED",
+    );
+    await controller.detach();
+  });
+
+  it("requires specific replacement risk, current paired liability and total fresh exposure before consuming permissions", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const first = (await controller.reserveAgent()).attempt;
+    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+    (await original.beforeCreate())();
+    await original.raw("create", {
+      id: "agent_run_unknown_for_intent",
+      status: "running",
+      costDollars: { total: 0.15 },
+    });
+    await original.finish();
+    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    await controller.grantUncertainty(cycle.id, "liability", first.operationId, 0.2);
+    await expect(controller.reserveAgent({}, "replace")).rejects.toThrow("REPLACEMENT_APPROVAL_REQUIRED");
+    const approved = await controller.grantReplacement(cycle.id, first.id, hash, 0.2);
+    const grant = approved.grants.at(-1);
+    if (!grant || !("id" in grant)) throw new Error("Risk grant missing");
+    await controller.grantUncertainty(cycle.id, "liability", first.operationId, 0.1);
+    await expect(controller.reserveAgent({}, "replace")).rejects.toThrow("REPLACEMENT_LIABILITY_CHANGED");
+    const refreshed = await controller.grantReplacement(cycle.id, first.id, hash, 0.2);
+    const replacement = refreshed.grants.at(-1);
+    if (!replacement || !("id" in replacement)) throw new Error("Risk grant missing");
+    await controller.grantBudget(cycle.id, 0.3, ["web_research_exa"]);
+    await expect(controller.reserveAgent({}, "replace")).rejects.toThrow("INSUFFICIENT_BALANCE");
+    expect((await controller.inspect(cycle.id)).attempts).toHaveLength(1);
+    await controller.grantBudget(cycle.id, 1, ["web_research_exa"]);
+    const second = (await controller.reserveAgent({}, "replace")).attempt;
+    expect(second).toMatchObject({
+      transitionMode: "replace",
+      sourceAttemptIds: [first.id],
+      replacementPermissionIds: [replacement.id],
+    });
+    expect(second.replacementPermissionIds).not.toContain(grant.id);
+    await expect(controller.reserveAgent({}, "replace")).rejects.toThrow("CYCLE_NOT_EXECUTABLE");
+    await controller.agentLifecycleObserver(cycle.id, second.id, hash).finish();
+    expect((await controller.status())?.status).toBe("unknown");
+    await expect(controller.reserveAgent({}, "replace")).rejects.toThrow("REPLACEMENT_APPROVAL_REQUIRED");
+    await controller.detach();
+  });
+
+  it.each([
+    "source",
+    "consumption",
+  ])("rejects corrupted retry intent %s metadata without modifying saved history", async (corruption) => {
+    const { controller, cycle, hash, root } = await readyAgent();
+    const first = (await controller.reserveAgent()).attempt;
+    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+    (await original.beforeCreate())();
+    await original.raw("create", {
+      id: "agent_run_failure_for_metadata",
+      status: "failed",
+      costDollars: { total: 0.01 },
+    });
+    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const second = (await controller.reserveAgent({}, "retry")).attempt;
+    await controller.detach();
+    const saved = await controller.inspect(cycle.id);
+    const entry = saved.attempts.find((attempt) => "id" in attempt && attempt.id === second.id);
+    if (!entry) throw new Error("Retry intent missing");
+    if (corruption === "source") Reflect.set(entry, "sourceAttemptIds", [second.id]);
+    else Reflect.set(entry, "replacementPermissionIds", ["unissued-permission"]);
+    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+    const json = JSON.stringify(saved);
+    await writeFile(path, json);
+    await expect(controller.resume(cycle.id)).rejects.toThrow(/retry intent metadata/);
+    expect(await readFile(path, "utf8")).toBe(json);
+  });
+
   it("rechecks a durable frozen-artifact assertion before preparing the actual GET guard", async () => {
     const { controller, cycle, hash, root, artifact } = await readyAgent();
     const { attempt } = await controller.reserveAgent();

@@ -256,6 +256,17 @@ or verified invoices. Late genuine completion still closes the entire cycle
 without deleting its risk grants. Pi operator command registration, fresh
 financial dispatch checks and risk consumption remain subsequent slices.
 
+The intent slice adds explicit controller-only retry/replacement reservations.
+Each gets a new operation and exact-request nonce after fresh total-exposure
+assessment; specific risk IDs are consumed once in immutable intent metadata,
+with source-attempt chronology and grant/request bindings checked on restore.
+An intervening original-liability amendment invalidates an older paired risk
+grant. Failed reservations do not consume grants. Aggregate lifecycle includes
+all saved attempts: one local nondispatch cannot reopen unknown original work,
+nor can an older failure hide a newer live intent. Actual transition SDK creates
+still fail closed with `RETRY_DISPATCH_GATED` until final submission fences and
+registered Pi activation are implemented and reviewed.
+
 ## #158 delegated recovery decisions
 
 Jev selected explicit Pi-only actions on existing tools: status `action=resume`

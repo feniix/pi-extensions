@@ -216,6 +216,9 @@ export const agentAttemptSchema = Type.Object(
     createdAt: Type.String(),
     result: Type.Optional(agentObservationSchema),
     localInterruption: Type.Optional(Type.Literal("Local wait ended; remote outcome must be inspected, not replaced.")),
+    transitionMode: Type.Optional(Type.Union([Type.Literal("retry"), Type.Literal("replace")])),
+    sourceAttemptIds: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true })),
+    replacementPermissionIds: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true })),
   },
   { additionalProperties: false },
 );

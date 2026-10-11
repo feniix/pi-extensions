@@ -67,6 +67,7 @@ export function retryAttemptFacts(
       id: attempt.id,
       operationId: attempt.operationId,
       state,
+      replacementPermissionIds: attempt.replacementPermissionIds,
     };
   });
 }
@@ -107,6 +108,40 @@ export function validateReplacementRecords(
     ids.add(entry.id);
   }
   retryAttemptFacts(attempts, ledger, identity);
+  const consumed = new Set<string>();
+  for (const [index, attempt] of attempts.entries()) {
+    if (!Value.Check(agentAttemptSchema, attempt)) continue;
+    if (!attempt.transitionMode) {
+      if (attempt.sourceAttemptIds !== undefined || attempt.replacementPermissionIds !== undefined)
+        throw new Error("Invalid retry intent metadata.");
+      continue;
+    }
+    const sources = attempt.sourceAttemptIds ?? [];
+    const permissions = attempt.replacementPermissionIds;
+    const prior = attempts.slice(0, index).filter((entry) => Value.Check(agentAttemptSchema, entry));
+    if (
+      !sources.length ||
+      permissions === undefined ||
+      sources.some((id) => !prior.some((entry) => entry.id === id)) ||
+      (attempt.transitionMode === "retry" && permissions.length) ||
+      (attempt.transitionMode === "replace" && permissions.length !== sources.length)
+    )
+      throw new Error("Invalid retry intent metadata.");
+    const targets = new Set<string>();
+    for (const id of permissions) {
+      const permission = grants.find((entry) => "id" in entry && entry.id === id);
+      if (
+        consumed.has(id) ||
+        !Value.Check(replacementPermissionSchema, permission) ||
+        permission.requestHash !== attempt.requestHash ||
+        !sources.includes(permission.attemptId) ||
+        targets.has(permission.attemptId)
+      )
+        throw new Error("Invalid replacement permission consumption.");
+      targets.add(permission.attemptId);
+      consumed.add(id);
+    }
+  }
 }
 
 export function assessRetryHistory(
@@ -150,7 +185,7 @@ export function assessRetryHistory(
   };
   const blocked = (reason: string, blockedAttemptIds: string[] = []) => ({
     ...base,
-    eligible: false,
+    eligible: false as const,
     reason,
     blockedAttemptIds,
   });
@@ -171,7 +206,7 @@ export function assessRetryHistory(
   const unknown = history.filter((fact) => fact.state === "unknown");
   if (!unknown.length)
     return mode === "retry"
-      ? { ...base, eligible: true, sourceAttemptIds: history.map((fact) => fact.id), blockedAttemptIds: [] }
+      ? { ...base, eligible: true as const, sourceAttemptIds: history.map((fact) => fact.id), blockedAttemptIds: [] }
       : blocked("RETRY_REQUIRED");
   if (mode !== "replace")
     return blocked(
@@ -206,7 +241,7 @@ export function assessRetryHistory(
   if (blockedIds.length) return blocked("REPLACEMENT_APPROVAL_REQUIRED", blockedIds);
   return {
     ...base,
-    eligible: true,
+    eligible: true as const,
     sourceAttemptIds: unknown.map((fact) => fact.id),
     replacementPermissionIds: selected.map((entry) => entry.id),
     blockedAttemptIds: [],
