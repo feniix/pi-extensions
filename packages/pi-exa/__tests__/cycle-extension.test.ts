@@ -15,7 +15,7 @@ import exaExtension from "../extensions/index.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof fs>();
-  return { ...original, unlink: vi.fn(original.unlink) };
+  return { ...original, unlink: vi.fn(original.unlink), rename: vi.fn(original.rename) };
 });
 
 const offlineSearch = vi.hoisted(() =>
@@ -35,6 +35,7 @@ vi.mock("exa-js", () => ({
 const directories: string[] = [];
 afterEach(async () => {
   vi.mocked(fs.unlink).mockReset();
+  vi.mocked(fs.rename).mockReset();
   offlineSearch.mockReset().mockResolvedValue({ results: [], requestId: "offline" });
   offlineCreate.mockClear();
   vi.unstubAllEnvs();
@@ -156,6 +157,81 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("retries the original genuine total after a transient write failure rather than replacing it with missing evidence", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 0.01`, pi.context);
+    let resolve!: (response: Record<string, unknown>) => void;
+    let entered!: () => void;
+    const sdk = new Promise<Record<string, unknown>>((done) => {
+      resolve = done;
+    });
+    const barrier = new Promise<void>((done) => {
+      entered = done;
+    });
+    offlineSearch.mockImplementationOnce(async () => {
+      entered();
+      return sdk;
+    });
+    const pending = pi.call("web_search_exa", { query: "topic", cycleId: status.id });
+    await barrier;
+    vi.mocked(fs.rename).mockRejectedValueOnce(new Error("transient receipt write failure"));
+    resolve({ results: [], costDollars: { total: 0.003 } });
+    const response = await pending;
+    expect(response.details.accounting).toMatchObject({
+      reportedDollars: 0.003,
+      pendingEstimatedDollars: 0,
+      unresolvedOperationIds: [],
+    });
+    expect((await pi.call("exa_research_status")).details.ledger).toMatchObject([
+      { status: "reported", reportedMicros: 3_000 },
+    ]);
+    expect((await pi.call("web_search_exa", { query: "another", cycleId: status.id })).isError).not.toBe(true);
+    expect(offlineSearch).toHaveBeenCalledTimes(2);
+  });
+
+  it("exposes genuine unsaved usage and blocks spending after receipt durability fails", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 0.01`, pi.context);
+    let resolve!: (response: Record<string, unknown>) => void;
+    let entered!: () => void;
+    const sdk = new Promise<Record<string, unknown>>((done) => {
+      resolve = done;
+    });
+    const barrier = new Promise<void>((done) => {
+      entered = done;
+    });
+    offlineSearch.mockImplementationOnce(async () => {
+      entered();
+      return sdk;
+    });
+    const args = { query: "topic", cycleId: status.id };
+    const pending = pi.call("web_search_exa", args);
+    await barrier;
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    let fail = true;
+    vi.mocked(fs.rename).mockImplementation(async (...values) => {
+      if (fail) throw new Error("offline receipt write failure");
+      await original.rename(...values);
+    });
+    resolve({ results: [], costDollars: { total: 0.05 } });
+    const response = await pending;
+    expect(response.isError).toBe(true);
+    expect(response.details).toMatchObject({
+      apiReportedReceipt: { totalDollars: 0.05 },
+      receiptDurability: "unconfirmed",
+      billingVerified: false,
+    });
+    fail = false;
+    const denied = await pi.call("web_search_exa", args);
+    expect(denied.isError).toBe(true);
+    expect(denied.content[0]).toMatchObject({ text: expect.stringContaining("ACCOUNTING_UNAVAILABLE") });
+    expect(offlineSearch).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ["web_fetch_exa", { urls: ["https://a.test"] }],
     ["web_find_similar_exa", { url: "https://a.test" }],

@@ -10,6 +10,7 @@ import {
   EXPLORATION_TOOLS,
   ExplorationApprovalError,
   explorationOperationSchema,
+  moneyMicros,
   summarizeAccounting,
 } from "./research-accounting.js";
 import { assertArtifactTarget, executionPlanSchema, ResearchArtifactError } from "./research-artifacts.js";
@@ -276,6 +277,15 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                 let started = false;
                 let observed = false;
                 let closed = false;
+                let receivedReceipt: { totalDollars?: number } | undefined;
+                const finish = async () => {
+                  closed = true;
+                  if (!started) await cycles.releaseUndispatchedExploration(savedCycle, operationId, requestHash);
+                  else if (!observed) {
+                    await cycles.reconcileExploration(savedCycle, operationId, requestHash, receivedReceipt ?? {});
+                    observed = true;
+                  }
+                };
                 const observer: ExaUsageObserver = {
                   before: async () => {
                     const guard = await cycles.explorationDispatchGuard(savedCycle, operationId, requestHash);
@@ -292,12 +302,16 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                         : undefined;
                     const total =
                       typeof costs === "object" && costs !== null && "total" in costs ? costs.total : undefined;
-                    await cycles.reconcileExploration(
-                      savedCycle,
-                      operationId,
-                      requestHash,
-                      typeof total === "number" ? { totalDollars: total } : {},
-                    );
+                    receivedReceipt = {};
+                    if (typeof total === "number") {
+                      try {
+                        moneyMicros(total);
+                        receivedReceipt = { totalDollars: total };
+                      } catch {
+                        // Malformed totals remain unknown, never genuine reported spend.
+                      }
+                    }
+                    await cycles.reconcileExploration(savedCycle, operationId, requestHash, receivedReceipt);
                     observed = true;
                   },
                 };
@@ -305,9 +319,7 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                   const retrieval = retrievalFactory(tool.name, observer);
                   if (!retrieval) throw new Error("Retrieval is not enabled; no SDK request was dispatched.");
                   const response = await retrieval.execute(id, standalone, signal, onUpdate, ctx);
-                  closed = true;
-                  if (!started) await cycles.releaseUndispatchedExploration(savedCycle, operationId, requestHash);
-                  else if (!observed) await cycles.reconcileExploration(savedCycle, operationId, requestHash, {});
+                  await finish();
                   const current = await cycles.inspect(savedCycle);
                   const accounting = view(current).accounting;
                   return {
@@ -329,9 +341,23 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                     },
                   };
                 } catch (error) {
-                  closed = true;
-                  if (!started) await cycles.releaseUndispatchedExploration(savedCycle, operationId, requestHash);
-                  else if (!observed) await cycles.reconcileExploration(savedCycle, operationId, requestHash, {});
+                  try {
+                    await finish();
+                  } catch (storageError) {
+                    return result(
+                      {
+                        cycleId: savedCycle,
+                        operationId,
+                        requestHash,
+                        sdkInvoked: started,
+                        apiReportedReceipt: receivedReceipt,
+                        receiptDurability: "unconfirmed",
+                        billingVerified: false,
+                      },
+                      `ACCOUNTING_UNAVAILABLE: Usage could not be durably saved. Repair storage, reload and explicitly resume to inspect unknown liabilities. SDK receipt: ${JSON.stringify(receivedReceipt ?? {})}. ${storageError instanceof Error ? storageError.message : String(storageError)}`,
+                      true,
+                    );
+                  }
                   throw error;
                 }
               }

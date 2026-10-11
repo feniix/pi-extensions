@@ -200,6 +200,11 @@ Only a genuine explicit SDK total (including zero) replaces its reservation.
 Missing/malformed costs and local timeout/cancellation remain unknown; late
 receipts reconcile even after detach/archive. Formatting errors cannot erase
 genuine usage. Only proven pre-SDK nondispatch releases a reservation.
+If saving a genuine receipt fails, its original total is retried rather than
+replaced by missing evidence. Persistent durability failure returns the known
+SDK receipt marked unconfirmed and blocks further cycle spending in that runtime.
+Repair storage, reload and explicitly resume: interrupted reservations remain
+unknown, never silently zero. No power-loss or vendor invoice verification is claimed.
 
 Approval displays the versioned published-price profile and source/review date.
 Supported assessments cover basic search, bounded regular/deep/deep-reasoning

@@ -172,6 +172,46 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it("retries directory durability even when the failed receipt replacement is already visible", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const options = { root: join(root, "store"), cwd: root, sessionId: "one" };
+    const controller = await createResearchCycles(options);
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    let fail = true;
+    let syncs = 0;
+    vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const handle = await original.open(...args);
+      if (String(args[0]) === join(options.root, controller.projectId)) {
+        const sync = handle.sync.bind(handle);
+        vi.spyOn(handle, "sync").mockImplementation(async () => {
+          syncs++;
+          if (fail) {
+            fail = false;
+            throw new Error("receipt directory sync failure");
+          }
+          await sync();
+        });
+      }
+      return handle;
+    });
+    await expect(
+      controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.003 }),
+    ).rejects.toThrow("receipt directory sync failure");
+    expect((await controller.inspect(cycle.id)).ledger).toMatchObject([{ reportedMicros: 3_000 }]);
+    await expect(controller.reserveExploration("web_search_exa", { query: "another" })).rejects.toThrow(
+      "ACCOUNTING_UNAVAILABLE",
+    );
+    const before = syncs;
+    await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.003 });
+    expect(syncs).toBeGreaterThan(before);
+    await expect(controller.reserveExploration("web_search_exa", { query: "another" })).resolves.toBeDefined();
+    await controller.detach();
+  });
+
   it("rechecks scope/ceiling before SDK invocation and exposes a final generation fence", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);

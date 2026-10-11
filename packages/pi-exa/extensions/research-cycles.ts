@@ -1,5 +1,5 @@
 /**
- * Pi-independent durable cycle controller. No network calls or spending grants.
+ * Pi-independent durable cycle/accounting controller. No network dispatch.
  * The Pi adapter opts in; portable/MCP tools retain their existing planner.
  */
 import { execFile } from "node:child_process";
@@ -183,6 +183,25 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
   let generation = 0;
   let localQueue: Promise<void> = Promise.resolve();
   let initialization: Promise<void> | undefined;
+  const failedReceiptWrites = new Set<string>();
+
+  function assertAccountingAvailable(cycleId: string) {
+    if ([...failedReceiptWrites].some((key) => key.startsWith(`${cycleId}/`)))
+      throw new Error(
+        "ACCOUNTING_UNAVAILABLE: Receipt durability failed; repair storage and reload/explicitly resume to inspect unknown liabilities.",
+      );
+  }
+
+  async function writeReceipt(record: ResearchCycle, operationId: string) {
+    const key = `${record.id}/${operationId}`;
+    try {
+      await write(record);
+      failedReceiptWrites.delete(key);
+    } catch (error) {
+      failedReceiptWrites.add(key);
+      throw error;
+    }
+  }
 
   function ordered<T>(action: () => Promise<T>): Promise<T> {
     const job = localQueue.then(action);
@@ -470,6 +489,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         transaction(async () => {
           const record = await owned();
           assertCurrent();
+          assertAccountingAvailable(record.id);
           assertArtifactTarget(record, reference);
           if (record.archived || record.status !== "planning") throw new Error("CYCLE_NOT_EXECUTABLE");
           const estimate = estimateExploration(tool, request);
@@ -578,7 +598,10 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           } catch {
             // Malformed usage is missing evidence, not a zero-dollar receipt.
           }
-          if (operation.status === "reported" && operation.reportedMicros === total) return record;
+          if (operation.status === "reported" && operation.reportedMicros === total) {
+            if (failedReceiptWrites.has(`${cycleId}/${operationId}`)) await writeReceipt(record, operationId);
+            return record;
+          }
           if (operation.reportedMicros !== undefined) {
             // Missing evidence cannot revoke a genuine prior usage receipt.
             if (total === undefined) return record;
@@ -588,7 +611,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
               operation.status = "reported";
               operation.conflictingMicros = [...new Set([...(operation.conflictingMicros ?? []), total])];
             }
-            await write(record);
+            await writeReceipt(record, operationId);
             return record;
           }
           if (total === undefined) operation.status = "unknown";
@@ -596,7 +619,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             operation.status = "reported";
             operation.reportedMicros = total;
           }
-          await write(record);
+          await writeReceipt(record, operationId);
           return record;
         }),
       );
@@ -606,6 +629,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         transaction(async () => {
           const record = await owned();
           assertCurrent();
+          assertAccountingAvailable(record.id);
           const operation = record.ledger.find((entry) => "id" in entry && entry.id === operationId);
           if (
             !Value.Check(explorationOperationSchema, operation) ||
