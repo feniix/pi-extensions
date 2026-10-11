@@ -99,6 +99,12 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
       const paid = tool.name.startsWith("web_");
       pi.registerTool({
         ...tool,
+        ...(tool.name === "exa_research_reset"
+          ? {
+              description:
+                "Detach and archive the active durable research cycle; retain history, attempts, grants and liabilities. Does not cancel remote work.",
+            }
+          : {}),
         ...(paid
           ? {
               parameters: Type.Evaluate(
@@ -129,6 +135,17 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
               if (researchMode === "active" && !record) throw new Error("No active research cycle.");
               if (record && researchMode !== "standalone") {
                 throw new Error("Integrated paid research is not available in this slice; no request was dispatched.");
+              }
+              if (standalone.previousRunId !== undefined) {
+                if (typeof standalone.previousRunId !== "string") throw new Error("Invalid previousRunId.");
+                const saved = await cycles.list();
+                if (
+                  saved.some((cycle) =>
+                    cycle.attempts.some((attempt) => "runId" in attempt && attempt.runId === standalone.previousRunId),
+                  )
+                ) {
+                  throw new Error("Recorded cycle attempts cannot be continued as unrelated standalone work.");
+                }
               }
               return tool.execute(id, standalone, signal, onUpdate, ctx);
             }

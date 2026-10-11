@@ -34,7 +34,7 @@ export { DEFAULT_MAX_CHARACTERS } from "./web-fetch.js";
 export { DEFAULT_NUM_RESULTS } from "./web-search.js";
 
 function registerFlags(pi: ExtensionAPI): void {
-  pi.registerFlag("--exa-enable-cycles", {
+  pi.registerFlag("exa-enable-cycles", {
     description: "Opt in to durable Pi research planning; integrated paid execution remains gated.",
     type: "boolean",
   });
@@ -113,5 +113,14 @@ export default function exaExtension(pi: ExtensionAPI) {
       },
     };
   });
-  registerPiTools(pi.getFlag("--exa-enable-cycles") === true ? cyclePiRegistration(pi) : pi, tools);
+  registerPiTools(pi, tools);
+  let cyclesInstalled = false;
+  // Pi applies CLI flags after factories load. Registration is refreshable once
+  // bound, and session_start also runs for a fresh runtime after reload.
+  pi.on("session_start", () => {
+    if (!cyclesInstalled && pi.getFlag("exa-enable-cycles") === true) {
+      registerPiTools(cyclePiRegistration(pi), tools);
+      cyclesInstalled = true;
+    }
+  });
 }

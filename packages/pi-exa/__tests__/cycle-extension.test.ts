@@ -1,9 +1,14 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import { createEventBus, createExtensionRuntime } from "@earendil-works/pi-coding-agent";
 import type { PiToolRegistration } from "@feniix/bridgekit/pi";
+import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { parseArgs } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js";
+import { loadExtensionFromFactory } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js";
+import { cyclePiRegistration } from "../extensions/cycle-pi.js";
 import exaExtension from "../extensions/index.js";
 
 const offlineSearch = vi.hoisted(() => vi.fn(async () => ({ results: [], requestId: "offline" })));
@@ -50,7 +55,7 @@ async function host(enabled = true) {
   const pi = {
     registerFlag: vi.fn(),
     getFlag: (name: string) =>
-      name === "--exa-enable-cycles" ? enabled : name === "--exa-config-file" ? config : undefined,
+      name === "exa-enable-cycles" ? enabled : name === "--exa-config-file" ? config : undefined,
     registerTool: (tool: Parameters<PiToolRegistration["registerTool"]>[0]) => tools.set(tool.name, tool),
     registerCommand: (name: string, command: { handler: (args: string, context: ExtensionContext) => Promise<void> }) =>
       commands.set(name, command),
@@ -58,6 +63,7 @@ async function host(enabled = true) {
       handlers.set(event, handler),
   } as unknown as ExtensionAPI;
   exaExtension(pi);
+  await handlers.get("session_start")?.({} as never, context);
   const command = commands.get("exa-research");
   return {
     tools,
@@ -74,6 +80,94 @@ async function host(enabled = true) {
 }
 
 describe("Pi cycle commands and tools", () => {
+  it("activates after real Pi flag application on startup and reload", async () => {
+    const hostContext = await host(false);
+    expect([...parseArgs(["--exa-enable-cycles"]).unknownFlags.keys()]).toEqual(["exa-enable-cycles"]);
+    for (let reload = 0; reload < 2; reload++) {
+      const runtime = createExtensionRuntime();
+      // Isolate tool selection from the operator's Exa config; only the cycle
+      // flag deliberately arrives after factory loading.
+      runtime.flagValues.set("--exa-config-file", join(hostContext.context.cwd, "exa.json"));
+      const extension = await loadExtensionFromFactory(
+        exaExtension,
+        hostContext.context.cwd,
+        createEventBus(),
+        runtime,
+      );
+      expect(extension.commands.has("exa-research")).toBe(false);
+      expect(extension.flags.has("exa-enable-cycles")).toBe(true);
+      runtime.flagValues.set("exa-enable-cycles", true);
+      for (const handler of [...(extension.handlers.get("session_start") ?? [])]) {
+        await handler({ type: "session_start" }, hostContext.context);
+      }
+      expect(extension.commands.has("exa-research")).toBe(true);
+      expect(extension.tools.get("exa_research_reset")?.definition.description).toContain("archive");
+    }
+  });
+
+  it.each([
+    "completed",
+    "unknown",
+  ])("blocks %s attempts after archive while unrelated continuations remain standalone", async (lifecycle) => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    const path = join(pi.context.cwd, "agent", "research-cycles", String(status.projectId), `${status.id}.json`);
+    const record = JSON.parse(await readFile(path, "utf8"));
+    record.status = lifecycle;
+    record.attempts = [{ id: "attempt-one", status: lifecycle, runId: "remote-one" }];
+    await writeFile(path, JSON.stringify(record));
+    const forwarded = vi.fn(async () => ({ content: [{ type: "text" as const, text: "offline" }], details: {} }));
+    const tools = new Map<string, Parameters<PiToolRegistration["registerTool"]>[0]>();
+    const registration = cyclePiRegistration({
+      on: vi.fn(),
+      registerCommand: vi.fn(),
+      registerTool: (tool: Parameters<PiToolRegistration["registerTool"]>[0]) => {
+        tools.set(tool.name, tool);
+      },
+    } as unknown as ExtensionAPI);
+    registration.registerTool({
+      name: "web_research_exa",
+      label: "Offline",
+      description: "Offline",
+      parameters: Type.Object({ query: Type.String() }),
+      execute: forwarded,
+    });
+    const tool = tools.get("web_research_exa");
+    if (!tool) throw new Error("Missing offline research tool");
+    const call = () =>
+      tool.execute(
+        "test",
+        {
+          query: "continuation",
+          previousRunId: "remote-one",
+          researchMode: "standalone",
+        },
+        undefined,
+        undefined,
+        pi.context,
+      );
+    // This decorator has no local active pointer: identifiable durable attempts
+    // still belong to their project cycle, not an unrelated standalone call.
+    expect((await call()).isError).toBe(true);
+    await pi.command?.handler("archive", pi.context);
+    expect((await call()).isError).toBe(true);
+    expect(forwarded).not.toHaveBeenCalled();
+    const unrelated = await tool.execute(
+      "test",
+      {
+        query: "unrelated",
+        previousRunId: "unrelated-run",
+        researchMode: "standalone",
+      },
+      undefined,
+      undefined,
+      pi.context,
+    );
+    expect(unrelated.isError).not.toBe(true);
+    expect(forwarded).toHaveBeenCalledTimes(1);
+  });
+
   it("publishes a root-object schema for provider-compatible routing arguments", async () => {
     const pi = await host();
     const schema = pi.tools.get("web_search_exa")?.parameters;
@@ -145,7 +239,7 @@ describe("Pi cycle commands and tools", () => {
   it("does not register cycle commands or lifecycle state when opt-in is disabled", async () => {
     const pi = await host(false);
     expect(pi.command).toBeUndefined();
-    expect(pi.handlers.size).toBe(0);
+    expect([...pi.handlers.keys()]).toEqual(["session_start"]);
     expect((await pi.call("exa_research_status")).isError).not.toBe(true);
   });
 });

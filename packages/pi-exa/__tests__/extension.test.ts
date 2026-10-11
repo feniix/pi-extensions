@@ -138,7 +138,7 @@ describe("pi-exa extension", () => {
         "--exa-config",
       ]),
     );
-    expect(flagNames).toContain("--exa-enable-cycles");
+    expect(flagNames).toContain("exa-enable-cycles");
     expect(flagNames).toHaveLength(8);
   });
 
