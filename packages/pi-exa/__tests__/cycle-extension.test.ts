@@ -72,13 +72,14 @@ async function host(enabled = true, timeoutMs?: number) {
     { description?: string; handler: (args: string, context: ExtensionContext) => Promise<void> }
   >();
   const notify = vi.fn();
+  const flags = vi.fn();
   const context = {
     cwd: directory,
     sessionManager: { getSessionId: () => "session-one" },
     ui: { notify },
   } as unknown as ExtensionToolContext;
   const pi = {
-    registerFlag: vi.fn(),
+    registerFlag: flags,
     getFlag: (name: string) =>
       name === "exa-enable-cycles"
         ? enabled
@@ -103,6 +104,7 @@ async function host(enabled = true, timeoutMs?: number) {
     handlers,
     context,
     notify,
+    flags,
     command,
     call: (name: string, args = {}, signal?: AbortSignal) => {
       const tool = tools.get(name);
@@ -157,6 +159,15 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("describes approved exploratory spending separately from gated Agent synthesis in flag help", async () => {
+    const pi = await host();
+    expect(pi.flags).toHaveBeenCalledWith("exa-enable-cycles", {
+      type: "boolean",
+      description:
+        "Opt in to durable Pi research cycles with operator-approved exploratory spending; Agent synthesis remains gated.",
+    });
+  });
+
   it.each([
     "cycleId",
     "expectedRevision",
