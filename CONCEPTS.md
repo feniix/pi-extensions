@@ -69,8 +69,18 @@ later candidate discovery does not silently refresh the compiled source context.
 
 A recorded submission intent for an Agent run and its remote or unknown outcome.
 An unknown attempt may have incurred spending even without a known run ID.
+Remote outcome and local result-processing outcome are separate facts. A local
+validation or persistence error does not prove that remote research failed.
 
 *Avoid:* retry (another attempt does not erase the earlier one).
+
+## Completed cycle
+
+A cycle whose Agent run has confirmed remote completion. It stops further
+automatic research even when the result leaves gaps or fails local validation.
+Completion does not establish criterion coverage or independently verified cost.
+
+*Avoid:* verified answer (completion and evidence quality are separate).
 
 ## Spending grant
 
