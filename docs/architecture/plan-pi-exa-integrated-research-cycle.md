@@ -158,3 +158,46 @@ consuming slices with standalone/MCP regression tests. Validator/lock utilities
 and transport mechanics are implementation choices subject to these invariants
 and repository dependency policy. Unavailable vendor guarantees use the defined
 fail-closed/uncertainty paths, not invented support.
+
+## #155 accounting design grill
+
+The operator approved the accounting-policy, real-filesystem controller, and
+registered Pi command/tool testing seams. Design-time Jev (`jev-1.13.0`) selected
+the following choices in dependency-aware rounds; the operator confirmed the
+resulting design before implementation. Jev is not a runtime dependency.
+
+- Approval amounts set a **total lifetime ceiling**, never additive credits.
+- Call-local shared-tool factories carry operation-bound raw/late SDK observers.
+- Default grants cover an explicit supported exploratory retrieval allowlist,
+  not Agent, Connect/contact work or unknown extras.
+- Package-owned published-price profiles record source, publication/review date,
+  version and request-derived basis. They are estimates, not vendor billing caps
+  or invoice verification. Unsupported pricing fails closed without a separately
+  approved, immutable-request-bound uncertainty assessment.
+- Checked integer micro-USD arithmetic rounds permission down and exposure up;
+  invalid inputs and sum overflow fail closed.
+- Owned, atomic assessments count reported usage, all pending estimates and
+  explicitly assessed unknown liabilities. Durable operation identity/request
+  hash and reservation precede SDK invocation; network waits never hold locks.
+- Interrupted reservations remain possible liabilities. Unknown cost blocks
+  autonomous spending until a valid receipt or operator permission naming that
+  exact operation and assessed liability allowance. Permission does not change
+  its classification to reported cost or cover future unknown operations.
+- Genuine late callbacks reconcile only their saved operation, including after
+  detach/archive/ownership changes. They cannot mutate plans, owners, lifecycle,
+  grants or submission eligibility.
+- Amendments preserve history and apply the latest ceiling/scope to new work;
+  insufficient balance and overspend are surfaced before further dispatch.
+- Only explicit valid API totals, including zero, resolve to API-reported usage.
+  Reservations are replaced once; components are not counted again. Missing or
+  malformed totals remain unknown. Conflicting receipts remain auditable and
+  block new work rather than silently applying last-write-wins. Local formatting
+  failures cannot discard genuine usage receipts.
+- Versioned accounting records validate identities, money, scope and uniqueness.
+  Opaque legacy data is preserved, never inferred as consent or zero liability.
+- Release a reservation only when call-local facts prove SDK invocation never
+  occurred. A local timeout, cancellation or error flag alone is insufficient.
+
+The 12 grill selections had selected-option probabilities 0.97–1.00; this is
+design evidence, not proof of correctness. Offline regressions and independent
+adversarial review remain required. Development approval grants no live spending.
