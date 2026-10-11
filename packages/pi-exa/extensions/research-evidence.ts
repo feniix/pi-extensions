@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import { spendingGrantSchema } from "./research-accounting.js";
+import type { ResearchExecutionPlan } from "./research-artifacts.js";
+import type { ResearchSource, ResearchSourceInput } from "./research-planner-types.js";
 
 const strict = { additionalProperties: false };
 export const evidenceProvenanceSchema = Type.Object(
@@ -29,11 +31,77 @@ export const candidateSchema = Type.Object(
     ]),
     decision: Type.Union([Type.Literal("candidate"), Type.Literal("selected"), Type.Literal("rejected")]),
     provenance: Type.Array(evidenceProvenanceSchema, { minItems: 1 }),
+    selectedProvenance: Type.Optional(Type.Array(evidenceProvenanceSchema, { minItems: 1 })),
     sourceId: Type.Optional(Type.String({ minLength: 1 })),
   },
   strict,
 );
 export type ResearchCandidate = Static<typeof candidateSchema>;
+export const evidenceDecisionSchema = Type.Union([
+  Type.Object(
+    {
+      candidateId: Type.String({ minLength: 1 }),
+      decision: Type.Literal("select"),
+      label: Type.String({ minLength: 1 }),
+      notes: Type.Optional(Type.String()),
+    },
+    strict,
+  ),
+  Type.Object({ candidateId: Type.String({ minLength: 1 }), decision: Type.Literal("reject") }, strict),
+]);
+export type EvidenceDecision = Static<typeof evidenceDecisionSchema>;
+
+export function curateEvidence(
+  previous: ResearchCandidate[],
+  decisions: EvidenceDecision[],
+  sources: ResearchSource[],
+  selections: NonNullable<ResearchExecutionPlan["selectedEvidence"]>,
+) {
+  if (!Value.Check(Type.Array(evidenceDecisionSchema), decisions)) throw new Error("Invalid evidence decisions.");
+  const candidates = structuredClone(previous);
+  let selectedEvidence = structuredClone(selections);
+  const sourceUpdates: ResearchSourceInput[] = [];
+  const seen = new Set<string>();
+  for (const decision of decisions) {
+    if (seen.has(decision.candidateId)) throw new Error("Duplicate evidence decision.");
+    seen.add(decision.candidateId);
+    const candidate = candidates.find((entry) => entry.id === decision.candidateId);
+    if (!candidate) throw new Error("Unknown evidence candidate.");
+    if (decision.decision === "reject") {
+      candidate.decision = "rejected";
+      selectedEvidence = selectedEvidence.filter((entry) => entry.sourceId !== candidate.sourceId);
+      continue;
+    }
+    const existing = sources.find((source) => source.url === candidate.url);
+    const sourceId = existing?.id ?? candidate.sourceId ?? candidate.id;
+    if (sources.some((source) => source.id === sourceId && source.url !== candidate.url))
+      throw new Error("Evidence source identity conflict.");
+    candidate.sourceId = sourceId;
+    candidate.decision = "selected";
+    candidate.selectedProvenance = structuredClone(candidate.provenance);
+    sourceUpdates.push({
+      id: sourceId,
+      title: existing?.title ?? candidate.title,
+      url: candidate.url,
+      retrievalStatus: candidate.retrievalStatus,
+      retrievalEvidence:
+        existing?.retrievalEvidence ??
+        `Exa metadata from operations ${candidate.provenance.map((entry) => entry.operationId).join(", ")}: ${candidate.retrievalStatus}; source bodies not retained or independently verified.`,
+    });
+    const prior = selectedEvidence.find((entry) => entry.sourceId === sourceId);
+    selectedEvidence = selectedEvidence.filter((entry) => entry.sourceId !== sourceId);
+    selectedEvidence.push({
+      sourceId,
+      label: decision.label,
+      ...(decision.notes === undefined
+        ? prior?.notes === undefined
+          ? {}
+          : { notes: prior.notes }
+        : { notes: decision.notes }),
+    });
+  }
+  return { candidates, sourceUpdates, selectedEvidence };
+}
 
 function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

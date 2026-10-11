@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { captureCandidates, type EvidenceProvenance } from "../extensions/research-evidence.js";
+import { captureCandidates, curateEvidence, type EvidenceProvenance } from "../extensions/research-evidence.js";
 
 const provenance: EvidenceProvenance = {
   operationId: "operation-one",
@@ -10,6 +10,50 @@ const provenance: EvidenceProvenance = {
 };
 
 describe("metadata-first candidate evidence", () => {
+  it("selects/rejects explicitly and preserves curated notes and source provenance", () => {
+    const captured = captureCandidates({ results: [{ url: "https://example.com/source", text: "body" }] }, provenance);
+    const selected = curateEvidence(
+      captured,
+      [
+        {
+          candidateId: captured[0].id,
+          decision: "select",
+          label: "Primary source",
+          notes: "Explicit evidence note",
+        },
+      ],
+      [],
+      [],
+    );
+    expect(selected.candidates[0]).toMatchObject({ decision: "selected", sourceId: captured[0].id });
+    expect(selected.sourceUpdates).toMatchObject([
+      { id: captured[0].id, url: captured[0].url, retrievalStatus: "fetched" },
+    ]);
+    expect(selected.selectedEvidence).toEqual([
+      {
+        sourceId: captured[0].id,
+        label: "Primary source",
+        notes: "Explicit evidence note",
+      },
+    ]);
+    const rejected = curateEvidence(
+      selected.candidates,
+      [
+        {
+          candidateId: captured[0].id,
+          decision: "reject",
+        },
+      ],
+      [],
+      selected.selectedEvidence,
+    );
+    expect(rejected.selectedEvidence).toEqual([]);
+    expect(rejected.candidates[0]).toMatchObject({ decision: "rejected", provenance: [provenance] });
+    expect(captured[0].decision).toBe("candidate");
+    expect(() => curateEvidence(captured, [{ candidateId: "unknown", decision: "reject" }], [], [])).toThrow(
+      "Unknown evidence candidate",
+    );
+  });
   it("records failed URL retrieval metadata without inventing fetched content", () => {
     expect(
       captureCandidates(

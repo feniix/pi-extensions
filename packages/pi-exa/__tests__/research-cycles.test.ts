@@ -172,6 +172,95 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it("curates candidates and external sources into selected-only previews without processing rows or automatic coverage", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
+    await controller.explorationEvidenceObserver(
+      cycle.id,
+      operation.id,
+      operation.requestHash,
+    )({
+      results: [
+        { url: "https://example.com/selected", title: "Selected", text: "RAW BODY" },
+        { url: "https://example.com/unselected", title: "Unselected" },
+      ],
+    });
+    const candidates = (await controller.status())?.candidates;
+    if (!candidates?.[0]) throw new Error("Candidate missing");
+    const selected = await controller.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Explicit curation",
+      thought_number: 1,
+      total_thoughts: 2,
+      next_step_needed: true,
+      evidence: [{ candidateId: candidates[0].id, decision: "select", label: "Useful source", notes: "Relevant fact" }],
+      criteria: [{ label: "Criterion", category: "other" }],
+      sources: [
+        {
+          id: "external",
+          title: "External source",
+          retrievalStatus: "fetched",
+          retrievalEvidence: "Explicit filesystem read",
+          contentNotes: "External note",
+        },
+      ],
+      executionPlan: { goal: "question", taskSchema: { type: "object" } },
+    });
+    expect(selected.cycle.revision).toBe(1);
+    expect(selected.cycle.plan.criteria[0].status).toBe("proposed");
+    const preview = await controller.preview();
+    expect(preview.selectedEvidence).toMatchObject([
+      {
+        url: candidates[0].url,
+        notes: "Relevant fact",
+        provenance: [{ operationId: operation.id }],
+      },
+    ]);
+    expect(preview.input).toBeUndefined();
+    expect(preview.request.query).not.toMatch(/RAW BODY|Unselected|External note/);
+    const refreshed = await controller.reserveExploration("web_search_exa", { query: "newer retrieval" });
+    await controller.explorationEvidenceObserver(
+      cycle.id,
+      refreshed.operation.id,
+      refreshed.operation.requestHash,
+    )({
+      results: [{ url: candidates[0].url, title: "New uncurated title", text: "New uncurated body" }],
+    });
+    expect((await controller.status())?.candidates?.[0].provenance).toHaveLength(2);
+    expect((await controller.preview()).hash).toBe(preview.hash);
+    await controller.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Reject candidate and use external evidence",
+      thought_number: 2,
+      total_thoughts: 2,
+      next_step_needed: false,
+      evidence: [{ candidateId: candidates[0].id, decision: "reject" }],
+    });
+    expect((await controller.preview()).selectedEvidence).toEqual([]);
+    await controller.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Select external evidence",
+      thought_number: 3,
+      total_thoughts: 3,
+      next_step_needed: false,
+      executionPlan: { selectedEvidence: [{ sourceId: "external", label: "Filesystem evidence" }] },
+    });
+    expect((await controller.preview()).selectedEvidence).toMatchObject([
+      {
+        sourceId: "external",
+        contentNotes: "External note",
+        retrievalEvidence: "Explicit filesystem read",
+      },
+    ]);
+    await controller.detach();
+  });
   it("does not let an old capture capability modify archived or reattached evidence", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);

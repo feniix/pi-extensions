@@ -32,7 +32,7 @@ import {
   type ResearchCycleStepInput,
   validateExecutionPlan,
 } from "./research-artifacts.js";
-import { candidateSchema, captureCandidates, evidenceProvenanceSchema } from "./research-evidence.js";
+import { candidateSchema, captureCandidates, curateEvidence, evidenceProvenanceSchema } from "./research-evidence.js";
 import { createResearchPlanner, type ResearchPlannerSnapshot } from "./research-planner.js";
 import type { ResearchSummaryParams } from "./research-planner-types.js";
 import { withResearchStorageLock } from "./research-storage-lock.js";
@@ -335,8 +335,18 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           throw new Error("Invalid candidate provenance.");
         operationIds.add(provenance.operationId);
       }
-      if (candidate.sourceId !== undefined && !record.plan.sources.some((source) => source.id === candidate.sourceId))
+      if (
+        candidate.sourceId !== undefined &&
+        !record.plan.sources.some((source) => source.id === candidate.sourceId && source.url === candidate.url)
+      )
         throw new Error("Invalid candidate source reference.");
+      if (
+        candidate.selectedProvenance?.some(
+          (entry) =>
+            !candidate.provenance.some((known) => canonicalResearchJson(entry) === canonicalResearchJson(known)),
+        )
+      )
+        throw new Error("Invalid selected evidence provenance.");
     }
     return record;
   }
@@ -741,9 +751,23 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         assertArtifactTarget(record, update);
         const planner = createResearchPlanner(record.plan);
         const before = planner.getStatus().stepCount;
-        const { executionPlan, cycleId: _cycleId, expectedRevision: _revision, ...plannerInput } = update;
-        const result = planner.recordStep(plannerInput);
-        if (result.stepCount === before && executionPlan !== undefined)
+        const { evidence, executionPlan, cycleId: _cycleId, expectedRevision: _revision, ...plannerInput } = update;
+        if (evidence !== undefined && executionPlan?.selectedEvidence !== undefined)
+          throw new Error("Choose evidence decisions or executionPlan.selectedEvidence in one update, not both.");
+        const curation =
+          evidence === undefined
+            ? undefined
+            : curateEvidence(
+                record.candidates ?? [],
+                evidence,
+                record.plan.sources,
+                record.executionPlan?.selectedEvidence ?? [],
+              );
+        const result = planner.recordStep({
+          ...plannerInput,
+          ...(curation ? { sources: [...(plannerInput.sources ?? []), ...curation.sourceUpdates] } : {}),
+        });
+        if (result.stepCount === before && (executionPlan !== undefined || evidence !== undefined))
           throw new ResearchArtifactError([
             {
               code: "STEP_REJECTED",
@@ -761,9 +785,22 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
               },
             ]);
           record.plan = planner.snapshot();
+          if (curation) {
+            record.candidates = curation.candidates;
+            record.executionPlan = { ...record.executionPlan, selectedEvidence: curation.selectedEvidence };
+          }
           if (executionPlan !== undefined) {
             record.executionPlan = { ...record.executionPlan, ...executionPlan };
             validateExecutionPlan(record.executionPlan, record.plan.sources);
+          }
+          if (record.executionPlan !== undefined) validateExecutionPlan(record.executionPlan, record.plan.sources);
+          for (const candidate of record.candidates ?? []) {
+            if (candidate.sourceId !== undefined)
+              candidate.decision = record.executionPlan?.selectedEvidence?.some(
+                (entry) => entry.sourceId === candidate.sourceId,
+              )
+                ? "selected"
+                : "rejected";
           }
           record.revision++;
           await write(record);

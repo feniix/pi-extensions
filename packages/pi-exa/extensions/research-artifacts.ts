@@ -8,6 +8,7 @@ import formatsModule from "ajv-formats";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import type { ResearchCycle } from "./research-cycles.js";
+import type { EvidenceDecision } from "./research-evidence.js";
 import type { ResearchSource, ResearchStepInput } from "./research-planner-types.js";
 
 export const executionPlanSchema = Type.Object(
@@ -81,6 +82,7 @@ export const executionPlanSchema = Type.Object(
 );
 export type ResearchExecutionPlan = Static<typeof executionPlanSchema>;
 export interface ResearchCycleStepInput extends ResearchStepInput {
+  evidence?: EvidenceDecision[];
   executionPlan?: ResearchExecutionPlan;
   cycleId?: string;
   expectedRevision?: number;
@@ -260,6 +262,7 @@ export function compileResearchArtifact(record: ResearchCycle, assertions: Artif
           message: "Record the source before selecting it.",
         },
       ]);
+    const provenance = record.candidates?.find((candidate) => candidate.sourceId === source.id)?.selectedProvenance;
     return {
       sourceId: selection.sourceId,
       label: selection.label,
@@ -272,6 +275,7 @@ export function compileResearchArtifact(record: ResearchCycle, assertions: Artif
       contentNotes: source.contentNotes,
       qualityNotes: source.qualityNotes,
       inspectionIssues: source.inspectionIssues,
+      ...(provenance === undefined ? {} : { provenance }),
     };
   });
   const brief = {
