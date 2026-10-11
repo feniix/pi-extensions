@@ -247,7 +247,10 @@ export async function inspectResearchRun(
   runId: string,
   options: AgentInspectionOptions = {},
 ): Promise<ToolPerformResult> {
-  if (!/^[A-Za-z0-9_.:-]{1,200}$/.test(runId)) throw new Error("Invalid Agent run ID.");
+  // The pinned SDK interpolates IDs without encoding; URL dot segments are
+  // routing syntax, not an opaque run identifier.
+  if (runId === "." || runId === ".." || !/^[A-Za-z0-9_.:-]{1,200}$/.test(runId))
+    throw new Error("Invalid Agent run ID.");
   const deadline = Date.now() + (options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS);
   const assertWait = () => {
     if (options.signal?.aborted) throw new AgentInspectionInterruptedError(runId, "aborted");

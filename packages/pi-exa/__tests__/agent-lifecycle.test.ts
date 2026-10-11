@@ -138,6 +138,19 @@ it("leaves unavailable GET outcomes unknown and rejects invalid path IDs without
   expect(sdk.cancel).not.toHaveBeenCalled();
 });
 
+it.each([".", ".."])("rejects dot-segment ID %s before any SDK GET or host capability preparation", async (runId) => {
+  const beforeGet = vi.fn(async () => () => {});
+  await expect(
+    inspectResearchRun("offline", runId, {
+      observer: { beforeGet, raw: async () => {} },
+    }),
+  ).rejects.toThrow("Invalid Agent run ID.");
+  expect(beforeGet).not.toHaveBeenCalled();
+  expect(sdk.get).not.toHaveBeenCalled();
+  expect(sdk.create).not.toHaveBeenCalled();
+  expect(sdk.cancel).not.toHaveBeenCalled();
+});
+
 it("retains late create outcomes after the local timeout without creating replacement research", async () => {
   vi.useFakeTimers();
   let resolve!: (run: { id: string; status: "completed" }) => void;
