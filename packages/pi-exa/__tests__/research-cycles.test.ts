@@ -490,6 +490,10 @@ describe("durable research cycles", () => {
   it.each([
     "source",
     "consumption",
+    "nonce-missing",
+    "nonce-foreign",
+    "nonce-reused",
+    "nonce-underfunded",
   ])("rejects corrupted retry intent %s metadata without modifying saved history", async (corruption) => {
     const { controller, cycle, hash, root } = await readyAgent();
     const first = (await controller.reserveAgent()).attempt;
@@ -507,11 +511,28 @@ describe("durable research cycles", () => {
     const entry = saved.attempts.find((attempt) => "id" in attempt && attempt.id === second.id);
     if (!entry) throw new Error("Retry intent missing");
     if (corruption === "source") Reflect.set(entry, "sourceAttemptIds", [second.id]);
-    else Reflect.set(entry, "replacementPermissionIds", ["unissued-permission"]);
+    else if (corruption === "consumption") Reflect.set(entry, "replacementPermissionIds", ["unissued-permission"]);
+    else {
+      const operation = saved.ledger.find((item) => "id" in item && item.id === second.operationId);
+      if (!operation) throw new Error("Operation missing");
+      if (corruption === "nonce-missing") Reflect.deleteProperty(operation, "requestPermissionId");
+      else if (corruption === "nonce-foreign") Reflect.set(operation, "requestPermissionId", "missing-permission");
+      else if (corruption === "nonce-reused") {
+        const previous = saved.ledger.find((item) => "id" in item && item.id === first.operationId);
+        if (!previous) throw new Error("Original operation missing");
+        Reflect.set(operation, "requestPermissionId", Reflect.get(previous, "requestPermissionId"));
+      } else {
+        const permission = saved.grants.find(
+          (item) => "id" in item && item.id === Reflect.get(operation, "requestPermissionId"),
+        );
+        if (!permission) throw new Error("Funding permission missing");
+        Reflect.set(permission, "allowanceMicros", 10_000);
+      }
+    }
     const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
     const json = JSON.stringify(saved);
     await writeFile(path, json);
-    await expect(controller.resume(cycle.id)).rejects.toThrow(/retry intent metadata/);
+    await expect(controller.resume(cycle.id)).rejects.toThrow(/retry intent (metadata|funding)/);
     expect(await readFile(path, "utf8")).toBe(json);
   });
 

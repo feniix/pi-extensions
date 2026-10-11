@@ -116,6 +116,23 @@ export function validateReplacementRecords(
         throw new Error("Invalid retry intent metadata.");
       continue;
     }
+    const operation = ledger.find((entry) => "id" in entry && entry.id === attempt.operationId);
+    const funding = Value.Check(explorationOperationSchema, operation)
+      ? grants.find((entry) => "id" in entry && entry.id === operation.requestPermissionId)
+      : undefined;
+    if (
+      !Value.Check(explorationOperationSchema, operation) ||
+      !Value.Check(uncertaintyPermissionSchema, funding) ||
+      funding.cycleId !== identity.cycleId ||
+      funding.projectId !== identity.projectId ||
+      funding.targetType !== "request" ||
+      funding.subjectId !== attempt.requestHash ||
+      funding.allowanceMicros < operation.estimateMicros ||
+      ledger.filter(
+        (entry) => Value.Check(explorationOperationSchema, entry) && entry.requestPermissionId === funding.id,
+      ).length !== 1
+    )
+      throw new Error("Invalid retry intent funding.");
     const sources = attempt.sourceAttemptIds ?? [];
     const permissions = attempt.replacementPermissionIds;
     const prior = attempts.slice(0, index).filter((entry) => Value.Check(agentAttemptSchema, entry));
