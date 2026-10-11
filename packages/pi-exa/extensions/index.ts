@@ -17,6 +17,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPiTools } from "@feniix/bridgekit/pi";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
+import { cyclePiRegistration } from "./cycle-pi.js";
 import { createExaTools, type ExaToolTimeouts } from "./tools.js";
 import { getExaRenderers } from "./tui-renderers.js";
 
@@ -33,6 +34,10 @@ export { DEFAULT_MAX_CHARACTERS } from "./web-fetch.js";
 export { DEFAULT_NUM_RESULTS } from "./web-search.js";
 
 function registerFlags(pi: ExtensionAPI): void {
+  pi.registerFlag("--exa-enable-cycles", {
+    description: "Opt in to durable Pi research planning; integrated paid execution remains gated.",
+    type: "boolean",
+  });
   pi.registerFlag("--exa-api-key", {
     description: "Exa AI API key for search operations",
     type: "string",
@@ -108,5 +113,5 @@ export default function exaExtension(pi: ExtensionAPI) {
       },
     };
   });
-  registerPiTools(pi, tools);
+  registerPiTools(pi.getFlag("--exa-enable-cycles") === true ? cyclePiRegistration(pi) : pi, tools);
 }

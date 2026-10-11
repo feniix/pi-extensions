@@ -138,7 +138,8 @@ describe("pi-exa extension", () => {
         "--exa-config",
       ]),
     );
-    expect(flagNames).toHaveLength(7);
+    expect(flagNames).toContain("--exa-enable-cycles");
+    expect(flagNames).toHaveLength(8);
   });
 
   it("registers default tools by default", () => {
