@@ -39,16 +39,21 @@ export function assessRetryHistory(
   if (!/^[a-f0-9]{64}$/.test(requestHash) || (mode !== "retry" && mode !== "replace"))
     throw new Error("Invalid retry request.");
   const ids = new Set<string>();
+  const operations = new Set<string>();
   for (const fact of history) {
+    if (!["completed", "failed", "not-dispatched", "unknown", "live", "unclassified"].includes(fact.state))
+      throw new Error("Retry history requires classified durable facts.");
     if (
       fact.cycleId !== identity.cycleId ||
       fact.projectId !== identity.projectId ||
       !fact.id ||
       !fact.operationId ||
-      ids.has(fact.id)
+      ids.has(fact.id) ||
+      operations.has(fact.operationId)
     )
       throw new Error("Retry history identity conflict.");
     ids.add(fact.id);
+    operations.add(fact.operationId);
   }
   const base = {
     assessmentOnly: true,

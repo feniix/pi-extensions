@@ -121,3 +121,17 @@ it("blocks unclassified history and foreign identities rather than infer failure
     assessRetryHistory([{ ...fact("failed", "failed"), cycleId: "other" }], [], identity, requestHash, "retry"),
   ).toThrow("Retry history identity conflict.");
 });
+
+it("rejects malformed classification and shared operation identities before assessing retry eligibility", () => {
+  const malformed = JSON.parse(JSON.stringify({ ...fact("bad", "failed"), state: "not-a-confirmed-state" }));
+  expect(() => assessRetryHistory([malformed], [], identity, requestHash, "retry")).toThrow(/classified durable facts/);
+  expect(() =>
+    assessRetryHistory(
+      [fact("one", "failed"), { ...fact("two", "failed"), operationId: "operation-one" }],
+      [],
+      identity,
+      requestHash,
+      "retry",
+    ),
+  ).toThrow("Retry history identity conflict.");
+});
