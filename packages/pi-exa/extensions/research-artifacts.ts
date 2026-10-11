@@ -230,29 +230,8 @@ export function canonicalResearchJson(value: unknown, root = "json"): string {
   return JSON.stringify(normalize(value, root));
 }
 
-export function compileResearchArtifact(record: ResearchCycle, assertions: ArtifactAssertions = {}) {
-  assertArtifactTarget(record, assertions);
-  if (record.archived || record.status !== "planning")
-    throw new ResearchArtifactError([
-      {
-        code: "CYCLE_NOT_EXECUTABLE",
-        path: "status",
-        message: "Only active planning state can compile a new execution; inspect brief/source_pack instead.",
-      },
-    ]);
-  const plan = record.executionPlan;
-  if (plan !== undefined) validateExecutionPlan(plan, record.plan.sources);
-  const issues: ArtifactIssue[] = [];
-  if (!plan?.goal?.trim())
-    issues.push({ code: "MISSING_GOAL", path: "executionPlan.goal", message: "Persist a research goal." });
-  if (!plan?.taskSchema)
-    issues.push({
-      code: "MISSING_TASK_SCHEMA",
-      path: "executionPlan.taskSchema",
-      message: "Persist a draft-07 root-object task schema.",
-    });
-  if (issues.length || !plan?.goal || !plan.taskSchema) throw new ResearchArtifactError(issues);
-  const selectedEvidence = (plan.selectedEvidence ?? []).map((selection) => {
+export function selectedResearchEvidence(record: ResearchCycle) {
+  return (record.executionPlan?.selectedEvidence ?? []).map((selection) => {
     const source = record.plan.sources.find((candidate) => candidate.id === selection.sourceId);
     if (!source)
       throw new ResearchArtifactError([
@@ -278,6 +257,31 @@ export function compileResearchArtifact(record: ResearchCycle, assertions: Artif
       ...(provenance === undefined ? {} : { provenance }),
     };
   });
+}
+
+export function compileResearchArtifact(record: ResearchCycle, assertions: ArtifactAssertions = {}) {
+  assertArtifactTarget(record, assertions);
+  if (record.archived || record.status !== "planning")
+    throw new ResearchArtifactError([
+      {
+        code: "CYCLE_NOT_EXECUTABLE",
+        path: "status",
+        message: "Only active planning state can compile a new execution; inspect brief/source_pack instead.",
+      },
+    ]);
+  const plan = record.executionPlan;
+  if (plan !== undefined) validateExecutionPlan(plan, record.plan.sources);
+  const issues: ArtifactIssue[] = [];
+  if (!plan?.goal?.trim())
+    issues.push({ code: "MISSING_GOAL", path: "executionPlan.goal", message: "Persist a research goal." });
+  if (!plan?.taskSchema)
+    issues.push({
+      code: "MISSING_TASK_SCHEMA",
+      path: "executionPlan.taskSchema",
+      message: "Persist a draft-07 root-object task schema.",
+    });
+  if (issues.length || !plan?.goal || !plan.taskSchema) throw new ResearchArtifactError(issues);
+  const selectedEvidence = selectedResearchEvidence(record);
   const brief = {
     topic: record.plan.topic,
     goal: plan.goal,

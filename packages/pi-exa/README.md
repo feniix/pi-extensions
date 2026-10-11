@@ -269,7 +269,8 @@ processing/exclusion records; evidence is never converted into rows.
 Save only curated, nonsecret values: explicit rows may contain sensitive data.
 
 `exa_research_summary` defaults to compilation in cycle mode; `execution_plan`
-and `payload` do the same. `brief` / `source_pack` retain read-only planner views.
+and `payload` do the same. `brief` / `source_pack` show read-only **selected-only**
+evidence views; inspect all candidates and planner sources through status.
 The returned `details.artifact` includes artifact version, cycle/revision,
 brief, selected evidence, output contract, controls, optional input/continuation,
 the actual SDK-shaped `request`, and a canonical SHA-256 `hash`. No raw step
@@ -295,6 +296,63 @@ execution fields must equal the compiled authoritative values: scalars exactly,
 JSON objects ignoring key order, arrays retaining order. Conflicts identify the
 field to update; execution never adds fields, deep-merges or mutates the plan.
 Even a valid artifact has `canExecute: false` in this rollout.
+
+#### Candidate evidence and curation
+
+Approved, explicitly cycle-attributed exploratory calls capture metadata from
+SDK results, answer citations and Deep Search grounding citations. Results and
+status expose `candidates`, each with a stable URL-derived `id`, title, retrieval
+state, decision and operation provenance (tool, operation ID, request hash,
+original revision and retrieval timestamp). URL fragments are ignored for
+deduplication; meaningful query parameters are preserved. Only HTTP(S) URLs are
+accepted; userinfo and common credential-bearing query parameters are rejected.
+Titles are limited to 512 characters and URLs to 8192.
+
+Candidate capture retains **no automatic text/highlight/summary excerpts, generated
+answers, raw SDK responses or processing rows**. Returned text/highlights can mark
+retrieval as fetched, not independently verified; generated summaries/synthesis
+alone do not prove source inspection. Metadata alone remains discovered-only.
+Failed URL statuses record fetch-failed metadata where a URL is available.
+Capture never selects a source or changes criterion coverage.
+
+Select a candidate explicitly through a normal `exa_research_step`:
+
+```json
+{
+  "topic": "pricing",
+  "stage": "source_retrieval",
+  "note": "Curate official evidence",
+  "thought_number": 2,
+  "total_thoughts": 3,
+  "next_step_needed": true,
+  "evidence": [{
+    "candidateId": "candidate-<hash-from-status>",
+    "decision": "select",
+    "label": "Official pricing",
+    "notes": "Explicitly record the relevant finding here"
+  }]
+}
+```
+
+Selection records a planner source and labeled selected evidence, with frozen
+provenance. Later retrieval of the same URL enriches candidate metadata but does
+not silently change the selected artifact; reselect explicitly to refresh it.
+Use `{ "candidateId": "...", "decision": "reject" }` to remove that candidate's
+selection while preserving its metadata/history. Use `evidence` decisions or
+`executionPlan.selectedEvidence` in a single step, not both. Duplicate/unknown
+candidate decisions are rejected without committing a planning step.
+
+External tools are not intercepted. Explicitly record their evidence through
+`sources` (including `retrievalEvidence`, useful `contentNotes`, and a source ID),
+then select it with `executionPlan.selectedEvidence`; both may happen in one step.
+Criteria still need explicit evidence-backed updates, not automatic satisfaction.
+
+Candidate metadata, selected sources and curated notes survive explicit resume.
+Old capture capabilities are fenced on detach/archive/reattach; late accounting
+can still reconcile its original operation. If candidate persistence fails after
+cost reconciliation, the returned content is preserved with a durability warning:
+explicitly curate it instead of repeating paid work. Standalone/default-opt-out
+and MCP calls do not install candidate capture.
 
 The storage uses short exclusive filesystem transactions and durable replacement,
 including synchronization of the namespace's containing directories.

@@ -175,7 +175,7 @@ describe("durable research cycles", () => {
   it("curates candidates and external sources into selected-only previews without processing rows or automatic coverage", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);
-    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    let controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
     const cycle = await controller.start("question");
     await controller.grantBudget(cycle.id, 1);
     const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
@@ -223,6 +223,12 @@ describe("durable research cycles", () => {
     ]);
     expect(preview.input).toBeUndefined();
     expect(preview.request.query).not.toMatch(/RAW BODY|Unselected|External note/);
+    expect(await controller.summary({ mode: "source_pack" })).not.toContain("External note");
+    await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.007 });
+    await controller.detach();
+    controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "two" });
+    await controller.resume(cycle.id);
+    expect((await controller.preview()).hash).toBe(preview.hash);
     const refreshed = await controller.reserveExploration("web_search_exa", { query: "newer retrieval" });
     await controller.explorationEvidenceObserver(
       cycle.id,

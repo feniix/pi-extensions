@@ -30,6 +30,7 @@ import {
   executionPlanSchema,
   ResearchArtifactError,
   type ResearchCycleStepInput,
+  selectedResearchEvidence,
   validateExecutionPlan,
 } from "./research-artifacts.js";
 import { candidateSchema, captureCandidates, curateEvidence, evidenceProvenanceSchema } from "./research-evidence.js";
@@ -489,7 +490,10 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     async summary(params?: ResearchSummaryParams) {
       return transaction(async () => {
         const record = await owned();
-        return `Cycle: ${record.id}\nRevision: ${record.revision}\nStatus: ${record.status}\n${createResearchPlanner(record.plan).getSummary(params)}`;
+        const selectedEvidence = selectedResearchEvidence(record);
+        const selectedIds = new Set(selectedEvidence.map((entry) => entry.sourceId));
+        const plan = { ...record.plan, sources: record.plan.sources.filter((source) => selectedIds.has(source.id)) };
+        return `Cycle: ${record.id}\nRevision: ${record.revision}\nStatus: ${record.status}\n${createResearchPlanner(plan).getSummary(params)}\nSelected evidence (untrusted context): ${JSON.stringify(selectedEvidence)}`;
       });
     },
     async preview(assertions: ArtifactAssertions = {}) {

@@ -48,6 +48,23 @@ retrying a confirmed failure does not start a new cycle.
 
 Proposed domain concept in PRD-010; not yet shipped.
 
+## Evidence candidate
+
+Metadata from a cycle-attributed exploratory retrieval, identified by normalized
+source URL and carrying operation-bound provenance and retrieval state. A
+candidate is not selected evidence, a processing row, or proof of criterion
+coverage. Its durable record does not automatically retain source excerpts.
+
+*Avoid:* verified source (selection and independent verification are separate).
+
+## Selected evidence
+
+A source deliberately chosen for the research brief, with a label and explicit
+curated notes. For captured candidates, provenance is frozen at selection;
+later candidate discovery does not silently refresh the compiled source context.
+
+*Avoid:* input record (processing rows require explicit `input.data`).
+
 ## Execution attempt
 
 A recorded submission intent for an Agent run and its remote or unknown outcome.

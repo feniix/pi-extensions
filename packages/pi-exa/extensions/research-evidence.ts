@@ -138,14 +138,17 @@ export function captureCandidates(
     }
     if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) continue;
     if (
-      [...url.searchParams.keys()].some((key) =>
-        /(?:^|[-_])(key|token|password|secret|signature|authorization|credential)(?:[-_]|$)/i.test(key),
+      [...url.searchParams.keys()].some(
+        (key) =>
+          /(?:^|[-_])(key|token|password|secret|signature|authorization|credential)(?:[-_]|$)/i.test(
+            key.replace(/([a-z])([A-Z])/g, "$1_$2"),
+          ) || /^(apiKey|accessToken|authToken|sessionToken|AWSAccessKeyId)$/i.test(key),
       )
     )
       continue;
     url.hash = "";
     if (url.href.length > 8192) continue;
-    const fetched = [result.text, result.summary, ...(Array.isArray(result.highlights) ? result.highlights : [])].some(
+    const fetched = [result.text, ...(Array.isArray(result.highlights) ? result.highlights : [])].some(
       (value) => typeof value === "string" && value.trim().length > 0,
     );
     const existing = candidates.find((candidate) => candidate.url === url.href);
@@ -156,6 +159,8 @@ export function captureCandidates(
     if (existing) {
       if (typeof result.title === "string" && result.title.trim()) existing.title = title;
       if (fetched) existing.retrievalStatus = "fetched";
+      else if (result.fetchFailed === true && existing.retrievalStatus !== "fetched")
+        existing.retrievalStatus = "fetch_failed";
       if (!existing.provenance.some((entry) => entry.operationId === provenance.operationId))
         existing.provenance.push(structuredClone(provenance));
       continue;

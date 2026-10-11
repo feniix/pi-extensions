@@ -10,6 +10,20 @@ const provenance: EvidenceProvenance = {
 };
 
 describe("metadata-first candidate evidence", () => {
+  it("does not classify generated summaries or synthesis as direct source inspection", () => {
+    expect(
+      captureCandidates(
+        {
+          results: [{ url: "https://example.com/summary", summary: "Generated summary" }],
+          output: {
+            content: "Generated synthesis",
+            grounding: [{ citations: [{ url: "https://example.com/citation" }] }],
+          },
+        },
+        provenance,
+      ).map((candidate) => candidate.retrievalStatus),
+    ).toEqual(["discovered_only", "discovered_only"]);
+  });
   it("selects/rejects explicitly and preserves curated notes and source provenance", () => {
     const captured = captureCandidates({ results: [{ url: "https://example.com/source", text: "body" }] }, provenance);
     const selected = curateEvidence(
@@ -59,12 +73,15 @@ describe("metadata-first candidate evidence", () => {
       captureCandidates(
         {
           results: [{ id: "sdk-id", url: "https://example.com/ok", title: null }],
-          statuses: [{ id: "https://example.com/failed", status: "error", error: { message: "raw secret" } }],
+          statuses: [
+            { id: "https://example.com/ok", status: "error" },
+            { id: "https://example.com/failed", status: "error", error: { message: "raw secret" } },
+          ],
         },
         { ...provenance, tool: "web_fetch_exa" },
       ),
     ).toMatchObject([
-      { url: "https://example.com/ok", title: "https://example.com/ok", retrievalStatus: "discovered_only" },
+      { url: "https://example.com/ok", title: "https://example.com/ok", retrievalStatus: "fetch_failed" },
       { url: "https://example.com/failed", retrievalStatus: "fetch_failed" },
     ]);
   });
@@ -75,6 +92,8 @@ describe("metadata-first candidate evidence", () => {
           { url: "javascript:alert(1)" },
           { url: "https://username:password@example.com" },
           { url: "https://example.com?api_key=secret" },
+          { url: "https://example.com?apiKey=secret" },
+          { url: "https://example.com?accessToken=secret" },
           { url: "https://example.com?X-Amz-Signature=secret" },
           { url: "https://example.com/valid", title: "x".repeat(1000), summary: {} },
         ],

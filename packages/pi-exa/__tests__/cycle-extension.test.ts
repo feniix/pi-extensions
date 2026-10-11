@@ -22,12 +22,30 @@ const offlineSearch = vi.hoisted(() =>
   vi.fn<(...args: unknown[]) => Promise<Record<string, unknown>>>(async () => ({ results: [], requestId: "offline" })),
 );
 const offlineCreate = vi.hoisted(() => vi.fn(async () => ({ id: "offline", status: "completed" })));
+const offlineEndpoints = vi.hoisted(() => ({
+  search: vi.fn(),
+  getContents: vi.fn(),
+  findSimilar: vi.fn(),
+  answer: vi.fn(),
+}));
 vi.mock("exa-js", () => ({
   Exa: class {
-    search = offlineSearch;
-    getContents = offlineSearch;
-    findSimilar = offlineSearch;
-    answer = offlineSearch;
+    search = (...args: unknown[]) => {
+      offlineEndpoints.search(...args);
+      return offlineSearch(...args);
+    };
+    getContents = (...args: unknown[]) => {
+      offlineEndpoints.getContents(...args);
+      return offlineSearch(...args);
+    };
+    findSimilar = (...args: unknown[]) => {
+      offlineEndpoints.findSimilar(...args);
+      return offlineSearch(...args);
+    };
+    answer = (...args: unknown[]) => {
+      offlineEndpoints.answer(...args);
+      return offlineSearch(...args);
+    };
     agent = { runs: { create: offlineCreate } };
   },
 }));
@@ -38,6 +56,7 @@ afterEach(async () => {
   vi.mocked(fs.rename).mockReset();
   offlineSearch.mockReset().mockResolvedValue({ results: [], requestId: "offline" });
   offlineCreate.mockClear();
+  for (const endpoint of Object.values(offlineEndpoints)) endpoint.mockClear();
   vi.unstubAllEnvs();
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
@@ -159,6 +178,217 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("keeps concurrent reversed SDK completions bound to their own operation and candidates", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 0.014`, pi.context);
+    const pending = new Map<string, (response: Record<string, unknown>) => void>();
+    let entered!: () => void;
+    const bothEntered = new Promise<void>((done) => {
+      entered = done;
+    });
+    offlineSearch.mockImplementation(
+      (query) =>
+        new Promise((resolve) => {
+          if (typeof query !== "string") throw new Error("Unexpected query");
+          pending.set(query, resolve);
+          if (pending.size === 2) entered();
+        }),
+    );
+    const first = pi.call("web_search_exa", { query: "first", cycleId: status.id });
+    const second = pi.call("web_search_exa", { query: "second", cycleId: status.id });
+    await bothEntered;
+    for (const query of ["second", "first"])
+      pending.get(query)?.({
+        results: [{ id: query, title: query, url: `https://example.com/${query}` }],
+        costDollars: { total: 0.007 },
+      });
+    const responses = await Promise.all([first, second]);
+    for (const [index, query] of ["first", "second"].entries()) {
+      expect(responses[index].isError, JSON.stringify(responses[index])).not.toBe(true);
+      expect(responses[index].details).toMatchObject({
+        candidates: [
+          {
+            title: query,
+            url: `https://example.com/${query}`,
+            provenance: [{ operationId: responses[index].details.operationId }],
+          },
+        ],
+      });
+    }
+    const final = (await pi.call("exa_research_status")).details;
+    expect(final.candidates).toHaveLength(2);
+    expect(final.accounting).toMatchObject({ reportedDollars: 0.014, pendingEstimatedDollars: 0 });
+  });
+  it("does not capture late results after archive, while reconciling their genuine cost", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+    let resolve!: (response: Record<string, unknown>) => void;
+    let enter!: () => void;
+    const entered = new Promise<void>((done) => {
+      enter = done;
+    });
+    offlineSearch.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+          enter();
+        }),
+    );
+    const pending = pi.call("web_search_exa", { query: "topic", cycleId: status.id });
+    await entered;
+    await pi.call("exa_research_reset");
+    resolve({
+      results: [{ id: "https://late.example", url: "https://late.example", title: "Late", text: "Late content" }],
+      costDollars: { total: 0.009 },
+    });
+    expect((await pending).details.candidates).toEqual([]);
+    await pi.command?.handler("list", pi.context);
+    const saved = JSON.parse(String(pi.notify.mock.lastCall?.[0]));
+    expect(saved).toMatchObject([
+      {
+        archived: true,
+        ledger: [{ status: "reported", reportedMicros: 9_000 }],
+      },
+    ]);
+    expect(JSON.stringify(saved)).not.toContain("late.example");
+  });
+  it("preserves successful returned content and reported accounting when candidate persistence fails", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    offlineSearch.mockImplementationOnce(async () => {
+      let replacements = 0;
+      vi.mocked(fs.rename).mockImplementation(async (...args) => {
+        if (++replacements === 2) throw new Error("candidate persistence denied");
+        return original.rename(...args);
+      });
+      return {
+        results: [
+          {
+            id: "https://example.com/source",
+            url: "https://example.com/source",
+            title: "Source",
+            text: "Useful returned body",
+          },
+        ],
+        costDollars: { total: 0.007 },
+      };
+    });
+    const response = await pi.call("web_search_exa", { query: "topic", cycleId: status.id });
+    expect(response.isError, JSON.stringify(response)).not.toBe(true);
+    expect(JSON.stringify(response.content)).toContain("Useful returned body");
+    expect(response.details).toMatchObject({
+      candidateCaptureError: expect.stringContaining("candidate persistence denied"),
+      candidates: [],
+      accounting: { reportedDollars: 0.007, billingVerified: false },
+    });
+    expect(offlineSearch).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    { tool: "web_search_exa", endpoint: "search", args: { query: "topic" } },
+    { tool: "web_search_advanced_exa", endpoint: "search", args: { query: "topic", type: "deep" } },
+    { tool: "web_fetch_exa", endpoint: "getContents", args: { urls: ["https://example.com/source"] } },
+    { tool: "web_find_similar_exa", endpoint: "findSimilar", args: { url: "https://example.com/source" } },
+    { tool: "web_answer_exa", endpoint: "answer", args: { query: "topic" } },
+  ] as const)("captures $tool results from its actual SDK endpoint after spending authorization", async ({
+    tool,
+    endpoint,
+    args,
+  }) => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1 ${tool}`, pi.context);
+    offlineSearch.mockResolvedValue({
+      results: [{ id: "https://example.com/source", url: "https://example.com/source", title: "Source", text: "body" }],
+      citations: [
+        { id: "https://example.com/source", url: "https://example.com/source", title: "Source", text: "body" },
+      ],
+      answer: "Generated answer",
+      requestId: "offline",
+      costDollars: { total: 0 },
+    });
+    let response = await pi.call(tool, { ...args, cycleId: status.id });
+    if (response.isError && typeof response.details.requestHash === "string") {
+      await pi.command?.handler(`approve-request ${status.id} ${response.details.requestHash} 0.02`, pi.context);
+      response = await pi.call(tool, { ...args, cycleId: status.id });
+    }
+    expect(response.isError, JSON.stringify(response)).not.toBe(true);
+    for (const [name, spy] of Object.entries(offlineEndpoints)) {
+      expect(spy).toHaveBeenCalledTimes(name === endpoint ? 1 : 0);
+    }
+    expect(response.details).toMatchObject({
+      candidates: [{ url: "https://example.com/source", decision: "candidate", provenance: [{ tool }] }],
+    });
+    expect((await pi.call("exa_research_status")).details).toMatchObject({
+      sources: [],
+      criteriaCoverage: { supported: 0 },
+      ledger: [{ reportedMicros: 0 }],
+    });
+  });
+  it("captures attributed SDK candidates, curates them explicitly, and isolates unrelated standalone results", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    const fixture = {
+      results: [
+        { id: "https://example.com/source", url: "https://example.com/source", title: "Candidate", text: "Raw body" },
+      ],
+      costDollars: { total: 0.007 },
+    };
+    offlineSearch.mockResolvedValue(fixture);
+    expect((await pi.call("web_search_exa", { query: "topic", cycleId: status.id })).isError).toBe(true);
+    expect(offlineSearch).not.toHaveBeenCalled();
+    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+    const response = await pi.call("web_search_exa", { query: "topic", cycleId: status.id });
+    expect(response.isError, JSON.stringify(response)).not.toBe(true);
+    const captured = (await pi.call("exa_research_status")).details;
+    expect(captured.candidates).toMatchObject([
+      {
+        title: "Candidate",
+        decision: "candidate",
+        provenance: [{ operationId: response.details.operationId }],
+      },
+    ]);
+    const candidates = captured.candidates;
+    if (!Array.isArray(candidates) || !candidates[0]) throw new Error("Missing candidates");
+    const curated = await pi.call("exa_research_step", {
+      topic: "topic",
+      stage: "source_retrieval",
+      note: "Explicit selection",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+      evidence: [
+        { candidateId: candidates[0].id, decision: "select", label: "Useful evidence", notes: "Explicit note" },
+      ],
+      sources: [{ id: "external-unselected", title: "UNSELECTED EXTERNAL", contentNotes: "UNSELECTED NOTES" }],
+      executionPlan: { goal: "topic", taskSchema: { type: "object" } },
+    });
+    expect(curated.isError).not.toBe(true);
+    const preview = await pi.call("exa_research_summary", { mode: "execution_plan" });
+    expect(preview.details).toMatchObject({
+      artifact: {
+        selectedEvidence: [{ title: "Candidate", notes: "Explicit note", provenance: [{ tool: "web_search_exa" }] }],
+      },
+    });
+    for (const mode of ["brief", "source_pack"]) {
+      const summary = await pi.call("exa_research_summary", { mode });
+      expect(JSON.stringify(summary)).not.toMatch(/UNSELECTED EXTERNAL|UNSELECTED NOTES/);
+      expect(JSON.stringify(summary)).toContain("Explicit note");
+    }
+    offlineSearch.mockResolvedValue({
+      results: [{ id: "https://unrelated.example", url: "https://unrelated.example", title: "Unrelated" }],
+    });
+    await pi.call("web_search_exa", { query: "unrelated", researchMode: "standalone" });
+    expect((await pi.call("exa_research_status")).details).toEqual(curated.details.cycle);
+  });
   it("describes approved exploratory spending separately from gated Agent synthesis in flag help", async () => {
     const pi = await host();
     expect(pi.flags).toHaveBeenCalledWith("exa-enable-cycles", {

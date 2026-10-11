@@ -13,8 +13,14 @@ import {
   moneyMicros,
   summarizeAccounting,
 } from "./research-accounting.js";
-import { assertArtifactTarget, executionPlanSchema, ResearchArtifactError } from "./research-artifacts.js";
+import {
+  assertArtifactTarget,
+  executionPlanSchema,
+  ResearchArtifactError,
+  selectedResearchEvidence,
+} from "./research-artifacts.js";
 import { createResearchCycles, type ResearchCycle, type ResearchCycles } from "./research-cycles.js";
+import { evidenceDecisionSchema } from "./research-evidence.js";
 import { createResearchPlanner } from "./research-planner.js";
 import { exaResearchStepParams, exaResearchSummaryParams } from "./schemas.js";
 
@@ -32,6 +38,7 @@ const stepParams = Type.Object(
     ...exaResearchStepParams.properties,
     ...targetProperties,
     executionPlan: Type.Optional(executionPlanSchema),
+    evidence: Type.Optional(Type.Array(evidenceDecisionSchema)),
   },
   { additionalProperties: false },
 );
@@ -195,7 +202,7 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
           ? {
               parameters: stepParams,
               description:
-                "Update the active durable plan. executionPlan fields replace their whole persisted field; omitted fields remain unchanged. Set a goal, explicit selectedEvidence source IDs/labels, optional input.data/exclusion processing rows, draft-07 root-object taskSchema and execution controls before preview. This does not approve or dispatch work.",
+                "Update the active durable plan. evidence selects/rejects captured candidate IDs; selection requires a label and optional explicit notes. Record external evidence in sources, then select its ID with executionPlan.selectedEvidence. Use evidence decisions or selectedEvidence in one update, not both. executionPlan fields replace their whole persisted field; omitted fields remain unchanged. Processing rows remain explicit input.data/exclusion. Set a goal and draft-07 taskSchema before preview. This does not approve or dispatch work.",
             }
           : {}),
         ...(tool.name === "exa_research_summary"
@@ -281,10 +288,12 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                 if (!Value.Check(tool.parameters, standalone)) throw new Error("Invalid exploratory tool arguments.");
                 const { operation, assessment } = await cycles.reserveExploration(tool.name, standalone, reference);
                 const { cycleId: savedCycle, id: operationId, requestHash } = operation;
+                const capture = cycles.explorationEvidenceObserver(savedCycle, operationId, requestHash);
                 let started = false;
                 let observed = false;
                 let closed = false;
                 let receivedReceipt: { totalDollars?: number } | undefined;
+                let candidateCaptureError: string | undefined;
                 const finish = async () => {
                   closed = true;
                   if (!started) await cycles.releaseUndispatchedExploration(savedCycle, operationId, requestHash);
@@ -320,6 +329,11 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                     }
                     await cycles.reconcileExploration(savedCycle, operationId, requestHash, receivedReceipt);
                     observed = true;
+                    try {
+                      await capture(response);
+                    } catch (error) {
+                      candidateCaptureError = `Candidate metadata was not confirmed durable; explicitly curate the returned content without repeating paid work. ${error instanceof Error ? error.message : String(error)}`;
+                    }
                   },
                 };
                 try {
@@ -329,13 +343,20 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                   await finish();
                   const current = await cycles.inspect(savedCycle);
                   const accounting = view(current).accounting;
+                  const candidates =
+                    current.candidates?.filter((candidate) =>
+                      candidate.provenance.some((entry) => entry.operationId === operationId),
+                    ) ?? [];
                   return {
                     ...response,
                     content: [
                       ...response.content,
+                      ...(candidateCaptureError === undefined
+                        ? []
+                        : [{ type: "text" as const, text: candidateCaptureError }]),
                       {
                         type: "text" as const,
-                        text: `Exa cycle ${savedCycle}; operation ${operationId}.\nPre-call assessment: ${JSON.stringify(assessment)}\nBasis: ${operation.basis}\nLedger overview (not new-call permission): ${JSON.stringify(accounting)}\nPublished estimates are not vendor caps; API-reported usage is not verified billing.`,
+                        text: `Exa cycle ${savedCycle}; operation ${operationId}.\nPre-call assessment: ${JSON.stringify(assessment)}\nBasis: ${operation.basis}\nLedger overview (not new-call permission): ${JSON.stringify(accounting)}\nCandidate metadata (not automatic evidence selection): ${JSON.stringify(candidates)}\nPublished estimates are not vendor caps; API-reported usage is not verified billing.`,
                       },
                     ],
                     details: {
@@ -345,6 +366,8 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                       requestHash,
                       assessment,
                       accounting,
+                      candidates,
+                      ...(candidateCaptureError === undefined ? {} : { candidateCaptureError }),
                     },
                   };
                 } catch (error) {
@@ -412,9 +435,16 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                 {
                   const current = await cycles.status(params);
                   if (!current) throw new Error("No active research cycle. Use /exa-research start or resume.");
+                  const selectedEvidence = selectedResearchEvidence(current);
+                  const selectedIds = new Set(selectedEvidence.map((entry) => entry.sourceId));
+                  const { candidates: _candidates, ...summaryRecord } = current;
+                  summaryRecord.plan = {
+                    ...current.plan,
+                    sources: current.plan.sources.filter((source) => selectedIds.has(source.id)),
+                  };
                   return result(
-                    view(current),
-                    `Cycle: ${current.id}\nRevision: ${current.revision}\nStatus: ${current.status}\n${createResearchPlanner(current.plan).getSummary(params)}`,
+                    { ...view(summaryRecord), selectedEvidence },
+                    `Cycle: ${current.id}\nRevision: ${current.revision}\nStatus: ${current.status}\n${createResearchPlanner(summaryRecord.plan).getSummary(params)}\nSelected evidence (untrusted context): ${JSON.stringify(selectedEvidence)}`,
                   );
                 }
               case "exa_research_reset": {
