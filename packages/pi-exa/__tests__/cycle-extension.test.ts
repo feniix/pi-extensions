@@ -136,6 +136,22 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("records total-ceiling operator grants without accepting assistant approval fields or dispatching work", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 0.01`, pi.context);
+    expect(pi.notify).toHaveBeenLastCalledWith(expect.stringContaining("ceiling"), "info");
+    await pi.command?.handler(`approve ${status.id} 0.02`, pi.context);
+    expect((await pi.call("exa_research_status")).details.grants).toMatchObject([
+      { ceilingMicros: 10_000, source: "command" },
+      { ceilingMicros: 20_000, source: "command" },
+    ]);
+    expect((await pi.call("web_search_exa", { query: "topic", approved: true })).isError).toBe(true);
+    expect(offlineSearch).not.toHaveBeenCalled();
+    expect(offlineCreate).not.toHaveBeenCalled();
+  });
+
   it.each([
     { tool: "exa_research_summary", mode: undefined, reference: "revision" },
     { tool: "exa_research_summary", mode: "payload", reference: "revision" },

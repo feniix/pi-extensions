@@ -138,6 +138,10 @@ Start Pi with `--exa-enable-cycles` to use durable research planning:
   in this project. Unreadable contents are never displayed; attribution checks
   remain fail-closed until those records are repaired.
 - `/exa-research resume <cycle-id>` explicitly acquires ownership after restart.
+- `/exa-research approve <cycle-id> <total-dollar-ceiling>` records an operator
+  grant for supported exploratory retrieval. Each approval sets the cycle's
+  **total lifetime ceiling**, not additional credits. Grant history survives
+  resume/archive; assistant approval fields do not establish consent.
 - `/exa-research archive [cycle-id]` detaches and archives without deleting history.
 
 The four `exa_research_*` tools then update, inspect, summarize, and archive the
@@ -166,9 +170,12 @@ inspection diagnostics are recomputed from retained facts.
 Unknown execution remains unknown after
 resume; completed records cannot be edited back into executable planning.
 
-This release implements **local persistence and request compilation only**. Integrated paid retrieval/
-Agent execution and `/exa-research approve` are unavailable until their safety
-slices land. Active-cycle web calls fail before dispatch; `researchMode:
+The current implementation includes local persistence, request compilation and
+the initial durable accounting core. **Integrated paid retrieval and Agent
+execution remain unavailable** while the remaining safety wiring lands; even an
+operator grant does not dispatch work yet. Approval displays the published-rate
+profile; estimates are not vendor-enforced billing caps or invoice verification.
+Active-cycle web calls fail before dispatch; `researchMode:
 "standalone"` explicitly selects unrelated legacy retrieval.
 With no active cycle, normal standalone web tools remain available.
 Continuations identifying a saved cycle attempt and requests carrying a saved

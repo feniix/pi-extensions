@@ -4,6 +4,7 @@ import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil
 import type { PiToolRegistration } from "@feniix/bridgekit/pi";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import { EXA_RATE_PROFILE } from "./research-accounting.js";
 import { assertArtifactTarget, executionPlanSchema, ResearchArtifactError } from "./research-artifacts.js";
 import { createResearchCycles, type ResearchCycle, type ResearchCycles } from "./research-cycles.js";
 import { createResearchPlanner } from "./research-planner.js";
@@ -114,8 +115,18 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
             text = `Archived ${record.id}.${warning(record)}`;
             break;
           }
-          case "approve":
-            throw new Error("Spending approval is not available yet; no grant was issued.");
+          case "approve": {
+            const approval = /^(\S+)\s+(\d+(?:\.\d{1,6})?)$/.exec(value);
+            if (!approval) throw new Error("Use approve <cycle-id> <total-dollar-ceiling>; no grant was issued.");
+            const approved = await cycles.grantBudget(approval[1], Number(approval[2]), [
+              "web_search_exa",
+              "web_fetch_exa",
+              "web_find_similar_exa",
+              "web_search_advanced_exa",
+            ]);
+            text = `Recorded total lifetime Exa ceiling. Estimates are not billing caps; unsupported pricing remains gated.\n${JSON.stringify(EXA_RATE_PROFILE)}\n${JSON.stringify(view(approved), null, 2)}`;
+            break;
+          }
           default:
             throw new Error("Use /exa-research start <topic>, list, resume <id>, or archive [id].");
         }
