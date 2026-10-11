@@ -1,5 +1,10 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { resetExaClientCache } from "../extensions/exa-client.js";
+import { createResearchCycles } from "../extensions/research-cycles.js";
+import { agentRequestHash } from "../extensions/research-execution.js";
 import { AgentResearchTimeoutError, inspectResearchRun, performResearch } from "../extensions/web-research.js";
 
 const sdk = vi.hoisted(() => ({ create: vi.fn(), get: vi.fn(), cancel: vi.fn() }));
@@ -12,6 +17,72 @@ afterEach(() => {
   vi.useRealTimers();
   vi.resetAllMocks();
   resetExaClientCache();
+});
+
+it("uses the real controller fences for two explicitly funded SDK creates after confirmed failure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "exa-retry-sdk-"));
+  const cycles = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "sdk-test" });
+  try {
+    const cycle = await cycles.start("question");
+    await cycles.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Prepare",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+      executionPlan: {
+        goal: "answer",
+        taskSchema: {
+          type: "object",
+          required: ["answer"],
+          properties: { answer: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+    });
+    const artifact = await cycles.preview();
+    const hash = agentRequestHash(artifact.request);
+    await cycles.grantBudget(cycle.id, 1, ["web_research_exa"]);
+    await cycles.grantUncertainty(cycle.id, "request", hash, 0.2);
+    sdk.create
+      .mockResolvedValueOnce({ id: "agent_run_first_failed", status: "failed", costDollars: { total: 0.01 } })
+      .mockResolvedValueOnce({
+        id: "agent_run_second_success",
+        status: "completed",
+        costDollars: { total: 0.1 },
+        output: { structured: { answer: "funded retry" } },
+      });
+    const first = (await cycles.reserveAgent()).attempt;
+    const firstObserver = cycles.agentLifecycleObserver(cycle.id, first.id, hash);
+    if (typeof artifact.request.query !== "string") throw new Error("Compiled query missing");
+    await expect(
+      performResearch("offline", { ...artifact.request, query: artifact.request.query }, { observer: firstObserver }),
+    ).rejects.toThrow(/failed/);
+    await firstObserver.finish();
+    expect((await cycles.status())?.status).toBe("failed");
+    await expect(cycles.reserveAgent({}, "retry")).rejects.toThrow("UNCERTAINTY_APPROVAL_REQUIRED");
+    expect(sdk.create).toHaveBeenCalledTimes(1);
+    await cycles.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const second = (await cycles.reserveAgent({}, "retry")).attempt;
+    const secondObserver = cycles.agentLifecycleObserver(cycle.id, second.id, hash);
+    await performResearch(
+      "offline",
+      { ...artifact.request, query: artifact.request.query },
+      { observer: secondObserver },
+    );
+    await secondObserver.finish();
+    expect(sdk.create).toHaveBeenCalledTimes(2);
+    expect(sdk.create.mock.calls[1][0]).toEqual(second.artifact.request);
+    expect(sdk.get).not.toHaveBeenCalled();
+    expect(sdk.cancel).not.toHaveBeenCalled();
+    expect((await cycles.status())?.status).toBe("completed");
+    await expect(cycles.reserveAgent({}, "retry")).rejects.toThrow("CYCLE_NOT_EXECUTABLE");
+    expect(sdk.create).toHaveBeenCalledTimes(2);
+  } finally {
+    await cycles.detach();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 it("inspects exactly one existing pending run without creating, polling or cancelling research", async () => {
@@ -34,6 +105,117 @@ it("inspects exactly one existing pending run without creating, polling or cance
   expect(sdk.get).toHaveBeenCalledExactlyOnceWith("agent_run_existing");
   expect(sdk.create).not.toHaveBeenCalled();
   expect(sdk.cancel).not.toHaveBeenCalled();
+});
+
+it("preserves both genuine late successes after an explicitly approved unknown replacement without more SDK work", async () => {
+  const root = await mkdtemp(join(tmpdir(), "exa-replace-sdk-"));
+  const cycles = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "sdk-test" });
+  try {
+    const cycle = await cycles.start("question");
+    await cycles.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Prepare",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+      executionPlan: {
+        goal: "answer",
+        taskSchema: {
+          type: "object",
+          required: ["answer"],
+          properties: { answer: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+    });
+    const artifact = await cycles.preview();
+    if (typeof artifact.request.query !== "string") throw new Error("Compiled query missing");
+    const request = { ...artifact.request, query: artifact.request.query };
+    const hash = agentRequestHash(artifact.request);
+    await cycles.grantBudget(cycle.id, 1, ["web_research_exa"]);
+    await cycles.grantUncertainty(cycle.id, "request", hash, 0.2);
+    let resolveOriginal!: (reply: {
+      id: string;
+      status: "completed";
+      costDollars: { total: number };
+      output: { structured: { answer: string } };
+    }) => void;
+    let observed!: () => void;
+    const lateObservation = new Promise<void>((done) => {
+      observed = done;
+    });
+    const signal = new AbortController();
+    sdk.create
+      .mockImplementationOnce(() => {
+        signal.abort();
+        return new Promise((done) => {
+          resolveOriginal = done;
+        });
+      })
+      .mockResolvedValueOnce({
+        id: "agent_run_replacement",
+        status: "completed",
+        costDollars: { total: 0.1 },
+        output: { structured: { answer: "replacement" } },
+      });
+    const first = (await cycles.reserveAgent()).attempt;
+    const original = cycles.agentLifecycleObserver(cycle.id, first.id, hash);
+    await expect(
+      performResearch("offline", request, {
+        signal: signal.signal,
+        observer: {
+          beforeCreate: original.beforeCreate,
+          raw: async (phase, reply) => {
+            await original.raw(phase, reply);
+            observed();
+          },
+        },
+      }),
+    ).rejects.toThrow("Cancelled.");
+    await original.finish();
+    expect((await cycles.status())?.status).toBe("unknown");
+    await cycles.grantUncertainty(cycle.id, "request", hash, 0.2);
+    await expect(cycles.reserveAgent({}, "replace")).rejects.toThrow("REPLACEMENT_APPROVAL_REQUIRED");
+    expect(sdk.create).toHaveBeenCalledTimes(1);
+    await cycles.grantReplacement(cycle.id, first.id, hash, 0.2);
+    const second = (await cycles.reserveAgent({}, "replace")).attempt;
+    const replacement = cycles.agentLifecycleObserver(cycle.id, second.id, hash);
+    await performResearch("offline", request, { observer: replacement });
+    await replacement.finish();
+    resolveOriginal({
+      id: "agent_run_original_late",
+      status: "completed",
+      costDollars: { total: 0.1 },
+      output: { structured: { answer: "original also succeeded" } },
+    });
+    await lateObservation;
+    const saved = await cycles.status();
+    expect(saved?.status).toBe("completed");
+    expect(saved?.attempts).toMatchObject([
+      {
+        result: {
+          remoteId: "agent_run_original_late",
+          remoteStatus: "completed",
+          taskOutput: { answer: "original also succeeded" },
+        },
+      },
+      {
+        result: {
+          remoteId: "agent_run_replacement",
+          remoteStatus: "completed",
+          taskOutput: { answer: "replacement" },
+        },
+      },
+    ]);
+    await expect(cycles.reserveAgent({}, "replace")).rejects.toThrow("CYCLE_NOT_EXECUTABLE");
+    expect(sdk.create).toHaveBeenCalledTimes(2);
+    expect(sdk.get).not.toHaveBeenCalled();
+    expect(sdk.cancel).not.toHaveBeenCalled();
+  } finally {
+    await cycles.detach();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 it("snapshots inspection metadata before an asynchronous host observer can mutate the SDK reply", async () => {

@@ -263,9 +263,10 @@ with source-attempt chronology and grant/request bindings checked on restore.
 An intervening original-liability amendment invalidates an older paired risk
 grant. Failed reservations do not consume grants. Aggregate lifecycle includes
 all saved attempts: one local nondispatch cannot reopen unknown original work,
-nor can an older failure hide a newer live intent. Actual transition SDK creates
-still fail closed with `RETRY_DISPATCH_GATED` until final submission fences and
-registered Pi activation are implemented and reviewed.
+nor can an older failure hide a newer live intent. The intent-only milestone
+kept transition SDK creates behind `RETRY_DISPATCH_GATED`; the subsequent
+controller dispatch slice replaces that temporary gate with the fences below.
+Registered Pi activation remains separate.
 
 Jev selected frozen historical authorization proof rather than replaying today's
 outcomes as though they existed at reservation. Each transition retains all
@@ -292,6 +293,24 @@ creation time. Truncation cannot hide an earlier amendment; extension cannot
 turn a later nonce into historical funding. The restored liability minimum also
 covers the immutable request's published fixed rate and frozen ledger receipts,
 without treating later provisional growth as an invalid historical approval.
+
+Controller dispatch rechecks original history, latest paired risk/liability,
+held exact-request nonce, current total exposure, frozen artifact, owner and
+generation both before the durable claim and in a synchronous no-await final
+guard. The final guard opens a private owned regular record with no symlink
+following, validates a fresh snapshot and never echoes malformed private JSON.
+Known original success, another held local operation, grown liability or lost
+scope/ownership blocks a new create without deleting its saved intent.
+
+A same-process, operation-bound genuine completion latch also blocks creates
+while the asynchronous receipt is publishing; successful durable publication
+clears it, whereas unresolved local persistence failure remains conservative.
+Across processes the fresh durable snapshot is the visibility/linearization
+boundary; this is not a distributed transaction with vendor state. Local
+nondispatch then releases only the new hold and preserves older unknown work.
+Real-controller/mock-SDK regressions exercise funded failed retry and explicitly
+approved unknown replacement with both late successes preserved and no third
+create. No live paid SDK call or independently verified invoice is claimed.
 
 ## #158 delegated recovery decisions
 

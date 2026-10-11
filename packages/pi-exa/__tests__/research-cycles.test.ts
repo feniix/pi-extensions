@@ -448,9 +448,18 @@ describe("durable research cycles", () => {
     expect(saved.attempts).toHaveLength(2);
     await original.raw("get", { id: "agent_run_failure", status: "failed", costDollars: { total: 0.01 } });
     expect((await controller.status())?.status).toBe("running");
-    await expect(controller.agentLifecycleObserver(cycle.id, second.id, hash).beforeCreate()).rejects.toThrow(
-      "RETRY_DISPATCH_GATED",
-    );
+    const retry = controller.agentLifecycleObserver(cycle.id, second.id, hash);
+    const send = await retry.beforeCreate();
+    send();
+    expect(send).toThrow(/already consumed/);
+    await retry.raw("create", {
+      id: "agent_run_retry_success",
+      status: "completed",
+      costDollars: { total: 0.1 },
+      output: { answer: "explicit retry succeeded" },
+    });
+    await retry.finish();
+    expect((await controller.status())?.status).toBe("completed");
     await controller.detach();
   });
 
@@ -740,6 +749,39 @@ describe("durable research cycles", () => {
     await controller.detach();
     await controller.resume(cycle.id);
     expect((await controller.status())?.attempts).toHaveLength(2);
+    await controller.detach();
+  });
+
+  it.each([
+    "published-success",
+    "pending-success",
+    "liability-growth",
+  ])("rechecks %s in the synchronous final replacement guard after durable claim", async (change) => {
+    const { controller, cycle, hash } = await readyAgent();
+    const first = (await controller.reserveAgent()).attempt;
+    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+    (await original.beforeCreate())();
+    await original.raw("create", { id: "agent_run_before_guard", status: "running" });
+    await original.finish();
+    await controller.grantReplacement(cycle.id, first.id, hash, 0.2);
+    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const second = (await controller.reserveAgent({}, "replace")).attempt;
+    const replacement = controller.agentLifecycleObserver(cycle.id, second.id, hash);
+    const send = await replacement.beforeCreate();
+    const completion = original.raw("get", {
+      id: "agent_run_before_guard",
+      status: change === "liability-growth" ? "running" : "completed",
+      costDollars: { total: change === "liability-growth" ? 0.4 : 0.1 },
+      output: { answer: "original success blocks a later create" },
+    });
+    if (change !== "pending-success") await completion;
+    expect(send).toThrow(change === "liability-growth" ? "REPLACEMENT_LIABILITY_CHANGED" : "CYCLE_NOT_EXECUTABLE");
+    await completion;
+    await replacement.finish();
+    const saved = await controller.inspect(cycle.id);
+    expect(saved.status).toBe(change === "liability-growth" ? "unknown" : "completed");
+    expect(saved.attempts[1]).toMatchObject({ status: "not-dispatched" });
+    expect(saved.ledger[1]).toMatchObject({ status: "not-dispatched" });
     await controller.detach();
   });
 

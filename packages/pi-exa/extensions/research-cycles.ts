@@ -4,7 +4,7 @@
  */
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { constants, renameSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readFileSync, renameSync } from "node:fs";
 import { chmod, type FileHandle, lstat, mkdir, open, readdir, realpath, rename, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -153,6 +153,9 @@ export interface ResearchCycleOptions {
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const exec = promisify(execFile);
+// Same-process observation latch: a genuine completion already received must
+// block a create even while its asynchronous durable receipt is publishing.
+const pendingCompletions = new Set<string>();
 
 export async function researchProjectId(cwd: string): Promise<string> {
   const directory = await realpath(cwd);
@@ -408,6 +411,31 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     return record;
   }
 
+  function readDispatchSnapshot(id: string): ResearchCycle {
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(filename(id), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      const info = fstatSync(descriptor);
+      if (!info.isFile() || (process.getuid && info.uid !== process.getuid()) || (info.mode & 0o077) !== 0)
+        throw new Error("Invalid private record.");
+      const value: unknown = JSON.parse(readFileSync(descriptor, "utf8"));
+      if (!Value.Check(recordSchema, value) || value.id !== id || value.projectId !== projectId)
+        throw new Error("Invalid record identity.");
+      const record: ResearchCycle = value;
+      record.plan = createResearchPlanner(record.plan).snapshot();
+      validateAccountingRecords(record.grants, record.ledger, { cycleId: id, projectId });
+      validateAgentAttempts(record.attempts, record.ledger, { cycleId: id, projectId });
+      validateReplacementRecords(record.grants, record.attempts, record.ledger, { cycleId: id, projectId });
+      validateCandidateSourceReferences(record);
+      return record;
+    } catch {
+      // Never echo malformed private JSON excerpts through a dispatch error.
+      throw new Error("CYCLE_NOT_EXECUTABLE: Saved dispatch state is unavailable or invalid.");
+    } finally {
+      if (descriptor !== undefined) closeSync(descriptor);
+    }
+  }
+
   async function write(record: ResearchCycle, beforePublish?: () => void) {
     // Enforce the same source identity invariant on publication and restore.
     // A planner warning must never make durable curation unreadable.
@@ -523,6 +551,85 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     else if (facts.some((fact) => fact.state === "unknown" || fact.state === "unclassified")) record.status = "unknown";
     else if (facts.some((fact) => fact.state === "failed")) record.status = "failed";
     else record.status = "planning";
+  };
+  const completionKey = (id: string) => `${directory}:${id}`;
+  const assertHeldAgent = (record: ResearchCycle, attempt: AgentAttempt, phase: "intent" | "running") => {
+    const operation = agentOperation(record, attempt);
+    if (
+      pendingCompletions.has(completionKey(record.id)) ||
+      record.archived ||
+      !owns(record) ||
+      record.status !== "running" ||
+      attempt.status !== phase ||
+      operation.status !== "reserved"
+    )
+      throw new Error("CYCLE_NOT_EXECUTABLE");
+    const others = retryAttemptFacts(
+      record.attempts.filter((entry) => !("id" in entry) || entry.id !== attempt.id),
+      record.ledger,
+      { cycleId: record.id, projectId },
+    );
+    if (others.some((fact) => ["completed", "live", "unclassified"].includes(fact.state)))
+      throw new Error("CYCLE_NOT_EXECUTABLE: Existing research must be recovered, not duplicated.");
+    if (
+      attempt.transitionMode &&
+      record.ledger.some(
+        (entry) =>
+          Value.Check(explorationOperationSchema, entry) && entry.id !== operation.id && entry.status === "reserved",
+      )
+    )
+      throw new Error("CYCLE_NOT_EXECUTABLE: Another local operation is still held.");
+    const funding = record.grants.find((entry) => "id" in entry && entry.id === operation.requestPermissionId);
+    if (
+      !Value.Check(uncertaintyPermissionSchema, funding) ||
+      funding.targetType !== "request" ||
+      funding.subjectId !== attempt.requestHash ||
+      funding.allowanceMicros < operation.estimateMicros ||
+      record.ledger.filter(
+        (entry) => Value.Check(explorationOperationSchema, entry) && entry.requestPermissionId === funding.id,
+      ).length !== 1
+    )
+      throw new Error("CYCLE_NOT_EXECUTABLE: Held exact request funding changed.");
+    const targets = new Set<string>();
+    for (const id of attempt.replacementPermissionIds ?? []) {
+      const risk = record.grants.find((entry) => "id" in entry && entry.id === id);
+      if (!Value.Check(replacementPermissionSchema, risk)) throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
+      const source = others.find((fact) => fact.id === risk.attemptId);
+      const latest = [...record.grants]
+        .reverse()
+        .find(
+          (entry) =>
+            Value.Check(uncertaintyPermissionSchema, entry) &&
+            entry.targetType === "liability" &&
+            entry.subjectId === risk.operationId,
+        );
+      if (
+        !source ||
+        !Value.Check(uncertaintyPermissionSchema, latest) ||
+        latest.id !== risk.liabilityPermissionId ||
+        risk.originalAllowanceMicros < (source.knownLiabilityMicros ?? 0)
+      )
+        throw new Error("REPLACEMENT_LIABILITY_CHANGED");
+      targets.add(source.id);
+    }
+    if (others.some((fact) => fact.state === "unknown" && !targets.has(fact.id)))
+      throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
+    compileResearchArtifact(
+      { ...record, status: "planning" },
+      {
+        cycleId: record.id,
+        expectedRevision: attempt.revision,
+        artifactHash: attempt.artifact.hash,
+      },
+    );
+    const held = assessExploration(
+      record.grants,
+      record.ledger,
+      { dollars: 0, basis: "Recheck held Agent exposure." },
+      "web_research_exa",
+      { cycleId: record.id, projectId },
+    );
+    if (!held.canDispatch) throw new Error(`${held.reason}: dispatch permission changed.`);
   };
   const cycles = {
     projectId,
@@ -930,33 +1037,8 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
               assertCurrent();
               const record = await owned();
               const attempt = savedAgent(record, attemptId, requestHash);
-              if (attempt.transitionMode)
-                throw new Error("RETRY_DISPATCH_GATED: final retry submission guards are not activated.");
-              const operation = agentOperation(record, attempt);
               assertAccountingAvailable(record.id);
-              if (
-                record.archived ||
-                record.status !== "running" ||
-                attempt.status !== "intent" ||
-                operation.status !== "reserved"
-              )
-                throw new Error("CYCLE_NOT_EXECUTABLE");
-              compileResearchArtifact(
-                { ...record, status: "planning" },
-                {
-                  cycleId,
-                  expectedRevision: attempt.revision,
-                  artifactHash: attempt.artifact.hash,
-                },
-              );
-              const assessment = assessExploration(
-                record.grants,
-                record.ledger,
-                { dollars: 0, basis: "Recheck held Agent exposure." },
-                "web_research_exa",
-                { cycleId, projectId },
-              );
-              if (!assessment.canDispatch) throw new Error(`${assessment.reason}: dispatch permission changed.`);
+              assertHeldAgent(record, attempt, "intent");
               // Claim this exact saved intent durably: a second observer/caller
               // cannot obtain another create capability for the same attempt.
               attempt.status = "running";
@@ -970,6 +1052,8 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                 assertCurrent();
                 assertAccountingAvailable(cycleId);
                 if (closed || consumed) throw new Error("Agent dispatch capability was already consumed or closed.");
+                const current = readDispatchSnapshot(cycleId);
+                assertHeldAgent(current, savedAgent(current, attemptId, requestHash), "running");
                 consumed = true;
                 dispatched = true;
               };
@@ -1001,6 +1085,23 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           }
           if (snapshotHash !== undefined && snapshotHash === lastPersistedSnapshotHash && !failedReceiptWrites.size)
             return;
+          if (snapshot.status === "completed") {
+            const current = readDispatchSnapshot(cycleId);
+            const saved = savedAgent(current, attemptId, requestHash);
+            const operation = agentOperation(current, saved);
+            if (saved.status === "not-dispatched" || operation.status === "not-dispatched")
+              throw new Error("Agent was not dispatched.");
+            const completion = curateAgentRun(snapshot, saved.artifact.outputContract.taskSchema, {
+              operationId: operation.id,
+              revision: saved.revision,
+              requestHash,
+              tool: "web_research_exa",
+              retrievedAt: new Date().toISOString(),
+            });
+            if (saved.result && saved.result.remoteId !== completion.remoteId)
+              throw new Error("Agent remote identity conflict.");
+            pendingCompletions.add(completionKey(cycleId));
+          }
           let receiptWriteFailed = false;
           const persist = () =>
             ordered(() =>
@@ -1086,10 +1187,12 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             );
           try {
             await persist();
+            if (snapshot.status === "completed") pendingCompletions.delete(completionKey(cycleId));
           } catch (error) {
             if (!receiptWriteFailed) throw error;
             // Retry only the same original fact snapshot, never another SDK call.
             await persist();
+            if (snapshot.status === "completed") pendingCompletions.delete(completionKey(cycleId));
           }
           lastPersistedSnapshotHash = snapshotHash;
         },
