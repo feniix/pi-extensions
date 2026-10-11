@@ -344,14 +344,16 @@ export function summarizeAccounting(
   identity: AccountingIdentity,
 ) {
   const latest = grants.filter((grant): grant is SpendingGrant => Value.Check(spendingGrantSchema, grant)).at(-1);
+  const { canDispatch: ledgerHealthy, ...overview } = assessExploration(
+    grants,
+    ledger,
+    { dollars: 0, basis: "Ledger overview only." },
+    latest?.tools[0] ?? "web_search_exa",
+    identity,
+  );
   return {
-    ...assessExploration(
-      grants,
-      ledger,
-      { dollars: 0, basis: "Ledger overview only." },
-      latest?.tools[0] ?? "web_search_exa",
-      identity,
-    ),
+    ...overview,
+    ledgerHealthy,
     assessmentOnly: true,
     rateProfile: EXA_RATE_PROFILE,
   };

@@ -59,7 +59,7 @@ function view(record: ResearchCycle) {
     accounting = summarizeAccounting(record.grants, record.ledger, { cycleId: record.id, projectId: record.projectId });
   } catch (error) {
     accounting = {
-      canDispatch: false,
+      ledgerHealthy: false,
       billingVerified: false,
       reason: "UNKNOWN_LIABILITY",
       error: error instanceof Error ? error.message : String(error),

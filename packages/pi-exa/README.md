@@ -296,6 +296,10 @@ execution fields must equal the compiled authoritative values: scalars exactly,
 JSON objects ignoring key order, arrays retaining order. Conflicts identify the
 field to update; execution never adds fields, deep-merges or mutates the plan.
 Compilation returns `previewOnly: true`; it never establishes spending permission.
+Status accounting is an assessment-only ledger overview: `ledgerHealthy`
+describes assessed liabilities/balance, not permission or lifecycle eligibility
+to dispatch a particular tool. Only the fresh request reservation/guard decides
+dispatchability; Agent still needs its exact-request approval.
 
 #### One compiled Agent attempt
 

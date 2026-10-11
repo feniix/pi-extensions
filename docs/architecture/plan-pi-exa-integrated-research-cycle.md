@@ -213,6 +213,15 @@ under the existing opt-in flag and exact operator permissions, with all
 unavailable recovery/replacement paths failing closed. Do not invent a new flag
 or test-only bypass. Evidence: `/tmp/pi-exa-157-jev-activation-{request,response}.json`.
 
+## #157 review decisions
+
+Fresh full-diff review identified two non-blocking display/diagnostic gaps.
+Under the operator's delegated design authority, Jev selected a neutral
+assessment-only `ledgerHealthy` status field (never a status `canDispatch`
+claim) and a closed, package-owned remote-error summary instead of archiving
+arbitrary vendor prose. Real per-request assessments retain `canDispatch`.
+Evidence: `/tmp/pi-exa-157-jev-review-{request,response}.json`.
+
 ## #156 evidence implementation decisions
 
 The operator approved metadata-first candidate retention and the public testing

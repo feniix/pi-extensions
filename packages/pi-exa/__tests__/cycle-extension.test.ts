@@ -319,6 +319,9 @@ describe("Pi cycle commands and tools", () => {
     const preview = await pi.call("exa_research_summary", { mode: "execution_plan" });
     const artifact = preview.details.artifact as { cycleId: string; revision: number; hash: string; request: object };
     await pi.command?.handler(`approve ${artifact.cycleId} 1 web_research_exa`, pi.context);
+    const status = await pi.call("exa_research_status");
+    expect(status.details.accounting).toMatchObject({ ledgerHealthy: true, assessmentOnly: true });
+    expect(status.details.accounting).not.toHaveProperty("canDispatch");
     const paused = await pi.call("web_research_exa", {
       cycleId: artifact.cycleId,
       expectedRevision: artifact.revision,
