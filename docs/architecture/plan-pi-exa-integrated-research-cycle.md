@@ -283,6 +283,16 @@ historical consent. Future actual submission must separately recheck today's
 success/concurrency/ownership/funding/liability state at its final guard.
 Evidence: `/tmp/pi-exa-159-jev-restore-{request,response}.json`.
 
+Grant issuance and intent/operation creation use a monotonic logical timestamp
+computed from existing recognized events and wall time. It orders commands even
+when the wall clock stalls or moves backward; it is not a lease timeout or a
+vendor timestamp. The historical grant set must equal every recognized grant
+issued strictly before the intent's cutoff, which must match its operation's
+creation time. Truncation cannot hide an earlier amendment; extension cannot
+turn a later nonce into historical funding. The restored liability minimum also
+covers the immutable request's published fixed rate and frozen ledger receipts,
+without treating later provisional growth as an invalid historical approval.
+
 ## #158 delegated recovery decisions
 
 Jev selected explicit Pi-only actions on existing tools: status `action=resume`

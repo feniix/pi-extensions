@@ -10,8 +10,8 @@ import {
   uncertaintyPermissionSchema,
 } from "./research-accounting.js";
 import {
-  AGENT_RATE_PROFILE,
   agentAttemptSchema,
+  agentFixedBaseMicros,
   retryAuthorizationSchema,
   validateAgentAttempts,
 } from "./research-execution.js";
@@ -75,8 +75,6 @@ export function retryAttemptFacts(
               : attempt.status === "unknown"
                 ? "unknown"
                 : "unclassified";
-    const effort = "effort" in attempt.artifact.request ? (attempt.artifact.request.effort ?? "medium") : "medium";
-    const base = Object.entries(AGENT_RATE_PROFILE.fixed).find(([name]) => name === effort)?.[1] ?? 0;
     return {
       ...identity,
       id: attempt.id,
@@ -87,7 +85,7 @@ export function retryAttemptFacts(
         operation.reportedMicros ?? 0,
         ...(operation.conflictingMicros ?? []),
         moneyMicros(attempt.result?.provisionalTotalDollars ?? 0),
-        moneyMicros(base),
+        agentFixedBaseMicros(attempt.artifact.request),
       ),
     };
   });
@@ -101,6 +99,33 @@ export function retryGrantIds(grants: readonly object[]): string[] {
       ? [entry.id]
       : [],
   );
+}
+
+function authorizationEpoch(value: string): number {
+  const epoch = Date.parse(value);
+  if (!Number.isFinite(epoch) || new Date(epoch).toISOString() !== value)
+    throw new Error("Invalid retry intent authorization.");
+  return epoch;
+}
+
+/** Logical issuance time keeps command/intent causality across a frozen or backward wall clock. */
+export function nextAuthorizationTime(
+  grants: readonly object[],
+  attempts: readonly object[],
+  ledger: readonly object[],
+): string {
+  let next = Date.now();
+  for (const entry of [...grants, ...attempts, ...ledger]) {
+    if (
+      Value.Check(spendingGrantSchema, entry) ||
+      Value.Check(uncertaintyPermissionSchema, entry) ||
+      Value.Check(replacementPermissionSchema, entry)
+    )
+      next = Math.max(next, authorizationEpoch(entry.issuedAt) + 1);
+    else if (Value.Check(agentAttemptSchema, entry) || Value.Check(explorationOperationSchema, entry))
+      next = Math.max(next, authorizationEpoch(entry.createdAt) + 1);
+  }
+  return new Date(next).toISOString();
 }
 
 export function freezeRetryAuthorization(
@@ -176,6 +201,7 @@ export function validateReplacementRecords(
       : undefined;
     if (
       !Value.Check(explorationOperationSchema, operation) ||
+      operation.createdAt !== attempt.createdAt ||
       !Value.Check(uncertaintyPermissionSchema, funding) ||
       funding.cycleId !== identity.cycleId ||
       funding.projectId !== identity.projectId ||
@@ -203,9 +229,20 @@ export function validateReplacementRecords(
     const currentFacts = retryAttemptFacts(attempts.slice(0, index), ledger, identity);
     const currentGrantIds = retryGrantIds(grants);
     const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+    const cutoff = authorizationEpoch(attempt.createdAt);
+    const preIntentGrantIds = grants.flatMap((entry) => {
+      if (
+        !Value.Check(spendingGrantSchema, entry) &&
+        !Value.Check(uncertaintyPermissionSchema, entry) &&
+        !Value.Check(replacementPermissionSchema, entry)
+      )
+        return [];
+      return authorizationEpoch(entry.issuedAt) < cutoff ? [entry.id] : [];
+    });
     if (
       proof.history.length !== currentFacts.length ||
-      !same(proof.grantIds, currentGrantIds.slice(0, proof.grantIds.length))
+      !same(proof.grantIds, currentGrantIds.slice(0, proof.grantIds.length)) ||
+      !same(proof.grantIds, preIntentGrantIds)
     )
       throw new Error("Invalid retry intent authorization.");
     for (const [factIndex, fact] of proof.history.entries()) {
@@ -254,12 +291,19 @@ export function validateReplacementRecords(
     }
     for (const fact of proof.history) {
       const original = proof.ledger.find((entry) => entry.id === fact.operationId);
+      const source = prior.find((entry) => entry.id === fact.id);
       if (
         !original ||
+        !source ||
         (fact.state === "not-dispatched"
           ? original.status !== "not-dispatched"
           : !["unknown", "reported"].includes(original.status)) ||
-        fact.knownLiabilityMicros < Math.max(original.reportedMicros ?? 0, ...(original.conflictingMicros ?? []))
+        fact.knownLiabilityMicros <
+          Math.max(
+            original.reportedMicros ?? 0,
+            ...(original.conflictingMicros ?? []),
+            agentFixedBaseMicros(source.artifact.request),
+          )
       )
         throw new Error("Invalid retry intent authorization.");
     }

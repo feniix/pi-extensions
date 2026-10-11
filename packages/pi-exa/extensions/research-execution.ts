@@ -24,6 +24,13 @@ export function agentRequestHash(request: Record<string, unknown>): string {
     .digest("hex");
 }
 
+export function agentFixedBaseMicros(request: object): number {
+  const effort = Reflect.get(request, "effort") ?? "medium";
+  if (typeof effort !== "string" || !["minimal", "low", "medium", "high", "xhigh", "auto"].includes(effort))
+    throw new Error("Unsupported cycle Agent effort.");
+  return moneyMicros(Object.entries(AGENT_RATE_PROFILE.fixed).find(([name]) => name === effort)?.[1] ?? 0);
+}
+
 export function assessAgent(
   grants: readonly object[],
   ledger: readonly object[],

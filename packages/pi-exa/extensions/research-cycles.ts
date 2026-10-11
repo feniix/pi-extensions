@@ -49,6 +49,7 @@ import type { ResearchSummaryParams } from "./research-planner-types.js";
 import {
   assessRetryHistory,
   freezeRetryAuthorization,
+  nextAuthorizationTime,
   replacementPermissionSchema,
   retryAttemptFacts,
   validateReplacementRecords,
@@ -624,7 +625,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             projectId,
             issuerSessionId: owner.sessionId,
             source: "command",
-            issuedAt: new Date().toISOString(),
+            issuedAt: nextAuthorizationTime(record.grants, record.attempts, record.ledger),
             ceilingMicros: moneyMicros(dollars, true),
             tools: [...tools],
           };
@@ -694,7 +695,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             );
           if (assessment.proposedMicros === null || !assessment.requestPermissionId)
             throw new Error("UNCERTAINTY_APPROVAL_REQUIRED");
-          const createdAt = new Date().toISOString();
+          const createdAt = nextAuthorizationTime(record.grants, record.attempts, record.ledger);
           const operation: ExplorationOperation = {
             kind: "exa-exploration-v1",
             id: randomUUID(),
@@ -772,7 +773,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             throw new Error(
               "Investigate conflicting receipts or assess at least the known liability before replacement.",
             );
-          const issuedAt = new Date().toISOString();
+          const issuedAt = nextAuthorizationTime(record.grants, record.attempts, record.ledger);
           const liability = {
             kind: "exa-uncertainty-v1",
             id: randomUUID(),
@@ -1158,7 +1159,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                 : estimate.basis,
             ...(assessment.requestPermissionId ? { requestPermissionId: assessment.requestPermissionId } : {}),
             status: "reserved",
-            createdAt: new Date().toISOString(),
+            createdAt: nextAuthorizationTime(record.grants, record.attempts, record.ledger),
           };
           assertCurrent();
           record.ledger.push(operation);
@@ -1238,7 +1239,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             projectId,
             issuerSessionId: owner.sessionId,
             source: "command",
-            issuedAt: new Date().toISOString(),
+            issuedAt: nextAuthorizationTime(record.grants, record.attempts, record.ledger),
             targetType,
             subjectId,
             allowanceMicros: moneyMicros(dollars, true),

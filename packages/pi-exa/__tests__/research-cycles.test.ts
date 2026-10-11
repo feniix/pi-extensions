@@ -514,6 +514,7 @@ describe("durable research cycles", () => {
     "nonce-foreign",
     "nonce-reused",
     "nonce-underfunded",
+    "cutoff-mismatch",
     "history-omission",
     "grant-prefix",
     "proof-mode",
@@ -535,6 +536,8 @@ describe("durable research cycles", () => {
     const entry = saved.attempts.find((attempt) => "id" in attempt && attempt.id === second.id);
     if (!entry) throw new Error("Retry intent missing");
     if (corruption === "source") Reflect.set(entry, "sourceAttemptIds", [second.id]);
+    else if (corruption === "cutoff-mismatch")
+      Reflect.set(entry, "createdAt", new Date(Date.parse(second.createdAt) + 1_000).toISOString());
     else if (corruption === "consumption") Reflect.set(entry, "replacementPermissionIds", ["unissued-permission"]);
     else if (["history-omission", "grant-prefix", "proof-mode", "ledger-false-nondispatch"].includes(corruption)) {
       const proof = Reflect.get(entry, "retryAuthorization");
@@ -636,6 +639,108 @@ describe("durable research cycles", () => {
     await writeFile(path, json);
     await expect(controller.resume(cycle.id)).rejects.toThrow("Invalid retry intent authorization.");
     expect(await readFile(path, "utf8")).toBe(json);
+  });
+
+  it.each([
+    "hidden-amendment",
+    "zero-floor",
+  ])("rejects replacement proof %s despite internally matching amount and prefix fields", async (corruption) => {
+    const { controller, cycle, hash, root } = await readyAgent();
+    const first = (await controller.reserveAgent()).attempt;
+    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+    (await original.beforeCreate())();
+    await original.raw("create", { id: "agent_run_cutoff", status: "running" });
+    await original.finish();
+    const approved = await controller.grantReplacement(cycle.id, first.id, hash, 0.2);
+    const risk = approved.grants.at(-1);
+    if (!risk || !("id" in risk)) throw new Error("Risk missing");
+    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const second = (await controller.reserveAgent({}, "replace")).attempt;
+    await controller.agentLifecycleObserver(cycle.id, second.id, hash).finish();
+    if (corruption === "hidden-amendment")
+      await controller.grantUncertainty(cycle.id, "liability", first.operationId, 0.3);
+    await controller.detach();
+    const saved = await controller.inspect(cycle.id);
+    const entry = saved.attempts.find((item) => "id" in item && item.id === second.id);
+    if (!entry) throw new Error("Intent missing");
+    const proof = Reflect.get(entry, "retryAuthorization");
+    if (!proof || typeof proof !== "object") throw new Error("Proof missing");
+    if (corruption === "hidden-amendment") {
+      const amendment = saved.grants.at(-1);
+      if (!amendment) throw new Error("Amendment missing");
+      Reflect.set(amendment, "issuedAt", new Date(Date.parse(second.createdAt) - 1).toISOString());
+    } else {
+      const grant = saved.grants.find((item) => "id" in item && item.id === risk.id);
+      if (!grant) throw new Error("Risk missing");
+      const liability = saved.grants.find(
+        (item) => "id" in item && item.id === Reflect.get(grant, "liabilityPermissionId"),
+      );
+      if (!liability) throw new Error("Liability missing");
+      Reflect.set(grant, "originalAllowanceMicros", 0);
+      Reflect.set(liability, "allowanceMicros", 0);
+      const history = Reflect.get(proof, "history");
+      if (!Array.isArray(history) || !history[0]) throw new Error("History missing");
+      Reflect.set(history[0], "knownLiabilityMicros", 0);
+    }
+    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+    const json = JSON.stringify(saved);
+    await writeFile(path, json);
+    await expect(controller.resume(cycle.id)).rejects.toThrow("Invalid retry intent authorization.");
+    expect(await readFile(path, "utf8")).toBe(json);
+  });
+
+  it("rejects a post-intent nonce substituted into an extended historical grant prefix", async () => {
+    const { controller, cycle, hash, root } = await readyAgent();
+    const first = (await controller.reserveAgent()).attempt;
+    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+    (await original.beforeCreate())();
+    await original.raw("create", { id: "agent_run_post_nonce", status: "failed", costDollars: { total: 0.01 } });
+    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const second = (await controller.reserveAgent({}, "retry")).attempt;
+    await controller.agentLifecycleObserver(cycle.id, second.id, hash).finish();
+    const changed = await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const post = changed.grants.at(-1);
+    if (!post || !("id" in post)) throw new Error("Nonce missing");
+    await controller.detach();
+    const saved = await controller.inspect(cycle.id);
+    const entry = saved.attempts.find((item) => "id" in item && item.id === second.id);
+    const operation = saved.ledger.find((item) => "id" in item && item.id === second.operationId);
+    if (!entry || !operation) throw new Error("Intent missing");
+    const proof = Reflect.get(entry, "retryAuthorization");
+    if (!proof || typeof proof !== "object") throw new Error("Proof missing");
+    const ids = Reflect.get(proof, "grantIds");
+    if (!Array.isArray(ids)) throw new Error("Grant prefix missing");
+    ids.push(post.id);
+    Reflect.set(operation, "requestPermissionId", post.id);
+    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+    const json = JSON.stringify(saved);
+    await writeFile(path, json);
+    await expect(controller.resume(cycle.id)).rejects.toThrow("Invalid retry intent authorization.");
+    expect(await readFile(path, "utf8")).toBe(json);
+  });
+
+  it("keeps grant/intent issuance causally ordered with a frozen or backward wall clock", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const first = (await controller.reserveAgent()).attempt;
+    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+    (await original.beforeCreate())();
+    await original.raw("create", { id: "agent_run_clock", status: "failed", costDollars: { total: 0.01 } });
+    vi.spyOn(Date, "now").mockReturnValue(0);
+    const updated = await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const nonce = updated.grants.at(-1);
+    if (!nonce || !("issuedAt" in nonce) || typeof nonce.issuedAt !== "string") throw new Error("Nonce missing");
+    const second = (await controller.reserveAgent({}, "retry")).attempt;
+    expect(Date.parse(nonce.issuedAt)).toBeGreaterThan(Date.parse(first.createdAt));
+    expect(Date.parse(second.createdAt)).toBeGreaterThan(Date.parse(nonce.issuedAt));
+    await controller.agentLifecycleObserver(cycle.id, second.id, hash).finish();
+    const amended = await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const post = amended.grants.at(-1);
+    if (!post || !("issuedAt" in post) || typeof post.issuedAt !== "string") throw new Error("Nonce missing");
+    expect(Date.parse(post.issuedAt)).toBeGreaterThan(Date.parse(second.createdAt));
+    await controller.detach();
+    await controller.resume(cycle.id);
+    expect((await controller.status())?.attempts).toHaveLength(2);
+    await controller.detach();
   });
 
   it("rechecks a durable frozen-artifact assertion before preparing the actual GET guard", async () => {
