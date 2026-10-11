@@ -10,8 +10,17 @@ import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
+import {
+  type ArtifactAssertions,
+  assertArtifactTarget,
+  compileResearchArtifact,
+  executionPlanSchema,
+  ResearchArtifactError,
+  type ResearchCycleStepInput,
+  validateExecutionPlan,
+} from "./research-artifacts.js";
 import { createResearchPlanner, type ResearchPlannerSnapshot } from "./research-planner.js";
-import type { ResearchStepInput, ResearchSummaryParams } from "./research-planner-types.js";
+import type { ResearchSummaryParams } from "./research-planner-types.js";
 import { withResearchStorageLock } from "./research-storage-lock.js";
 import { exaResearchStepParams, researchCriterion, researchGap, researchSource } from "./schemas.js";
 
@@ -83,7 +92,7 @@ const recordSchema = Type.Object(
     schemaVersion: Type.Literal(1),
     id: Type.String(),
     projectId: Type.String(),
-    revision: Type.Integer({ minimum: 0 }),
+    revision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
     status: Type.Union([
       Type.Literal("planning"),
       Type.Literal("running"),
@@ -93,6 +102,7 @@ const recordSchema = Type.Object(
     archived: Type.Boolean(),
     owner: Type.Optional(ownerSchema),
     plan: snapshotSchema,
+    executionPlan: Type.Optional(executionPlanSchema),
     attempts: objects,
     ledger: objects,
     grants: objects,
@@ -387,16 +397,43 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         return `Cycle: ${record.id}\nRevision: ${record.revision}\nStatus: ${record.status}\n${createResearchPlanner(record.plan).getSummary(params)}`;
       });
     },
-    async recordStep(input: ResearchStepInput) {
+    async preview(assertions: ArtifactAssertions = {}) {
+      return transaction(async () => compileResearchArtifact(await owned(), assertions));
+    },
+    async recordStep(input: ResearchCycleStepInput) {
       if (!Value.Check(exaResearchStepParams, input)) throw new Error("Invalid research step arguments.");
+      const update = structuredClone(input);
+      if (update.executionPlan !== undefined) validateExecutionPlan(update.executionPlan);
       return transaction(async () => {
         const record = await owned();
         if (record.status !== "planning") throw new Error("This cycle is not editable planning state.");
+        assertArtifactTarget(record, update);
         const planner = createResearchPlanner(record.plan);
         const before = planner.getStatus().stepCount;
-        const result = planner.recordStep(input);
+        const { executionPlan, cycleId: _cycleId, expectedRevision: _revision, ...plannerInput } = update;
+        const result = planner.recordStep(plannerInput);
+        if (result.stepCount === before && executionPlan !== undefined)
+          throw new ResearchArtifactError([
+            {
+              code: "STEP_REJECTED",
+              path: "thought_number",
+              message: `Execution plan was not changed: ${result.step.warnings.join(" ")}`,
+            },
+          ]);
         if (result.stepCount !== before) {
+          if (record.revision === Number.MAX_SAFE_INTEGER)
+            throw new ResearchArtifactError([
+              {
+                code: "REVISION_EXHAUSTED",
+                path: "revision",
+                message: "Archive this cycle and explicitly start another.",
+              },
+            ]);
           record.plan = planner.snapshot();
+          if (executionPlan !== undefined) {
+            record.executionPlan = { ...record.executionPlan, ...executionPlan };
+            validateExecutionPlan(record.executionPlan, record.plan.sources);
+          }
           record.revision++;
           await write(record);
         }

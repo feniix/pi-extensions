@@ -171,6 +171,140 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it("does not persist stale, rejected or invalid structured planning edits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    await controller.start("topic");
+    const input = {
+      topic: "topic",
+      stage: "framing" as const,
+      note: "",
+      thought_number: 1,
+      total_thoughts: 2,
+      next_step_needed: true,
+      executionPlan: { goal: "Research", taskSchema: { type: "object" } },
+    };
+    await controller.recordStep(input);
+    const before = await controller.status();
+    await expect(controller.recordStep({ ...input, expectedRevision: 0 })).rejects.toThrow("STALE_REVISION");
+    await expect(controller.recordStep({ ...input, executionPlan: { goal: "IGNORED EDIT" } })).rejects.toThrow(
+      "STEP_REJECTED",
+    );
+    await expect(
+      controller.recordStep({
+        ...input,
+        thought_number: 2,
+        executionPlan: { taskSchema: { type: "array" } },
+      }),
+    ).rejects.toThrow("INVALID_TASK_SCHEMA");
+    await expect(
+      controller.recordStep({
+        ...input,
+        thought_number: 2,
+        executionPlan: { selectedEvidence: [{ sourceId: "S99", label: "Missing" }] },
+      }),
+    ).rejects.toThrow("UNKNOWN_EVIDENCE");
+    expect(await controller.status()).toEqual(before);
+  });
+
+  it("replaces structured fields atomically and permits explicit removal", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    await controller.start("topic");
+    const input = { topic: "topic", stage: "framing" as const, note: "", total_thoughts: 3, next_step_needed: true };
+    await controller.recordStep({
+      ...input,
+      thought_number: 1,
+      executionPlan: {
+        goal: "Research",
+        taskSchema: { type: "object" },
+        previousRunId: "remote-one",
+        input: { data: [{ name: "A" }], exclusion: [{ name: "B" }] },
+        controls: { effort: "auto", budget: { maxCostDollars: 3 } },
+      },
+    });
+    await controller.recordStep({
+      ...input,
+      thought_number: 2,
+      executionPlan: {
+        input: { data: [{ name: "C" }] },
+        controls: {},
+        previousRunId: null,
+      },
+    });
+    const artifact = await controller.preview();
+    expect(artifact.request.input).toEqual({ data: [{ name: "C" }] });
+    expect(artifact.request.effort).toBe("medium");
+    expect(artifact.request).not.toHaveProperty("budget");
+    expect(artifact.request).not.toHaveProperty("previousRunId");
+    await controller.recordStep({ ...input, thought_number: 3, executionPlan: { taskSchema: null } });
+    await expect(controller.preview()).rejects.toThrow("MISSING_TASK_SCHEMA");
+  });
+
+  it("fails closed before exhausting the persisted plan revision", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const record = await controller.start("topic");
+    const fixture = await controller.archive();
+    fixture.revision = Number.MAX_SAFE_INTEGER;
+    await writeFile(join(root, "store", controller.projectId, `${record.id}.json`), JSON.stringify(fixture));
+    await controller.resume(record.id);
+    await expect(
+      controller.recordStep({
+        topic: "topic",
+        stage: "framing",
+        note: "",
+        thought_number: 1,
+        total_thoughts: 1,
+        next_step_needed: false,
+      }),
+    ).rejects.toThrow("REVISION_EXHAUSTED");
+    expect((await controller.status())?.revision).toBe(Number.MAX_SAFE_INTEGER);
+    expect((await controller.status())?.plan.steps).toHaveLength(0);
+  });
+
+  it("persists an execution plan and previews the same artifact after explicit resume", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const options = { root: join(root, "store"), cwd: root, sessionId: "one" };
+    const controller = await createResearchCycles(options);
+    const record = await controller.start("pricing");
+    await controller.recordStep({
+      topic: "pricing",
+      stage: "framing",
+      note: "DO_NOT_COMPILE_THIS",
+      thought_number: 1,
+      total_thoughts: 2,
+      next_step_needed: true,
+      executionPlan: { goal: "Compare current prices", taskSchema: { type: "object" } },
+      expectedRevision: 0,
+    });
+    const preview = await controller.preview({ cycleId: record.id, expectedRevision: 1 });
+    expect(preview).toMatchObject({ artifactVersion: 1, revision: 1, brief: { goal: "Compare current prices" } });
+    expect(JSON.stringify(preview)).not.toContain("DO_NOT_COMPILE_THIS");
+    await controller.detach();
+    const restarted = await createResearchCycles({ ...options, sessionId: "two" });
+    await restarted.resume(record.id);
+    expect((await restarted.preview()).hash).toBe(preview.hash);
+    await restarted.recordStep({
+      topic: "pricing",
+      stage: "criteria_discovery",
+      note: "",
+      thought_number: 2,
+      total_thoughts: 2,
+      next_step_needed: false,
+      executionPlan: { constraints: ["Official sources"] },
+      expectedRevision: 1,
+    });
+    const changed = await restarted.preview();
+    expect(changed.brief.goal).toBe("Compare current prices");
+    expect(changed.hash).not.toBe(preview.hash);
+    await expect(restarted.preview({ artifactHash: preview.hash })).rejects.toThrow("STALE_ARTIFACT");
+  });
+
   it("retains a failed-start lease until explicit cleanup, even after replacement", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);
