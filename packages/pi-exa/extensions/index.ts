@@ -41,7 +41,7 @@ export { DEFAULT_NUM_RESULTS } from "./web-search.js";
 function registerFlags(pi: ExtensionAPI): void {
   pi.registerFlag("exa-enable-cycles", {
     description:
-      "Opt in to durable Pi research cycles with operator-approved exploration and one scoped Agent attempt; recovery/replacement remain gated.",
+      "Opt in to durable Pi research cycles with operator-approved exploration, one scoped Agent attempt and explicit existing-run GET recovery; replacement remains gated.",
     type: "boolean",
   });
   pi.registerFlag("--exa-api-key", {

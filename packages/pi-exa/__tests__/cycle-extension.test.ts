@@ -31,6 +31,7 @@ const offlineCreate = vi.hoisted(() =>
   vi.fn<(params: unknown) => Promise<AgentRun>>(async () => ({ id: "offline", status: "completed" })),
 );
 const offlineGet = vi.hoisted(() => vi.fn<(runId: string) => Promise<AgentRun>>());
+const offlineCancel = vi.hoisted(() => vi.fn<(runId: string) => Promise<AgentRun>>());
 const offlineEndpoints = vi.hoisted(() => ({
   search: vi.fn(),
   getContents: vi.fn(),
@@ -55,18 +56,20 @@ vi.mock("exa-js", () => ({
       offlineEndpoints.answer(...args);
       return offlineSearch(...args);
     };
-    agent = { runs: { create: offlineCreate, get: offlineGet } };
+    agent = { runs: { create: offlineCreate, get: offlineGet, cancel: offlineCancel } };
   },
 }));
 
 const directories: string[] = [];
 afterEach(async () => {
+  vi.useRealTimers();
   vi.mocked(fs.unlink).mockReset();
   vi.mocked(fs.rename).mockReset();
   vi.mocked(nativeFs.renameSync).mockReset();
   offlineSearch.mockReset().mockResolvedValue({ results: [], requestId: "offline" });
   offlineCreate.mockReset().mockResolvedValue({ id: "offline", status: "completed" });
   offlineGet.mockReset();
+  offlineCancel.mockReset();
   for (const endpoint of Object.values(offlineEndpoints)) endpoint.mockClear();
   vi.unstubAllEnvs();
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
@@ -391,6 +394,62 @@ describe("Pi cycle commands and tools", () => {
     expect((await pi.call("exa_research_status")).details.id).toBe(artifact.cycleId);
     expect(offlineCreate).not.toHaveBeenCalled();
     expect(offlineGet).not.toHaveBeenCalled();
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
+  it("retains a late recovery reply after local timeout and archive without remote cancellation or replacement", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    offlineCreate.mockResolvedValueOnce({
+      id: "agent_run_late_recovery",
+      status: "completed",
+      output: { structured: { answer: 42 } },
+      costDollars: { total: 0.1 },
+    });
+    await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    const before = (await pi.call("exa_research_status")).details;
+    let started!: () => void;
+    const reachedGet = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let reply!: (run: AgentRun) => void;
+    offlineGet.mockImplementationOnce(() => {
+      started();
+      return new Promise((resolve) => {
+        reply = resolve;
+      });
+    });
+    vi.useFakeTimers();
+    const pending = pi.call("web_research_exa", { researchMode: "recover", cycleId: artifact.cycleId });
+    await reachedGet;
+    await vi.advanceTimersByTimeAsync(180_000);
+    const response = await pending;
+    expect(response.isError).toBe(true);
+    expect(response.details).toMatchObject({ status: "completed", inspectionOnly: true });
+    vi.useRealTimers();
+    await pi.call("exa_research_reset");
+    reply({
+      id: "agent_run_late_recovery",
+      status: "completed",
+      output: { structured: { answer: "late recovered" } },
+      costDollars: { total: 0.1 },
+    });
+    const path = join(pi.context.cwd, "agent", "research-cycles", String(before.projectId), `${artifact.cycleId}.json`);
+    await vi.waitFor(async () => {
+      const saved = JSON.parse(await readFile(path, "utf8"));
+      expect(saved).toMatchObject({
+        archived: true,
+        status: "completed",
+        attempts: [{ result: { processing: "validated", taskOutput: { answer: "late recovered" } } }],
+        ledger: [{ status: "reported", reportedMicros: 100_000 }],
+      });
+      expect(saved.owner).toBeUndefined();
+      expect(saved.attempts).toHaveLength(1);
+      expect(saved.ledger).toHaveLength(1);
+    });
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    expect(offlineGet).toHaveBeenCalledTimes(1);
+    expect(offlineCancel).not.toHaveBeenCalled();
+    expect((await pi.call("exa_research_status")).details.active).toBe(false);
     await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
   });
 
@@ -850,12 +909,12 @@ describe("Pi cycle commands and tools", () => {
     await pi.call("web_search_exa", { query: "unrelated", researchMode: "standalone" });
     expect((await pi.call("exa_research_status")).details).toEqual(curated.details.cycle);
   });
-  it("describes scoped Agent execution separately from still-gated recovery/replacement in flag help", async () => {
+  it("describes explicit existing-run GET recovery separately from still-gated replacement in flag help", async () => {
     const pi = await host();
     expect(pi.flags).toHaveBeenCalledWith("exa-enable-cycles", {
       type: "boolean",
       description:
-        "Opt in to durable Pi research cycles with operator-approved exploration and one scoped Agent attempt; recovery/replacement remain gated.",
+        "Opt in to durable Pi research cycles with operator-approved exploration, one scoped Agent attempt and explicit existing-run GET recovery; replacement remains gated.",
     });
   });
 

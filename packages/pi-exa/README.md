@@ -345,14 +345,56 @@ validation fails. Findings never satisfy criteria automatically or buy more
 research. Confirmed remote failed/cancelled runs are `failed`; local timeout/error
 without terminal confirmation is `unknown`. Every saved attempt blocks another
 submission in this slice, even after proven nondispatch. Inspect the existing
-attempt rather than repeat the paid call; recovery/replacement are still gated
-until the following safety layers. Archive retains liabilities and never cancels
+attempt rather than repeat the paid call; replacement remains gated until the
+following safety layer. Archive retains liabilities and never cancels
 the run. Late observations can settle only their original attempt, not reactivate
 it or mutate another cycle's plan/ownership.
 
 Standalone/default-opt-out and MCP remain unchanged. Recorded cycle run IDs
 cannot be continued through an unrelated standalone override. This is the
 independently safe one-attempt subset, not the completed workflow rollout.
+
+#### Explicit resume and existing-run recovery
+
+With cycles enabled, `exa_research_status` without an active cycle returns
+`active: false` and saved cycle summaries. This is discovery only: startup,
+reload, tree navigation and status inspection never implicitly activate saved
+state. Call `exa_research_status` with `action: "resume"` and the explicit
+`cycleId` (optional `expectedRevision`) to acquire exclusive ownership.
+The existing `/exa-research resume <cycle-id>` command remains supported.
+Another live session/runtime cannot be displaced. Stored lifetime grants and
+liabilities survive resume; resume itself grants no spending consent.
+
+Inspect an existing attempt with:
+
+```json
+{ "researchMode": "recover", "cycleId": "<saved-cycle-id>" }
+```
+
+on `web_research_exa`. Optional `attemptId` selects a saved controlled attempt;
+otherwise the latest saved attempt is used. `expectedRevision` and `artifactHash`
+assert its current cycle/frozen snapshot. Query, effort, input, providers,
+budgets, metadata and `previousRunId` are forbidden in recovery. In particular,
+`previousRunId` is paid continuation/create, **never** inspection.
+
+Recovery makes one bounded SDK GET for the saved remote ID. It does not create
+another run, poll automatically or cancel the original run on local timeout or
+abort. Late genuine GET replies can still reconcile the original archived
+attempt without acquiring ownership. Pending totals stay provisional; terminal
+totals reconcile the original reservation (including zero), while missing or
+conflicting totals retain unresolved liability. No new grant/reservation is
+created. Existing remote work may continue spending under its original request;
+GET recovery does not cap or stop that work.
+
+Recovered structured output is validated again against the original frozen
+schema. Remote completion stays irreversible even if local validation or
+persistence failed. Missing IDs and unavailable GETs (including 404/auth/network
+errors) produce actionable unknown/unavailable outcomes, never fabricated
+remote failure or permission to resubmit. Status `nextSafeAction` explains the
+safe next step. Legacy attempts without a frozen contract require manual
+inspection. Reset/archive retains attempts and accounting history; explicitly
+resuming archived history does not erase these records. Default-opt-out,
+standalone and MCP schemas remain unchanged.
 
 #### Candidate evidence and curation
 

@@ -382,7 +382,7 @@ export function cyclePiRegistration(
                     accounting: view(current).accounting,
                     status: current.status,
                     nextSafeAction: unavailable
-                      ? "INSPECTION_UNAVAILABLE: Existing remote outcome was not confirmed. Inspect the same saved run again; do not submit replacement research."
+                      ? "INSPECTION_UNAVAILABLE: This inspection did not confirm a fresh remote outcome; previously confirmed terminal outcomes remain. Inspect the same saved run again; do not submit replacement research."
                       : "Review recovered state; pending/unknown work requires another explicit inspection, never automatic replacement. Findings do not satisfy criteria automatically.",
                   },
                   undefined,

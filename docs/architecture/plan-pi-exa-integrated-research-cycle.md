@@ -231,8 +231,15 @@ its frozen artifact/schema, without a new operation, grant or submission.
 Source: Exa get-a-run primary documentation and pinned SDK 2.23.0.
 Evidence: `/tmp/pi-exa-158-jev-{request,response}.json`.
 
-The SDK inspection slice is implemented first; integrated resume/recovery
-actions remain gated until controller and registered Pi regressions pass.
+The SDK inspection, original-attempt controller and registered Pi tool slices
+are now implemented with offline regressions. Pi status discovers saved
+summaries without activation; explicit resume acquires ownership, and explicit
+Agent recovery performs one GET without a new attempt/reservation. Missing IDs
+stay unknown, terminal completion cannot be undone, frozen assertions are
+checked at preparation and actual GET preparation, and each GET observation
+capability is one-use. Provider prose/raw responses remain outside durable
+storage. The complete layer still requires fresh full-diff review; replacement
+and whole-workflow rollout remain #159/#160.
 
 ## #157 review decisions
 
