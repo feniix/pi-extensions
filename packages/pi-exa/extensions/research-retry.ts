@@ -95,6 +95,11 @@ export function assessRetryHistory(
   const permissions = grants.filter((entry): entry is ReplacementPermission =>
     Value.Check(replacementPermissionSchema, entry),
   );
+  const permissionIds = new Set<string>();
+  for (const permission of permissions) {
+    if (permissionIds.has(permission.id)) throw new Error("Replacement permission identity conflict.");
+    permissionIds.add(permission.id);
+  }
   const selected: ReplacementPermission[] = [];
   const blockedIds: string[] = [];
   for (const fact of unknown) {

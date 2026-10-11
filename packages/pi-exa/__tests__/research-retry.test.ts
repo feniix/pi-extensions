@@ -77,6 +77,18 @@ it("requires unused exact-bound operator risk permission for every unresolved or
   });
 });
 
+it("rejects duplicate replacement permission IDs instead of authorizing multiple originals with one identity", () => {
+  expect(() =>
+    assessRetryHistory(
+      [fact("one", "unknown"), fact("two", "unknown")],
+      [permission("one"), { ...permission("two"), id: "permission-one" }],
+      identity,
+      requestHash,
+      "replace",
+    ),
+  ).toThrow("Replacement permission identity conflict.");
+});
+
 it.each([
   { projectId: "other" },
   { cycleId: "other" },
