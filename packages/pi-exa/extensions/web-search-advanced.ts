@@ -13,7 +13,7 @@ import type {
 } from "exa-js";
 import type { AdvancedSearchType } from "./constants.js";
 import { DEEP_SEARCH_TYPES, DEFAULT_RESEARCH_OUTPUT_SCHEMA } from "./constants.js";
-import { getExaClient } from "./exa-client.js";
+import { type ExaUsageObserver, getExaClient, observeExaRequest } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatResearchOutput, formatSearchResults, toMetadata } from "./formatters.js";
 
@@ -234,6 +234,7 @@ export async function performAdvancedSearch(
   apiKey: string,
   query: string,
   options: AdvancedSearchOptions,
+  observer?: ExaUsageObserver,
 ): Promise<ToolPerformResult> {
   const category = validateCategory(options.category);
   validateCategoryFilters(category, options);
@@ -265,9 +266,11 @@ export async function performAdvancedSearch(
     payload.additionalQueries = options.additionalQueries;
 
   // See AdvancedSearchPayload comment for why we bypass the SDK type here.
-  const result: SearchResponse<AdvancedResultContents> = await exa.search<AdvancedResultContents>(
-    query,
-    payload as unknown as { contents: AdvancedResultContents } & Record<string, unknown>,
+  const result: SearchResponse<AdvancedResultContents> = await observeExaRequest(observer, () =>
+    exa.search<AdvancedResultContents>(
+      query,
+      payload as unknown as { contents: AdvancedResultContents } & Record<string, unknown>,
+    ),
   );
 
   const hasResults = Boolean(result?.results?.length);

@@ -527,7 +527,8 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
               (entry) =>
                 Value.Check(explorationOperationSchema, entry) &&
                 entry.id === subjectId &&
-                (entry.status === "unknown" || Boolean(entry.conflictingMicros?.length)),
+                entry.status === "unknown" &&
+                !entry.conflictingMicros?.length,
             )
           )
             throw new Error("An existing unresolved operation is required.");
@@ -595,6 +596,51 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             operation.status = "reported";
             operation.reportedMicros = total;
           }
+          await write(record);
+          return record;
+        }),
+      );
+    },
+    async explorationDispatchGuard(cycleId: string, operationId: string, requestHash: string) {
+      return activate((assertCurrent) =>
+        transaction(async () => {
+          const record = await owned();
+          assertCurrent();
+          const operation = record.ledger.find((entry) => "id" in entry && entry.id === operationId);
+          if (
+            !Value.Check(explorationOperationSchema, operation) ||
+            operation.cycleId !== cycleId ||
+            operation.requestHash !== requestHash ||
+            operation.status !== "reserved"
+          )
+            throw new Error("Operation identity conflict.");
+          assertArtifactTarget(record, { cycleId, expectedRevision: operation.revision });
+          if (record.archived || record.status !== "planning") throw new Error("CYCLE_NOT_EXECUTABLE");
+          const assessment = assessExploration(
+            record.grants,
+            record.ledger,
+            { dollars: 0, basis: "Recheck all held exposure before SDK invocation." },
+            operation.tool,
+            { cycleId: record.id, projectId: record.projectId },
+          );
+          if (!assessment.canDispatch) throw new Error(`${assessment.reason}: dispatch permission changed.`);
+          return assertCurrent;
+        }),
+      );
+    },
+    async releaseUndispatchedExploration(cycleId: string, operationId: string, requestHash: string) {
+      return ordered(() =>
+        transaction(async () => {
+          const record = await read(cycleId);
+          const operation = record.ledger.find((entry) => "id" in entry && entry.id === operationId);
+          if (
+            !Value.Check(explorationOperationSchema, operation) ||
+            operation.cycleId !== cycleId ||
+            operation.requestHash !== requestHash ||
+            operation.reportedMicros !== undefined
+          )
+            throw new Error("Operation identity conflict.");
+          operation.status = "not-dispatched";
           await write(record);
           return record;
         }),

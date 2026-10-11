@@ -138,10 +138,22 @@ Start Pi with `--exa-enable-cycles` to use durable research planning:
   in this project. Unreadable contents are never displayed; attribution checks
   remain fail-closed until those records are repaired.
 - `/exa-research resume <cycle-id>` explicitly acquires ownership after restart.
-- `/exa-research approve <cycle-id> <total-dollar-ceiling>` records an operator
+- `/exa-research approve <cycle-id> <total-dollar-ceiling> [tool,tool...]` records an operator
   grant for supported exploratory retrieval. Each approval sets the cycle's
   **total lifetime ceiling**, not additional credits. Grant history survives
   resume/archive; assistant approval fields do not establish consent.
+  The optional comma-separated scope replaces the whole allowlist. Default scope:
+  `web_search_exa`, `web_fetch_exa`, `web_find_similar_exa`, `web_search_advanced_exa`.
+  `web_answer_exa` requires an explicit scope amendment. Agent/Connect/contact tools
+  cannot be added to this exploratory grant.
+- `/exa-research approve-request <cycle-id> <request-hash> <assessed-dollars>`
+  approves one attempt of that exact uncertain request, after inspecting the
+  denied tool call's request and SHA-256 hash. Changed arguments require new permission.
+  Repeating/amending approval uses the latest record, never reviving older unused grants.
+- `/exa-research approve-liability <cycle-id> <operation-id> <assessed-dollars>`
+  names one existing unknown operation and an assessed allowance. It stays unknown,
+  counts against the total ceiling, and never covers another unknown operation.
+  Conflicting API receipts cannot be resolved through uncertainty permission.
 - `/exa-research archive [cycle-id]` detaches and archives without deleting history.
 
 The four `exa_research_*` tools then update, inspect, summarize, and archive the
@@ -171,12 +183,34 @@ Unknown execution remains unknown after
 resume; completed records cannot be edited back into executable planning.
 
 The current implementation includes local persistence, request compilation and
-the initial durable accounting core. **Integrated paid retrieval and Agent
-execution remain unavailable** while the remaining safety wiring lands; even an
-operator grant does not dispatch work yet. Approval displays the published-rate
-profile; estimates are not vendor-enforced billing caps or invoice verification.
-Active-cycle web calls fail before dispatch; `researchMode:
-"standalone"` explicitly selects unrelated legacy retrieval.
+exploratory accounting. **Agent execution remains unavailable** until its safety
+slice lands. Attributed retrieval requires a recorded operator grant and an
+atomic pre-call assessment. Include the active `cycleId` (and optionally
+`expectedRevision`) on each exploratory tool call:
+
+```json
+{ "query": "Exa pricing", "researchMode": "active", "cycleId": "<active-cycle-id>", "expectedRevision": 0 }
+```
+
+Each operation reserves allowance before SDK invocation; concurrent calls share
+pending estimates. Responses/status show API-reported totals, pending estimates,
+unresolved operation IDs, operator-assessed liabilities and overspend separately.
+Permission is rounded down, costs up, using safe integer micro-USD.
+Only a genuine explicit SDK total (including zero) replaces its reservation.
+Missing/malformed costs and local timeout/cancellation remain unknown; late
+receipts reconcile even after detach/archive. Formatting errors cannot erase
+genuine usage. Only proven pre-SDK nondispatch releases a reservation.
+
+Approval displays the versioned published-price profile and source/review date.
+Supported assessments cover basic search, bounded regular/deep/deep-reasoning
+advanced search, and dedicated content types/pages. Find-similar, answer,
+deep-lite, additional queries, subpages, deprecated context and unsupported
+options need exact-request uncertainty assessment. Unbounded or unaffordable
+calls return operator-command guidance without dispatch. Other-provider costs
+are outside the Exa ledger. These are best-effort estimates, **not vendor billing
+caps or independently verified invoices**.
+
+`researchMode: "standalone"` explicitly selects unrelated legacy retrieval.
 With no active cycle, normal standalone web tools remain available.
 Continuations identifying a saved cycle attempt and requests carrying a saved
 cycle's `metadata.cycleId` remain blocked even with a standalone override or after archival.

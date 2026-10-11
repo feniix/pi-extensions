@@ -3,7 +3,7 @@
  */
 
 import type { ContentsOptions, SearchResponse, SearchResult } from "exa-js";
-import { getExaClient } from "./exa-client.js";
+import { type ExaUsageObserver, getExaClient, observeExaRequest } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatCrawlResults, toMetadata } from "./formatters.js";
 
@@ -29,6 +29,7 @@ export async function performWebFetch(
   apiKey: string,
   urls: string[],
   options: FetchOptions = {},
+  observer?: ExaUsageObserver,
 ): Promise<ToolPerformResult> {
   const exa = getExaClient(apiKey);
 
@@ -57,7 +58,7 @@ export async function performWebFetch(
     highlights: ContentsOptions["highlights"];
     summary: ContentsOptions["summary"];
     subpages: number;
-  }> = await exa.getContents(urls, contents);
+  }> = await observeExaRequest(observer, () => exa.getContents(urls, contents));
 
   if (!result?.results || result.results.length === 0) {
     return {

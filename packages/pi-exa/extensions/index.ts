@@ -17,7 +17,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPiTools } from "@feniix/bridgekit/pi";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
-import { cyclePiRegistration } from "./cycle-pi.js";
+import { type CycleRetrievalFactory, cyclePiRegistration } from "./cycle-pi.js";
 import { createExaTools, type ExaToolTimeouts } from "./tools.js";
 import { getExaRenderers } from "./tui-renderers.js";
 
@@ -119,7 +119,24 @@ export default function exaExtension(pi: ExtensionAPI) {
   // bound, and session_start also runs for a fresh runtime after reload.
   pi.on("session_start", () => {
     if (!cyclesInstalled && pi.getFlag("exa-enable-cycles") === true) {
-      registerPiTools(cyclePiRegistration(pi), tools);
+      const retrievalFactory: CycleRetrievalFactory = (name, usageObserver) => {
+        let selected: ReturnType<CycleRetrievalFactory>;
+        registerPiTools(
+          {
+            registerTool: (tool) => {
+              selected = tool;
+            },
+          },
+          createExaTools({
+            resolveApiKey: () => resolveAuth(pi).apiKey || undefined,
+            isToolEnabled: (toolName) => toolName === name && isToolEnabledForConfig(pi, resolvedConfig, toolName),
+            timeouts: resolvePiTimeouts(pi),
+            usageObserver,
+          }),
+        );
+        return selected;
+      };
+      registerPiTools(cyclePiRegistration(pi, retrievalFactory), tools);
       cyclesInstalled = true;
     }
   });

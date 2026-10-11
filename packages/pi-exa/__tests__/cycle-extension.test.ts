@@ -18,11 +18,16 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return { ...original, unlink: vi.fn(original.unlink) };
 });
 
-const offlineSearch = vi.hoisted(() => vi.fn(async () => ({ results: [], requestId: "offline" })));
+const offlineSearch = vi.hoisted(() =>
+  vi.fn<(...args: unknown[]) => Promise<Record<string, unknown>>>(async () => ({ results: [], requestId: "offline" })),
+);
 const offlineCreate = vi.hoisted(() => vi.fn(async () => ({ id: "offline", status: "completed" })));
 vi.mock("exa-js", () => ({
   Exa: class {
     search = offlineSearch;
+    getContents = offlineSearch;
+    findSimilar = offlineSearch;
+    answer = offlineSearch;
     agent = { runs: { create: offlineCreate } };
   },
 }));
@@ -30,13 +35,13 @@ vi.mock("exa-js", () => ({
 const directories: string[] = [];
 afterEach(async () => {
   vi.mocked(fs.unlink).mockReset();
-  offlineSearch.mockClear();
+  offlineSearch.mockReset().mockResolvedValue({ results: [], requestId: "offline" });
   offlineCreate.mockClear();
   vi.unstubAllEnvs();
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-async function host(enabled = true) {
+async function host(enabled = true, timeoutMs?: number) {
   const directory = await mkdtemp(join(tmpdir(), "exa-cycle-host-"));
   directories.push(directory);
   vi.stubEnv("PI_CODING_AGENT_DIR", join(directory, "agent"));
@@ -50,6 +55,10 @@ async function host(enabled = true) {
         "exa_research_summary",
         "exa_research_reset",
         "web_search_exa",
+        "web_search_advanced_exa",
+        "web_fetch_exa",
+        "web_find_similar_exa",
+        "web_answer_exa",
         "web_research_exa",
       ],
       apiKey: "offline-fixture-key",
@@ -70,7 +79,13 @@ async function host(enabled = true) {
   const pi = {
     registerFlag: vi.fn(),
     getFlag: (name: string) =>
-      name === "exa-enable-cycles" ? enabled : name === "--exa-config-file" ? config : undefined,
+      name === "exa-enable-cycles"
+        ? enabled
+        : name === "--exa-config-file"
+          ? config
+          : name === "--exa-timeout-ms" && timeoutMs !== undefined
+            ? String(timeoutMs)
+            : undefined,
     registerTool: (tool: Parameters<PiToolRegistration["registerTool"]>[0]) => tools.set(tool.name, tool),
     registerCommand: (
       name: string,
@@ -88,10 +103,10 @@ async function host(enabled = true) {
     context,
     notify,
     command,
-    call: (name: string, args = {}) => {
+    call: (name: string, args = {}, signal?: AbortSignal) => {
       const tool = tools.get(name);
       if (!tool) throw new Error(`Missing tool ${name}`);
-      return tool.execute("call", args, undefined, undefined, context);
+      return tool.execute("call", args, signal, undefined, context);
     },
   };
 }
@@ -141,6 +156,284 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it.each([
+    ["web_fetch_exa", { urls: ["https://a.test"] }],
+    ["web_find_similar_exa", { url: "https://a.test" }],
+    ["web_answer_exa", { query: "topic" }],
+  ])("captures explicit zero raw costs on scoped %s calls", async (tool, args) => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1 ${tool}`, pi.context);
+    const request = { ...args, cycleId: status.id };
+    if (tool !== "web_fetch_exa") {
+      const denied = await pi.call(tool, request);
+      await pi.command?.handler(`approve-request ${status.id} ${denied.details.requestHash} 0.01`, pi.context);
+    }
+    offlineSearch.mockResolvedValueOnce({ results: [], answer: "answer", citations: [], costDollars: { total: 0 } });
+    const response = await pi.call(tool, request);
+    expect(response.isError).not.toBe(true);
+    expect(offlineSearch).toHaveBeenCalledOnce();
+    expect((await pi.call("exa_research_status")).details.ledger).toMatchObject([
+      { tool, status: "reported", reportedMicros: 0 },
+    ]);
+  });
+
+  it("prevents a timed-out async preflight from starting the SDK after its reservation is released", async () => {
+    const pi = await host(true, 100);
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    let releases = 0;
+    let entered!: () => void;
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(fs.unlink).mockImplementation(async (...args) => {
+      await original.unlink(...args);
+      if (String(args[0]).endsWith(".lock") && ++releases === 3) {
+        entered();
+        await blocked;
+      }
+    });
+    vi.useFakeTimers();
+    try {
+      const pending = pi.call("web_search_exa", { query: "topic", cycleId: status.id });
+      await barrier;
+      await vi.advanceTimersByTimeAsync(100);
+      release();
+      const response = await pending;
+      expect(response.isError).toBe(true);
+      expect(offlineSearch).not.toHaveBeenCalled();
+      expect((await pi.call("exa_research_status")).details.ledger).toMatchObject([{ status: "not-dispatched" }]);
+    } finally {
+      release();
+      vi.useRealTimers();
+    }
+  });
+
+  it("freezes caller-owned nested request values at entry before hashing or dispatch", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+    const queries = ["original"];
+    const args = { query: "topic", type: "deep", additionalQueries: queries, cycleId: status.id };
+    const denied = await pi.call("web_search_advanced_exa", args);
+    await pi.command?.handler(`approve-request ${status.id} ${denied.details.requestHash} 0.02`, pi.context);
+    offlineSearch.mockResolvedValueOnce({ results: [], costDollars: { total: 0 } });
+    const pending = pi.call("web_search_advanced_exa", args);
+    queries[0] = "changed after entry";
+    const response = await pending;
+    expect(response.isError).not.toBe(true);
+    expect(response.details.requestHash).toBe(denied.details.requestHash);
+    expect(offlineSearch).toHaveBeenCalledWith("topic", expect.objectContaining({ additionalQueries: ["original"] }));
+  });
+
+  it("releases a reservation only when a pre-aborted call provably never invokes the SDK", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 0.01`, pi.context);
+    const abort = new AbortController();
+    abort.abort();
+    await pi.call("web_search_exa", { query: "topic", cycleId: status.id }, abort.signal);
+    expect(offlineSearch).not.toHaveBeenCalled();
+    expect((await pi.call("exa_research_status")).details).toMatchObject({
+      ledger: [{ status: "not-dispatched", estimateMicros: 7_000 }],
+      accounting: { pendingEstimatedDollars: 0, reportedDollars: 0, unresolvedOperationIds: [] },
+    });
+  });
+
+  it("binds concurrent out-of-order SDK receipts to separate immutable operations", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+    let one!: (response: Record<string, unknown>) => void;
+    let two!: (response: Record<string, unknown>) => void;
+    const firstSdk = new Promise<Record<string, unknown>>((resolve) => {
+      one = resolve;
+    });
+    const secondSdk = new Promise<Record<string, unknown>>((resolve) => {
+      two = resolve;
+    });
+    offlineSearch.mockImplementation((query) => (query === "one" ? firstSdk : secondSdk));
+    const first = pi.call("web_search_exa", { query: "one", cycleId: status.id });
+    const second = pi.call("web_search_exa", { query: "two", cycleId: status.id });
+    await vi.waitFor(() => expect(offlineSearch).toHaveBeenCalledTimes(2));
+    two({ results: [], costDollars: { total: 0.006 } });
+    const secondResult = await second;
+    one({ results: [], costDollars: { total: 0.004 } });
+    const firstResult = await first;
+    const saved = (await pi.call("exa_research_status")).details;
+    expect(saved.ledger).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: firstResult.details.operationId, reportedMicros: 4_000 }),
+        expect.objectContaining({ id: secondResult.details.operationId, reportedMicros: 6_000 }),
+      ]),
+    );
+    expect(saved.accounting).toMatchObject({ reportedDollars: 0.01, pendingEstimatedDollars: 0 });
+    expect(firstResult.details.requestHash).not.toBe(secondResult.details.requestHash);
+  });
+
+  it("holds pending exposure across another call and reports actual overspend before further dispatch", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 0.01`, pi.context);
+    let resolve!: (response: Record<string, unknown>) => void;
+    let entered!: () => void;
+    const barrier = new Promise<void>((done) => {
+      entered = done;
+    });
+    const sdk = new Promise<Record<string, unknown>>((done) => {
+      resolve = done;
+    });
+    offlineSearch.mockImplementationOnce(async () => {
+      entered();
+      return sdk;
+    });
+    const args = { query: "topic", cycleId: status.id };
+    const first = pi.call("web_search_exa", args);
+    await barrier;
+    const denied = await pi.call("web_search_exa", args);
+    expect(denied.details.assessment).toMatchObject({
+      reason: "INSUFFICIENT_BALANCE",
+      pendingEstimatedDollars: 0.007,
+    });
+    resolve({ results: [], costDollars: { total: 0.02 } });
+    expect((await first).details.accounting).toMatchObject({
+      reason: "OVERSPEND",
+      reportedDollars: 0.02,
+      pendingEstimatedDollars: 0,
+    });
+    expect((await pi.call("web_search_exa", args)).details.assessment).toMatchObject({ reason: "OVERSPEND" });
+    expect(offlineSearch).toHaveBeenCalledOnce();
+  });
+
+  it("retains genuine raw usage when local formatting fails and never archives raw response data", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+    offlineSearch.mockResolvedValueOnce({
+      results: "not an array",
+      costDollars: { total: 0.003 },
+      rawSecretMarker: "DO_NOT_ARCHIVE_RESPONSE",
+    });
+    const response = await pi.call("web_search_exa", { query: "topic", cycleId: status.id });
+    expect(response.isError).toBe(true);
+    const saved = (await pi.call("exa_research_status")).details;
+    expect(saved.ledger).toMatchObject([{ status: "reported", reportedMicros: 3_000 }]);
+    expect(saved.accounting).toMatchObject({ reportedDollars: 0.003, pendingEstimatedDollars: 0 });
+    expect(JSON.stringify(saved)).not.toContain("DO_NOT_ARCHIVE_RESPONSE");
+  });
+
+  it.each([
+    "abort",
+    "timeout",
+  ])("keeps %s liability until its late raw receipt, including after archive", async (mode) => {
+    const pi = await host(true, mode === "timeout" ? 500 : undefined);
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+    let resolve!: (response: Record<string, unknown>) => void;
+    let entered!: () => void;
+    const barrier = new Promise<void>((done) => {
+      entered = done;
+    });
+    const sdk = new Promise<Record<string, unknown>>((done) => {
+      resolve = done;
+    });
+    offlineSearch.mockImplementationOnce(async () => {
+      entered();
+      return sdk;
+    });
+    const abort = new AbortController();
+    const pending = pi.call("web_search_exa", { query: "topic", cycleId: status.id }, abort.signal);
+    await Promise.race([
+      barrier,
+      pending.then(() => {
+        throw new Error("SDK did not start.");
+      }),
+    ]);
+    if (mode === "abort") abort.abort();
+    const interrupted = await pending;
+    expect(interrupted.details.accounting).toMatchObject({ reason: "UNKNOWN_LIABILITY" });
+    await pi.command?.handler(`archive ${status.id}`, pi.context);
+    expect(pi.notify).toHaveBeenLastCalledWith(expect.stringContaining("does not cancel"), "info");
+    resolve({ results: [], costDollars: { total: 0.009 } });
+    await vi.waitFor(async () => {
+      await pi.command?.handler("list", pi.context);
+      const saved = JSON.parse(pi.notify.mock.lastCall?.[0] ?? "[]")[0];
+      expect(saved).toMatchObject({
+        archived: true,
+        ledger: [{ status: "reported", reportedMicros: 9_000 }],
+        accounting: { reportedDollars: 0.009, pendingEstimatedDollars: 0 },
+      });
+      expect(saved).not.toHaveProperty("owner");
+      expect(saved.grants).toHaveLength(1);
+    });
+    expect(offlineSearch).toHaveBeenCalledOnce();
+  });
+
+  it("requires and consumes operator permission for an exact unsupported request", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+    const args = { query: "topic", type: "deep-lite", cycleId: status.id };
+    const denied = await pi.call("web_search_advanced_exa", args);
+    expect(denied.details.assessment).toMatchObject({ reason: "UNCERTAINTY_APPROVAL_REQUIRED" });
+    expect(offlineSearch).not.toHaveBeenCalled();
+    await pi.command?.handler(`approve-request ${status.id} ${denied.details.requestHash} 0.02`, pi.context);
+    expect(pi.notify).toHaveBeenLastCalledWith(expect.stringContaining("uncertainty"), "info");
+    offlineSearch.mockResolvedValueOnce({ results: [], costDollars: { total: 0 } });
+    expect((await pi.call("web_search_advanced_exa", args)).isError).not.toBe(true);
+    expect((await pi.call("web_search_advanced_exa", args)).isError).toBe(true);
+    expect(offlineSearch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps missing cost unknown and scopes operator liability assessment to only that operation", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 0.02`, pi.context);
+    const args = { query: "topic", cycleId: status.id };
+    const first = await pi.call("web_search_exa", args);
+    expect(first.details.accounting).toMatchObject({ reason: "UNKNOWN_LIABILITY", reportedDollars: 0 });
+    expect((await pi.call("web_search_exa", args)).details.assessment).toMatchObject({ reason: "UNKNOWN_LIABILITY" });
+    await pi.command?.handler(`approve-liability ${status.id} ${first.details.operationId} 0.005`, pi.context);
+    expect((await pi.call("web_search_exa", args)).isError).not.toBe(true);
+    const blocked = await pi.call("web_search_exa", args);
+    expect(blocked.details.assessment).toMatchObject({ reason: "UNKNOWN_LIABILITY", assessedUnknownDollars: 0.005 });
+    expect(offlineSearch).toHaveBeenCalledTimes(2);
+    expect((await pi.call("exa_research_status")).details.ledger).toMatchObject([
+      { status: "unknown" },
+      { status: "unknown" },
+    ]);
+  });
+
+  it("dispatches a budget-approved explicitly attributed search and keeps raw usage on an empty result", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 0.01`, pi.context);
+    offlineSearch.mockResolvedValueOnce({ results: [], costDollars: { total: 0.002, search: { total: 0.002 } } });
+    const response = await pi.call("web_search_exa", { query: "topic", cycleId: status.id, expectedRevision: 0 });
+    expect(response.isError).not.toBe(true);
+    expect(offlineSearch).toHaveBeenCalledOnce();
+    expect((await pi.call("exa_research_status")).details.ledger).toMatchObject([
+      { status: "reported", reportedMicros: 2_000, estimateMicros: 7_000 },
+    ]);
+  });
+
   it("makes total-ceiling approval discoverable in command help and invalid-action usage", async () => {
     const pi = await host();
     expect(pi.command?.description).toContain("approve <cycle-id> <total-dollar-ceiling>");
@@ -455,12 +748,12 @@ describe("Pi cycle commands and tools", () => {
     expect((await pi.call("exa_research_status")).isError).toBe(true);
   });
 
-  it("gates paid integrated calls while cycle execution is incomplete", async () => {
+  it("requires explicit attribution before exploratory dispatch", async () => {
     const pi = await host();
     await pi.command?.handler("start pricing", pi.context);
     const result = await pi.call("web_search_exa", { query: "pricing" });
     expect(result.isError).toBe(true);
-    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("not available") });
+    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("APPROVAL_REQUIRED") });
   });
 
   it("does not register cycle commands or lifecycle state when opt-in is disabled", async () => {

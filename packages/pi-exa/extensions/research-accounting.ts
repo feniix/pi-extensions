@@ -164,7 +164,6 @@ export function estimateExploration(tool: string, args: Record<string, unknown>)
               "userLocation",
               "moderation",
               "textMaxCharacters",
-              "contextMaxCharacters",
               "enableHighlights",
               "highlightsNumSentences",
               "highlightsMaxCharacters",
@@ -249,6 +248,7 @@ export function assessExploration(
   let pending = 0;
   let assessedUnknown = 0;
   const blockedOperationIds: string[] = [];
+  const conflictingOperationIds: string[] = [];
   const unresolvedOperationIds: string[] = [];
   for (const operation of ledger) {
     if (!Value.Check(explorationOperationSchema, operation)) throw new Error("Unclassified or invalid liability.");
@@ -261,6 +261,11 @@ export function assessExploration(
     else if (operation.status === "unknown") unresolved = true;
     if (unresolved) {
       unresolvedOperationIds.push(operation.id);
+      if (operation.conflictingMicros?.length) {
+        blockedOperationIds.push(operation.id);
+        conflictingOperationIds.push(operation.id);
+        continue;
+      }
       const permission = [...permissions]
         .reverse()
         .find((entry) => entry.targetType === "liability" && entry.subjectId === operation.id);
@@ -301,6 +306,7 @@ export function assessExploration(
     pendingEstimatedDollars: pending / 1_000_000,
     unresolvedOperationIds,
     blockedOperationIds,
+    conflictingOperationIds,
     billingVerified: false,
   };
 }
@@ -316,4 +322,23 @@ export class ExplorationApprovalError extends Error {
     super(`${assessment.reason}: inspect accounting and obtain operator approval.`);
     this.name = "ExplorationApprovalError";
   }
+}
+
+export function summarizeAccounting(
+  grants: readonly object[],
+  ledger: readonly object[],
+  identity: AccountingIdentity,
+) {
+  const latest = grants.filter((grant): grant is SpendingGrant => Value.Check(spendingGrantSchema, grant)).at(-1);
+  return {
+    ...assessExploration(
+      grants,
+      ledger,
+      { dollars: 0, basis: "Ledger overview only." },
+      latest?.tools[0] ?? "web_search_exa",
+      identity,
+    ),
+    assessmentOnly: true,
+    rateProfile: EXA_RATE_PROFILE,
+  };
 }

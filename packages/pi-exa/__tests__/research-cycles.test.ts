@@ -172,6 +172,30 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it("rechecks scope/ceiling before SDK invocation and exposes a final generation fence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
+    await controller.grantBudget(cycle.id, 0);
+    await expect(controller.explorationDispatchGuard(cycle.id, operation.id, operation.requestHash)).rejects.toThrow(
+      "INSUFFICIENT_BALANCE",
+    );
+    await controller.grantBudget(cycle.id, 1, ["web_fetch_exa"]);
+    await expect(controller.explorationDispatchGuard(cycle.id, operation.id, operation.requestHash)).rejects.toThrow(
+      "SCOPE_APPROVAL_REQUIRED",
+    );
+    await controller.grantBudget(cycle.id, 1);
+    const guard = await controller.explorationDispatchGuard(cycle.id, operation.id, operation.requestHash);
+    const detaching = controller.detach();
+    expect(guard).toThrow("activation was detached");
+    await detaching;
+    await controller.releaseUndispatchedExploration(cycle.id, operation.id, operation.requestHash);
+    expect((await controller.inspect(cycle.id)).ledger).toMatchObject([{ status: "not-dispatched" }]);
+  });
+
   it("shares one exact-request exception atomically between concurrent reservations", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);

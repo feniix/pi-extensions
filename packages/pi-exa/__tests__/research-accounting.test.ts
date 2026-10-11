@@ -45,6 +45,7 @@ describe("exploratory accounting policy", () => {
     ["web_search_advanced_exa", { query: "q", type: "deep-lite" }],
     ["web_search_advanced_exa", { query: "q", type: "deep", subpages: 2 }],
     ["web_search_advanced_exa", { query: "q", type: "deep", additionalQueries: ["extra"] }],
+    ["web_search_advanced_exa", { query: "q", contextMaxCharacters: 2000 }],
   ])("requires exact-request uncertainty permission for unsupported extras/modes in %s", (tool, args) => {
     expect(estimateExploration(tool, args).dollars).toBeNull();
   });
@@ -91,6 +92,15 @@ describe("exploratory accounting policy", () => {
       assessExploration(
         [grant, permission],
         [{ ...operation, id: "different" }],
+        estimateExploration("web_search_exa", {}),
+        "web_search_exa",
+        identity,
+      ),
+    ).toMatchObject({ canDispatch: false, reason: "UNKNOWN_LIABILITY" });
+    expect(
+      assessExploration(
+        [grant, permission],
+        [{ ...operation, status: "reported", reportedMicros: 1_000, conflictingMicros: [2_000] }],
         estimateExploration("web_search_exa", {}),
         "web_search_exa",
         identity,

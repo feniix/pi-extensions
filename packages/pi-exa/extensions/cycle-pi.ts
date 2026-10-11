@@ -4,7 +4,14 @@ import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil
 import type { PiToolRegistration } from "@feniix/bridgekit/pi";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { EXA_RATE_PROFILE } from "./research-accounting.js";
+import type { ExaUsageObserver } from "./exa-client.js";
+import {
+  EXA_RATE_PROFILE,
+  EXPLORATION_TOOLS,
+  ExplorationApprovalError,
+  explorationOperationSchema,
+  summarizeAccounting,
+} from "./research-accounting.js";
 import { assertArtifactTarget, executionPlanSchema, ResearchArtifactError } from "./research-artifacts.js";
 import { createResearchCycles, type ResearchCycle, type ResearchCycles } from "./research-cycles.js";
 import { createResearchPlanner } from "./research-planner.js";
@@ -37,7 +44,18 @@ const summaryParams = Type.Object(
 
 function view(record: ResearchCycle) {
   const { owner: _owner, ...visible } = record;
-  return { ...visible, ...createResearchPlanner(record.plan).getStatus() };
+  let accounting: Record<string, unknown>;
+  try {
+    accounting = summarizeAccounting(record.grants, record.ledger, { cycleId: record.id, projectId: record.projectId });
+  } catch (error) {
+    accounting = {
+      canDispatch: false,
+      billingVerified: false,
+      reason: "UNKNOWN_LIABILITY",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  return { ...visible, ...createResearchPlanner(record.plan).getStatus(), accounting };
 }
 
 function result(details: Record<string, unknown>, text = JSON.stringify(details, null, 2), isError = false) {
@@ -47,6 +65,11 @@ function result(details: Record<string, unknown>, text = JSON.stringify(details,
 function warning(record: ResearchCycle) {
   return record.status === "running" ||
     record.status === "unknown" ||
+    record.ledger.some(
+      (entry) =>
+        Value.Check(explorationOperationSchema, entry) &&
+        (entry.status === "reserved" || entry.status === "unknown" || Boolean(entry.conflictingMicros?.length)),
+    ) ||
     record.attempts.some(
       (attempt) => "status" in attempt && (attempt.status === "running" || attempt.status === "unknown"),
     )
@@ -54,7 +77,12 @@ function warning(record: ResearchCycle) {
     : "";
 }
 
-export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
+export type CycleRetrievalFactory = (
+  name: string,
+  observer: ExaUsageObserver,
+) => Parameters<PiToolRegistration["registerTool"]>[0] | undefined;
+
+export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRetrievalFactory): PiToolRegistration {
   const controllers = new Map<string, Promise<ResearchCycles>>();
   const get = (ctx: ExtensionContext) => {
     const key = JSON.stringify([ctx.cwd, ctx.sessionManager.getSessionId()]);
@@ -84,7 +112,7 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
 
   pi.registerCommand("exa-research", {
     description:
-      "Manage durable research cycles: start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling>, archive [id]. Paid cycle work remains gated.",
+      "Manage research cycles: start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling> [tool,tool...], approve-request <cycle-id> <request-hash> <assessed-dollars>, approve-liability <cycle-id> <operation-id> <assessed-dollars>, archive [id]. Agent synthesis remains gated.",
     handler: async (args, ctx) => {
       try {
         const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(args.trim());
@@ -116,20 +144,38 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
             break;
           }
           case "approve": {
-            const approval = /^(\S+)\s+(\d+(?:\.\d{1,6})?)$/.exec(value);
-            if (!approval) throw new Error("Use approve <cycle-id> <total-dollar-ceiling>; no grant was issued.");
-            const approved = await cycles.grantBudget(approval[1], Number(approval[2]), [
+            const approval = /^(\S+)\s+(\d+(?:\.\d{1,6})?)(?:\s+(\S+))?$/.exec(value);
+            if (!approval)
+              throw new Error("Use approve <cycle-id> <total-dollar-ceiling> [tool,tool...]; no grant was issued.");
+            const scope = approval[3]?.split(",") ?? [
               "web_search_exa",
               "web_fetch_exa",
               "web_find_similar_exa",
               "web_search_advanced_exa",
-            ]);
+            ];
+            const approved = await cycles.grantBudget(approval[1], Number(approval[2]), scope);
             text = `Recorded total lifetime Exa ceiling. Estimates are not billing caps; unsupported pricing remains gated.\n${JSON.stringify(EXA_RATE_PROFILE)}\n${JSON.stringify(view(approved), null, 2)}`;
+            break;
+          }
+          case "approve-request":
+          case "approve-liability": {
+            const approval = /^(\S+)\s+(\S+)\s+(\d+(?:\.\d{1,6})?)$/.exec(value);
+            if (!approval)
+              throw new Error(
+                `Use ${action} <cycle-id> <${action === "approve-request" ? "request-hash" : "operation-id"}> <assessed-dollars>; no grant was issued.`,
+              );
+            const approved = await cycles.grantUncertainty(
+              approval[1],
+              action === "approve-request" ? "request" : "liability",
+              approval[2],
+              Number(approval[3]),
+            );
+            text = `Recorded scoped uncertainty assessment, not a billing cap or reported cost. The total ceiling is unchanged; unknown liability remains unknown.\n${JSON.stringify(view(approved), null, 2)}`;
             break;
           }
           default:
             throw new Error(
-              "Use /exa-research start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling>, or archive [id].",
+              "Use /exa-research start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling> [tool,tool...], approve-request <cycle-id> <request-hash> <assessed-dollars>, approve-liability <cycle-id> <operation-id> <assessed-dollars>, or archive [id].",
             );
         }
         ctx.ui.notify(text, "info");
@@ -185,6 +231,9 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
           : {}),
         async execute(id, params, signal, onUpdate, ctx) {
           try {
+            // Capture JSON input before the first await; caller-owned arrays
+            // must not change the request after permission hashing/assessment.
+            const paidInput = paid ? structuredClone(params) : undefined;
             const cycles = await get(ctx);
             const explicitStandalone =
               paid &&
@@ -193,8 +242,8 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
               Reflect.get(params, "researchMode") === "standalone";
             const record = explicitStandalone ? undefined : await cycles.status();
             if (paid) {
-              if (typeof params !== "object" || params === null) throw new Error("Invalid tool arguments.");
-              const { researchMode, cycleId, expectedRevision, artifactHash, ...standalone } = params as Record<
+              if (typeof paidInput !== "object" || paidInput === null) throw new Error("Invalid tool arguments.");
+              const { researchMode, cycleId, expectedRevision, artifactHash, ...standalone } = paidInput as Record<
                 string,
                 unknown
               >;
@@ -209,10 +258,82 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
               if (record && researchMode !== "standalone") {
                 if (tool.name === "web_research_exa") {
                   await cycles.preview({ ...reference, executionFields: standalone });
-                } else {
-                  assertArtifactTarget(record, reference);
+                  throw new Error(
+                    "Integrated paid research is not available in this slice; no request was dispatched.",
+                  );
                 }
-                throw new Error("Integrated paid research is not available in this slice; no request was dispatched.");
+                if (!retrievalFactory || !EXPLORATION_TOOLS.some((name) => name === tool.name))
+                  throw new Error(
+                    "Integrated paid research is not available in this slice; no request was dispatched.",
+                  );
+                if (cycleId === undefined)
+                  throw new Error("APPROVAL_REQUIRED: Explicit cycleId is required to attribute exploratory spending.");
+                if (artifactHash !== undefined)
+                  throw new Error("Artifact hashes apply to synthesis previews, not exploration.");
+                if (!Value.Check(tool.parameters, standalone)) throw new Error("Invalid exploratory tool arguments.");
+                const { operation, assessment } = await cycles.reserveExploration(tool.name, standalone, reference);
+                const { cycleId: savedCycle, id: operationId, requestHash } = operation;
+                let started = false;
+                let observed = false;
+                let closed = false;
+                const observer: ExaUsageObserver = {
+                  before: async () => {
+                    const guard = await cycles.explorationDispatchGuard(savedCycle, operationId, requestHash);
+                    return () => {
+                      guard();
+                      if (closed || signal?.aborted) throw new Error("Exploration cancelled before SDK invocation.");
+                      started = true;
+                    };
+                  },
+                  raw: async (response) => {
+                    const costs =
+                      typeof response === "object" && response !== null && "costDollars" in response
+                        ? response.costDollars
+                        : undefined;
+                    const total =
+                      typeof costs === "object" && costs !== null && "total" in costs ? costs.total : undefined;
+                    await cycles.reconcileExploration(
+                      savedCycle,
+                      operationId,
+                      requestHash,
+                      typeof total === "number" ? { totalDollars: total } : {},
+                    );
+                    observed = true;
+                  },
+                };
+                try {
+                  const retrieval = retrievalFactory(tool.name, observer);
+                  if (!retrieval) throw new Error("Retrieval is not enabled; no SDK request was dispatched.");
+                  const response = await retrieval.execute(id, standalone, signal, onUpdate, ctx);
+                  closed = true;
+                  if (!started) await cycles.releaseUndispatchedExploration(savedCycle, operationId, requestHash);
+                  else if (!observed) await cycles.reconcileExploration(savedCycle, operationId, requestHash, {});
+                  const current = await cycles.inspect(savedCycle);
+                  const accounting = view(current).accounting;
+                  return {
+                    ...response,
+                    content: [
+                      ...response.content,
+                      {
+                        type: "text" as const,
+                        text: `Exa cycle ${savedCycle}; operation ${operationId}.\nPre-call assessment: ${JSON.stringify(assessment)}\nBasis: ${operation.basis}\nLedger overview (not new-call permission): ${JSON.stringify(accounting)}\nPublished estimates are not vendor caps; API-reported usage is not verified billing.`,
+                      },
+                    ],
+                    details: {
+                      ...response.details,
+                      cycleId: savedCycle,
+                      operationId,
+                      requestHash,
+                      assessment,
+                      accounting,
+                    },
+                  };
+                } catch (error) {
+                  closed = true;
+                  if (!started) await cycles.releaseUndispatchedExploration(savedCycle, operationId, requestHash);
+                  else if (!observed) await cycles.reconcileExploration(savedCycle, operationId, requestHash, {});
+                  throw error;
+                }
               }
               if (record) assertArtifactTarget(record, reference);
               if (artifactHash !== undefined) throw new Error("Artifact references require active-cycle research.");
@@ -272,7 +393,35 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
             }
           } catch (error) {
             return result(
-              error instanceof ResearchArtifactError ? { issues: error.issues } : {},
+              error instanceof ResearchArtifactError
+                ? { issues: error.issues }
+                : error instanceof ExplorationApprovalError
+                  ? {
+                      cycleId: error.cycleId,
+                      tool: error.tool,
+                      requestHash: error.requestHash,
+                      request: error.request,
+                      assessment: error.assessment,
+                      operatorCommands: [
+                        `/exa-research approve ${error.cycleId} <total-dollar-ceiling>`,
+                        ...(error.assessment.reason === "UNCERTAINTY_APPROVAL_REQUIRED"
+                          ? [`/exa-research approve-request ${error.cycleId} ${error.requestHash} <assessed-dollars>`]
+                          : []),
+                        ...error.assessment.blockedOperationIds
+                          .filter((operationId) => !error.assessment.conflictingOperationIds.includes(operationId))
+                          .map(
+                            (operationId) =>
+                              `/exa-research approve-liability ${error.cycleId} ${operationId} <assessed-dollars>`,
+                          ),
+                      ],
+                      ...(error.assessment.conflictingOperationIds.length
+                        ? {
+                            actionRequired:
+                              "Investigate conflicting API receipts; uncertainty permission cannot resolve them.",
+                          }
+                        : {}),
+                    }
+                  : {},
               error instanceof Error ? error.message : String(error),
               true,
             );

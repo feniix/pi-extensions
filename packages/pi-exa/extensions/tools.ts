@@ -13,6 +13,7 @@ import {
   type PortableToolResult,
 } from "@feniix/bridgekit";
 import type { Static, TObject } from "typebox";
+import type { ExaUsageObserver } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { createResearchPlanner, type ResearchPlanner } from "./research-planner.js";
 import {
@@ -36,6 +37,8 @@ import { DEFAULT_NUM_RESULTS, performWebSearch } from "./web-search.js";
 import { performAdvancedSearch } from "./web-search-advanced.js";
 
 export interface ExaToolsOptions {
+  /** Optional operation-bound raw/late retrieval hooks. Never installed by MCP. */
+  usageObserver?: ExaUsageObserver;
   /** Resolve the Exa API key at execute time. Return undefined when unconfigured. */
   resolveApiKey?: () => string | undefined;
   /** Host-agnostic gating; tools whose names return false are omitted from the returned array. */
@@ -315,6 +318,7 @@ function exaTool<TParams extends TObject>(
 }
 
 export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableTool<TObject>[] {
+  const observerArgs: [] | [ExaUsageObserver] = opts.usageObserver ? [opts.usageObserver] : [];
   const resolveApiKey = opts.resolveApiKey ?? (() => undefined);
   const isEnabled = opts.isToolEnabled ?? (() => true);
   const planner = opts.planner ?? createResearchPlanner();
@@ -456,7 +460,8 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             // since the search itself doesn't modify state.
             mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
-          perform: (apiKey, args) => performWebSearch(apiKey, args.query, args.numResults ?? DEFAULT_NUM_RESULTS),
+          perform: (apiKey, args) =>
+            performWebSearch(apiKey, args.query, args.numResults ?? DEFAULT_NUM_RESULTS, ...observerArgs),
         },
         resolveApiKey,
         timeoutFor("web_search_exa"),
@@ -487,12 +492,17 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
           perform: (apiKey, args) =>
-            performWebFetch(apiKey, args.urls, {
-              maxCharacters: args.maxCharacters,
-              highlights: args.highlights,
-              summary: args.summary,
-              maxAgeHours: args.maxAgeHours,
-            }),
+            performWebFetch(
+              apiKey,
+              args.urls,
+              {
+                maxCharacters: args.maxCharacters,
+                highlights: args.highlights,
+                summary: args.summary,
+                maxAgeHours: args.maxAgeHours,
+              },
+              ...observerArgs,
+            ),
         },
         resolveApiKey,
         timeoutFor("web_fetch_exa"),
@@ -524,12 +534,16 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
           perform: (apiKey, args) =>
-            performAnswer(apiKey, {
-              query: args.query,
-              systemPrompt: args.systemPrompt,
-              text: args.text,
-              outputSchema: args.outputSchema,
-            }),
+            performAnswer(
+              apiKey,
+              {
+                query: args.query,
+                systemPrompt: args.systemPrompt,
+                text: args.text,
+                outputSchema: args.outputSchema,
+              },
+              ...observerArgs,
+            ),
         },
         resolveApiKey,
         timeoutFor("web_answer_exa"),
@@ -560,16 +574,20 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
           perform: (apiKey, args) =>
-            performFindSimilar(apiKey, {
-              url: args.url,
-              numResults: args.numResults,
-              textMaxCharacters: args.textMaxCharacters,
-              excludeSourceDomain: args.excludeSourceDomain,
-              startPublishedDate: args.startPublishedDate,
-              endPublishedDate: args.endPublishedDate,
-              includeDomains: args.includeDomains,
-              excludeDomains: args.excludeDomains,
-            }),
+            performFindSimilar(
+              apiKey,
+              {
+                url: args.url,
+                numResults: args.numResults,
+                textMaxCharacters: args.textMaxCharacters,
+                excludeSourceDomain: args.excludeSourceDomain,
+                startPublishedDate: args.startPublishedDate,
+                endPublishedDate: args.endPublishedDate,
+                includeDomains: args.includeDomains,
+                excludeDomains: args.excludeDomains,
+              },
+              ...observerArgs,
+            ),
         },
         resolveApiKey,
         timeoutFor("web_find_similar_exa"),
@@ -651,34 +669,39 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
           perform: (apiKey, args) =>
-            performAdvancedSearch(apiKey, args.query, {
-              numResults: args.numResults,
-              category: args.category,
-              type: args.type,
-              systemPrompt: args.systemPrompt,
-              outputSchema: args.outputSchema,
-              startPublishedDate: args.startPublishedDate,
-              endPublishedDate: args.endPublishedDate,
-              includeDomains: args.includeDomains,
-              excludeDomains: args.excludeDomains,
-              includeText: args.includeText,
-              excludeText: args.excludeText,
-              userLocation: args.userLocation,
-              moderation: args.moderation,
-              additionalQueries: args.additionalQueries,
-              textMaxCharacters: args.textMaxCharacters,
-              contextMaxCharacters: args.contextMaxCharacters,
-              enableHighlights: args.enableHighlights,
-              highlightsNumSentences: args.highlightsNumSentences,
-              highlightsMaxCharacters: args.highlightsMaxCharacters,
-              highlightsQuery: args.highlightsQuery,
-              enableSummary: args.enableSummary,
-              summaryQuery: args.summaryQuery,
-              maxAgeHours: args.maxAgeHours,
-              livecrawlTimeout: args.livecrawlTimeout,
-              subpages: args.subpages,
-              subpageTarget: args.subpageTarget,
-            }),
+            performAdvancedSearch(
+              apiKey,
+              args.query,
+              {
+                numResults: args.numResults,
+                category: args.category,
+                type: args.type,
+                systemPrompt: args.systemPrompt,
+                outputSchema: args.outputSchema,
+                startPublishedDate: args.startPublishedDate,
+                endPublishedDate: args.endPublishedDate,
+                includeDomains: args.includeDomains,
+                excludeDomains: args.excludeDomains,
+                includeText: args.includeText,
+                excludeText: args.excludeText,
+                userLocation: args.userLocation,
+                moderation: args.moderation,
+                additionalQueries: args.additionalQueries,
+                textMaxCharacters: args.textMaxCharacters,
+                contextMaxCharacters: args.contextMaxCharacters,
+                enableHighlights: args.enableHighlights,
+                highlightsNumSentences: args.highlightsNumSentences,
+                highlightsMaxCharacters: args.highlightsMaxCharacters,
+                highlightsQuery: args.highlightsQuery,
+                enableSummary: args.enableSummary,
+                summaryQuery: args.summaryQuery,
+                maxAgeHours: args.maxAgeHours,
+                livecrawlTimeout: args.livecrawlTimeout,
+                subpages: args.subpages,
+                subpageTarget: args.subpageTarget,
+              },
+              ...observerArgs,
+            ),
         },
         resolveApiKey,
         timeoutFor("web_search_advanced_exa"),

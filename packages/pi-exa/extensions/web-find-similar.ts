@@ -3,7 +3,7 @@
  */
 
 import type { SearchResponse, SearchResult, TextContentsOptions } from "exa-js";
-import { getExaClient } from "./exa-client.js";
+import { type ExaUsageObserver, getExaClient, observeExaRequest } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatSearchResults, toMetadata } from "./formatters.js";
 
@@ -24,22 +24,28 @@ type SimilarResult = SearchResult<{
   text: TextContentsOptions;
 }>;
 
-export async function performFindSimilar(apiKey: string, params: FindSimilarParams): Promise<ToolPerformResult> {
+export async function performFindSimilar(
+  apiKey: string,
+  params: FindSimilarParams,
+  observer?: ExaUsageObserver,
+): Promise<ToolPerformResult> {
   const exa = getExaClient(apiKey);
 
-  const result: SearchResponse<{ text: TextContentsOptions }> = await exa.findSimilar(params.url, {
-    numResults: params.numResults || DEFAULT_NUM_RESULTS,
-    excludeSourceDomain: params.excludeSourceDomain,
-    startPublishedDate: params.startPublishedDate,
-    endPublishedDate: params.endPublishedDate,
-    includeDomains: params.includeDomains,
-    excludeDomains: params.excludeDomains,
-    contents: {
-      text: {
-        maxCharacters: params.textMaxCharacters || 5000,
+  const result: SearchResponse<{ text: TextContentsOptions }> = await observeExaRequest(observer, () =>
+    exa.findSimilar(params.url, {
+      numResults: params.numResults || DEFAULT_NUM_RESULTS,
+      excludeSourceDomain: params.excludeSourceDomain,
+      startPublishedDate: params.startPublishedDate,
+      endPublishedDate: params.endPublishedDate,
+      includeDomains: params.includeDomains,
+      excludeDomains: params.excludeDomains,
+      contents: {
+        text: {
+          maxCharacters: params.textMaxCharacters || 5000,
+        },
       },
-    },
-  });
+    }),
+  );
 
   if (!result?.results || result.results.length === 0) {
     return {
