@@ -57,6 +57,32 @@ export function assessAgent(
 }
 
 const statuses = ["queued", "running", "completed", "failed", "cancelled"] as const;
+const errorCategories = {
+  INVALID_REQUEST: "invalid-request",
+  INVALID_API_KEY: "permission",
+  PERMISSION_DENIED: "permission",
+  RATE_LIMIT_EXCEEDED: "rate-limit",
+  INTERNAL_ERROR: "upstream",
+  CANCELLED: "cancelled",
+  TIMEOUT: "timeout",
+} as const;
+const errorCodes = [
+  "INVALID_REQUEST",
+  "INVALID_API_KEY",
+  "PERMISSION_DENIED",
+  "RATE_LIMIT_EXCEEDED",
+  "INTERNAL_ERROR",
+  "CANCELLED",
+  "TIMEOUT",
+] as const;
+const remoteErrorMessage =
+  "Exa included remote error metadata. Inspect the original run for further details; do not submit replacement research.";
+export interface RemoteErrorSummary {
+  kind: "exa-reported-error";
+  category: (typeof errorCategories)[keyof typeof errorCategories] | "unknown";
+  code?: (typeof errorCodes)[number];
+  message: typeof remoteErrorMessage;
+}
 export interface AgentObservation {
   remoteId: string;
   remoteStatus: (typeof statuses)[number];
@@ -71,6 +97,7 @@ export interface AgentObservation {
   taskOutput?: Record<string, unknown>;
   totalDollars?: number;
   provisionalTotalDollars?: number;
+  remoteError?: RemoteErrorSummary;
 }
 
 const jsonObjectSchema = Type.Object({}, { additionalProperties: true });
@@ -117,6 +144,35 @@ export const agentObservationSchema = Type.Object(
     taskOutput: Type.Optional(jsonObjectSchema),
     totalDollars: Type.Optional(Type.Number({ minimum: 0 })),
     provisionalTotalDollars: Type.Optional(Type.Number({ minimum: 0 })),
+    remoteError: Type.Optional(
+      Type.Object(
+        {
+          kind: Type.Literal("exa-reported-error"),
+          category: Type.Union([
+            Type.Literal("invalid-request"),
+            Type.Literal("permission"),
+            Type.Literal("rate-limit"),
+            Type.Literal("upstream"),
+            Type.Literal("cancelled"),
+            Type.Literal("timeout"),
+            Type.Literal("unknown"),
+          ]),
+          code: Type.Optional(
+            Type.Union([
+              Type.Literal("INVALID_REQUEST"),
+              Type.Literal("INVALID_API_KEY"),
+              Type.Literal("PERMISSION_DENIED"),
+              Type.Literal("RATE_LIMIT_EXCEEDED"),
+              Type.Literal("INTERNAL_ERROR"),
+              Type.Literal("CANCELLED"),
+              Type.Literal("TIMEOUT"),
+            ]),
+          ),
+          message: Type.Literal(remoteErrorMessage),
+        },
+        { additionalProperties: false },
+      ),
+    ),
   },
   { additionalProperties: false },
 );
@@ -196,6 +252,13 @@ export function validateAgentAttempts(
     taskSchemaValidator(attempt.artifact.outputContract.taskSchema);
     if (attempt.result) {
       if (
+        attempt.result.remoteError &&
+        (!attempt.result.terminal ||
+          (attempt.result.remoteError.code !== undefined &&
+            attempt.result.remoteError.category !== errorCategories[attempt.result.remoteError.code]))
+      )
+        throw new Error("Invalid Agent remote-error summary.");
+      if (
         attempt.result.terminal !== ["completed", "failed", "cancelled"].includes(attempt.result.remoteStatus) ||
         (attempt.status === "completed") !== (attempt.result.remoteStatus === "completed") ||
         (attempt.result.processing === "validated" &&
@@ -243,6 +306,20 @@ export function curateAgentRun(
   const remoteStatus = statuses.find((status) => status === raw.status);
   if (!remoteStatus) throw new Error("Invalid Agent run status.");
   const terminal = ["completed", "failed", "cancelled"].includes(remoteStatus);
+  let remoteError: RemoteErrorSummary | undefined;
+  if (terminal && object(raw.error)) {
+    const error = raw.error;
+    const code = errorCodes.find(
+      (known) =>
+        known === error.code || (typeof error.type === "string" && known.toLowerCase() === error.type.toLowerCase()),
+    );
+    remoteError = {
+      kind: "exa-reported-error",
+      category: code === undefined ? "unknown" : errorCategories[code],
+      ...(code === undefined ? {} : { code }),
+      message: remoteErrorMessage,
+    };
+  }
   const usage: Record<string, number | Record<string, number>> = {};
   if (object(raw.usage)) {
     for (const key of ["agentComputeUnits", "searches", "emails", "phoneNumbers"])
@@ -319,6 +396,7 @@ export function curateAgentRun(
       ? { stopReason: raw.stopReason }
       : {}),
     ...(taskOutput === undefined ? {} : { taskOutput }),
+    ...(remoteError === undefined ? {} : { remoteError }),
     ...(totalDollars === undefined ? {} : terminal ? { totalDollars } : { provisionalTotalDollars: totalDollars }),
   };
 }

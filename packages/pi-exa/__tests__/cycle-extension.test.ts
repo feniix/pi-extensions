@@ -215,6 +215,35 @@ describe("Pi cycle commands and tools", () => {
     return { pi, artifact };
   }
 
+  it("persists and exposes privacy-safe remote failure diagnostics without allowing replacement", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    offlineCreate.mockResolvedValueOnce({
+      id: "agent_run_failure",
+      status: "failed",
+      stopReason: "error",
+      error: {
+        code: "INVALID_REQUEST",
+        message: "secret credential and private excerpt",
+        actual: { apiKey: "secret" },
+      },
+      costDollars: { total: 0.01 },
+    });
+    const response = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    expect(response.isError).toBe(true);
+    expect(response.details).toMatchObject({
+      status: "failed",
+      execution: { result: { remoteError: { category: "invalid-request", code: "INVALID_REQUEST" } } },
+      accounting: { reportedDollars: 0.01 },
+    });
+    expect(JSON.stringify(response)).not.toMatch(/secret|credential|private excerpt/);
+    const record = (await pi.call("exa_research_status")).details;
+    expect(record).toMatchObject({ attempts: [{ result: { remoteError: { category: "invalid-request" } } }] });
+    expect(JSON.stringify(record)).not.toMatch(/secret|credential|private excerpt/);
+    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
   it("does not submit when the frozen Agent intent cannot be published durably", async () => {
     const { pi, artifact } = await readyAgentHost();
     vi.mocked(nativeFs.renameSync).mockImplementationOnce(() => {

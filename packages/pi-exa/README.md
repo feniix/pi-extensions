@@ -329,7 +329,13 @@ Missing/malformed costs and local interruption remain unknown, not free work.
 
 Status exposes attempts and the curated execution `result`: validated structured
 task output, normalized credential-free citation metadata, numeric usage and
-processing diagnostics. This explicitly requested synthesis is retained privately;
+processing diagnostics.
+Remote `error` metadata is retained as `result.remoteError`: recognized safe
+codes/categories and a package-owned explanation. Unknown vendor codes map to
+`unknown`; arbitrary vendor message/path/actual/expected fields are omitted
+because they can contain credentials, excerpts or request data. Inspect the
+original remote run for detailed troubleshooting rather than buy a replacement.
+This explicitly requested synthesis is retained privately;
 the exploration metadata-only policy is unchanged. Full SDK responses, request
 headers, unrequested generated prose, source excerpts and invalid task outputs
 are not archived automatically. Artifacts/explicit rows must remain nonsecret.

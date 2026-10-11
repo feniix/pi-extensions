@@ -729,6 +729,8 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             completedAt: reply.completedAt,
             usage: reply.usage,
             costDollars: reply.costDollars,
+            // Never copy arbitrary error prose/path/actual/expected into durable inputs.
+            error: reply.error ? { code: reply.error.code, type: reply.error.type } : undefined,
             output: reply.output
               ? { structured: reply.output.structured, grounding: reply.output.grounding }
               : undefined,
