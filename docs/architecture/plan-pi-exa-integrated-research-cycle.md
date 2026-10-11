@@ -239,6 +239,23 @@ The first pure history/risk policy slice is assessment-only; runtime retry,
 operator commands and replacement execution remain gated pending controller
 and registered Pi regressions.
 
+The durable draft slice projects history from validated saved Agent attempts
+and original ledger operations, not tool-supplied outcome flags. Editing and
+preview preserve failed/unknown lifecycle and all prior contracts. Any success,
+live intent/run, or unclassified history blocks a draft. Budget amendments and
+new exact-request permissions may be recorded for an owned draft but do not
+enable dispatch; the original single-attempt reservation guard remains.
+
+Replacement records retain command/session provenance and a binding to the
+simultaneously recorded original-operation liability permission, including its
+assessment amount and issuance metadata. Publication/restore validate these
+bindings. The controller rejects assessments below currently known costs,
+including genuine provisional totals and the conservative published fixed-base
+floor, and blocks conflicting receipts. These assessments are not vendor caps
+or verified invoices. Late genuine completion still closes the entire cycle
+without deleting its risk grants. Pi operator command registration, fresh
+financial dispatch checks and risk consumption remain subsequent slices.
+
 ## #158 delegated recovery decisions
 
 Jev selected explicit Pi-only actions on existing tools: status `action=resume`

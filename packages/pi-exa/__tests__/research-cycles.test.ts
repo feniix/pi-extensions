@@ -250,6 +250,143 @@ describe("durable research cycles", () => {
     await controller.detach();
   });
 
+  it("revises a failed brief under its historical lifecycle and previews a new frozen revision without erasing the first attempt", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const observer = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await observer.beforeCreate())();
+    await observer.raw("create", { id: "agent_run_failed", status: "failed", costDollars: { total: 0.01 } });
+    const before = await controller.inspect(cycle.id);
+    await controller.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Revise after confirmed failure",
+      thought_number: 2,
+      total_thoughts: 2,
+      next_step_needed: false,
+      executionPlan: { goal: "revised answer" },
+    });
+    const artifact = await controller.preview();
+    const record = await controller.inspect(cycle.id);
+    expect(record.status).toBe("failed");
+    expect(record.revision).toBe(before.revision + 1);
+    expect(artifact.revision).toBe(record.revision);
+    expect(artifact.hash).not.toBe(attempt.artifact.hash);
+    expect(record.attempts).toEqual(before.attempts);
+    expect(record.ledger).toEqual(before.ledger);
+    await controller.grantBudget(cycle.id, 1, ["web_research_exa"]);
+    await controller.grantUncertainty(cycle.id, "request", agentRequestHash(artifact.request), 0.3);
+    const withFreshPermissions = await controller.inspect(cycle.id);
+    expect(withFreshPermissions.status).toBe("failed");
+    expect(withFreshPermissions.grants).toHaveLength(before.grants.length + 2);
+    expect(withFreshPermissions.attempts).toEqual(before.attempts);
+    expect(withFreshPermissions.ledger).toEqual(before.ledger);
+    await expect(
+      controller.reserveExploration("web_search_exa", { query: "No automatic exploratory reopening" }),
+    ).rejects.toThrow("CYCLE_NOT_EXECUTABLE");
+    await expect(controller.reserveAgent()).rejects.toThrow("AGENT_ATTEMPT_EXISTS");
+    await controller.detach();
+  });
+
+  it("records exact-bound replacement risk and original liability only for an owned unknown attempt", async () => {
+    const { controller, cycle, hash, root } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const observer = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await observer.beforeCreate())();
+    await observer.raw("create", { id: "agent_run_unknown", status: "running", costDollars: { total: 0.15 } });
+    await observer.finish();
+    const artifact = await controller.preview();
+    const replacementHash = agentRequestHash(artifact.request);
+    await expect(controller.grantReplacement(cycle.id, attempt.id, replacementHash, 0.1)).rejects.toThrow(
+      /known liability/,
+    );
+    await expect(controller.grantReplacement(cycle.id, attempt.id, "f".repeat(64), 0.2)).rejects.toThrow(
+      /request hash/,
+    );
+    const before = await controller.inspect(cycle.id);
+    const approved = await controller.grantReplacement(cycle.id, attempt.id, replacementHash, 0.2);
+    expect(approved.grants.slice(-2)).toMatchObject([
+      {
+        kind: "exa-uncertainty-v1",
+        targetType: "liability",
+        subjectId: attempt.operationId,
+        allowanceMicros: 200_000,
+        source: "command",
+      },
+      {
+        kind: "exa-replacement-permission-v1",
+        attemptId: attempt.id,
+        operationId: attempt.operationId,
+        requestHash: replacementHash,
+        originalAllowanceMicros: 200_000,
+        source: "command",
+        issuerSessionId: "one",
+        duplicateWorkAcknowledged: true,
+        additionalChargesAcknowledged: true,
+      },
+    ]);
+    expect(approved.ledger).toEqual(before.ledger);
+    expect(approved.attempts).toEqual(before.attempts);
+    await controller.detach();
+    const resumed = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "two" });
+    await resumed.resume(cycle.id);
+    expect((await resumed.status())?.grants).toEqual(approved.grants);
+    await observer.raw("get", {
+      id: "agent_run_unknown",
+      status: "completed",
+      costDollars: { total: 0.15 },
+      output: { answer: "original completed late" },
+    });
+    expect((await resumed.status())?.status).toBe("completed");
+    await expect(resumed.preview()).rejects.toThrow("CYCLE_NOT_EXECUTABLE");
+    await expect(resumed.grantReplacement(cycle.id, attempt.id, replacementHash, 0.2)).rejects.toThrow(
+      "CYCLE_NOT_EXECUTABLE",
+    );
+    await expect(
+      resumed.recordStep({
+        topic: "question",
+        stage: "source_retrieval",
+        note: "No reopening success",
+        thought_number: 2,
+        total_thoughts: 2,
+        next_step_needed: false,
+      }),
+    ).rejects.toThrow("not editable");
+    expect((await resumed.status())?.attempts).toHaveLength(1);
+    await resumed.detach();
+  });
+
+  it.each([
+    "provenance",
+    "liability-link",
+    "original-operation",
+    "duplicate-id",
+  ])("rejects a corrupt saved replacement %s before reacquiring ownership", async (corruption) => {
+    const { controller, cycle, hash, root } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const observer = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await observer.beforeCreate())();
+    await observer.raw("create", { id: "agent_run_saved_unknown", status: "running" });
+    await observer.finish();
+    const artifact = await controller.preview();
+    await controller.grantReplacement(cycle.id, attempt.id, agentRequestHash(artifact.request), 0.2);
+    await controller.detach();
+    const saved = await controller.inspect(cycle.id);
+    const permission = saved.grants.find((entry) => "kind" in entry && entry.kind === "exa-replacement-permission-v1");
+    if (!permission) throw new Error("Permission missing");
+    if (corruption === "provenance" && "source" in permission) permission.source = "tool";
+    else if (corruption === "liability-link" && "liabilityPermissionId" in permission)
+      permission.liabilityPermissionId = "missing";
+    else if (corruption === "original-operation" && "operationId" in permission) permission.operationId = "foreign";
+    else if (corruption === "duplicate-id") saved.grants.push(structuredClone(permission));
+    const json = JSON.stringify(saved);
+    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+    await writeFile(path, json);
+    await expect(controller.resume(cycle.id)).rejects.toThrow(/replacement permission/i);
+    expect(await readFile(path, "utf8")).toBe(json);
+    expect(await controller.status()).toBeUndefined();
+  });
+
   it("checks recovery assertions against the frozen artifact rather than silently ignoring request overrides", async () => {
     const { controller, cycle, hash, artifact } = await readyAgent();
     const { attempt } = await controller.reserveAgent();

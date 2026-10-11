@@ -21,6 +21,8 @@ const permission = (id: string) => ({
   additionalChargesAcknowledged: true,
   issuedAt: "2026-10-11",
   source: "command",
+  issuerSessionId: "operator-session",
+  liabilityPermissionId: `liability-${id}`,
 });
 
 it("assesses confirmed failure/nondispatch retry history without claiming spending consent", () => {

@@ -36,6 +36,7 @@ import {
 } from "./research-artifacts.js";
 import { candidateSchema, captureCandidates, curateEvidence, evidenceProvenanceSchema } from "./research-evidence.js";
 import {
+  AGENT_RATE_PROFILE,
   type AgentAttempt,
   agentAttemptSchema,
   agentRequestHash,
@@ -45,6 +46,7 @@ import {
 } from "./research-execution.js";
 import { createResearchPlanner, type ResearchPlannerSnapshot } from "./research-planner.js";
 import type { ResearchSummaryParams } from "./research-planner-types.js";
+import { replacementPermissionSchema, retryAttemptFacts, validateReplacementRecords } from "./research-retry.js";
 import { withResearchStorageLock } from "./research-storage-lock.js";
 import { exaResearchStepParams, researchCriterion, researchGap, researchSource } from "./schemas.js";
 import type { AgentInspectionOptions, AgentLifecycleObserver } from "./web-research.js";
@@ -361,6 +363,10 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     record.plan = createResearchPlanner(record.plan).snapshot();
     validateAccountingRecords(record.grants, record.ledger, { cycleId: record.id, projectId: record.projectId });
     validateAgentAttempts(record.attempts, record.ledger, { cycleId: record.id, projectId: record.projectId });
+    validateReplacementRecords(record.grants, record.attempts, record.ledger, {
+      cycleId: record.id,
+      projectId: record.projectId,
+    });
     const candidateIds = new Set<string>();
     for (const candidate of record.candidates ?? []) {
       if (
@@ -400,6 +406,10 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     // A planner warning must never make durable curation unreadable.
     validateCandidateSourceReferences(record);
     validateAgentAttempts(record.attempts, record.ledger, { cycleId: record.id, projectId: record.projectId });
+    validateReplacementRecords(record.grants, record.attempts, record.ledger, {
+      cycleId: record.id,
+      projectId: record.projectId,
+    });
     const target = filename(record.id);
     const temporary = `${target}.${randomUUID()}.tmp`;
     let file: FileHandle | undefined;
@@ -484,6 +494,21 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     });
   }
 
+  const assertDraft = (record: ResearchCycle) => {
+    if (record.archived || !["planning", "failed", "unknown"].includes(record.status))
+      throw new Error("CYCLE_NOT_EXECUTABLE: No editable planning or historical retry draft.");
+    if (!record.attempts.length) {
+      if (record.status !== "planning") throw new Error("CYCLE_NOT_EXECUTABLE");
+      return;
+    }
+    const facts = retryAttemptFacts(record.attempts, record.ledger, { cycleId: record.id, projectId });
+    if (facts.some((fact) => ["completed", "live", "unclassified"].includes(fact.state)))
+      throw new Error("CYCLE_NOT_EXECUTABLE: Recover existing or completed work; no editable retry draft.");
+  };
+  const draftArtifact = (record: ResearchCycle, assertions: ArtifactAssertions = {}) => {
+    assertDraft(record);
+    return compileResearchArtifact({ ...record, status: "planning" }, assertions);
+  };
   const cycles = {
     projectId,
     async start(topic: string) {
@@ -570,14 +595,14 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
       });
     },
     async preview(assertions: ArtifactAssertions = {}) {
-      return transaction(async () => compileResearchArtifact(await owned(), assertions));
+      return transaction(async () => draftArtifact(await owned(), assertions));
     },
     async grantBudget(cycleId: string, dollars: number, tools: string[] = ["web_search_exa"]) {
       return ordered(() =>
         transaction(async () => {
           const record = await owned();
           assertArtifactTarget(record, { cycleId });
-          if (record.archived || record.status !== "planning") throw new Error("CYCLE_NOT_EXECUTABLE");
+          assertDraft(record);
           const grant = {
             kind: "exa-grant-v1",
             id: randomUUID(),
@@ -603,7 +628,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           const record = await owned();
           assertCurrent();
           assertAccountingAvailable(record.id);
-          const artifact = compileResearchArtifact(record, reference);
+          const artifact = draftArtifact(record, reference);
           if (record.attempts.length)
             throw new Error("AGENT_ATTEMPT_EXISTS: inspect/recover the existing attempt; replacement is gated.");
           const assessment = assessAgent(record.grants, record.ledger, artifact.request, {
@@ -655,6 +680,77 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           await write(record, assertCurrent);
           assertCurrent();
           return { attempt: structuredClone(attempt), artifact: structuredClone(artifact), assessment };
+        }),
+      );
+    },
+    async grantReplacement(cycleId: string, attemptId: string, requestHash: string, originalDollars: number) {
+      return activate((assertCurrent) =>
+        transaction(async () => {
+          const record = await owned();
+          assertCurrent();
+          assertArtifactTarget(record, { cycleId });
+          const artifact = draftArtifact(record);
+          if (agentRequestHash(artifact.request) !== requestHash)
+            throw new Error("Replacement must name the current exact request hash.");
+          const facts = retryAttemptFacts(record.attempts, record.ledger, { cycleId, projectId });
+          if (facts.find((entry) => entry.id === attemptId)?.state !== "unknown")
+            throw new Error("Specific replacement permission requires an existing unknown attempt.");
+          const attempt = record.attempts.find((entry) => "id" in entry && entry.id === attemptId);
+          if (!Value.Check(agentAttemptSchema, attempt)) throw new Error("A controlled original attempt is required.");
+          const operation = agentOperation(record, attempt);
+          const allowanceMicros = moneyMicros(originalDollars, true);
+          const originalEffort =
+            "effort" in attempt.artifact.request ? (attempt.artifact.request.effort ?? "medium") : "medium";
+          const fixedBase =
+            Object.entries(AGENT_RATE_PROFILE.fixed).find(([effort]) => effort === originalEffort)?.[1] ?? 0;
+          const minimum = Math.max(
+            operation.reportedMicros ?? 0,
+            ...(operation.conflictingMicros ?? []),
+            moneyMicros(attempt.result?.provisionalTotalDollars ?? 0),
+            moneyMicros(fixedBase),
+          );
+          if (operation.conflictingMicros?.length || allowanceMicros < minimum)
+            throw new Error(
+              "Investigate conflicting receipts or assess at least the known liability before replacement.",
+            );
+          const issuedAt = new Date().toISOString();
+          const liability = {
+            kind: "exa-uncertainty-v1",
+            id: randomUUID(),
+            cycleId,
+            projectId,
+            issuerSessionId: owner.sessionId,
+            source: "command",
+            issuedAt,
+            targetType: "liability",
+            subjectId: operation.id,
+            allowanceMicros,
+          };
+          const permission = {
+            kind: "exa-replacement-permission-v1",
+            id: randomUUID(),
+            cycleId,
+            projectId,
+            source: "command",
+            issuerSessionId: owner.sessionId,
+            issuedAt,
+            attemptId,
+            operationId: operation.id,
+            requestHash,
+            originalAllowanceMicros: allowanceMicros,
+            liabilityPermissionId: liability.id,
+            duplicateWorkAcknowledged: true,
+            additionalChargesAcknowledged: true,
+          };
+          if (
+            !Value.Check(uncertaintyPermissionSchema, liability) ||
+            !Value.Check(replacementPermissionSchema, permission)
+          )
+            throw new Error("Invalid replacement permission.");
+          record.grants.push(liability, permission);
+          await write(record, assertCurrent);
+          assertCurrent();
+          return record;
         }),
       );
     },
@@ -1058,7 +1154,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           const record = await owned();
           assertCurrent();
           assertArtifactTarget(record, { cycleId });
-          if (record.archived || record.status !== "planning") throw new Error("CYCLE_NOT_EXECUTABLE");
+          assertDraft(record);
           if (targetType === "request" && !/^[a-f0-9]{64}$/.test(subjectId))
             throw new Error("An exact request hash is required.");
           if (
@@ -1196,7 +1292,11 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
       if (update.executionPlan !== undefined) validateExecutionPlan(update.executionPlan);
       return transaction(async () => {
         const record = await owned();
-        if (record.status !== "planning") throw new Error("This cycle is not editable planning state.");
+        try {
+          assertDraft(record);
+        } catch {
+          throw new Error("This cycle is not editable planning or retry draft state.");
+        }
         assertArtifactTarget(record, update);
         const planner = createResearchPlanner(record.plan);
         const before = planner.getStatus().stepCount;

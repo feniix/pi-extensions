@@ -2,11 +2,15 @@
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import type { AccountingIdentity } from "./research-accounting.js";
+import { explorationOperationSchema, uncertaintyPermissionSchema } from "./research-accounting.js";
+import { agentAttemptSchema, validateAgentAttempts } from "./research-execution.js";
 
 export const replacementPermissionSchema = Type.Object(
   {
     kind: Type.Literal("exa-replacement-permission-v1"),
     source: Type.Literal("command"),
+    issuerSessionId: Type.String({ minLength: 1 }),
+    liabilityPermissionId: Type.String({ minLength: 1 }),
     id: Type.String({ minLength: 1 }),
     cycleId: Type.String({ minLength: 1 }),
     projectId: Type.String({ minLength: 1 }),
@@ -28,6 +32,77 @@ export interface RetryAttemptFact extends AccountingIdentity {
   operationId: string;
   state: "completed" | "failed" | "not-dispatched" | "unknown" | "live" | "unclassified";
   replacementPermissionIds?: readonly string[];
+}
+
+export function retryAttemptFacts(
+  attempts: readonly object[],
+  ledger: readonly object[],
+  identity: AccountingIdentity,
+): RetryAttemptFact[] {
+  validateAgentAttempts(attempts, ledger, identity);
+  return attempts.map((attempt, index) => {
+    if (!Value.Check(agentAttemptSchema, attempt))
+      return {
+        ...identity,
+        id: "id" in attempt && typeof attempt.id === "string" && attempt.id ? attempt.id : `legacy-${index}`,
+        operationId: `unclassified-${index}`,
+        state: "unclassified" as const,
+      };
+    const operation = ledger.find((entry) => "id" in entry && entry.id === attempt.operationId);
+    if (!Value.Check(explorationOperationSchema, operation)) throw new Error("Retry history identity conflict.");
+    const state: RetryAttemptFact["state"] =
+      attempt.result?.remoteStatus === "completed"
+        ? "completed"
+        : attempt.result?.terminal && ["failed", "cancelled"].includes(attempt.result.remoteStatus)
+          ? "failed"
+          : attempt.status === "not-dispatched" && operation.status === "not-dispatched"
+            ? "not-dispatched"
+            : attempt.status === "intent" || attempt.status === "running"
+              ? "live"
+              : attempt.status === "unknown"
+                ? "unknown"
+                : "unclassified";
+    return {
+      ...identity,
+      id: attempt.id,
+      operationId: attempt.operationId,
+      state,
+    };
+  });
+}
+
+/** Durable recognized records must retain their original command/money binding. */
+export function validateReplacementRecords(
+  grants: readonly object[],
+  attempts: readonly object[],
+  ledger: readonly object[],
+  identity: AccountingIdentity,
+): void {
+  const ids = new Set<string>();
+  for (const entry of grants) {
+    if (!("kind" in entry) || entry.kind !== "exa-replacement-permission-v1") continue;
+    if (!Value.Check(replacementPermissionSchema, entry)) throw new Error("Invalid replacement permission.");
+    const attempt = attempts.find((item) => "id" in item && item.id === entry.attemptId);
+    const liability = grants.find((item) => "id" in item && item.id === entry.liabilityPermissionId);
+    if (
+      ids.has(entry.id) ||
+      entry.cycleId !== identity.cycleId ||
+      entry.projectId !== identity.projectId ||
+      !Value.Check(agentAttemptSchema, attempt) ||
+      attempt.operationId !== entry.operationId ||
+      !Value.Check(uncertaintyPermissionSchema, liability) ||
+      liability.cycleId !== identity.cycleId ||
+      liability.projectId !== identity.projectId ||
+      liability.targetType !== "liability" ||
+      liability.subjectId !== entry.operationId ||
+      liability.allowanceMicros !== entry.originalAllowanceMicros ||
+      liability.issuerSessionId !== entry.issuerSessionId ||
+      liability.issuedAt !== entry.issuedAt
+    )
+      throw new Error("Replacement permission identity conflict.");
+    ids.add(entry.id);
+  }
+  retryAttemptFacts(attempts, ledger, identity);
 }
 
 export function assessRetryHistory(
