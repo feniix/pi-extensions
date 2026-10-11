@@ -248,6 +248,29 @@ describe("durable research cycles", () => {
     await controller.detach();
   });
 
+  it("checks recovery assertions against the frozen artifact rather than silently ignoring request overrides", async () => {
+    const { controller, cycle, hash, artifact } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const execution = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await execution.beforeCreate())();
+    await execution.raw("create", { id: "agent_run_saved", status: "running" });
+    const before = await controller.inspect(cycle.id);
+    await expect(controller.prepareAgentRecovery({ cycleId: cycle.id, artifactHash: "f".repeat(64) })).rejects.toThrow(
+      "STALE_ARTIFACT",
+    );
+    await expect(
+      controller.prepareAgentRecovery({ cycleId: cycle.id, executionFields: { query: "override" } }),
+    ).rejects.toThrow("EXECUTION_CONFLICT");
+    expect(await controller.inspect(cycle.id)).toEqual(before);
+    const recovery = await controller.prepareAgentRecovery({
+      cycleId: cycle.id,
+      artifactHash: artifact.hash,
+      executionFields: { query: artifact.request.query },
+    });
+    (await recovery.observer.beforeGet())();
+    await controller.detach();
+  });
+
   it("recovers existing completed output after explicit resume without a new attempt, grant or reservation", async () => {
     const { controller, cycle, hash, root } = await readyAgent();
     const prepared = await controller.reserveAgent();

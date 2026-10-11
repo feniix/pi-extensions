@@ -24,6 +24,7 @@ import {
 } from "./research-accounting.js";
 import {
   type ArtifactAssertions,
+  assertArtifactRequest,
   assertArtifactTarget,
   canonicalResearchJson,
   compileResearchArtifact,
@@ -684,6 +685,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
               "RECOVERY_UNAVAILABLE: No controlled saved Agent attempt with a frozen artifact; inspect history, never submit replacement research.",
             );
           const attempt = savedAgent(record, entry.id, entry.requestHash);
+          assertArtifactRequest(attempt.artifact, reference);
           const operation = agentOperation(record, attempt);
           const runId = attempt.result?.remoteId;
           if (!runId)
@@ -732,6 +734,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                 transaction(async () => {
                   const current = await read(record.id);
                   const saved = savedAgent(current, attempt.id, attempt.requestHash);
+                  assertArtifactRequest(saved.artifact, reference);
                   const liability = agentOperation(current, saved);
                   // A failed local inspection never undoes confirmed remote completion/failure.
                   if (saved.result?.terminal) return;

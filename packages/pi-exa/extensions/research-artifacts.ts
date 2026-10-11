@@ -332,8 +332,17 @@ export function compileResearchArtifact(record: ResearchCycle, assertions: Artif
     },
   };
   const hash = createHash("sha256").update(canonicalResearchJson(body)).digest("hex");
+  assertArtifactRequest({ hash, request: body.request }, assertions);
+  return structuredClone({ ...body, hash });
+}
+
+/** Check a compiled or frozen request without recompiling a historical attempt. */
+export function assertArtifactRequest(
+  artifact: { hash: string; request: object },
+  assertions: ArtifactAssertions,
+): void {
   const conflicts: ArtifactIssue[] = [];
-  if (assertions.artifactHash !== undefined && assertions.artifactHash !== hash) {
+  if (assertions.artifactHash !== undefined && assertions.artifactHash !== artifact.hash) {
     conflicts.push({
       code: "STALE_ARTIFACT",
       path: "artifactHash",
@@ -343,8 +352,8 @@ export function compileResearchArtifact(record: ResearchCycle, assertions: Artif
   for (const [field, provided] of Object.entries(assertions.executionFields ?? {})) {
     if (provided === undefined) continue;
     if (
-      !Object.hasOwn(body.request, field) ||
-      canonicalResearchJson(provided) !== canonicalResearchJson(Reflect.get(body.request, field))
+      !Object.hasOwn(artifact.request, field) ||
+      canonicalResearchJson(provided) !== canonicalResearchJson(Reflect.get(artifact.request, field))
     ) {
       conflicts.push({
         code: "EXECUTION_CONFLICT",
@@ -354,6 +363,5 @@ export function compileResearchArtifact(record: ResearchCycle, assertions: Artif
     }
   }
   if (conflicts.length) throw new ResearchArtifactError(conflicts);
-  return structuredClone({ ...body, hash });
 }
 export type ResearchArtifact = ReturnType<typeof compileResearchArtifact>;
