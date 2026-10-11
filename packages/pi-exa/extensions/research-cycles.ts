@@ -697,6 +697,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           const original = this.agentLifecycleObserver(record.id, attempt.id, attempt.requestHash);
           let prepared = false;
           let consumed = false;
+          let observed = false;
           return {
             attempt: structuredClone(attempt),
             runId,
@@ -724,6 +725,8 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
               raw: async (phase, reply) => {
                 if (!consumed || phase !== "get" || reply.id !== runId)
                   throw new Error("Agent inspection remote identity conflict.");
+                if (observed) throw new Error("Agent inspection observation was already consumed.");
+                observed = true;
                 // Late original facts can reconcile after detach/archive, never reacquire ownership.
                 await original.raw("get", reply);
               },

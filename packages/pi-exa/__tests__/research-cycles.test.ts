@@ -271,6 +271,30 @@ describe("durable research cycles", () => {
     await controller.detach();
   });
 
+  it("consumes one recovery observation before async persistence and rejects terminal reply replay", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const execution = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await execution.beforeCreate())();
+    await execution.raw("create", { id: "agent_run_saved", status: "running" });
+    const recovery = await controller.prepareAgentRecovery({ cycleId: cycle.id });
+    const guard = await recovery.observer.beforeGet();
+    guard();
+    expect(guard).toThrow(/already consumed/);
+    await recovery.observer.raw("get", { id: recovery.runId, status: "failed", costDollars: { total: 0.01 } });
+    const original = await controller.inspect(cycle.id);
+    await expect(
+      recovery.observer.raw("get", {
+        id: recovery.runId,
+        status: "completed",
+        output: { structured: { answer: "replayed" } },
+        costDollars: { total: 0.02 },
+      }),
+    ).rejects.toThrow(/already consumed/);
+    expect(await controller.inspect(cycle.id)).toEqual(original);
+    await controller.detach();
+  });
+
   it("recovers existing completed output after explicit resume without a new attempt, grant or reservation", async () => {
     const { controller, cycle, hash, root } = await readyAgent();
     const prepared = await controller.reserveAgent();
