@@ -434,6 +434,13 @@ describe("durable research cycles", () => {
       replacementPermissionIds: [],
     });
     expect(second.operationId).not.toBe(first.operationId);
+    expect(second).toMatchObject({
+      retryAuthorization: {
+        kind: "exa-retry-authorization-v1",
+        history: [{ id: first.id, operationId: first.operationId, state: "failed" }],
+        ledger: [{ id: first.operationId }],
+      },
+    });
     expect(second.assessment).toMatchObject({ retryHistory: { assessmentOnly: true, eligible: true } });
     const saved = await controller.inspect(cycle.id);
     expect(saved.attempts[0]).toEqual(before.attempts[0]);
@@ -484,6 +491,19 @@ describe("durable research cycles", () => {
     await controller.agentLifecycleObserver(cycle.id, second.id, hash).finish();
     expect((await controller.status())?.status).toBe("unknown");
     await expect(controller.reserveAgent({}, "replace")).rejects.toThrow("REPLACEMENT_APPROVAL_REQUIRED");
+    await controller.grantUncertainty(cycle.id, "liability", first.operationId, 0.5);
+    await original.raw("get", { id: "agent_run_unknown_for_intent", status: "running", costDollars: { total: 0.4 } });
+    expect((await controller.inspect(cycle.id)).attempts).toHaveLength(2);
+    await original.raw("get", {
+      id: "agent_run_unknown_for_intent",
+      status: "completed",
+      costDollars: { total: 0.4 },
+      output: { answer: "late original success remains readable" },
+    });
+    expect((await controller.status())?.status).toBe("completed");
+    await controller.detach();
+    await controller.resume(cycle.id);
+    expect((await controller.status())?.status).toBe("completed");
     await controller.detach();
   });
 
@@ -494,6 +514,10 @@ describe("durable research cycles", () => {
     "nonce-foreign",
     "nonce-reused",
     "nonce-underfunded",
+    "history-omission",
+    "grant-prefix",
+    "proof-mode",
+    "ledger-false-nondispatch",
   ])("rejects corrupted retry intent %s metadata without modifying saved history", async (corruption) => {
     const { controller, cycle, hash, root } = await readyAgent();
     const first = (await controller.reserveAgent()).attempt;
@@ -512,7 +536,21 @@ describe("durable research cycles", () => {
     if (!entry) throw new Error("Retry intent missing");
     if (corruption === "source") Reflect.set(entry, "sourceAttemptIds", [second.id]);
     else if (corruption === "consumption") Reflect.set(entry, "replacementPermissionIds", ["unissued-permission"]);
-    else {
+    else if (["history-omission", "grant-prefix", "proof-mode", "ledger-false-nondispatch"].includes(corruption)) {
+      const proof = Reflect.get(entry, "retryAuthorization");
+      if (!proof || typeof proof !== "object") throw new Error("Authorization proof missing");
+      if (corruption === "history-omission") Reflect.set(proof, "history", []);
+      else if (corruption === "grant-prefix") Reflect.set(proof, "grantIds", []);
+      else if (corruption === "ledger-false-nondispatch") {
+        const ledger = Reflect.get(proof, "ledger");
+        if (!Array.isArray(ledger) || !ledger[0]) throw new Error("Ledger proof missing");
+        Reflect.set(ledger[0], "status", "not-dispatched");
+      } else {
+        const history = Reflect.get(proof, "history");
+        if (!Array.isArray(history) || !history[0]) throw new Error("History missing");
+        Reflect.set(history[0], "state", "unknown");
+      }
+    } else {
       const operation = saved.ledger.find((item) => "id" in item && item.id === second.operationId);
       if (!operation) throw new Error("Operation missing");
       if (corruption === "nonce-missing") Reflect.deleteProperty(operation, "requestPermissionId");
@@ -532,7 +570,71 @@ describe("durable research cycles", () => {
     const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
     const json = JSON.stringify(saved);
     await writeFile(path, json);
-    await expect(controller.resume(cycle.id)).rejects.toThrow(/retry intent (metadata|funding)/);
+    await expect(controller.resume(cycle.id)).rejects.toThrow(
+      /retry intent (metadata|funding|authorization)|Invalid Agent attempt/,
+    );
+    expect(await readFile(path, "utf8")).toBe(json);
+  });
+
+  it("rejects all-history omissions even when forged local source metadata describes another valid prior attempt", async () => {
+    const { controller, cycle, hash, root } = await readyAgent();
+    const first = (await controller.reserveAgent()).attempt;
+    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+    (await original.beforeCreate())();
+    await original.raw("create", { id: "agent_run_omitted_unknown", status: "running" });
+    await original.finish();
+    await controller.grantReplacement(cycle.id, first.id, hash, 0.2);
+    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const second = (await controller.reserveAgent({}, "replace")).attempt;
+    await controller.agentLifecycleObserver(cycle.id, second.id, hash).finish();
+    await controller.grantReplacement(cycle.id, first.id, hash, 0.2);
+    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const third = (await controller.reserveAgent({}, "replace")).attempt;
+    await controller.detach();
+    const saved = await controller.inspect(cycle.id);
+    const entry = saved.attempts.find((item) => "id" in item && item.id === third.id);
+    if (!entry) throw new Error("Third intent missing");
+    const proof = Reflect.get(entry, "retryAuthorization");
+    if (!proof || typeof proof !== "object") throw new Error("Authorization proof missing");
+    const history = Reflect.get(proof, "history");
+    if (!Array.isArray(history) || history.length !== 2) throw new Error("Full history missing");
+    Reflect.set(proof, "history", history.slice(1));
+    Reflect.set(entry, "transitionMode", "retry");
+    Reflect.set(entry, "sourceAttemptIds", [second.id]);
+    Reflect.set(entry, "replacementPermissionIds", []);
+    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+    const json = JSON.stringify(saved);
+    await writeFile(path, json);
+    await expect(controller.resume(cycle.id)).rejects.toThrow("Invalid retry intent authorization.");
+    expect(await readFile(path, "utf8")).toBe(json);
+  });
+
+  it("rejects a claimed historical liability amendment preceding consumption of an older risk permission", async () => {
+    const { controller, cycle, hash, root } = await readyAgent();
+    const first = (await controller.reserveAgent()).attempt;
+    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+    (await original.beforeCreate())();
+    await original.raw("create", { id: "agent_run_stale_proof", status: "running" });
+    await original.finish();
+    await controller.grantReplacement(cycle.id, first.id, hash, 0.2);
+    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const second = (await controller.reserveAgent({}, "replace")).attempt;
+    await controller.agentLifecycleObserver(cycle.id, second.id, hash).finish();
+    await controller.grantUncertainty(cycle.id, "liability", first.operationId, 0.3);
+    await controller.detach();
+    const saved = await controller.inspect(cycle.id);
+    const entry = saved.attempts.find((item) => "id" in item && item.id === second.id);
+    const amendment = saved.grants.at(-1);
+    if (!entry || !amendment || !("id" in amendment)) throw new Error("Intent/amendment missing");
+    const proof = Reflect.get(entry, "retryAuthorization");
+    if (!proof || typeof proof !== "object") throw new Error("Authorization proof missing");
+    const ids = Reflect.get(proof, "grantIds");
+    if (!Array.isArray(ids)) throw new Error("Grant prefix missing");
+    ids.push(amendment.id);
+    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+    const json = JSON.stringify(saved);
+    await writeFile(path, json);
+    await expect(controller.resume(cycle.id)).rejects.toThrow("Invalid retry intent authorization.");
     expect(await readFile(path, "utf8")).toBe(json);
   });
 

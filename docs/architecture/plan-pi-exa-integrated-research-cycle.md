@@ -267,6 +267,22 @@ nor can an older failure hide a newer live intent. Actual transition SDK creates
 still fail closed with `RETRY_DISPATCH_GATED` until final submission fences and
 registered Pi activation are implemented and reviewed.
 
+Jev selected frozen historical authorization proof rather than replaying today's
+outcomes as though they existed at reservation. Each transition retains all
+prior closed attempt facts/consumed risk IDs, known liability assessments, the
+ordered recognized grant prefix and curated pre-intent monetary ledger.
+Restore checks exhaustive immutable identities and compatible later outcomes,
+replays then-current eligibility/funding/exposure and then-latest paired risk
+liability, and requires the exact consumed source/risk arrays and a unique
+request nonce covering the new hold. This is structural private-record proof,
+not cryptographic authenticity or independent invoice verification.
+
+Later genuine success, receipt growth/conflicts or appended operator liability
+amendments must remain recordable/readable; they do not retroactively erase valid
+historical consent. Future actual submission must separately recheck today's
+success/concurrency/ownership/funding/liability state at its final guard.
+Evidence: `/tmp/pi-exa-159-jev-restore-{request,response}.json`.
+
 ## #158 delegated recovery decisions
 
 Jev selected explicit Pi-only actions on existing tools: status `action=resume`

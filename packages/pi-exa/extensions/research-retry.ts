@@ -2,8 +2,19 @@
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import type { AccountingIdentity } from "./research-accounting.js";
-import { explorationOperationSchema, uncertaintyPermissionSchema } from "./research-accounting.js";
-import { agentAttemptSchema, validateAgentAttempts } from "./research-execution.js";
+import {
+  assessExploration,
+  explorationOperationSchema,
+  moneyMicros,
+  spendingGrantSchema,
+  uncertaintyPermissionSchema,
+} from "./research-accounting.js";
+import {
+  AGENT_RATE_PROFILE,
+  agentAttemptSchema,
+  retryAuthorizationSchema,
+  validateAgentAttempts,
+} from "./research-execution.js";
 
 export const replacementPermissionSchema = Type.Object(
   {
@@ -32,6 +43,7 @@ export interface RetryAttemptFact extends AccountingIdentity {
   operationId: string;
   state: "completed" | "failed" | "not-dispatched" | "unknown" | "live" | "unclassified";
   replacementPermissionIds?: readonly string[];
+  knownLiabilityMicros?: number;
 }
 
 export function retryAttemptFacts(
@@ -47,6 +59,7 @@ export function retryAttemptFacts(
         id: "id" in attempt && typeof attempt.id === "string" && attempt.id ? attempt.id : `legacy-${index}`,
         operationId: `unclassified-${index}`,
         state: "unclassified" as const,
+        knownLiabilityMicros: 0,
       };
     const operation = ledger.find((entry) => "id" in entry && entry.id === attempt.operationId);
     if (!Value.Check(explorationOperationSchema, operation)) throw new Error("Retry history identity conflict.");
@@ -62,14 +75,51 @@ export function retryAttemptFacts(
               : attempt.status === "unknown"
                 ? "unknown"
                 : "unclassified";
+    const effort = "effort" in attempt.artifact.request ? (attempt.artifact.request.effort ?? "medium") : "medium";
+    const base = Object.entries(AGENT_RATE_PROFILE.fixed).find(([name]) => name === effort)?.[1] ?? 0;
     return {
       ...identity,
       id: attempt.id,
       operationId: attempt.operationId,
       state,
       replacementPermissionIds: attempt.replacementPermissionIds,
+      knownLiabilityMicros: Math.max(
+        operation.reportedMicros ?? 0,
+        ...(operation.conflictingMicros ?? []),
+        moneyMicros(attempt.result?.provisionalTotalDollars ?? 0),
+        moneyMicros(base),
+      ),
     };
   });
+}
+
+export function retryGrantIds(grants: readonly object[]): string[] {
+  return grants.flatMap((entry) =>
+    Value.Check(spendingGrantSchema, entry) ||
+    Value.Check(uncertaintyPermissionSchema, entry) ||
+    Value.Check(replacementPermissionSchema, entry)
+      ? [entry.id]
+      : [],
+  );
+}
+
+export function freezeRetryAuthorization(
+  grants: readonly object[],
+  attempts: readonly object[],
+  ledger: readonly object[],
+  identity: AccountingIdentity,
+) {
+  const proof = {
+    kind: "exa-retry-authorization-v1",
+    history: retryAttemptFacts(attempts, ledger, identity).map((fact) => ({
+      ...fact,
+      replacementPermissionIds: [...(fact.replacementPermissionIds ?? [])],
+    })),
+    grantIds: retryGrantIds(grants),
+    ledger: structuredClone(ledger),
+  };
+  if (!Value.Check(retryAuthorizationSchema, proof)) throw new Error("Invalid retry intent authorization.");
+  return proof;
 }
 
 /** Durable recognized records must retain their original command/money binding. */
@@ -112,7 +162,11 @@ export function validateReplacementRecords(
   for (const [index, attempt] of attempts.entries()) {
     if (!Value.Check(agentAttemptSchema, attempt)) continue;
     if (!attempt.transitionMode) {
-      if (attempt.sourceAttemptIds !== undefined || attempt.replacementPermissionIds !== undefined)
+      if (
+        attempt.sourceAttemptIds !== undefined ||
+        attempt.replacementPermissionIds !== undefined ||
+        attempt.retryAuthorization !== undefined
+      )
         throw new Error("Invalid retry intent metadata.");
       continue;
     }
@@ -144,6 +198,96 @@ export function validateReplacementRecords(
       (attempt.transitionMode === "replace" && permissions.length !== sources.length)
     )
       throw new Error("Invalid retry intent metadata.");
+    const proof = attempt.retryAuthorization;
+    if (!proof) throw new Error("Invalid retry intent authorization.");
+    const currentFacts = retryAttemptFacts(attempts.slice(0, index), ledger, identity);
+    const currentGrantIds = retryGrantIds(grants);
+    const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+    if (
+      proof.history.length !== currentFacts.length ||
+      !same(proof.grantIds, currentGrantIds.slice(0, proof.grantIds.length))
+    )
+      throw new Error("Invalid retry intent authorization.");
+    for (const [factIndex, fact] of proof.history.entries()) {
+      const current = currentFacts[factIndex];
+      const compatible =
+        fact.state === "unknown"
+          ? ["unknown", "not-dispatched", "failed", "completed"]
+          : fact.state === "failed"
+            ? ["failed", "completed"]
+            : ["not-dispatched"];
+      if (
+        fact.id !== current.id ||
+        fact.operationId !== current.operationId ||
+        fact.cycleId !== identity.cycleId ||
+        fact.projectId !== identity.projectId ||
+        !compatible.includes(current.state) ||
+        !same(fact.replacementPermissionIds, current.replacementPermissionIds ?? [])
+      )
+        throw new Error("Invalid retry intent authorization.");
+    }
+    const operationIndex = ledger.findIndex((entry) => "id" in entry && entry.id === attempt.operationId);
+    const immutableFinancialFacts = (entry: object) => {
+      if (!Value.Check(explorationOperationSchema, entry)) throw new Error("Invalid retry intent authorization.");
+      const { status: _status, reportedMicros: _reported, conflictingMicros: _conflicts, ...immutable } = entry;
+      return immutable;
+    };
+    if (!same(proof.ledger.map(immutableFinancialFacts), ledger.slice(0, operationIndex).map(immutableFinancialFacts)))
+      throw new Error("Invalid retry intent authorization.");
+    for (const [ledgerIndex, previous] of proof.ledger.entries()) {
+      const current = ledger[ledgerIndex];
+      if (!Value.Check(explorationOperationSchema, current)) throw new Error("Invalid retry intent authorization.");
+      const compatible =
+        previous.status === "not-dispatched"
+          ? ["not-dispatched"]
+          : previous.status === "unknown"
+            ? ["unknown", "reported", "not-dispatched"]
+            : previous.status === "reported"
+              ? ["reported", "unknown"]
+              : ["reserved", "unknown", "reported", "not-dispatched"];
+      if (
+        !compatible.includes(current.status) ||
+        (previous.reportedMicros !== undefined && previous.reportedMicros !== current.reportedMicros) ||
+        previous.conflictingMicros?.some((amount) => !current.conflictingMicros?.includes(amount))
+      )
+        throw new Error("Invalid retry intent authorization.");
+    }
+    for (const fact of proof.history) {
+      const original = proof.ledger.find((entry) => entry.id === fact.operationId);
+      if (
+        !original ||
+        (fact.state === "not-dispatched"
+          ? original.status !== "not-dispatched"
+          : !["unknown", "reported"].includes(original.status)) ||
+        fact.knownLiabilityMicros < Math.max(original.reportedMicros ?? 0, ...(original.conflictingMicros ?? []))
+      )
+        throw new Error("Invalid retry intent authorization.");
+    }
+    const historicalGrants = grants.filter((entry) => "id" in entry && proof.grantIds.includes(String(entry.id)));
+    const eligibility = assessRetryHistory(
+      proof.history,
+      historicalGrants,
+      identity,
+      attempt.requestHash,
+      attempt.transitionMode,
+    );
+    const held = assessExploration(
+      historicalGrants,
+      proof.ledger,
+      { dollars: null, basis: "Historical intent assessment, not a vendor cap." },
+      "web_research_exa",
+      identity,
+      attempt.requestHash,
+    );
+    if (
+      !eligibility.eligible ||
+      !same(eligibility.sourceAttemptIds, sources) ||
+      !same(eligibility.replacementPermissionIds, permissions) ||
+      !held.canDispatch ||
+      held.requestPermissionId !== operation.requestPermissionId ||
+      held.proposedMicros !== operation.estimateMicros
+    )
+      throw new Error("Invalid retry intent authorization.");
     const targets = new Set<string>();
     for (const id of permissions) {
       const permission = grants.find((entry) => "id" in entry && entry.id === id);
@@ -156,6 +300,22 @@ export function validateReplacementRecords(
       )
         throw new Error("Invalid replacement permission consumption.");
       targets.add(permission.attemptId);
+      const thenLatest = [...historicalGrants]
+        .reverse()
+        .find(
+          (entry) =>
+            Value.Check(uncertaintyPermissionSchema, entry) &&
+            entry.targetType === "liability" &&
+            entry.subjectId === permission.operationId,
+        );
+      const original = proof.history.find((fact) => fact.id === permission.attemptId);
+      if (
+        !Value.Check(uncertaintyPermissionSchema, thenLatest) ||
+        thenLatest.id !== permission.liabilityPermissionId ||
+        !original ||
+        permission.originalAllowanceMicros < original.knownLiabilityMicros
+      )
+        throw new Error("Invalid retry intent authorization.");
       consumed.add(id);
     }
   }

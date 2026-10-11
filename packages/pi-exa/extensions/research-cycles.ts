@@ -48,6 +48,7 @@ import { createResearchPlanner, type ResearchPlannerSnapshot } from "./research-
 import type { ResearchSummaryParams } from "./research-planner-types.js";
 import {
   assessRetryHistory,
+  freezeRetryAuthorization,
   replacementPermissionSchema,
   retryAttemptFacts,
   validateReplacementRecords,
@@ -722,6 +723,10 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                   transitionMode,
                   sourceAttemptIds: retryHistory.sourceAttemptIds,
                   replacementPermissionIds: retryHistory.replacementPermissionIds,
+                  retryAuthorization: freezeRetryAuthorization(record.grants, record.attempts, record.ledger, {
+                    cycleId: record.id,
+                    projectId,
+                  }),
                 }
               : {}),
             status: "intent",

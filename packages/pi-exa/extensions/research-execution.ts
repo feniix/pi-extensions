@@ -177,6 +177,30 @@ export const agentObservationSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const retryAuthorizationSchema = Type.Object(
+  {
+    kind: Type.Literal("exa-retry-authorization-v1"),
+    history: Type.Array(
+      Type.Object(
+        {
+          cycleId: Type.String({ minLength: 1 }),
+          projectId: Type.String({ minLength: 1 }),
+          id: Type.String({ minLength: 1 }),
+          operationId: Type.String({ minLength: 1 }),
+          state: Type.Union([Type.Literal("failed"), Type.Literal("not-dispatched"), Type.Literal("unknown")]),
+          replacementPermissionIds: Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true }),
+          knownLiabilityMicros: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+        },
+        { additionalProperties: false },
+      ),
+      { minItems: 1 },
+    ),
+    grantIds: Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true }),
+    ledger: Type.Array(explorationOperationSchema),
+  },
+  { additionalProperties: false },
+);
+
 export const agentAttemptSchema = Type.Object(
   {
     kind: Type.Literal("exa-agent-attempt-v1"),
@@ -217,6 +241,7 @@ export const agentAttemptSchema = Type.Object(
     result: Type.Optional(agentObservationSchema),
     localInterruption: Type.Optional(Type.Literal("Local wait ended; remote outcome must be inspected, not replaced.")),
     transitionMode: Type.Optional(Type.Union([Type.Literal("retry"), Type.Literal("replace")])),
+    retryAuthorization: Type.Optional(retryAuthorizationSchema),
     sourceAttemptIds: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true })),
     replacementPermissionIds: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true })),
   },
