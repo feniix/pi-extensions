@@ -192,6 +192,17 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("documents single-GET recovery in opted-in Agent tool guidance without changing default descriptions", async () => {
+    const plain = await host(false);
+    expect(plain.tools.get("web_research_exa")?.description).not.toMatch(/researchMode=recover/);
+    const pi = await host();
+    const description = pi.tools.get("web_research_exa")?.description;
+    expect(description).toMatch(/researchMode=recover.*one existing-run GET/);
+    expect(description).toMatch(/cycleId.*attemptId/);
+    expect(description).toMatch(/never creates, polls or cancels/);
+    expect(description).toMatch(/request overrides are forbidden/);
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
   it("marks an unassessable aggregate-liability status fallback as assessment-only, never dispatch permission", async () => {
     const pi = await host();
     await pi.command?.handler("start question", pi.context);

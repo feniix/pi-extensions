@@ -232,6 +232,11 @@ export function cyclePiRegistration(
       const paid = tool.name.startsWith("web_");
       pi.registerTool({
         ...tool,
+        ...(tool.name === "web_research_exa"
+          ? {
+              description: `${tool.description} Pi cycles: active mode executes only the approved compiled request. researchMode=recover performs one existing-run GET with explicit cycleId and optional attemptId; request overrides are forbidden and recovery never creates, polls or cancels. Explicitly resume saved state with exa_research_status action=resume first. previousRunId means new paid continuation, never recovery. Resume and inspection grant no spending permission.`,
+            }
+          : {}),
         ...(tool.name === "exa_research_status"
           ? {
               parameters: statusParams,
