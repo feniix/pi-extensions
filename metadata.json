@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4PFWYS4F2D4RSZF4RHPHW88",
+  "strategy": "manual-commit",
+  "branch": "pi-exa-cycle/retry",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/architecture/plan-pi-exa-integrated-research-cycle.md",
+    "packages/pi-exa/__tests__/research-cycles.test.ts",
+    "packages/pi-exa/extensions/research-cycles.ts",
+    "packages/pi-exa/extensions/research-execution.ts",
+    "packages/pi-exa/extensions/research-retry.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 34139,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1926400,
+    "output_tokens": 13660,
+    "api_call_count": 19
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4PFWYS4F2D4RSZF4RHPHW88",
+  "session_id": "01a126d9-3541-7289-8466-8f13d8de3a7e",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-11T22:03:58.163938Z",
+  "branch": "pi-exa-cycle/retry",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/architecture/plan-pi-exa-integrated-research-cycle.md",
+    "packages/pi-exa/__tests__/research-cycles.test.ts",
+    "packages/pi-exa/extensions/research-cycles.ts",
+    "packages/pi-exa/extensions/research-execution.ts",
+    "packages/pi-exa/extensions/research-retry.ts"
+  ],
+  "agent": "Pi",
+  "model": "gpt-6.1-sol",
+  "turn_id": "a4c8dc6acf8a",
+  "checkpoint_transcript_start": 2924,
+  "transcript_lines_at_start": 2924,
+  "compact_transcript_start": 1277,
+  "token_usage": {
+    "input_tokens": 34139,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1926400,
+    "output_tokens": 13660,
+    "api_call_count": 19
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "pi-skill-to-tickets-2026-10-10T21:35:24.243Z-0",
+      "event_type": "prompt_invocation",
+      "skill": {
+        "name": "to-tickets"
+      },
+      "source": {
+        "agent": "pi",
+        "signal": "input_slash_command",
+        "confidence": "explicit"
+      },
+      "turn_id": "1bc358d55c0f",
+      "timestamp": "2026-10-10T21:35:24.243Z",
+      "native": {
+        "command": "/skill:to-tickets"
+      },
+      "collapse": {
+        "target": "user_message",
+        "label": "/skill:to-tickets",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 63
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-11T22:03:57.827411Z",
+    "agent_lines": 212,
+    "agent_removed": 8,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 212,
+    "total_lines_changed": 220,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
