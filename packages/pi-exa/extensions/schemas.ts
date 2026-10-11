@@ -140,7 +140,7 @@ const gapResolution = Type.Union([
   Type.Literal(GAP_RESOLUTIONS[4]),
 ]);
 
-const researchCriterion = Type.Object(
+export const researchCriterion = Type.Object(
   {
     id: Type.Optional(Type.String({ description: "Stable criterion ID, e.g. C1" })),
     label: Type.String({ description: "Short criterion label" }),
@@ -153,7 +153,7 @@ const researchCriterion = Type.Object(
   { additionalProperties: true },
 );
 
-const researchSource = Type.Object(
+export const researchSource = Type.Object(
   {
     id: Type.Optional(Type.String({ description: "Stable source ID, e.g. S1" })),
     title: Type.String({ description: "Source title" }),
@@ -170,7 +170,7 @@ const researchSource = Type.Object(
   { additionalProperties: true },
 );
 
-const researchGap = Type.Object(
+export const researchGap = Type.Object(
   {
     id: Type.Optional(Type.String({ description: "Stable gap ID, e.g. G1" })),
     description: Type.String({ description: "Ambiguity, missing evidence, conflict, or decision needed" }),

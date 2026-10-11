@@ -42,6 +42,12 @@ interface PlannerState {
   nextGapId: number;
 }
 
+/** Curated durable state. Raw per-step notes and update payloads are excluded. */
+export interface ResearchPlannerSnapshot extends Omit<PlannerState, "steps" | "branches"> {
+  steps: Omit<ResearchStep, "note" | "criteria" | "sources" | "gaps" | "assumptions">[];
+  branches: [string, number][];
+}
+
 function createEmptyState(): PlannerState {
   return {
     steps: [],
@@ -220,10 +226,17 @@ export interface ResearchPlanner {
   getStatus(): ResearchStatus;
   getSummary(params?: ResearchSummaryParams): string;
   reset(): ResearchStatus;
+  snapshot(): ResearchPlannerSnapshot;
 }
 
-export function createResearchPlanner(): ResearchPlanner {
-  let state: PlannerState = createEmptyState();
+export function createResearchPlanner(initial?: ResearchPlannerSnapshot): ResearchPlanner {
+  let state: PlannerState = initial
+    ? {
+        ...structuredClone(initial),
+        branches: new Map(initial.branches),
+        steps: initial.steps.map((step) => ({ ...structuredClone(step), note: "" })),
+      }
+    : createEmptyState();
 
   function nextId(prefix: "C" | "S" | "G"): string {
     if (prefix === "C") {
@@ -602,5 +615,28 @@ export function createResearchPlanner(): ResearchPlanner {
     return getStatus();
   }
 
-  return { recordStep, getStatus, getSummary, reset };
+  function snapshot(): ResearchPlannerSnapshot {
+    const { steps, branches, ...curated } = state;
+    return structuredClone({
+      ...curated,
+      branches: [...branches],
+      steps: steps.map((step) => ({
+        topic: step.topic,
+        stage: step.stage,
+        sequence: step.sequence,
+        warnings: step.warnings,
+        thought_number: step.thought_number,
+        total_thoughts: step.total_thoughts,
+        next_step_needed: step.next_step_needed,
+        nextAction: step.nextAction,
+        nextActionReason: step.nextActionReason,
+        is_revision: step.is_revision,
+        revises_step: step.revises_step,
+        branch_id: step.branch_id,
+        branch_from_step: step.branch_from_step,
+      })),
+    });
+  }
+
+  return { recordStep, getStatus, getSummary, reset, snapshot };
 }
