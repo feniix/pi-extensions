@@ -238,6 +238,7 @@ export function projectResearchSummary(record: ResearchCycle, params?: ResearchS
 export async function createResearchCycles(options: ResearchCycleOptions) {
   const projectId = await researchProjectId(options.cwd);
   const directory = join(options.root, projectId);
+  let completionScope: string | undefined;
   const owner = { sessionId: options.sessionId, token: randomUUID(), pid: process.pid };
   let activeId: string | undefined;
   let leasedId: string | undefined;
@@ -298,6 +299,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     await privateDirectory(options.root);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     await privateDirectory(directory);
+    completionScope ??= await realpath(directory);
     // Sync every containing parent, even when another controller created the
     // hierarchy concurrently. Existing entries do not prove durable publication.
     let child = resolve(directory);
@@ -552,7 +554,10 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     else if (facts.some((fact) => fact.state === "failed")) record.status = "failed";
     else record.status = "planning";
   };
-  const completionKey = (id: string) => `${directory}:${id}`;
+  const completionKey = (id: string) => {
+    if (!completionScope) throw new Error("CYCLE_NOT_EXECUTABLE: Completion scope was not initialized.");
+    return `${completionScope}:${id}`;
+  };
   const assertHeldAgent = (record: ResearchCycle, attempt: AgentAttempt, phase: "intent" | "running") => {
     const operation = agentOperation(record, attempt);
     if (

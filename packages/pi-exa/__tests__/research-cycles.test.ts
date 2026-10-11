@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { canonicalResearchJson } from "../extensions/research-artifacts.js";
@@ -726,6 +726,39 @@ describe("durable research cycles", () => {
     await writeFile(path, json);
     await expect(controller.resume(cycle.id)).rejects.toThrow("Invalid retry intent authorization.");
     expect(await readFile(path, "utf8")).toBe(json);
+  });
+
+  it("shares the pending genuine-completion latch between relative and absolute spellings of one store", async () => {
+    const { controller, cycle, hash, root } = await readyAgent();
+    const first = (await controller.reserveAgent()).attempt;
+    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+    (await original.beforeCreate())();
+    await original.raw("create", { id: "agent_run_shared_store", status: "running" });
+    await original.finish();
+    await controller.detach();
+    const resumed = await createResearchCycles({
+      root: relative(process.cwd(), join(root, "store")),
+      cwd: root,
+      sessionId: "two",
+    });
+    await resumed.resume(cycle.id);
+    await resumed.grantReplacement(cycle.id, first.id, hash, 0.2);
+    await resumed.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const second = (await resumed.reserveAgent({}, "replace")).attempt;
+    const replacement = resumed.agentLifecycleObserver(cycle.id, second.id, hash);
+    const send = await replacement.beforeCreate();
+    const completion = original.raw("get", {
+      id: "agent_run_shared_store",
+      status: "completed",
+      costDollars: { total: 0.1 },
+      output: { structured: { answer: "same physical store" } },
+    });
+    expect(send).toThrow("CYCLE_NOT_EXECUTABLE");
+    await completion;
+    await replacement.finish();
+    expect((await resumed.status())?.status).toBe("completed");
+    expect((await resumed.status())?.attempts[1]).toMatchObject({ status: "not-dispatched" });
+    await resumed.detach();
   });
 
   it("keeps grant/intent issuance causally ordered with a frozen or backward wall clock", async () => {
