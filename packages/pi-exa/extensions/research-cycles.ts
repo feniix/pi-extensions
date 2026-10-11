@@ -11,8 +11,19 @@ import { promisify } from "node:util";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import {
+  assessExploration,
+  type ExplorationOperation,
+  estimateExploration,
+  explorationOperationSchema,
+  moneyMicros,
+  type SpendingGrant,
+  spendingGrantSchema,
+  validateAccountingRecords,
+} from "./research-accounting.js";
+import {
   type ArtifactAssertions,
   assertArtifactTarget,
+  canonicalResearchJson,
   compileResearchArtifact,
   executionPlanSchema,
   ResearchArtifactError,
@@ -149,6 +160,18 @@ function code(error: unknown): string | undefined {
   return typeof error === "object" && error !== null && "code" in error ? String(error.code) : undefined;
 }
 
+function orphanExplorations(record: ResearchCycle) {
+  for (const operation of record.ledger) {
+    if (
+      "kind" in operation &&
+      operation.kind === "exa-exploration-v1" &&
+      "status" in operation &&
+      operation.status === "reserved"
+    )
+      operation.status = "unknown";
+  }
+}
+
 export async function createResearchCycles(options: ResearchCycleOptions) {
   const projectId = await researchProjectId(options.cwd);
   const directory = join(options.root, projectId);
@@ -262,6 +285,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     // Validate semantic identity invariants and derive diagnostics from facts,
     // not cached evidence/inspection flags from disk.
     record.plan = createResearchPlanner(record.plan).snapshot();
+    validateAccountingRecords(record.grants, record.ledger);
     return record;
   }
 
@@ -313,6 +337,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           return;
         }
         if (owns(record)) {
+          orphanExplorations(record);
           delete record.owner;
           await write(record);
         }
@@ -369,6 +394,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             throw new Error("Detach the owned cycle before resuming another.");
           }
           const record = await read(id);
+          if (!owns(record)) orphanExplorations(record);
           if (record.owner && !owns(record)) {
             try {
               process.kill(record.owner.pid, 0);
@@ -406,6 +432,109 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     },
     async preview(assertions: ArtifactAssertions = {}) {
       return transaction(async () => compileResearchArtifact(await owned(), assertions));
+    },
+    async grantBudget(cycleId: string, dollars: number, tools: string[] = ["web_search_exa"]) {
+      return ordered(() =>
+        transaction(async () => {
+          const record = await owned();
+          assertArtifactTarget(record, { cycleId });
+          if (record.archived || record.status !== "planning") throw new Error("CYCLE_NOT_EXECUTABLE");
+          const grant = {
+            kind: "exa-grant-v1",
+            id: randomUUID(),
+            cycleId: record.id,
+            projectId,
+            issuerSessionId: owner.sessionId,
+            source: "command",
+            issuedAt: new Date().toISOString(),
+            ceilingMicros: moneyMicros(dollars, true),
+            tools: [...tools],
+          };
+          if (!Value.Check(spendingGrantSchema, grant)) throw new Error("Invalid spending scope or amount.");
+          record.grants.push(grant as SpendingGrant);
+          await write(record);
+          return record;
+        }),
+      );
+    },
+    async reserveExploration(tool: string, args: Record<string, unknown>, assertions: ArtifactAssertions = {}) {
+      const request = structuredClone(args);
+      const reference = structuredClone(assertions);
+      return ordered(() =>
+        transaction(async () => {
+          const record = await owned();
+          assertArtifactTarget(record, reference);
+          if (record.archived || record.status !== "planning") throw new Error("CYCLE_NOT_EXECUTABLE");
+          const estimate = estimateExploration(tool, request);
+          const assessment = assessExploration(record.grants, record.ledger, estimate, tool);
+          if (!assessment.canDispatch)
+            throw new Error(`${assessment.reason}: inspect accounting and obtain operator approval.`);
+          if (estimate.dollars === null) throw new Error("UNCERTAINTY_APPROVAL_REQUIRED");
+          const operation: ExplorationOperation = {
+            kind: "exa-exploration-v1",
+            id: randomUUID(),
+            cycleId: record.id,
+            revision: record.revision,
+            tool,
+            requestHash: createHash("sha256").update(canonicalResearchJson({ tool, request })).digest("hex"),
+            estimateMicros: moneyMicros(estimate.dollars),
+            basis: estimate.basis,
+            status: "reserved",
+            createdAt: new Date().toISOString(),
+          };
+          record.ledger.push(operation);
+          await write(record);
+          return { operation, assessment };
+        }),
+      );
+    },
+    async reconcileExploration(
+      cycleId: string,
+      operationId: string,
+      requestHash: string,
+      receipt: { totalDollars?: number },
+    ) {
+      const copy = structuredClone(receipt);
+      return ordered(() =>
+        transaction(async () => {
+          // Receipt-only capability: deliberately does not acquire ownership.
+          const record = await read(cycleId);
+          const operation = record.ledger.find((entry) => "id" in entry && entry.id === operationId);
+          if (
+            !Value.Check(explorationOperationSchema, operation) ||
+            operation.cycleId !== cycleId ||
+            operation.requestHash !== requestHash
+          ) {
+            throw new Error("Operation identity conflict.");
+          }
+          let total: number | undefined;
+          try {
+            if (copy.totalDollars !== undefined) total = moneyMicros(copy.totalDollars);
+          } catch {
+            // Malformed usage is missing evidence, not a zero-dollar receipt.
+          }
+          if (operation.status === "reported" && operation.reportedMicros === total) return record;
+          if (operation.reportedMicros !== undefined) {
+            if (total === undefined) {
+              operation.status = "unknown";
+            } else if (operation.reportedMicros === total) {
+              operation.status = "reported";
+            } else {
+              operation.status = "reported";
+              operation.conflictingMicros = [...new Set([...(operation.conflictingMicros ?? []), total])];
+            }
+            await write(record);
+            return record;
+          }
+          if (total === undefined) operation.status = "unknown";
+          else {
+            operation.status = "reported";
+            operation.reportedMicros = total;
+          }
+          await write(record);
+          return record;
+        }),
+      );
     },
     async recordStep(input: ResearchCycleStepInput) {
       if (!Value.Check(exaResearchStepParams, input)) throw new Error("Invalid research step arguments.");

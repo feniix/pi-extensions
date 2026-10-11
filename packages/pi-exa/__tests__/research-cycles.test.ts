@@ -171,6 +171,80 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it("durably shares one operator ceiling between simultaneous exploratory reservations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-accounting-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "operator" });
+    const cycle = await controller.start("topic");
+    await expect(controller.reserveExploration("web_search_exa", { query: "topic" })).rejects.toThrow(
+      "APPROVAL_REQUIRED",
+    );
+    await controller.grantBudget(cycle.id, 0.01, ["web_search_exa"]);
+    const reservations = await Promise.allSettled([
+      controller.reserveExploration("web_search_exa", { query: "one" }),
+      controller.reserveExploration("web_search_exa", { query: "two" }),
+    ]);
+    expect(reservations.filter((entry) => entry.status === "fulfilled")).toHaveLength(1);
+    expect(reservations.filter((entry) => entry.status === "rejected")).toHaveLength(1);
+    expect((await controller.status())?.ledger).toHaveLength(1);
+    await controller.detach();
+    const restored = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "next" });
+    await restored.resume(cycle.id);
+    await expect(restored.reserveExploration("web_search_exa", { query: "third" })).rejects.toThrow(
+      "UNKNOWN_LIABILITY",
+    );
+    expect((await restored.status())?.grants).toHaveLength(1);
+    await restored.detach();
+  });
+
+  it("reconciles a late receipt after archive without changing owner, plan or grants", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-late-cost-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "operator" });
+    const cycle = await controller.start("topic");
+    await controller.grantBudget(cycle.id, 0.01);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "topic" });
+    await controller.archive();
+    const before = await controller.inspect(cycle.id);
+    await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.002 });
+    const after = await controller.inspect(cycle.id);
+    expect(after.ledger).toMatchObject([{ status: "reported", estimateMicros: 7_000, reportedMicros: 2_000 }]);
+    expect({ ...after, ledger: [] }).toEqual({ ...before, ledger: [] });
+    await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.002 });
+    expect(await controller.inspect(cycle.id)).toEqual(after);
+    await expect(
+      controller.reconcileExploration(cycle.id, operation.id, "WRONG HASH", { totalDollars: 0 }),
+    ).rejects.toThrow("Operation identity conflict");
+    expect(await controller.inspect(cycle.id)).toEqual(after);
+  });
+
+  it("keeps malformed and conflicting receipts as unknown liabilities before further spending", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-invalid-cost-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "operator" });
+    const cycle = await controller.start("topic");
+    await controller.grantBudget(cycle.id, 1);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "topic" });
+    await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: -1 });
+    expect((await controller.inspect(cycle.id)).ledger).toMatchObject([{ status: "unknown" }]);
+    await expect(controller.reserveExploration("web_search_exa", { query: "second" })).rejects.toThrow(
+      "UNKNOWN_LIABILITY",
+    );
+    await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.001 });
+    await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.002 });
+    expect((await controller.inspect(cycle.id)).ledger).toMatchObject([
+      {
+        status: "reported",
+        reportedMicros: 1_000,
+        conflictingMicros: [2_000],
+      },
+    ]);
+    await expect(controller.reserveExploration("web_search_exa", { query: "third" })).rejects.toThrow(
+      "UNKNOWN_LIABILITY",
+    );
+    await controller.detach();
+  });
+
   it("does not persist stale, rejected or invalid structured planning edits", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);
