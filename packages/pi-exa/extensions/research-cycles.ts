@@ -197,6 +197,13 @@ function orphanExplorations(record: ResearchCycle) {
     )
       operation.status = "unknown";
   }
+  for (const attempt of record.attempts) {
+    if (Value.Check(agentAttemptSchema, attempt) && (attempt.status === "intent" || attempt.status === "running")) {
+      attempt.status = "unknown";
+      attempt.localInterruption = "Local wait ended; remote outcome must be inspected, not replaced.";
+      if (record.status === "running") record.status = "unknown";
+    }
+  }
 }
 
 /** Shared selected-only projection for durable and Pi summaries. Never mutate saved state. */
@@ -649,9 +656,16 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         }),
       );
     },
-    agentLifecycleObserver(cycleId: string, attemptId: string, requestHash: string): AgentLifecycleObserver {
+    agentLifecycleObserver(
+      cycleId: string,
+      attemptId: string,
+      requestHash: string,
+    ): AgentLifecycleObserver & { finish: () => Promise<void> } {
       // Bind before any asynchronous SDK work; resume never refreshes this capability.
       const captured = generation;
+      let dispatched = false;
+      let claimed = false;
+      let closed = false;
       const assertCurrent = () => {
         if (captured !== generation || activeId !== cycleId) throw new Error("Agent dispatch capability was detached.");
       };
@@ -691,14 +705,17 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
               // cannot obtain another create capability for the same attempt.
               attempt.status = "running";
               await write(record, assertCurrent);
+              claimed = true;
               assertActivation();
               assertCurrent();
               let consumed = false;
               return () => {
                 assertActivation();
                 assertCurrent();
-                if (consumed) throw new Error("Agent dispatch capability was already consumed.");
+                assertAccountingAvailable(cycleId);
+                if (closed || consumed) throw new Error("Agent dispatch capability was already consumed or closed.");
                 consumed = true;
+                dispatched = true;
               };
             }),
           ),
@@ -716,62 +733,99 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
               ? { structured: reply.output.structured, grounding: reply.output.grounding }
               : undefined,
           });
+          let receiptWriteFailed = false;
+          const persist = () =>
+            ordered(() =>
+              transaction(async () => {
+                // Operation-bound fact capability: never acquires/replaces owner or mutates plan/grants.
+                const record = await read(cycleId);
+                const attempt = savedAgent(record, attemptId, requestHash);
+                const operation = agentOperation(record, attempt);
+                if (attempt.status === "not-dispatched" || operation.status === "not-dispatched")
+                  throw new Error("Agent was not dispatched.");
+                const providers: unknown = Reflect.get(attempt.artifact.request, "dataSources");
+                const providerNames = Array.isArray(providers)
+                  ? providers.flatMap((entry) =>
+                      typeof entry === "object" &&
+                      entry !== null &&
+                      "provider" in entry &&
+                      typeof entry.provider === "string"
+                        ? [entry.provider]
+                        : [],
+                    )
+                  : [];
+                const observation = curateAgentRun(
+                  snapshot,
+                  attempt.artifact.outputContract.taskSchema,
+                  {
+                    operationId: operation.id,
+                    revision: attempt.revision,
+                    requestHash,
+                    tool: "web_research_exa",
+                    retrievedAt: new Date().toISOString(),
+                  },
+                  providerNames,
+                );
+                if (attempt.result && attempt.result.remoteId !== observation.remoteId)
+                  throw new Error("Agent remote identity conflict.");
+                if (attempt.result?.terminal && !observation.terminal) return;
+                if (!(attempt.result?.remoteStatus === "completed" && observation.remoteStatus !== "completed")) {
+                  attempt.result = observation;
+                  attempt.status =
+                    observation.remoteStatus === "completed"
+                      ? "completed"
+                      : observation.terminal
+                        ? "failed"
+                        : attempt.status === "unknown"
+                          ? "unknown"
+                          : "running";
+                  if (attempt.status === "completed") record.status = "completed";
+                  else if (attempt.status === "failed" && record.status !== "completed") record.status = "failed";
+                }
+                if (observation.terminal) {
+                  const total =
+                    observation.totalDollars === undefined ? undefined : moneyMicros(observation.totalDollars);
+                  if (total !== undefined) {
+                    if (operation.reportedMicros !== undefined && operation.reportedMicros !== total)
+                      operation.conflictingMicros = [...new Set([...(operation.conflictingMicros ?? []), total])];
+                    else operation.reportedMicros = total;
+                    operation.status = "reported";
+                  } else if (operation.reportedMicros === undefined) operation.status = "unknown";
+                }
+                try {
+                  await writeReceipt(record, operation.id);
+                } catch (error) {
+                  receiptWriteFailed = true;
+                  throw error;
+                }
+              }),
+            );
+          try {
+            await persist();
+          } catch (error) {
+            if (!receiptWriteFailed) throw error;
+            // Retry only the same original fact snapshot, never another SDK call.
+            await persist();
+          }
+        },
+        finish: async () => {
+          closed = true;
           await ordered(() =>
             transaction(async () => {
-              // Operation-bound fact capability: never acquires/replaces owner or mutates plan/grants.
               const record = await read(cycleId);
               const attempt = savedAgent(record, attemptId, requestHash);
               const operation = agentOperation(record, attempt);
-              if (attempt.status === "not-dispatched" || operation.status === "not-dispatched")
-                throw new Error("Agent was not dispatched.");
-              const providers: unknown = Reflect.get(attempt.artifact.request, "dataSources");
-              const providerNames = Array.isArray(providers)
-                ? providers.flatMap((entry) =>
-                    typeof entry === "object" &&
-                    entry !== null &&
-                    "provider" in entry &&
-                    typeof entry.provider === "string"
-                      ? [entry.provider]
-                      : [],
-                  )
-                : [];
-              const observation = curateAgentRun(
-                snapshot,
-                attempt.artifact.outputContract.taskSchema,
-                {
-                  operationId: operation.id,
-                  revision: attempt.revision,
-                  requestHash,
-                  tool: "web_research_exa",
-                  retrievedAt: new Date().toISOString(),
-                },
-                providerNames,
-              );
-              if (attempt.result && attempt.result.remoteId !== observation.remoteId)
-                throw new Error("Agent remote identity conflict.");
-              if (attempt.result?.terminal && !observation.terminal) return;
-              if (!(attempt.result?.remoteStatus === "completed" && observation.remoteStatus !== "completed")) {
-                attempt.result = observation;
-                attempt.status =
-                  observation.remoteStatus === "completed"
-                    ? "completed"
-                    : observation.terminal
-                      ? "failed"
-                      : attempt.status === "unknown"
-                        ? "unknown"
-                        : "running";
-                if (attempt.status === "completed") record.status = "completed";
-                else if (attempt.status === "failed" && record.status !== "completed") record.status = "failed";
-              }
-              if (observation.terminal) {
-                const total =
-                  observation.totalDollars === undefined ? undefined : moneyMicros(observation.totalDollars);
-                if (total !== undefined) {
-                  if (operation.reportedMicros !== undefined && operation.reportedMicros !== total)
-                    operation.conflictingMicros = [...new Set([...(operation.conflictingMicros ?? []), total])];
-                  else operation.reportedMicros = total;
-                  operation.status = "reported";
-                } else if (operation.reportedMicros === undefined) operation.status = "unknown";
+              if (attempt.status === "completed" || attempt.status === "failed" || attempt.status === "not-dispatched")
+                return;
+              if (!dispatched && !attempt.result && (claimed || attempt.status === "intent")) {
+                attempt.status = "not-dispatched";
+                operation.status = "not-dispatched";
+                if (record.status === "running" || record.status === "unknown") record.status = "planning";
+              } else {
+                attempt.status = "unknown";
+                attempt.localInterruption = "Local wait ended; remote outcome must be inspected, not replaced.";
+                if (operation.status === "reserved") operation.status = "unknown";
+                if (record.status === "running") record.status = "unknown";
               }
               await writeReceipt(record, operation.id);
             }),

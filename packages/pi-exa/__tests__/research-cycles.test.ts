@@ -173,6 +173,147 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  async function readyAgent() {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("question");
+    await controller.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Prepare",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+      executionPlan: {
+        goal: "answer",
+        taskSchema: {
+          type: "object",
+          required: ["answer"],
+          properties: { answer: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+    });
+    const artifact = await controller.preview();
+    await controller.grantBudget(cycle.id, 1, ["web_research_exa"]);
+    const hash = agentRequestHash(artifact.request);
+    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    return { controller, cycle, artifact, hash };
+  }
+
+  it("serializes competing Agent intents and competing dispatch claims without granting a second SDK capability", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const attempts = await Promise.allSettled([controller.reserveAgent(), controller.reserveAgent()]);
+    const prepared = attempts.find((outcome) => outcome.status === "fulfilled");
+    if (!prepared || prepared.status !== "fulfilled") throw new Error("Expected one prepared intent");
+    expect(attempts.map((outcome) => outcome.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const first = controller.agentLifecycleObserver(cycle.id, prepared.value.attempt.id, hash);
+    const second = controller.agentLifecycleObserver(cycle.id, prepared.value.attempt.id, hash);
+    const guards = await Promise.allSettled([first.beforeCreate(), second.beforeCreate()]);
+    expect(guards.map((outcome) => outcome.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const record = await controller.inspect(cycle.id);
+    expect(record.attempts).toHaveLength(1);
+    expect(record.ledger).toHaveLength(1);
+    await controller.detach();
+  });
+
+  it("releases only proven pre-SDK nondispatch and never erases the durable attempt or silently replaces it", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const observer = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    await observer.finish();
+    expect(await controller.inspect(cycle.id)).toMatchObject({
+      status: "planning",
+      attempts: [{ status: "not-dispatched" }],
+      ledger: [{ status: "not-dispatched" }],
+    });
+    await expect(observer.beforeCreate()).rejects.toThrow("CYCLE_NOT_EXECUTABLE");
+    await expect(controller.reserveAgent()).rejects.toThrow("AGENT_ATTEMPT_EXISTS");
+    await controller.detach();
+  });
+
+  it("does not let an unclaimed observer release another observer's possible SDK submission", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const first = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await first.beforeCreate())();
+    await controller.agentLifecycleObserver(cycle.id, attempt.id, hash).finish();
+    expect(await controller.inspect(cycle.id)).toMatchObject({
+      status: "unknown",
+      attempts: [{ status: "unknown" }],
+      ledger: [{ status: "unknown" }],
+    });
+    await controller.detach();
+  });
+
+  it("persists local-invalid remote success and retries the original receipt after a transient durable-write failure", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const observer = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await observer.beforeCreate())();
+    vi.mocked(fs.rename).mockRejectedValueOnce(new Error("receipt denied"));
+    await observer.raw("create", {
+      id: "agent_run_one",
+      status: "completed",
+      output: { structured: { answer: 7 } },
+      costDollars: { total: 0.1 },
+    });
+    await observer.finish();
+    expect(await controller.inspect(cycle.id)).toMatchObject({
+      status: "completed",
+      attempts: [{ status: "completed", result: { processing: "failed" } }],
+      ledger: [{ status: "reported", reportedMicros: 100_000 }],
+    });
+    await expect(controller.reserveAgent()).rejects.toThrow("CYCLE_NOT_EXECUTABLE");
+    await controller.detach();
+  });
+  it("keeps an interrupted claimed Agent attempt unknown and accepts late completion without reactivating an archived cycle", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("question");
+    await controller.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Prepare",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+      executionPlan: { goal: "answer", taskSchema: { type: "object" } },
+    });
+    const artifact = await controller.preview();
+    await controller.grantBudget(cycle.id, 1, ["web_research_exa"]);
+    const hash = agentRequestHash(artifact.request);
+    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    const { attempt } = await controller.reserveAgent();
+    const observer = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await observer.beforeCreate())();
+    await observer.finish();
+    expect(await controller.inspect(cycle.id)).toMatchObject({
+      status: "unknown",
+      attempts: [{ status: "unknown" }],
+      ledger: [{ status: "unknown" }],
+    });
+    await controller.archive();
+    const newCycle = await controller.start("new question");
+    await expect(observer.beforeCreate()).rejects.toThrow("detached");
+    await observer.raw("create", {
+      id: "agent_run_late",
+      status: "completed",
+      output: { structured: { answer: "late" } },
+      costDollars: { total: 0.1 },
+    });
+    expect(await controller.inspect(cycle.id)).toMatchObject({
+      archived: true,
+      status: "completed",
+      attempts: [{ status: "completed", result: { remoteId: "agent_run_late" } }],
+      ledger: [{ status: "reported", reportedMicros: 100_000 }],
+    });
+    expect((await controller.inspect(cycle.id)).owner).toBeUndefined();
+    expect(await controller.status()).toMatchObject({ id: newCycle.id, status: "planning", attempts: [] });
+    await controller.detach();
+  });
   it("freezes a single compiled Agent intent, preserves provisional exposure, and completes without changing criterion coverage", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);
