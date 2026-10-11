@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createResearchCycles, projectResearchSummary, researchProjectId } from "../extensions/research-cycles.js";
+import { agentRequestHash } from "../extensions/research-execution.js";
 import { withResearchStorageLock } from "../extensions/research-storage-lock.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -172,6 +173,64 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it("freezes a single compiled Agent intent, preserves provisional exposure, and completes without changing criterion coverage", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("question");
+    await controller.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Prepare execution",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+      criteria: [{ id: "answer", label: "Supported answer" }],
+      executionPlan: {
+        goal: "answer the question",
+        taskSchema: {
+          type: "object",
+          required: ["answer"],
+          properties: { answer: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+    });
+    const artifact = await controller.preview();
+    const criteriaBefore = (await controller.inspect(cycle.id)).plan.criteria;
+    await controller.grantBudget(cycle.id, 1, ["web_research_exa"]);
+    const requestHash = agentRequestHash(artifact.request);
+    await controller.grantUncertainty(cycle.id, "request", requestHash, 0.2);
+    const prepared = await controller.reserveAgent({
+      cycleId: cycle.id,
+      expectedRevision: artifact.revision,
+      artifactHash: artifact.hash,
+    });
+    expect(prepared.attempt).toMatchObject({ status: "intent", revision: 1, requestHash, artifact });
+    expect((await controller.inspect(cycle.id)).ledger).toMatchObject([
+      { status: "reserved", estimateMicros: 200_000 },
+    ]);
+    const observer = controller.agentLifecycleObserver(cycle.id, prepared.attempt.id, requestHash);
+    (await observer.beforeCreate())();
+    await observer.raw("create", { id: "agent_run_one", status: "queued", costDollars: { total: 0 } });
+    expect((await controller.inspect(cycle.id)).ledger).toMatchObject([{ status: "reserved" }]);
+    await observer.raw("get", {
+      id: "agent_run_one",
+      status: "completed",
+      costDollars: { total: 0.1 },
+      output: { structured: { answer: "result" } },
+    });
+    const completed = await controller.inspect(cycle.id);
+    expect(completed).toMatchObject({
+      status: "completed",
+      revision: 1,
+      attempts: [{ status: "completed", result: { processing: "validated", taskOutput: { answer: "result" } } }],
+      ledger: [{ status: "reported", reportedMicros: 100_000 }],
+    });
+    expect(completed.plan.criteria).toEqual(criteriaBefore);
+    await expect(controller.reserveAgent()).rejects.toThrow("CYCLE_NOT_EXECUTABLE");
+    await controller.detach();
+  });
   it.each([
     "detach",
     "archive",

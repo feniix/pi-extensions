@@ -1,6 +1,13 @@
 /** Deterministic Agent execution policy. No SDK dispatch or inferred consent. */
 import { createHash } from "node:crypto";
-import { type AccountingIdentity, assessExploration, moneyMicros } from "./research-accounting.js";
+import { type Static, Type } from "typebox";
+import { Value } from "typebox/value";
+import {
+  type AccountingIdentity,
+  assessExploration,
+  explorationOperationSchema,
+  moneyMicros,
+} from "./research-accounting.js";
 import { canonicalResearchJson, taskSchemaValidator } from "./research-artifacts.js";
 import { captureCandidates, type EvidenceProvenance } from "./research-evidence.js";
 
@@ -64,6 +71,159 @@ export interface AgentObservation {
   taskOutput?: Record<string, unknown>;
   totalDollars?: number;
   provisionalTotalDollars?: number;
+}
+
+const jsonObjectSchema = Type.Object({}, { additionalProperties: true });
+const integer = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
+const hash = Type.String({ pattern: "^[a-f0-9]{64}$" });
+const statusSchema = Type.Union([
+  Type.Literal("queued"),
+  Type.Literal("running"),
+  Type.Literal("completed"),
+  Type.Literal("failed"),
+  Type.Literal("cancelled"),
+]);
+export const agentObservationSchema = Type.Object(
+  {
+    remoteId: Type.String({ pattern: "^[A-Za-z0-9_.:-]{1,200}$" }),
+    remoteStatus: statusSchema,
+    terminal: Type.Boolean(),
+    processing: Type.Union([
+      Type.Literal("pending"),
+      Type.Literal("validated"),
+      Type.Literal("failed"),
+      Type.Literal("not-applicable"),
+    ]),
+    usage: jsonObjectSchema,
+    grounding: Type.Array(
+      Type.Object(
+        {
+          field: Type.String({ maxLength: 512 }),
+          citations: Type.Array(
+            Type.Object(
+              { url: Type.String({ maxLength: 8192 }), title: Type.String({ maxLength: 512 }) },
+              { additionalProperties: false },
+            ),
+          ),
+          confidence: Type.Optional(Type.String()),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    diagnostics: Type.Array(Type.String({ maxLength: 512 })),
+    createdAt: Type.Optional(Type.String({ maxLength: 40 })),
+    completedAt: Type.Optional(Type.String({ maxLength: 40 })),
+    stopReason: Type.Optional(Type.String()),
+    taskOutput: Type.Optional(jsonObjectSchema),
+    totalDollars: Type.Optional(Type.Number({ minimum: 0 })),
+    provisionalTotalDollars: Type.Optional(Type.Number({ minimum: 0 })),
+  },
+  { additionalProperties: false },
+);
+
+export const agentAttemptSchema = Type.Object(
+  {
+    kind: Type.Literal("exa-agent-attempt-v1"),
+    id: Type.String({ minLength: 1 }),
+    cycleId: Type.String({ minLength: 1 }),
+    projectId: Type.String({ minLength: 1 }),
+    operationId: Type.String({ minLength: 1 }),
+    revision: integer,
+    requestHash: hash,
+    artifact: Type.Object(
+      {
+        artifactVersion: Type.Literal(1),
+        cycleId: Type.String(),
+        revision: integer,
+        hash,
+        request: jsonObjectSchema,
+        outputContract: Type.Object(
+          {
+            dialect: Type.Literal("draft-07"),
+            taskSchema: jsonObjectSchema,
+            evidenceExpectations: Type.Array(Type.String()),
+          },
+          { additionalProperties: false },
+        ),
+      },
+      { additionalProperties: true },
+    ),
+    assessment: jsonObjectSchema,
+    status: Type.Union([
+      Type.Literal("intent"),
+      Type.Literal("running"),
+      Type.Literal("unknown"),
+      Type.Literal("completed"),
+      Type.Literal("failed"),
+      Type.Literal("not-dispatched"),
+    ]),
+    createdAt: Type.String(),
+    result: Type.Optional(agentObservationSchema),
+    localInterruption: Type.Optional(Type.Literal("Local wait ended; remote outcome must be inspected, not replaced.")),
+  },
+  { additionalProperties: false },
+);
+export type AgentAttempt = Static<typeof agentAttemptSchema>;
+
+export function validateAgentAttempts(
+  attempts: readonly object[],
+  ledger: readonly object[],
+  identity: AccountingIdentity,
+) {
+  const ids = new Set<string>();
+  const operations = new Set<string>();
+  for (const attempt of attempts) {
+    if (!("kind" in attempt) || attempt.kind !== "exa-agent-attempt-v1") continue;
+    if (!Value.Check(agentAttemptSchema, attempt)) throw new Error("Invalid Agent attempt.");
+    const { hash: artifactHash, ...artifactBody } = attempt.artifact;
+    const operation = ledger.find((entry) => "id" in entry && entry.id === attempt.operationId);
+    if (
+      ids.has(attempt.id) ||
+      operations.has(attempt.operationId) ||
+      attempt.cycleId !== identity.cycleId ||
+      attempt.projectId !== identity.projectId ||
+      attempt.artifact.cycleId !== attempt.cycleId ||
+      attempt.artifact.revision !== attempt.revision ||
+      artifactHash !== createHash("sha256").update(canonicalResearchJson(artifactBody)).digest("hex") ||
+      attempt.requestHash !== agentRequestHash(Object.fromEntries<unknown>(Object.entries(attempt.artifact.request))) ||
+      !Value.Check(explorationOperationSchema, operation) ||
+      operation.tool !== "web_research_exa" ||
+      operation.cycleId !== attempt.cycleId ||
+      operation.revision !== attempt.revision ||
+      operation.requestHash !== attempt.requestHash
+    )
+      throw new Error("Agent attempt identity conflict.");
+    taskSchemaValidator(attempt.artifact.outputContract.taskSchema);
+    if (attempt.result) {
+      if (
+        attempt.result.terminal !== ["completed", "failed", "cancelled"].includes(attempt.result.remoteStatus) ||
+        (attempt.status === "completed") !== (attempt.result.remoteStatus === "completed") ||
+        (attempt.result.processing === "validated" &&
+          (!attempt.result.taskOutput ||
+            !taskSchemaValidator(attempt.artifact.outputContract.taskSchema)(attempt.result.taskOutput)))
+      )
+        throw new Error("Invalid Agent result.");
+      for (const entry of attempt.result.grounding) {
+        const safe = captureCandidates(
+          { results: entry.citations },
+          {
+            operationId: attempt.operationId,
+            revision: attempt.revision,
+            requestHash: attempt.requestHash,
+            tool: "web_research_exa",
+            retrievedAt: attempt.createdAt,
+          },
+        );
+        if (
+          safe.length !== entry.citations.length ||
+          safe.some((citation, i) => citation.url !== entry.citations[i].url)
+        )
+          throw new Error("Invalid Agent grounding URL.");
+      }
+    }
+    ids.add(attempt.id);
+    operations.add(attempt.operationId);
+  }
 }
 const stopReasons = ["schema_satisfied", "budget_reached", "time_limit_reached", "stopped", "error", "cancelled"];
 const object = (value: unknown): value is Record<string, unknown> =>

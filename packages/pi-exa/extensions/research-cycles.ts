@@ -34,10 +34,19 @@ import {
   validateExecutionPlan,
 } from "./research-artifacts.js";
 import { candidateSchema, captureCandidates, curateEvidence, evidenceProvenanceSchema } from "./research-evidence.js";
+import {
+  type AgentAttempt,
+  agentAttemptSchema,
+  agentRequestHash,
+  assessAgent,
+  curateAgentRun,
+  validateAgentAttempts,
+} from "./research-execution.js";
 import { createResearchPlanner, type ResearchPlannerSnapshot } from "./research-planner.js";
 import type { ResearchSummaryParams } from "./research-planner-types.js";
 import { withResearchStorageLock } from "./research-storage-lock.js";
 import { exaResearchStepParams, researchCriterion, researchGap, researchSource } from "./schemas.js";
+import type { AgentLifecycleObserver } from "./web-research.js";
 
 const strict = { additionalProperties: false };
 const strings = Type.Array(Type.String());
@@ -113,6 +122,7 @@ const recordSchema = Type.Object(
       Type.Literal("running"),
       Type.Literal("unknown"),
       Type.Literal("completed"),
+      Type.Literal("failed"),
     ]),
     archived: Type.Boolean(),
     owner: Type.Optional(ownerSchema),
@@ -342,6 +352,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     // not cached evidence/inspection flags from disk.
     record.plan = createResearchPlanner(record.plan).snapshot();
     validateAccountingRecords(record.grants, record.ledger, { cycleId: record.id, projectId: record.projectId });
+    validateAgentAttempts(record.attempts, record.ledger, { cycleId: record.id, projectId: record.projectId });
     const candidateIds = new Set<string>();
     for (const candidate of record.candidates ?? []) {
       if (
@@ -380,6 +391,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     // Enforce the same source identity invariant on publication and restore.
     // A planner warning must never make durable curation unreadable.
     validateCandidateSourceReferences(record);
+    validateAgentAttempts(record.attempts, record.ledger, { cycleId: record.id, projectId: record.projectId });
     const target = filename(record.id);
     const temporary = `${target}.${randomUUID()}.tmp`;
     let file: FileHandle | undefined;
@@ -414,6 +426,28 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     const record = await read(activeId);
     if (!owns(record)) throw new Error("Research cycle ownership changed; explicitly resume.");
     return record;
+  }
+
+  function savedAgent(record: ResearchCycle, attemptId: string, requestHash: string): AgentAttempt {
+    const attempt = record.attempts.find((entry) => "id" in entry && entry.id === attemptId);
+    if (
+      !Value.Check(agentAttemptSchema, attempt) ||
+      attempt.cycleId !== record.id ||
+      attempt.requestHash !== requestHash
+    )
+      throw new Error("Agent attempt identity conflict.");
+    return attempt;
+  }
+
+  function agentOperation(record: ResearchCycle, attempt: AgentAttempt): ExplorationOperation {
+    const operation = record.ledger.find((entry) => "id" in entry && entry.id === attempt.operationId);
+    if (
+      !Value.Check(explorationOperationSchema, operation) ||
+      operation.tool !== "web_research_exa" ||
+      operation.requestHash !== attempt.requestHash
+    )
+      throw new Error("Agent operation identity conflict.");
+    return operation;
   }
 
   async function detach() {
@@ -552,6 +586,198 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           return record;
         }),
       );
+    },
+    async reserveAgent(assertions: ArtifactAssertions = {}) {
+      const reference = structuredClone(assertions);
+      return activate((assertCurrent) =>
+        transaction(async () => {
+          const record = await owned();
+          assertCurrent();
+          assertAccountingAvailable(record.id);
+          const artifact = compileResearchArtifact(record, reference);
+          if (record.attempts.length)
+            throw new Error("AGENT_ATTEMPT_EXISTS: inspect/recover the existing attempt; replacement is gated.");
+          const assessment = assessAgent(record.grants, record.ledger, artifact.request, {
+            cycleId: record.id,
+            projectId,
+          });
+          const requestHash = agentRequestHash(artifact.request);
+          if (!assessment.canDispatch)
+            throw new ExplorationApprovalError(
+              record.id,
+              "web_research_exa",
+              requestHash,
+              artifact.request,
+              assessment,
+            );
+          if (assessment.proposedMicros === null || !assessment.requestPermissionId)
+            throw new Error("UNCERTAINTY_APPROVAL_REQUIRED");
+          const createdAt = new Date().toISOString();
+          const operation: ExplorationOperation = {
+            kind: "exa-exploration-v1",
+            id: randomUUID(),
+            cycleId: record.id,
+            revision: record.revision,
+            tool: "web_research_exa",
+            requestHash,
+            estimateMicros: assessment.proposedMicros,
+            basis: `${assessment.rateProfile.version}; full exact-request operator assessment, not a vendor cap.`,
+            requestPermissionId: assessment.requestPermissionId,
+            status: "reserved",
+            createdAt,
+          };
+          const attempt = {
+            kind: "exa-agent-attempt-v1",
+            id: randomUUID(),
+            cycleId: record.id,
+            projectId,
+            operationId: operation.id,
+            revision: record.revision,
+            requestHash,
+            artifact,
+            assessment,
+            status: "intent",
+            createdAt,
+          };
+          if (!Value.Check(agentAttemptSchema, attempt)) throw new Error("Invalid prepared Agent intent.");
+          record.ledger.push(operation);
+          record.attempts.push(attempt);
+          record.status = "running";
+          await write(record, assertCurrent);
+          assertCurrent();
+          return { attempt: structuredClone(attempt), artifact: structuredClone(artifact), assessment };
+        }),
+      );
+    },
+    agentLifecycleObserver(cycleId: string, attemptId: string, requestHash: string): AgentLifecycleObserver {
+      // Bind before any asynchronous SDK work; resume never refreshes this capability.
+      const captured = generation;
+      const assertCurrent = () => {
+        if (captured !== generation || activeId !== cycleId) throw new Error("Agent dispatch capability was detached.");
+      };
+      return {
+        beforeCreate: async () =>
+          activate((assertActivation) =>
+            transaction(async () => {
+              assertCurrent();
+              const record = await owned();
+              const attempt = savedAgent(record, attemptId, requestHash);
+              const operation = agentOperation(record, attempt);
+              assertAccountingAvailable(record.id);
+              if (
+                record.archived ||
+                record.status !== "running" ||
+                attempt.status !== "intent" ||
+                operation.status !== "reserved"
+              )
+                throw new Error("CYCLE_NOT_EXECUTABLE");
+              compileResearchArtifact(
+                { ...record, status: "planning" },
+                {
+                  cycleId,
+                  expectedRevision: attempt.revision,
+                  artifactHash: attempt.artifact.hash,
+                },
+              );
+              const assessment = assessExploration(
+                record.grants,
+                record.ledger,
+                { dollars: 0, basis: "Recheck held Agent exposure." },
+                "web_research_exa",
+                { cycleId, projectId },
+              );
+              if (!assessment.canDispatch) throw new Error(`${assessment.reason}: dispatch permission changed.`);
+              // Claim this exact saved intent durably: a second observer/caller
+              // cannot obtain another create capability for the same attempt.
+              attempt.status = "running";
+              await write(record, assertCurrent);
+              assertActivation();
+              assertCurrent();
+              let consumed = false;
+              return () => {
+                assertActivation();
+                assertCurrent();
+                if (consumed) throw new Error("Agent dispatch capability was already consumed.");
+                consumed = true;
+              };
+            }),
+          ),
+        raw: async (_phase, reply) => {
+          // Snapshot only curated-field inputs before the first await. Never archive raw SDK request/text.
+          const snapshot = structuredClone({
+            id: reply.id,
+            status: reply.status,
+            stopReason: reply.stopReason,
+            createdAt: reply.createdAt,
+            completedAt: reply.completedAt,
+            usage: reply.usage,
+            costDollars: reply.costDollars,
+            output: reply.output
+              ? { structured: reply.output.structured, grounding: reply.output.grounding }
+              : undefined,
+          });
+          await ordered(() =>
+            transaction(async () => {
+              // Operation-bound fact capability: never acquires/replaces owner or mutates plan/grants.
+              const record = await read(cycleId);
+              const attempt = savedAgent(record, attemptId, requestHash);
+              const operation = agentOperation(record, attempt);
+              if (attempt.status === "not-dispatched" || operation.status === "not-dispatched")
+                throw new Error("Agent was not dispatched.");
+              const providers: unknown = Reflect.get(attempt.artifact.request, "dataSources");
+              const providerNames = Array.isArray(providers)
+                ? providers.flatMap((entry) =>
+                    typeof entry === "object" &&
+                    entry !== null &&
+                    "provider" in entry &&
+                    typeof entry.provider === "string"
+                      ? [entry.provider]
+                      : [],
+                  )
+                : [];
+              const observation = curateAgentRun(
+                snapshot,
+                attempt.artifact.outputContract.taskSchema,
+                {
+                  operationId: operation.id,
+                  revision: attempt.revision,
+                  requestHash,
+                  tool: "web_research_exa",
+                  retrievedAt: new Date().toISOString(),
+                },
+                providerNames,
+              );
+              if (attempt.result && attempt.result.remoteId !== observation.remoteId)
+                throw new Error("Agent remote identity conflict.");
+              if (attempt.result?.terminal && !observation.terminal) return;
+              if (!(attempt.result?.remoteStatus === "completed" && observation.remoteStatus !== "completed")) {
+                attempt.result = observation;
+                attempt.status =
+                  observation.remoteStatus === "completed"
+                    ? "completed"
+                    : observation.terminal
+                      ? "failed"
+                      : attempt.status === "unknown"
+                        ? "unknown"
+                        : "running";
+                if (attempt.status === "completed") record.status = "completed";
+                else if (attempt.status === "failed" && record.status !== "completed") record.status = "failed";
+              }
+              if (observation.terminal) {
+                const total =
+                  observation.totalDollars === undefined ? undefined : moneyMicros(observation.totalDollars);
+                if (total !== undefined) {
+                  if (operation.reportedMicros !== undefined && operation.reportedMicros !== total)
+                    operation.conflictingMicros = [...new Set([...(operation.conflictingMicros ?? []), total])];
+                  else operation.reportedMicros = total;
+                  operation.status = "reported";
+                } else if (operation.reportedMicros === undefined) operation.status = "unknown";
+              }
+              await writeReceipt(record, operation.id);
+            }),
+          );
+        },
+      };
     },
     async reserveExploration(tool: string, args: Record<string, unknown>, assertions: ArtifactAssertions = {}) {
       const request = structuredClone(args);

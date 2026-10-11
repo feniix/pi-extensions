@@ -198,6 +198,13 @@ high $0.50, xhigh $1.00; contacts/providers are additional. SDK 2.23.0 and
 the guide document beta `max`, while newer create docs list `ultra`; both remain
 excluded from cycles. No live Agent call is authorized by these decisions.
 
+A second design-time Jev round selected an explicit `failed` cycle lifecycle
+for confirmed remote failed/cancelled outcomes, retaining the exact remote status
+on its attempt. Local interruption remains `unknown`; cost liability is separate.
+The #157 replacement block remains even after confirmed failure. Planning/grant
+amendments for retries are a deliberate #159 change, not implicitly enabled here.
+Evidence: `/tmp/pi-exa-157-jev-terminal-{request,response}.json`.
+
 ## #156 evidence implementation decisions
 
 The operator approved metadata-first candidate retention and the public testing
