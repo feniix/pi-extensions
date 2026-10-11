@@ -10,6 +10,18 @@ const provenance: EvidenceProvenance = {
 };
 
 describe("metadata-first candidate evidence", () => {
+  it.each(["sig", "SIG", "oauth_sig"])("rejects signed URL credential parameter %s before retention", (parameter) => {
+    const candidates = captureCandidates(
+      {
+        results: [
+          { url: `https://blob.example/file?${parameter}=DO_NOT_RETAIN_SAS_SIGNATURE&se=expiry`, text: "body" },
+        ],
+      },
+      provenance,
+    );
+    expect(candidates).toEqual([]);
+    expect(JSON.stringify(candidates)).not.toContain("DO_NOT_RETAIN_SAS_SIGNATURE");
+  });
   it("does not classify generated summaries or synthesis as direct source inspection", () => {
     expect(
       captureCandidates(

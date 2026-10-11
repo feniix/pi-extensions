@@ -140,7 +140,7 @@ export function captureCandidates(
     if (
       [...url.searchParams.keys()].some(
         (key) =>
-          /(?:^|[-_])(key|token|password|secret|signature|authorization|credential)(?:[-_]|$)/i.test(
+          /(?:^|[-_])(key|token|password|secret|sig|signature|authorization|credential)(?:[-_]|$)/i.test(
             key.replace(/([a-z])([A-Z])/g, "$1_$2"),
           ) || /^(apiKey|accessToken|authToken|sessionToken|AWSAccessKeyId)$/i.test(key),
       )

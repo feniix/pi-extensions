@@ -305,7 +305,8 @@ status expose `candidates`, each with a stable URL-derived `id`, title, retrieva
 state, decision and operation provenance (tool, operation ID, request hash,
 original revision and retrieval timestamp). URL fragments are ignored for
 deduplication; meaningful query parameters are preserved. Only HTTP(S) URLs are
-accepted; userinfo and common credential-bearing query parameters are rejected.
+accepted; userinfo and common credential-bearing query parameters (including
+signed-URL `sig` / `signature` parameters) are rejected.
 Titles are limited to 512 characters and URLs to 8192.
 
 Candidate capture retains **no automatic text/highlight/summary excerpts, generated

@@ -178,6 +178,35 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("does not persist a signed URL signature from SDK results or expose it as selectable candidate metadata", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+    offlineSearch.mockResolvedValue({
+      results: [
+        {
+          id: "signed-document",
+          title: "Signed document",
+          url: "https://blob.example/file?sig=DO_NOT_RETAIN_SAS_SIGNATURE&se=expiry",
+          text: "Returned content",
+        },
+      ],
+      costDollars: { total: 0.007 },
+    });
+    const response = await pi.call("web_search_exa", { query: "topic", cycleId: status.id });
+    expect(response.isError).not.toBe(true);
+    expect(response.details.candidates).toEqual([]);
+    const current = (await pi.call("exa_research_status")).details;
+    expect(JSON.stringify(current)).not.toContain("DO_NOT_RETAIN_SAS_SIGNATURE");
+    expect(current.ledger).toMatchObject([{ reportedMicros: 7_000 }]);
+    const projects = await fs.readdir(join(String(process.env.PI_CODING_AGENT_DIR), "research-cycles"));
+    const stored = await readFile(
+      join(String(process.env.PI_CODING_AGENT_DIR), "research-cycles", projects[0], `${status.id}.json`),
+      "utf8",
+    );
+    expect(stored).not.toContain("DO_NOT_RETAIN_SAS_SIGNATURE");
+  });
   it("returns an actionable same-step source conflict while retaining an inspectable original cycle", async () => {
     const pi = await host();
     await pi.command?.handler("start topic", pi.context);
