@@ -1,3 +1,4 @@
+import * as fs from "node:fs/promises";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +13,11 @@ import { loadExtensionFromFactory } from "../../../node_modules/@earendil-works/
 import { cyclePiRegistration } from "../extensions/cycle-pi.js";
 import exaExtension from "../extensions/index.js";
 
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const original = await importOriginal<typeof fs>();
+  return { ...original, unlink: vi.fn(original.unlink) };
+});
+
 const offlineSearch = vi.hoisted(() => vi.fn(async () => ({ results: [], requestId: "offline" })));
 const offlineCreate = vi.hoisted(() => vi.fn(async () => ({ id: "offline", status: "completed" })));
 vi.mock("exa-js", () => ({
@@ -23,6 +29,7 @@ vi.mock("exa-js", () => ({
 
 const directories: string[] = [];
 afterEach(async () => {
+  vi.mocked(fs.unlink).mockReset();
   offlineSearch.mockClear();
   offlineCreate.mockClear();
   vi.unstubAllEnvs();
@@ -129,6 +136,81 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it.each([
+    { tool: "exa_research_summary", mode: undefined, reference: "revision" },
+    { tool: "exa_research_summary", mode: "payload", reference: "revision" },
+    { tool: "exa_research_summary", mode: "execution_plan", reference: "revision" },
+    { tool: "web_research_exa", mode: undefined, reference: "revision" },
+    { tool: "exa_research_summary", mode: "brief", reference: "revision" },
+    { tool: "exa_research_summary", mode: "source_pack", reference: "revision" },
+    { tool: "exa_research_summary", mode: "payload", reference: "hash" },
+    { tool: "exa_research_summary", mode: "brief", reference: "hash" },
+    { tool: "exa_research_summary", mode: "source_pack", reference: "hash" },
+    { tool: "web_research_exa", mode: undefined, reference: "hash" },
+    { tool: "exa_research_summary", mode: "payload", reference: "current-revision" },
+    { tool: "web_research_exa", mode: undefined, reference: "current-revision" },
+    { tool: "exa_research_summary", mode: "brief", reference: "current-revision" },
+    { tool: "exa_research_summary", mode: "source_pack", reference: "current-revision" },
+  ])("validates $reference against the current plan for $tool/$mode", async ({ tool, mode, reference }) => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const step = (number: number, goal: string) => ({
+      topic: "topic",
+      stage: "framing",
+      note: "",
+      thought_number: number,
+      total_thoughts: 2,
+      next_step_needed: true,
+      executionPlan: { goal, taskSchema: { type: "object" } },
+    });
+    expect((await pi.call("exa_research_step", step(1, "OLD GOAL"))).isError).not.toBe(true);
+    const initial = (await pi.call("exa_research_summary")).details.artifact;
+    if (!initial || typeof initial !== "object" || !("hash" in initial)) throw new Error("Missing initial artifact");
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    let interleave = true;
+    vi.mocked(fs.unlink).mockImplementation(async (path) => {
+      await original.unlink(path);
+      // Finish a real sibling edit after the first read releases its lock,
+      // before the outer tool can consume that now-stale snapshot.
+      if (interleave && String(path).endsWith(".lock")) {
+        interleave = false;
+        expect((await pi.call("exa_research_step", step(2, "NEW GOAL"))).isError).not.toBe(true);
+      }
+    });
+    const preview = await pi.call(tool, {
+      ...(mode === undefined ? {} : { mode }),
+      ...(reference === "hash"
+        ? { artifactHash: initial.hash }
+        : {
+            expectedRevision: reference === "current-revision" ? 2 : 1,
+          }),
+    });
+    if (reference === "current-revision") {
+      if (tool === "exa_research_summary") {
+        expect(preview.isError).not.toBe(true);
+        if (mode === "brief" || mode === "source_pack") {
+          expect(preview.details).toMatchObject({ revision: 2, executionPlan: { goal: "NEW GOAL" } });
+        } else {
+          expect(preview.details.artifact).toMatchObject({ revision: 2, brief: { goal: "NEW GOAL" } });
+        }
+      } else {
+        expect(preview.isError).toBe(true);
+        expect(preview.content[0]).toMatchObject({ text: expect.stringContaining("no request was dispatched") });
+        expect(preview.details).not.toHaveProperty("issues");
+      }
+    } else {
+      expect(preview.isError).toBe(true);
+      expect(preview.details).toMatchObject({
+        issues: [expect.objectContaining({ code: reference === "hash" ? "STALE_ARTIFACT" : "STALE_REVISION" })],
+      });
+    }
+    expect((await pi.call("exa_research_status")).details).toMatchObject({
+      revision: 2,
+      executionPlan: { goal: "NEW GOAL" },
+    });
+    expect(offlineCreate).not.toHaveBeenCalled();
+  });
+
   it("keeps query optional for active compilation but mandatory for unrelated standalone research", async () => {
     const pi = await host();
     const schema = pi.tools.get("web_research_exa")?.parameters;

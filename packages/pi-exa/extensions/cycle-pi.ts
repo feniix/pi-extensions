@@ -4,12 +4,7 @@ import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil
 import type { PiToolRegistration } from "@feniix/bridgekit/pi";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import {
-  assertArtifactTarget,
-  compileResearchArtifact,
-  executionPlanSchema,
-  ResearchArtifactError,
-} from "./research-artifacts.js";
+import { assertArtifactTarget, executionPlanSchema, ResearchArtifactError } from "./research-artifacts.js";
 import { createResearchCycles, type ResearchCycle, type ResearchCycles } from "./research-cycles.js";
 import { createResearchPlanner } from "./research-planner.js";
 import { exaResearchStepParams, exaResearchSummaryParams } from "./schemas.js";
@@ -195,16 +190,18 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
               }
               const reference = { cycleId, expectedRevision, artifactHash };
               if (!Value.Check(referenceParams, reference)) throw new Error("Invalid artifact reference.");
-              if (record) assertArtifactTarget(record, reference);
-              else if (cycleId !== undefined || expectedRevision !== undefined)
+              if (!record && (cycleId !== undefined || expectedRevision !== undefined))
                 throw new Error("No active research cycle.");
               if (researchMode === "active" && !record) throw new Error("No active research cycle.");
               if (record && researchMode !== "standalone") {
                 if (tool.name === "web_research_exa") {
-                  compileResearchArtifact(record, { ...reference, executionFields: standalone });
+                  await cycles.preview({ ...reference, executionFields: standalone });
+                } else {
+                  assertArtifactTarget(record, reference);
                 }
                 throw new Error("Integrated paid research is not available in this slice; no request was dispatched.");
               }
+              if (record) assertArtifactTarget(record, reference);
               if (artifactHash !== undefined) throw new Error("Artifact references require active-cycle research.");
               const metadata = standalone.metadata;
               const attributedCycleId =
@@ -241,16 +238,18 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
                 return result(view(record));
               case "exa_research_summary":
                 if (!Value.Check(summaryParams, params)) throw new Error("Invalid research summary arguments.");
-                assertArtifactTarget(record, params);
                 if (params.mode === undefined || params.mode === "payload" || params.mode === "execution_plan") {
-                  const artifact = compileResearchArtifact(record, params);
+                  const artifact = await cycles.preview(params);
                   return result({ artifact, canExecute: false });
                 }
-                if (params.artifactHash !== undefined) compileResearchArtifact(record, params);
-                return result(
-                  view(record),
-                  `Cycle: ${record.id}\nRevision: ${record.revision}\nStatus: ${record.status}\n${createResearchPlanner(record.plan).getSummary(params)}`,
-                );
+                {
+                  const current = await cycles.status(params);
+                  if (!current) throw new Error("No active research cycle. Use /exa-research start or resume.");
+                  return result(
+                    view(current),
+                    `Cycle: ${current.id}\nRevision: ${current.revision}\nStatus: ${current.status}\n${createResearchPlanner(current.plan).getSummary(params)}`,
+                  );
+                }
               case "exa_research_reset": {
                 const archived = await cycles.archive();
                 return result(view(archived), `Archived ${archived.id}.${warning(archived)}`);

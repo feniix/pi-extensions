@@ -388,8 +388,15 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
       );
     },
     detach,
-    async status() {
-      return activeId ? transaction(owned) : undefined;
+    async status(assertions: ArtifactAssertions = {}) {
+      return activeId
+        ? transaction(async () => {
+            const record = await owned();
+            if (assertions.artifactHash !== undefined) compileResearchArtifact(record, assertions);
+            else assertArtifactTarget(record, assertions);
+            return record;
+          })
+        : undefined;
     },
     async summary(params?: ResearchSummaryParams) {
       return transaction(async () => {
