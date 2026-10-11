@@ -12,12 +12,14 @@ import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import {
   assessExploration,
+  ExplorationApprovalError,
   type ExplorationOperation,
   estimateExploration,
   explorationOperationSchema,
   moneyMicros,
   type SpendingGrant,
   spendingGrantSchema,
+  uncertaintyPermissionSchema,
   validateAccountingRecords,
 } from "./research-accounting.js";
 import {
@@ -471,22 +473,34 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           assertArtifactTarget(record, reference);
           if (record.archived || record.status !== "planning") throw new Error("CYCLE_NOT_EXECUTABLE");
           const estimate = estimateExploration(tool, request);
-          const assessment = assessExploration(record.grants, record.ledger, estimate, tool, {
-            cycleId: record.id,
-            projectId: record.projectId,
-          });
+          const requestHash = createHash("sha256").update(canonicalResearchJson({ tool, request })).digest("hex");
+          const assessment = assessExploration(
+            record.grants,
+            record.ledger,
+            estimate,
+            tool,
+            {
+              cycleId: record.id,
+              projectId: record.projectId,
+            },
+            requestHash,
+          );
           if (!assessment.canDispatch)
-            throw new Error(`${assessment.reason}: inspect accounting and obtain operator approval.`);
-          if (estimate.dollars === null) throw new Error("UNCERTAINTY_APPROVAL_REQUIRED");
+            throw new ExplorationApprovalError(record.id, tool, requestHash, request, assessment);
+          if (assessment.proposedMicros === null) throw new Error("UNCERTAINTY_APPROVAL_REQUIRED");
           const operation: ExplorationOperation = {
             kind: "exa-exploration-v1",
             id: randomUUID(),
             cycleId: record.id,
             revision: record.revision,
             tool,
-            requestHash: createHash("sha256").update(canonicalResearchJson({ tool, request })).digest("hex"),
-            estimateMicros: moneyMicros(estimate.dollars),
-            basis: estimate.basis,
+            requestHash,
+            estimateMicros: assessment.proposedMicros,
+            basis:
+              estimate.dollars === null
+                ? `Operator-assessed exact request; permission ${assessment.requestPermissionId}; not a vendor cap.`
+                : estimate.basis,
+            ...(assessment.requestPermissionId ? { requestPermissionId: assessment.requestPermissionId } : {}),
             status: "reserved",
             createdAt: new Date().toISOString(),
           };
@@ -495,6 +509,46 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           await write(record);
           assertCurrent();
           return { operation, assessment };
+        }),
+      );
+    },
+    async grantUncertainty(cycleId: string, targetType: "request" | "liability", subjectId: string, dollars: number) {
+      return activate((assertCurrent) =>
+        transaction(async () => {
+          const record = await owned();
+          assertCurrent();
+          assertArtifactTarget(record, { cycleId });
+          if (record.archived || record.status !== "planning") throw new Error("CYCLE_NOT_EXECUTABLE");
+          if (targetType === "request" && !/^[a-f0-9]{64}$/.test(subjectId))
+            throw new Error("An exact request hash is required.");
+          if (
+            targetType === "liability" &&
+            !record.ledger.some(
+              (entry) =>
+                Value.Check(explorationOperationSchema, entry) &&
+                entry.id === subjectId &&
+                (entry.status === "unknown" || Boolean(entry.conflictingMicros?.length)),
+            )
+          )
+            throw new Error("An existing unresolved operation is required.");
+          const permission = {
+            kind: "exa-uncertainty-v1",
+            id: randomUUID(),
+            cycleId: record.id,
+            projectId,
+            issuerSessionId: owner.sessionId,
+            source: "command",
+            issuedAt: new Date().toISOString(),
+            targetType,
+            subjectId,
+            allowanceMicros: moneyMicros(dollars, true),
+          };
+          if (!Value.Check(uncertaintyPermissionSchema, permission)) throw new Error("Invalid uncertainty permission.");
+          record.grants.push(permission);
+          assertCurrent();
+          await write(record);
+          assertCurrent();
+          return record;
         }),
       );
     },

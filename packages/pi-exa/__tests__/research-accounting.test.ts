@@ -25,6 +25,106 @@ describe("exploratory accounting policy", () => {
     });
   });
 
+  it("counts explicitly approved uncertainty only for the exact named liability", () => {
+    const operation = {
+      kind: "exa-exploration-v1",
+      id: "unknown",
+      cycleId: "cycle",
+      revision: 0,
+      tool: "web_search_exa",
+      requestHash: "a".repeat(64),
+      estimateMicros: 1,
+      basis: "not a bound",
+      status: "unknown",
+      createdAt: "now",
+    };
+    const permission = {
+      kind: "exa-uncertainty-v1",
+      id: "permission",
+      cycleId: "cycle",
+      projectId: "project",
+      issuerSessionId: "operator",
+      source: "command",
+      issuedAt: "now",
+      targetType: "liability",
+      subjectId: "unknown",
+      allowanceMicros: 2_000,
+    };
+    expect(
+      assessExploration(
+        [grant, permission],
+        [operation],
+        estimateExploration("web_search_exa", {}),
+        "web_search_exa",
+        identity,
+      ),
+    ).toMatchObject({
+      canDispatch: true,
+      assessedUnknownDollars: 0.002,
+      unresolvedOperationIds: ["unknown"],
+    });
+    expect(
+      assessExploration(
+        [grant, permission],
+        [{ ...operation, id: "different" }],
+        estimateExploration("web_search_exa", {}),
+        "web_search_exa",
+        identity,
+      ),
+    ).toMatchObject({ canDispatch: false, reason: "UNKNOWN_LIABILITY" });
+  });
+
+  it("consumes request uncertainty permission once without changing a different request's eligibility", () => {
+    const requestHash = "a".repeat(64);
+    const permission = {
+      kind: "exa-uncertainty-v1",
+      id: "request-permission",
+      cycleId: "cycle",
+      projectId: "project",
+      issuerSessionId: "operator",
+      source: "command",
+      issuedAt: "now",
+      targetType: "request",
+      subjectId: requestHash,
+      allowanceMicros: 5_000,
+    };
+    const scoped = { ...grant, tools: ["web_answer_exa"] };
+    const estimate = estimateExploration("web_answer_exa", { query: "question" });
+    expect(
+      assessExploration([scoped, permission], [], estimate, "web_answer_exa", identity, requestHash),
+    ).toMatchObject({ canDispatch: true, proposedDollars: 0.005, requestPermissionId: permission.id });
+    expect(
+      assessExploration([scoped, permission], [], estimate, "web_answer_exa", identity, "b".repeat(64)),
+    ).toMatchObject({ canDispatch: false, reason: "UNCERTAINTY_APPROVAL_REQUIRED" });
+    const consumed = {
+      kind: "exa-exploration-v1",
+      id: "operation",
+      cycleId: "cycle",
+      revision: 0,
+      tool: "web_answer_exa",
+      requestHash,
+      estimateMicros: 5_000,
+      basis: "operator assessed",
+      requestPermissionId: permission.id,
+      status: "reported",
+      reportedMicros: 0,
+      createdAt: "now",
+    };
+    expect(
+      assessExploration([scoped, permission], [consumed], estimate, "web_answer_exa", identity, requestHash),
+    ).toMatchObject({ canDispatch: false, reason: "UNCERTAINTY_APPROVAL_REQUIRED" });
+    expect(
+      assessExploration(
+        [scoped, { ...permission, id: "superseded" }, permission],
+        [consumed],
+        estimate,
+        "web_answer_exa",
+        identity,
+        requestHash,
+      ),
+    ).toMatchObject({ canDispatch: false, reason: "UNCERTAINTY_APPROVAL_REQUIRED" });
+  });
+
   it("uses the latest total ceiling rather than summing repeated approvals", () => {
     const estimate = estimateExploration("web_search_exa", {});
     expect(

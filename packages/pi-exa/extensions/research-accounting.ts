@@ -37,6 +37,22 @@ export const spendingGrantSchema = Type.Object(
   { additionalProperties: false },
 );
 export type SpendingGrant = Static<typeof spendingGrantSchema>;
+export const uncertaintyPermissionSchema = Type.Object(
+  {
+    kind: Type.Literal("exa-uncertainty-v1"),
+    id: Type.String({ minLength: 1 }),
+    cycleId: Type.String({ minLength: 1 }),
+    projectId: Type.String({ minLength: 1 }),
+    issuerSessionId: Type.String({ minLength: 1 }),
+    source: Type.Literal("command"),
+    issuedAt: Type.String({ minLength: 1 }),
+    targetType: Type.Union([Type.Literal("request"), Type.Literal("liability")]),
+    subjectId: Type.String({ minLength: 1 }),
+    allowanceMicros: micros,
+  },
+  { additionalProperties: false },
+);
+export type UncertaintyPermission = Static<typeof uncertaintyPermissionSchema>;
 export const explorationOperationSchema = Type.Object(
   {
     kind: Type.Literal("exa-exploration-v1"),
@@ -55,6 +71,7 @@ export const explorationOperationSchema = Type.Object(
     ]),
     createdAt: Type.String({ minLength: 1 }),
     reportedMicros: Type.Optional(micros),
+    requestPermissionId: Type.Optional(Type.String({ minLength: 1 })),
     conflictingMicros: Type.Optional(Type.Array(micros, { uniqueItems: true })),
   },
   { additionalProperties: false },
@@ -84,15 +101,18 @@ export function validateAccountingRecords(
     const schema =
       kind === "exa-grant-v1"
         ? spendingGrantSchema
-        : kind === "exa-exploration-v1"
-          ? explorationOperationSchema
-          : undefined;
+        : kind === "exa-uncertainty-v1"
+          ? uncertaintyPermissionSchema
+          : kind === "exa-exploration-v1"
+            ? explorationOperationSchema
+            : undefined;
     if (!schema) continue;
     if (!Value.Check(schema, record)) throw new Error("Invalid accounting record.");
     if (
       !("cycleId" in record) ||
       record.cycleId !== identity.cycleId ||
-      (kind === "exa-grant-v1" && (!("projectId" in record) || record.projectId !== identity.projectId))
+      ((kind === "exa-grant-v1" || kind === "exa-uncertainty-v1") &&
+        (!("projectId" in record) || record.projectId !== identity.projectId))
     ) {
       throw new Error("Accounting identity conflict.");
     }
@@ -138,43 +158,97 @@ export function assessExploration(
   estimate: ExplorationEstimate,
   tool: string,
   identity: AccountingIdentity,
+  requestHash?: string,
 ) {
   validateAccountingRecords(grants, ledger, identity);
   const known = grants.filter((grant): grant is SpendingGrant => Value.Check(spendingGrantSchema, grant));
   const latest = known.at(-1);
-  const proposed = estimate.dollars === null ? null : moneyMicros(estimate.dollars);
+  const permissions = grants.filter((entry): entry is UncertaintyPermission =>
+    Value.Check(uncertaintyPermissionSchema, entry),
+  );
+  const latestRequestPermission = requestHash
+    ? [...permissions].reverse().find((entry) => entry.targetType === "request" && entry.subjectId === requestHash)
+    : undefined;
+  const requestPermission =
+    latestRequestPermission &&
+    !ledger.some(
+      (operation) =>
+        Value.Check(explorationOperationSchema, operation) &&
+        operation.requestPermissionId === latestRequestPermission.id,
+    )
+      ? latestRequestPermission
+      : undefined;
+  const proposed =
+    estimate.dollars === null ? (requestPermission?.allowanceMicros ?? null) : moneyMicros(estimate.dollars);
   let reported = 0;
   let pending = 0;
+  let assessedUnknown = 0;
+  const blockedOperationIds: string[] = [];
   const unresolvedOperationIds: string[] = [];
   for (const operation of ledger) {
     if (!Value.Check(explorationOperationSchema, operation)) throw new Error("Unclassified or invalid liability.");
     if (operation.reportedMicros !== undefined) reported = addMoney(reported, operation.reportedMicros);
+    let unresolved = false;
     if (operation.status === "reported") {
       if (operation.reportedMicros === undefined) throw new Error("Reported usage requires a total.");
-      if (operation.conflictingMicros?.length) unresolvedOperationIds.push(operation.id);
+      if (operation.conflictingMicros?.length) unresolved = true;
     } else if (operation.status === "reserved") pending = addMoney(pending, operation.estimateMicros);
-    else if (operation.status === "unknown") unresolvedOperationIds.push(operation.id);
+    else if (operation.status === "unknown") unresolved = true;
+    if (unresolved) {
+      unresolvedOperationIds.push(operation.id);
+      const permission = [...permissions]
+        .reverse()
+        .find((entry) => entry.targetType === "liability" && entry.subjectId === operation.id);
+      if (!permission) blockedOperationIds.push(operation.id);
+      else {
+        const minimum = Math.max(operation.reportedMicros ?? 0, ...(operation.conflictingMicros ?? []));
+        if (permission.allowanceMicros < minimum) blockedOperationIds.push(operation.id);
+        assessedUnknown = addMoney(
+          assessedUnknown,
+          Math.max(minimum, permission.allowanceMicros) - (operation.reportedMicros ?? 0),
+        );
+      }
+    }
   }
-  const exposure = addMoney(reported, pending);
+  const exposure = addMoney(addMoney(reported, pending), assessedUnknown);
   const reason = !latest
     ? "APPROVAL_REQUIRED"
     : !latest.tools.some((allowed) => allowed === tool)
       ? "SCOPE_APPROVAL_REQUIRED"
-      : unresolvedOperationIds.length > 0
-        ? "UNKNOWN_LIABILITY"
-        : proposed === null
-          ? "UNCERTAINTY_APPROVAL_REQUIRED"
-          : addMoney(exposure, proposed) > latest.ceilingMicros
-            ? "INSUFFICIENT_BALANCE"
-            : undefined;
+      : reported > latest.ceilingMicros
+        ? "OVERSPEND"
+        : blockedOperationIds.length > 0
+          ? "UNKNOWN_LIABILITY"
+          : proposed === null
+            ? "UNCERTAINTY_APPROVAL_REQUIRED"
+            : addMoney(exposure, proposed) > latest.ceilingMicros
+              ? "INSUFFICIENT_BALANCE"
+              : undefined;
   return {
     canDispatch: reason === undefined,
     reason,
     ceilingDollars: latest ? latest.ceilingMicros / 1_000_000 : 0,
     proposedDollars: proposed === null ? null : proposed / 1_000_000,
+    proposedMicros: proposed,
+    requestPermissionId: estimate.dollars === null ? requestPermission?.id : undefined,
+    assessedUnknownDollars: assessedUnknown / 1_000_000,
     reportedDollars: reported / 1_000_000,
     pendingEstimatedDollars: pending / 1_000_000,
     unresolvedOperationIds,
+    blockedOperationIds,
     billingVerified: false,
   };
+}
+
+export class ExplorationApprovalError extends Error {
+  constructor(
+    readonly cycleId: string,
+    readonly tool: string,
+    readonly requestHash: string,
+    readonly request: Record<string, unknown>,
+    readonly assessment: ReturnType<typeof assessExploration>,
+  ) {
+    super(`${assessment.reason}: inspect accounting and obtain operator approval.`);
+    this.name = "ExplorationApprovalError";
+  }
 }

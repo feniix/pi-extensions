@@ -172,6 +172,57 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it("shares one exact-request exception atomically between concurrent reservations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1, ["web_answer_exa"]);
+    let requestHash = "";
+    try {
+      await controller.reserveExploration("web_answer_exa", { query: "question" });
+    } catch (error) {
+      if (error instanceof Error && "requestHash" in error && typeof error.requestHash === "string")
+        requestHash = error.requestHash;
+    }
+    await controller.grantUncertainty(cycle.id, "request", requestHash, 0.01);
+    const results = await Promise.allSettled([
+      controller.reserveExploration("web_answer_exa", { query: "question" }),
+      controller.reserveExploration("web_answer_exa", { query: "question" }),
+    ]);
+    expect(results.filter((entry) => entry.status === "fulfilled")).toHaveLength(1);
+    expect((await controller.status())?.ledger).toHaveLength(1);
+    await controller.detach();
+  });
+
+  it("persists exact-request uncertainty permission, consumes it once, and preserves it on resume", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const options = { root: join(root, "store"), cwd: root, sessionId: "one" };
+    const controller = await createResearchCycles(options);
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1, ["web_answer_exa"]);
+    let requestHash = "";
+    try {
+      await controller.reserveExploration("web_answer_exa", { query: "question" });
+    } catch (error) {
+      if (error instanceof Error && "requestHash" in error && typeof error.requestHash === "string")
+        requestHash = error.requestHash;
+    }
+    expect(requestHash).toMatch(/^[a-f0-9]{64}$/);
+    await controller.grantUncertainty(cycle.id, "request", requestHash, 0.01);
+    await controller.detach();
+    const restored = await createResearchCycles(options);
+    await restored.resume(cycle.id);
+    const reserved = await restored.reserveExploration("web_answer_exa", { query: "question" });
+    expect(reserved.operation).toMatchObject({ estimateMicros: 10_000, requestPermissionId: expect.any(String) });
+    await restored.reconcileExploration(cycle.id, reserved.operation.id, requestHash, { totalDollars: 0.001 });
+    await expect(restored.reserveExploration("web_answer_exa", { query: "question" })).rejects.toThrow(
+      "UNCERTAINTY_APPROVAL_REQUIRED",
+    );
+    await restored.detach();
+  });
+
   it.each(["read", "commit", "release"])("fences a reservation detached during its %s", async (phase) => {
     const root = await mkdtemp(join(tmpdir(), "exa-reserve-fence-"));
     roots.push(root);
