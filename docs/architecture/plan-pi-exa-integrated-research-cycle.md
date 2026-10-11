@@ -213,6 +213,32 @@ under the existing opt-in flag and exact operator permissions, with all
 unavailable recovery/replacement paths failing closed. Do not invent a new flag
 or test-only bypass. Evidence: `/tmp/pi-exa-157-jev-activation-{request,response}.json`.
 
+## #159 delegated retry/replacement decisions
+
+Jev selected a specific operator `approve-replacement` command binding project,
+cycle, original unknown attempt/operation and the new immutable request hash.
+It records literal duplicate-work/possible-additional-charge acknowledgment
+and an original-liability assessment. Independent lifetime tool scope, a new
+exact-request permission and fresh total-exposure assessment remain mandatory.
+Assistant flags/amounts and Jev judgments never establish this consent.
+
+Every unresolved unknown original needs a fresh unused exact-bound risk grant;
+the exception cannot bypass unrelated live local execution, ownership,
+receipt durability or submission guards. Consumed risk grants remain in
+history and cannot authorize another replacement. Late successes remain
+visible and stop further submissions, including duplicate outcomes following
+a specifically approved exception.
+
+Revised briefs remain drafts under failed/unknown lifecycle, with old frozen
+artifacts/attempts/liabilities intact. Explicit retry/replacement preview and
+execution use new revision/request identities; completion is never reopened
+for further research. New cycles still require operator go-ahead.
+
+Evidence: `/tmp/pi-exa-159-jev-{request,response}.json`.
+The first pure history/risk policy slice is assessment-only; runtime retry,
+operator commands and replacement execution remain gated pending controller
+and registered Pi regressions.
+
 ## #158 delegated recovery decisions
 
 Jev selected explicit Pi-only actions on existing tools: status `action=resume`
