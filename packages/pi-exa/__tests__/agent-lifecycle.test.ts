@@ -36,6 +36,22 @@ it("inspects exactly one existing pending run without creating, polling or cance
   expect(sdk.cancel).not.toHaveBeenCalled();
 });
 
+it("snapshots inspection metadata before an asynchronous host observer can mutate the SDK reply", async () => {
+  sdk.get.mockResolvedValue({ id: "agent_run_existing", status: "running" });
+  const response = await inspectResearchRun("offline", "agent_run_existing", {
+    observer: {
+      beforeGet: async () => () => {},
+      raw: async (_phase, run) => {
+        await Promise.resolve();
+        run.status = "completed";
+      },
+    },
+  });
+  expect(response.details).toMatchObject({ remoteStatus: "running" });
+  expect(sdk.get).toHaveBeenCalledTimes(1);
+  expect(sdk.create).not.toHaveBeenCalled();
+});
+
 it.each([
   "timeout",
   "aborted",

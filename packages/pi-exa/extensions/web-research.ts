@@ -263,24 +263,25 @@ export async function inspectResearchRun(
     if (reply.id !== runId) throw new Error("Agent inspection remote identity conflict.");
     if (!["queued", "running", "completed", "failed", "cancelled"].includes(reply.status))
       throw new Error("Invalid Agent inspection remote status.");
+    const metadata = { runId, remoteStatus: reply.status, inspectionOnly: true };
     try {
       await options.observer?.raw("get", reply);
     } catch {
       throw new AgentLifecycleObservationError(runId);
     }
-    return reply;
+    return metadata;
   });
-  let run: AgentRun;
+  let metadata: { runId: string; remoteStatus: AgentRun["status"]; inspectionOnly: boolean };
   try {
-    run = await withLifecycleBound(observed, deadline, options.signal);
+    metadata = await withLifecycleBound(observed, deadline, options.signal);
   } catch (error) {
     if (error instanceof AgentLifecycleAbortError) throw new AgentInspectionInterruptedError(runId, "aborted");
     if (error instanceof AgentLifecycleDeadlineError) throw new AgentInspectionInterruptedError(runId, "timeout");
     throw error;
   }
   return {
-    text: `Existing Agent run ${runId}: ${run.status}. This was one GET inspection, not replacement research or remote cancellation.`,
-    details: { runId, remoteStatus: run.status, inspectionOnly: true },
+    text: `Existing Agent run ${runId}: ${metadata.remoteStatus}. This was one GET inspection, not replacement research or remote cancellation.`,
+    details: metadata,
   };
 }
 
