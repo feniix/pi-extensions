@@ -37,6 +37,13 @@ export function assessRetryHistory(
   requestHash: string,
   mode: "retry" | "replace",
 ) {
+  if (
+    typeof identity.cycleId !== "string" ||
+    !identity.cycleId ||
+    typeof identity.projectId !== "string" ||
+    !identity.projectId
+  )
+    throw new Error("Invalid retry target identity.");
   if (!/^[a-f0-9]{64}$/.test(requestHash) || (mode !== "retry" && mode !== "replace"))
     throw new Error("Invalid retry request.");
   const ids = new Set<string>();

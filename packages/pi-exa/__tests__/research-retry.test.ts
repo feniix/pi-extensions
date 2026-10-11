@@ -145,6 +145,15 @@ it("blocks unclassified history and foreign identities rather than infer failure
   ).toThrow("Retry history identity conflict.");
 });
 
+it.each([
+  { cycleId: "", projectId: "project" },
+  { cycleId: "cycle", projectId: "" },
+])("rejects an empty durable target identity %j even when projected facts match", (target) => {
+  expect(() =>
+    assessRetryHistory([{ ...fact("failed", "failed"), ...target }], [], target, requestHash, "retry"),
+  ).toThrow("Invalid retry target identity.");
+});
+
 it("rejects malformed classification and shared operation identities before assessing retry eligibility", () => {
   const malformed = JSON.parse(JSON.stringify({ ...fact("bad", "failed"), state: "not-a-confirmed-state" }));
   expect(() => assessRetryHistory([malformed], [], identity, requestHash, "retry")).toThrow(/classified durable facts/);
