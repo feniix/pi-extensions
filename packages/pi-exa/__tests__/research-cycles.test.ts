@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { canonicalResearchJson } from "../extensions/research-artifacts.js";
 import { createResearchCycles, projectResearchSummary, researchProjectId } from "../extensions/research-cycles.js";
 import { agentRequestHash } from "../extensions/research-execution.js";
 import { withResearchStorageLock } from "../extensions/research-storage-lock.js";
@@ -268,6 +270,25 @@ describe("durable research cycles", () => {
       executionFields: { query: artifact.request.query },
     });
     (await recovery.observer.beforeGet())();
+    await controller.detach();
+  });
+
+  it("rechecks a durable frozen-artifact assertion before preparing the actual GET guard", async () => {
+    const { controller, cycle, hash, root, artifact } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const execution = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await execution.beforeCreate())();
+    await execution.raw("create", { id: "agent_run_saved", status: "running" });
+    const recovery = await controller.prepareAgentRecovery({ cycleId: cycle.id, artifactHash: artifact.hash });
+    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+    const record = JSON.parse(await readFile(path, "utf8"));
+    const frozen = record.attempts[0].artifact;
+    frozen.outputContract.taskSchema = { type: "object" };
+    const { hash: _hash, ...body } = frozen;
+    frozen.hash = createHash("sha256").update(canonicalResearchJson(body)).digest("hex");
+    await writeFile(path, JSON.stringify(record));
+    await expect(recovery.observer.beforeGet()).rejects.toThrow("STALE_ARTIFACT");
+    expect((await controller.inspect(cycle.id)).attempts).toHaveLength(1);
     await controller.detach();
   });
 

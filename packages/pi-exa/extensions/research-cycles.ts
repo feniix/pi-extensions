@@ -709,6 +709,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                     const current = await owned();
                     assertArtifactTarget(current, reference);
                     const saved = savedAgent(current, attempt.id, attempt.requestHash);
+                    assertArtifactRequest(saved.artifact, reference);
                     if (saved.result?.remoteId !== runId) throw new Error("Agent inspection remote identity conflict.");
                     if (prepared) throw new Error("Agent inspection capability was already prepared.");
                     prepared = true;
@@ -737,7 +738,6 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                 transaction(async () => {
                   const current = await read(record.id);
                   const saved = savedAgent(current, attempt.id, attempt.requestHash);
-                  assertArtifactRequest(saved.artifact, reference);
                   const liability = agentOperation(current, saved);
                   // A failed local inspection never undoes confirmed remote completion/failure.
                   if (saved.result?.terminal) return;
