@@ -164,7 +164,7 @@ export function cyclePiRegistration(
 
   pi.registerCommand("exa-research", {
     description:
-      "Manage research cycles: start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling> [tool,tool...], approve-request <cycle-id> <request-hash> <assessed-dollars>, approve-liability <cycle-id> <operation-id> <assessed-dollars>, archive [id]. Agent requires explicit tool scope and exact-request approval; recovery/replacement remain gated.",
+      "Manage research cycles: start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling> [tool,tool...], approve-request <cycle-id> <request-hash> <assessed-dollars>, approve-liability <cycle-id> <operation-id> <assessed-dollars>, approve-replacement <cycle-id> <unknown-attempt-id> <new-request-hash> <assessed-original-dollars>, archive [id]. Explicit funded retry requires fresh exact-request approval and lifetime scope/exposure. Replacement additionally requires approval for every unknown original acknowledging duplicate work and possible additional charges. Recovery performs one existing-run GET, not replacement or spending consent. No automatic retry/replacement.",
     handler: async (args, ctx) => {
       try {
         const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(args.trim());

@@ -1131,13 +1131,20 @@ describe("Pi cycle commands and tools", () => {
     await pi.call("web_search_exa", { query: "unrelated", researchMode: "standalone" });
     expect((await pi.call("exa_research_status")).details).toEqual(curated.details.cycle);
   });
-  it("describes explicit existing-run GET recovery separately from still-gated replacement in flag help", async () => {
+  it("documents explicit funded retry and operator duplicate-risk replacement consent in public Pi help", async () => {
     const pi = await host();
     expect(pi.flags).toHaveBeenCalledWith("exa-enable-cycles", {
       type: "boolean",
       description:
-        "Opt in to durable Pi research cycles with operator-approved exploration, one scoped Agent attempt and explicit existing-run GET recovery; replacement remains gated.",
+        "Opt in to durable Pi research cycles with operator-approved exploration, compiled Agent research, explicit existing-run GET recovery and explicit funded retry/replacement; unknown-work replacement requires operator duplicate-work/additional-charge consent.",
     });
+    expect(pi.command?.description).toContain(
+      "approve-replacement <cycle-id> <unknown-attempt-id> <new-request-hash> <assessed-original-dollars>",
+    );
+    expect(pi.command?.description).toMatch(/every unknown original.*duplicate work and possible additional charges/i);
+    expect(pi.command?.description).toMatch(/explicit funded retry.*fresh exact-request approval/i);
+    expect(pi.command?.description).toMatch(/recovery performs one existing-run GET/i);
+    expect(pi.command?.description).not.toMatch(/replacement remain[s]? gated|recovery.*remain[s]? gated/i);
   });
 
   it.each([
