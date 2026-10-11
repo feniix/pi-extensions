@@ -195,6 +195,27 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("adds complete assistant cycle guidance only to opted-in Pi tool registration without dispatch", async () => {
+    const plain = await host(false);
+    expect(plain.tools.get("exa_research_step")?.promptGuidelines?.join("\n")).not.toContain("Integrated Pi cycle");
+    const pi = await host();
+    for (const name of ["exa_research_step", "exa_research_status", "exa_research_summary", "web_research_exa"]) {
+      const guidance = pi.tools.get(name)?.promptGuidelines?.join("\n") ?? "";
+      expect(guidance).toContain("Integrated Pi cycle");
+      expect(guidance).toMatch(/clarify.*goals.*constraints.*output contract/i);
+      expect(guidance).toMatch(/candidate.*not trusted.*select/i);
+      expect(guidance).toMatch(/readiness.*judgment.*not.*permission/i);
+      expect(guidance).toMatch(/operator.*approve-request/i);
+      expect(guidance).toMatch(/evidence-backed.*criterion/i);
+      expect(guidance).toMatch(/final report.*gaps.*usage/i);
+      expect(guidance).toMatch(/no automatic.*gap-closing/i);
+      expect(guidance).toMatch(/explicit.*resume.*never.*spending/i);
+    }
+    expect(offlineCreate).not.toHaveBeenCalled();
+    expect(offlineSearch).not.toHaveBeenCalled();
+    expect(offlineGet).not.toHaveBeenCalled();
+  });
+
   it("documents single-GET recovery in opted-in Agent tool guidance without changing default descriptions", async () => {
     const plain = await host(false);
     expect(plain.tools.get("web_research_exa")?.description).not.toMatch(/researchMode=recover/);

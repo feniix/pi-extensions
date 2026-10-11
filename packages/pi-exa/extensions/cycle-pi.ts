@@ -27,6 +27,17 @@ import { retryAttemptFacts } from "./research-retry.js";
 import { exaResearchStepParams, exaResearchSummaryParams } from "./schemas.js";
 import type { AgentInspectionOptions, AgentLifecycleObserver } from "./web-research.js";
 
+const CYCLE_GUIDELINES = [
+  "Integrated Pi cycle: clarify unresolved goals, scope, constraints and output contract before planning. Ask the operator to start with /exa-research start <topic>; planning never calls Exa.",
+  "Integrated Pi cycle: retrieval candidate metadata is not trusted evidence; explicitly select relevant candidate IDs with labels/curated notes. Record external evidence explicitly. Selected sources are not input.data/exclusion processing rows.",
+  "Integrated Pi cycle: readiness is assistant judgment, not spending permission. Iteratively record criteria, gaps and labeled assumptions; review the compiled preview/schema/current revision and resolve structured or semantic conflicts before execution.",
+  "Integrated Pi cycle: paid work requires operator approvals. approve defines lifetime scope/ceiling; approve-request is fresh one-use full-request consent. Assistant amounts, flags, readiness and healthy accounting never authorize spending; explain pauses instead of bypassing them.",
+  "Integrated Pi cycle: interpret validated output and citations with evidence-backed criterion evaluation. Record only supported coverage; remote completion or generated claims do not automatically satisfy criteria.",
+  "Integrated Pi cycle: produce a final report with findings, supported criteria, unresolved gaps, assumptions and usage. Distinguish estimates, provisional costs, reported receipts, unknown liabilities and overshoot; vendor caps/independent invoice verification are not promised.",
+  "Integrated Pi cycle: any genuine completion blocks further submissions even when local output is invalid. No automatic retries, replacement or gap-closing runs; another successful pass needs operator go-ahead for a newly authorized cycle. Surface duplicate successes and separate costs.",
+  "Integrated Pi cycle: explicitly resume saved state; resume, inspection and archive never grant spending consent or cancel remote work. Recover an existing attempt with one GET. Explicit funded retry needs fresh consent; replacement additionally needs operator approve-replacement for every unknown original, acknowledging duplicate work/additional charges and preserving original liabilities.",
+];
+
 const targetProperties = {
   cycleId: Type.Optional(Type.String()),
   expectedRevision: Type.Optional(Type.Integer({ minimum: 0 })),
@@ -252,6 +263,9 @@ export function cyclePiRegistration(
       const paid = tool.name.startsWith("web_");
       pi.registerTool({
         ...tool,
+        ...(paid || tool.name.startsWith("exa_research_")
+          ? { promptGuidelines: [...(tool.promptGuidelines ?? []), ...CYCLE_GUIDELINES] }
+          : {}),
         ...(tool.name === "web_research_exa"
           ? {
               description: `${tool.description} Pi cycles: active mode executes only the approved compiled request. Explicit researchMode=retry after confirmed failure/nondispatch or researchMode=replace for unknown originals requires cycleId, fresh exact funding and total exposure approval. Replacement additionally requires an unused operator approve-replacement for EVERY unknown original; assistant risk flags/amounts never grant consent. No automatic retry, replacement or gap closing; any success blocks new submissions and duplicate successes remain visible. researchMode=recover performs one existing-run GET with explicit cycleId and optional attemptId; request overrides are forbidden and recovery never creates, polls or cancels. Explicitly resume saved state with exa_research_status action=resume first. previousRunId means new paid continuation, never recovery. Resume and inspection grant no spending permission.`,
