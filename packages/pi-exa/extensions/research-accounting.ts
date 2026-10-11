@@ -27,6 +27,7 @@ export const spendingGrantSchema = Type.Object(
         Type.Literal("web_find_similar_exa"),
         Type.Literal("web_search_advanced_exa"),
         Type.Literal("web_answer_exa"),
+        Type.Literal("web_research_exa"),
       ]),
       {
         minItems: 1,
