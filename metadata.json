@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4MSBN375VY8659STR6ADCRW",
+  "strategy": "manual-commit",
+  "branch": "pi-exa-cycle/artifacts",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "packages/pi-exa/__tests__/research-artifacts.test.ts",
+    "packages/pi-exa/__tests__/research-cycles.test.ts",
+    "packages/pi-exa/extensions/research-artifacts.ts",
+    "packages/pi-exa/extensions/research-cycles.ts",
+    "packages/pi-exa/package.json",
+    "pnpm-lock.yaml"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 454734,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 13567232,
+    "output_tokens": 83115,
+    "api_call_count": 86
+  }
+}
