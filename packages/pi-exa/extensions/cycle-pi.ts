@@ -21,8 +21,9 @@ import {
   type ResearchCycles,
 } from "./research-cycles.js";
 import { evidenceDecisionSchema } from "./research-evidence.js";
-import { agentAttemptSchema } from "./research-execution.js";
+import { agentAttemptSchema, agentRequestHash } from "./research-execution.js";
 import { createResearchPlanner } from "./research-planner.js";
+import { retryAttemptFacts } from "./research-retry.js";
 import { exaResearchStepParams, exaResearchSummaryParams } from "./schemas.js";
 import type { AgentInspectionOptions, AgentLifecycleObserver } from "./web-research.js";
 
@@ -73,19 +74,28 @@ function view(record: ResearchCycle) {
       error: error instanceof Error ? error.message : String(error),
     };
   }
-  const last = record.attempts.at(-1);
-  const nextSafeAction = Value.Check(agentAttemptSchema, last)
-    ? last.status === "not-dispatched"
-      ? "Proven nondispatch is retained. Replacement research remains gated; do not silently submit again."
-      : !last.result?.remoteId
-        ? "No saved remote ID: preserve the possible submission as unknown. Inspect history; never submit replacement research."
-        : last.result.processing === "validated" && last.result.remoteStatus === "completed"
-          ? "Review validated results and unmet criteria. Completion blocks further submissions; findings do not satisfy criteria automatically."
-          : "Inspect the same saved Agent attempt with web_research_exa researchMode=recover and explicit cycleId. This never creates replacement research."
-    : last
-      ? "Legacy attempt has no frozen recovery contract. Inspect its original history manually; never submit automatic replacement research."
-      : "Update the plan and preview the compiled request. Only operator grants and fresh request assessments can authorize spending.";
-  return { ...visible, ...createResearchPlanner(record.plan).getStatus(), accounting, nextSafeAction };
+  const facts = retryAttemptFacts(record.attempts, record.ledger, { cycleId: record.id, projectId: record.projectId });
+  const completedIds = facts.filter((fact) => fact.state === "completed").map((fact) => fact.id);
+  const duplicateSuccess = completedIds.length > 1;
+  const nextSafeAction =
+    record.status === "completed" || completedIds.length
+      ? `${duplicateSuccess ? "Review all duplicate successes and their separate costs. " : ""}Completion blocks further submissions; findings do not satisfy criteria automatically. Inspect the same saved attempt to recover failed local output processing.`
+      : facts.some((fact) => fact.state === "live")
+        ? "Existing local research remains live. Inspect the same saved Agent attempt; do not retry or replace live work."
+        : facts.some((fact) => fact.state === "unclassified")
+          ? "Legacy attempt has no frozen recovery contract. Inspect its original history manually; never submit automatic replacement research."
+          : facts.some((fact) => fact.state === "unknown")
+            ? "Preserve unknown original work and liabilities. No saved remote ID means the original remains unknown. Recover saved remote IDs with researchMode=recover. Any explicit researchMode=replace needs operator approve-replacement for EVERY unknown original, new exact-request funding and total exposure approval. No automatic replacement."
+            : facts.length
+              ? "Confirmed failure or proven nondispatch is retained. Revise and preview the draft; explicit researchMode=retry requires new exact-request funding and current total exposure approval. No automatic resubmission."
+              : "Update the plan and preview the compiled request. Only operator grants and fresh request assessments can authorize spending.";
+  return {
+    ...visible,
+    ...createResearchPlanner(record.plan).getStatus(),
+    accounting,
+    nextSafeAction,
+    completionSummary: { remoteCompletedAttemptIds: completedIds, duplicateSuccess },
+  };
 }
 
 function result(details: Record<string, unknown>, text = JSON.stringify(details, null, 2), isError = false) {
@@ -215,9 +225,19 @@ export function cyclePiRegistration(
             text = `Recorded scoped uncertainty assessment, not a billing cap or reported cost. The total ceiling is unchanged; unknown liability remains unknown.\n${JSON.stringify(view(approved), null, 2)}`;
             break;
           }
+          case "approve-replacement": {
+            const approval = /^(\S+)\s+(\S+)\s+([a-f0-9]{64})\s+(\d+(?:\.\d{1,6})?)$/.exec(value);
+            if (!approval)
+              throw new Error(
+                "Use approve-replacement <cycle-id> <unknown-attempt-id> <new-request-hash> <assessed-original-dollars>; no grant was issued.",
+              );
+            const approved = await cycles.grantReplacement(approval[1], approval[2], approval[3], Number(approval[4]));
+            text = `Recorded explicit acknowledgment of duplicate work and possible additional charges, with the bound original-liability assessment. Not a vendor cap or verified invoice. This does not submit research or replace lifetime scope/new exact-request funding.\n${JSON.stringify(view(approved), null, 2)}`;
+            break;
+          }
           default:
             throw new Error(
-              "Use /exa-research start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling> [tool,tool...], approve-request <cycle-id> <request-hash> <assessed-dollars>, approve-liability <cycle-id> <operation-id> <assessed-dollars>, or archive [id].",
+              "Use /exa-research start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling> [tool,tool...], approve-request <cycle-id> <request-hash> <assessed-dollars>, approve-liability <cycle-id> <operation-id> <assessed-dollars>, approve-replacement <cycle-id> <unknown-attempt-id> <new-request-hash> <assessed-original-dollars>, or archive [id].",
             );
         }
         ctx.ui.notify(text, "info");
@@ -234,7 +254,7 @@ export function cyclePiRegistration(
         ...tool,
         ...(tool.name === "web_research_exa"
           ? {
-              description: `${tool.description} Pi cycles: active mode executes only the approved compiled request. researchMode=recover performs one existing-run GET with explicit cycleId and optional attemptId; request overrides are forbidden and recovery never creates, polls or cancels. Explicitly resume saved state with exa_research_status action=resume first. previousRunId means new paid continuation, never recovery. Resume and inspection grant no spending permission.`,
+              description: `${tool.description} Pi cycles: active mode executes only the approved compiled request. Explicit researchMode=retry after confirmed failure/nondispatch or researchMode=replace for unknown originals requires cycleId, fresh exact funding and total exposure approval. Replacement additionally requires an unused operator approve-replacement for EVERY unknown original; assistant risk flags/amounts never grant consent. No automatic retry, replacement or gap closing; any success blocks new submissions and duplicate successes remain visible. researchMode=recover performs one existing-run GET with explicit cycleId and optional attemptId; request overrides are forbidden and recovery never creates, polls or cancels. Explicitly resume saved state with exa_research_status action=resume first. previousRunId means new paid continuation, never recovery. Resume and inspection grant no spending permission.`,
             }
           : {}),
         ...(tool.name === "exa_research_status"
@@ -274,7 +294,9 @@ export function cyclePiRegistration(
                       Type.Union([
                         Type.Literal("active"),
                         Type.Literal("standalone"),
-                        ...(tool.name === "web_research_exa" ? [Type.Literal("recover")] : []),
+                        ...(tool.name === "web_research_exa"
+                          ? [Type.Literal("recover"), Type.Literal("retry"), Type.Literal("replace")]
+                          : []),
                       ]),
                     ),
                     ...targetProperties,
@@ -335,12 +357,20 @@ export function cyclePiRegistration(
                 researchMode !== undefined &&
                 researchMode !== "active" &&
                 researchMode !== "standalone" &&
-                researchMode !== "recover"
+                researchMode !== "recover" &&
+                researchMode !== "retry" &&
+                researchMode !== "replace"
               ) {
                 throw new Error("Invalid researchMode.");
               }
               const reference = { cycleId, expectedRevision, artifactHash };
               if (!Value.Check(referenceParams, reference)) throw new Error("Invalid artifact reference.");
+              const transition = researchMode === "retry" || researchMode === "replace" ? researchMode : undefined;
+              if (
+                transition &&
+                (tool.name !== "web_research_exa" || !record || typeof cycleId !== "string" || !cycleId)
+              )
+                throw new Error("Explicit retry/replacement requires a resumed cycleId and web_research_exa.");
               if (researchMode === "recover") {
                 if (tool.name !== "web_research_exa")
                   throw new Error("Recovery is only supported by web_research_exa.");
@@ -387,7 +417,7 @@ export function cyclePiRegistration(
                     accounting: view(current).accounting,
                     status: current.status,
                     nextSafeAction: unavailable
-                      ? "INSPECTION_UNAVAILABLE: This inspection did not confirm a fresh remote outcome; previously confirmed terminal outcomes remain. Inspect the same saved run again; do not submit replacement research."
+                      ? "INSPECTION_UNAVAILABLE: This inspection did not confirm a fresh remote outcome; previously confirmed terminal outcomes remain. Inspect the same saved run again; this inspection grants no retry or replacement permission."
                       : "Review recovered state; pending/unknown work requires another explicit inspection, never automatic replacement. Findings do not satisfy criteria automatically.",
                   },
                   undefined,
@@ -413,7 +443,7 @@ export function cyclePiRegistration(
                       "Integrated paid research is not available in this slice; no request was dispatched.",
                     );
                   }
-                  const prepared = await cycles.reserveAgent({ ...reference, executionFields: standalone });
+                  const prepared = await cycles.reserveAgent({ ...reference, executionFields: standalone }, transition);
                   const { attempt, artifact, assessment } = prepared;
                   const observer = cycles.agentLifecycleObserver(attempt.cycleId, attempt.id, attempt.requestHash);
                   const callObserver: AgentLifecycleObserver = {
@@ -423,10 +453,18 @@ export function cyclePiRegistration(
                       const remoteStatus = reply.status;
                       await observer.raw(phase, reply);
                       try {
+                        const completionSummary = view(await cycles.inspect(attempt.cycleId)).completionSummary;
                         onUpdate?.(
                           result(
-                            { cycleId: attempt.cycleId, attemptId: attempt.id, phase, remoteId, remoteStatus },
-                            `Exa Agent ${remoteId}: ${remoteStatus}. Progress is not final billing or criterion verification.`,
+                            {
+                              cycleId: attempt.cycleId,
+                              attemptId: attempt.id,
+                              phase,
+                              remoteId,
+                              remoteStatus,
+                              completionSummary,
+                            },
+                            `Exa Agent ${remoteId}: ${remoteStatus}. ${completionSummary.duplicateSuccess ? "Duplicate successes are retained with separate costs; no further submission is permitted. " : ""}Progress is not final billing or criterion verification.`,
                           ),
                         );
                       } catch {
@@ -460,8 +498,10 @@ export function cyclePiRegistration(
                       execution,
                       accounting,
                       status: current.status,
+                      completionSummary: view(current).completionSummary,
+                      nextSafeAction: view(current).nextSafeAction,
                     },
-                    `Exa cycle ${attempt.cycleId}; Agent attempt ${attempt.id}; status ${current.status}.\n${JSON.stringify(execution, null, 2)}\nUsage classification: ${JSON.stringify(accounting)}\nRemote completion stops further submissions even when local processing failed. Findings do not satisfy criteria automatically. Recover/inspect the existing attempt; do not buy replacement research. Estimates are not vendor caps; API-reported costs are not independently verified invoices.`,
+                    `Exa cycle ${attempt.cycleId}; Agent attempt ${attempt.id}; status ${current.status}.\n${JSON.stringify(execution, null, 2)}\nUsage classification: ${JSON.stringify(accounting)}\n${view(current).nextSafeAction}\nNo automatic retry, replacement or gap closing. Estimates are not vendor caps; API-reported costs are not independently verified invoices.`,
                     response.isError || incompleteOrInvalid,
                   );
                 }
@@ -629,7 +669,11 @@ export function cyclePiRegistration(
                 if (!Value.Check(summaryParams, params)) throw new Error("Invalid research summary arguments.");
                 if (params.mode === undefined || params.mode === "payload" || params.mode === "execution_plan") {
                   const artifact = await cycles.preview(params);
-                  return result({ artifact, previewOnly: true });
+                  return result({
+                    artifact,
+                    requestHash: agentRequestHash(artifact.request),
+                    previewOnly: true,
+                  });
                 }
                 {
                   const current = await cycles.status(params);

@@ -301,7 +301,7 @@ describes assessed liabilities/balance, not permission or lifecycle eligibility
 to dispatch a particular tool. Only the fresh request reservation/guard decides
 dispatchability; Agent still needs its exact-request approval.
 
-#### One compiled Agent attempt
+#### Compiled Agent attempts
 
 With cycles enabled, an active `web_research_exa` call executes the exact current
 artifact after **both** operator permissions:
@@ -344,15 +344,60 @@ Confirmed remote completion marks the cycle `completed` even if local schema
 validation fails. Findings never satisfy criteria automatically or buy more
 research. Confirmed remote failed/cancelled runs are `failed`; local timeout/error
 without terminal confirmation is `unknown`. Every saved attempt blocks another
-submission in this slice, even after proven nondispatch. Inspect the existing
-attempt rather than repeat the paid call; replacement remains gated until the
-following safety layer. Archive retains liabilities and never cancels
+ordinary active submission, even after proven nondispatch. Explicit retry or
+replacement additionally requires the safety permissions below. Archive retains liabilities and never cancels
 the run. Late observations can settle only their original attempt, not reactivate
 it or mutate another cycle's plan/ownership.
 
 Standalone/default-opt-out and MCP remain unchanged. Recorded cycle run IDs
 cannot be continued through an unrelated standalone override. This is the
-independently safe one-attempt subset, not the completed workflow rollout.
+explicitly opted-in cycle workflow; it never buys automatic gap-closing runs.
+
+#### Explicit funded retry and unknown-work replacement
+
+Confirmed failure/cancellation or proven nondispatch permits editing and
+previewing a new draft without deleting old contracts, attempts or liabilities.
+Live, completed or unclassified historical work blocks new submissions.
+`exa_research_summary` displays `requestHash` for the **full new SDK request**,
+distinct from `artifact.hash`; preview is not spending consent.
+
+After reviewing the draft, the operator must approve a fresh one-use
+`approve-request` assessment. The current lifetime ceiling/scope must cover the
+entire exposure, including every unresolved original liability and new work;
+amend it with `approve` if necessary. Submit only explicitly:
+
+```json
+{ "researchMode": "retry", "cycleId": "<resumed-cycle-id>" }
+```
+
+If **any** original remains unknown, ordinary retry is prohibited. For
+**each unknown original**, the operator must additionally execute:
+
+```text
+/exa-research approve-replacement <cycle-id> <unknown-attempt-id> <new-request-hash> <assessed-original-dollars>
+```
+
+This command explicitly acknowledges **duplicate work and possible additional
+charges**. It records one-use risk consent bound to that original and new
+request, paired with its original-operation liability assessment. It does not
+submit research, cap vendor charges, settle unknown work, or replace the fresh
+request assessment/lifetime scope. Generic `approve-liability` and assistant
+flags/amounts cannot provide replacement consent. The assessment must cover
+known cost floors; later liability growth or amendments require reassessment.
+Then submit with explicit `researchMode: "replace"` and `cycleId`.
+Optional `expectedRevision` and `artifactHash` assert the current draft.
+
+Guards recheck current ownership, generation, history, frozen request, consumed
+permissions, liability assessments and total exposure immediately before SDK
+submission. Default active calls never silently retry or replace. Prior attempts,
+original schemas and liability/receipt history are retained; genuine late facts
+may settle only their original operations.
+Genuine late completion is processed against its **own original** contract even
+after a new draft/replacement. Any remote completion irreversibly stops further
+submissions, including when local output is invalid. If both runs succeed,
+status exposes `completionSummary.duplicateSuccess` and both attempt IDs; late
+progress also warns of duplicate successes with separate costs. No result
+satisfies criteria or authorizes a third/gap-closing run automatically.
 
 #### Explicit resume and existing-run recovery
 

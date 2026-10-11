@@ -266,7 +266,7 @@ all saved attempts: one local nondispatch cannot reopen unknown original work,
 nor can an older failure hide a newer live intent. The intent-only milestone
 kept transition SDK creates behind `RETRY_DISPATCH_GATED`; the subsequent
 controller dispatch slice replaces that temporary gate with the fences below.
-Registered Pi activation remains separate.
+Registered Pi activation was implemented in the following explicit command/tool slice.
 
 Jev selected frozen historical authorization proof rather than replaying today's
 outcomes as though they existed at reservation. Each transition retains all
@@ -311,6 +311,28 @@ nondispatch then releases only the new hold and preserves older unknown work.
 Real-controller/mock-SDK regressions exercise funded failed retry and explicitly
 approved unknown replacement with both late successes preserved and no third
 create. No live paid SDK call or independently verified invoice is claimed.
+
+The same-process completion latch uses the canonical real private-store
+directory, not caller path spelling. A two-controller regression proves a
+pending original completion blocks replacement through an equivalent relative
+root after ownership handoff, before its asynchronous receipt publication.
+
+Pi registration now exposes explicit `retry`/`replace` modes only on the opted-in
+Agent tool and requires a resumed explicit cycle ID. The operator-only
+`approve-replacement` command atomically issues the specific duplicate-work/
+additional-charge acknowledgment and paired original liability assessment.
+Each unknown original needs its own unused exact-new-request permission;
+generic liability grants, assistant flags and ordinary active calls cannot
+provide that consent. A preview displays the deterministic full SDK request
+hash without creating a permission or reservation.
+
+Registered-tool/mock-SDK regressions exercise failure plus freshly funded retry
+and unknown work plus an amended draft/schema, explicit risk command and
+replacement. The original late success validates against its original schema;
+both results/charges survive, status and late progress surface duplicate
+successes, and completion blocks a third call. Malformed/stale/underfunded risk
+commands leave grants unchanged and never dispatch. Default-opt-out/standalone/
+MCP behavior is unchanged. Full-feature review/publication remains pending.
 
 ## #158 delegated recovery decisions
 

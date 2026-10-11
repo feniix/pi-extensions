@@ -14,6 +14,7 @@ import { parseArgs } from "../../../node_modules/@earendil-works/pi-coding-agent
 import { loadExtensionFromFactory } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js";
 import { cyclePiRegistration } from "../extensions/cycle-pi.js";
 import exaExtension from "../extensions/index.js";
+import { agentAttemptSchema } from "../extensions/research-execution.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof fs>();
@@ -300,6 +301,174 @@ describe("Pi cycle commands and tools", () => {
     expect(retained.attempts).toHaveLength(1);
     expect(offlineCreate).toHaveBeenCalledOnce();
     expect(offlineGet).toHaveBeenCalledExactlyOnceWith(reply.id);
+    expect(offlineCancel).not.toHaveBeenCalled();
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
+  it("requires explicit Pi retry mode, cycle and fresh exact funding after confirmed failure, never automatic resubmission", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    offlineCreate
+      .mockResolvedValueOnce({ id: "agent_run_pi_failed", status: "failed", costDollars: { total: 0.01 } })
+      .mockResolvedValueOnce({
+        id: "agent_run_pi_retry",
+        status: "completed",
+        costDollars: { total: 0.1 },
+        output: { structured: { answer: "retry" } },
+      });
+    const failed = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    expect(failed.isError).toBe(true);
+    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    expect((await pi.call("web_research_exa", { researchMode: "retry" })).isError).toBe(true);
+    const denied = await pi.call("web_research_exa", { researchMode: "retry", cycleId: artifact.cycleId });
+    expect(JSON.stringify(denied.content)).toContain("UNCERTAINTY_APPROVAL_REQUIRED");
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    await pi.command?.handler(`approve-request ${artifact.cycleId} ${failed.details.requestHash} 0.2`, pi.context);
+    const retried = await pi.call("web_research_exa", {
+      researchMode: "retry",
+      cycleId: artifact.cycleId,
+      artifactHash: artifact.hash,
+      expectedRevision: artifact.revision,
+    });
+    expect(retried.isError).toBe(false);
+    expect(retried.details.execution).toMatchObject({
+      transitionMode: "retry",
+      result: { taskOutput: { answer: "retry" } },
+    });
+    const status = await pi.call("exa_research_status");
+    expect(status.details).toMatchObject({ status: "completed", completionSummary: { duplicateSuccess: false } });
+    expect(status.details.nextSafeAction).toMatch(/Completion blocks further submissions/);
+    expect((await pi.call("web_research_exa", { researchMode: "retry", cycleId: artifact.cycleId })).isError).toBe(
+      true,
+    );
+    expect(offlineCreate).toHaveBeenCalledTimes(2);
+    expect(offlineGet).not.toHaveBeenCalled();
+    expect(offlineCancel).not.toHaveBeenCalled();
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
+  it("requires the specific operator replacement command and surfaces both late duplicate successes without another run", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    let resolveOriginal!: (reply: AgentRun) => void;
+    let published!: () => void;
+    const completionUpdates: unknown[] = [];
+    const latePublication = new Promise<void>((done) => {
+      published = done;
+    });
+    const signal = new AbortController();
+    offlineCreate
+      .mockImplementationOnce(() => {
+        signal.abort();
+        return new Promise((done) => {
+          resolveOriginal = done;
+        });
+      })
+      .mockResolvedValueOnce({
+        id: "agent_run_pi_replacement",
+        status: "completed",
+        costDollars: { total: 0.1 },
+        output: { structured: { replacement: "new schema" } },
+      });
+    const tool = pi.tools.get("web_research_exa");
+    if (!tool) throw new Error("Agent tool missing");
+    const interrupted = await tool.execute(
+      "first",
+      { cycleId: artifact.cycleId },
+      signal.signal,
+      (update) => {
+        if (update.details?.remoteStatus === "completed") {
+          completionUpdates.push(update);
+          published();
+        }
+      },
+      pi.context,
+    );
+    if (!Value.Check(agentAttemptSchema, interrupted.details.execution)) throw new Error("Saved original missing");
+    const first = interrupted.details.execution;
+    const amended = await pi.call("exa_research_step", {
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Replacement draft",
+      thought_number: 2,
+      total_thoughts: 2,
+      next_step_needed: false,
+      executionPlan: {
+        goal: "new question",
+        taskSchema: {
+          type: "object",
+          required: ["replacement"],
+          properties: { replacement: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+    });
+    expect(amended.isError).toBe(false);
+    const preview = await pi.call("exa_research_summary");
+    expect(preview.details).toMatchObject({ previewOnly: true, requestHash: expect.any(String) });
+    const draftHash = preview.details.requestHash;
+    expect(draftHash).not.toBe(first.requestHash);
+    await pi.command?.handler(`approve-request ${artifact.cycleId} ${draftHash} 0.2`, pi.context);
+    await pi.command?.handler(`approve-liability ${artifact.cycleId} ${first.operationId} 0.2`, pi.context);
+    const noRisk = await pi.call("web_research_exa", { researchMode: "replace", cycleId: artifact.cycleId });
+    expect(JSON.stringify(noRisk.content)).toContain("REPLACEMENT_APPROVAL_REQUIRED");
+    const flags = await pi.call("web_research_exa", {
+      researchMode: "replace",
+      cycleId: artifact.cycleId,
+      acceptDuplicateRisk: true,
+      assessedOriginalDollars: 0.2,
+    });
+    expect(flags.isError).toBe(true);
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    const beforeRisk = (await pi.call("exa_research_status")).details.grants;
+    for (const command of [
+      `approve-replacement ${artifact.cycleId} ${first.id} ${"f".repeat(64)} 0.2`,
+      `approve-replacement ${artifact.cycleId} ${first.id} ${draftHash} 0`,
+      `approve-replacement ${artifact.cycleId} ${first.id} ${draftHash} 1e-1`,
+      `approve-replacement ${artifact.cycleId} missing-attempt ${draftHash} 0.2`,
+    ]) {
+      await pi.command?.handler(command, pi.context);
+      expect((await pi.call("exa_research_status")).details.grants).toEqual(beforeRisk);
+      expect(offlineCreate).toHaveBeenCalledTimes(1);
+    }
+    await pi.command?.handler(`approve-replacement ${artifact.cycleId} ${first.id} ${draftHash} 0.2`, pi.context);
+    expect(pi.notify).toHaveBeenLastCalledWith(expect.stringMatching(/duplicate work.*additional charges/i), "info");
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    const replaced = await pi.call("web_research_exa", { researchMode: "replace", cycleId: artifact.cycleId });
+    expect(replaced.isError).toBe(false);
+    resolveOriginal({
+      id: "agent_run_pi_original_late",
+      status: "completed",
+      costDollars: { total: 0.1 },
+      output: { structured: { answer: "original" } },
+    });
+    await latePublication;
+    const status = await pi.call("exa_research_status");
+    expect(status.details).toMatchObject({
+      status: "completed",
+      completionSummary: { duplicateSuccess: true, remoteCompletedAttemptIds: [first.id, replaced.details.attemptId] },
+    });
+    expect(status.details.nextSafeAction).toMatch(/duplicate successes/i);
+    expect(status.details.attempts).toEqual([
+      expect.objectContaining({
+        id: first.id,
+        requestHash: first.requestHash,
+        result: expect.objectContaining({ taskOutput: { answer: "original" } }),
+      }),
+      expect.objectContaining({
+        requestHash: draftHash,
+        result: expect.objectContaining({ taskOutput: { replacement: "new schema" } }),
+      }),
+    ]);
+    expect(completionUpdates).toContainEqual(
+      expect.objectContaining({
+        details: expect.objectContaining({ completionSummary: expect.objectContaining({ duplicateSuccess: true }) }),
+        content: [expect.objectContaining({ text: expect.stringMatching(/duplicate successes/i) })],
+      }),
+    );
+    expect((await pi.call("web_research_exa", { researchMode: "replace", cycleId: artifact.cycleId })).isError).toBe(
+      true,
+    );
+    expect(offlineCreate).toHaveBeenCalledTimes(2);
+    expect(offlineGet).not.toHaveBeenCalled();
     expect(offlineCancel).not.toHaveBeenCalled();
     await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
   });
