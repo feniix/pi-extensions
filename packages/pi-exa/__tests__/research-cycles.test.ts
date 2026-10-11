@@ -172,6 +172,26 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it("freezes returned candidate metadata before asynchronous storage work", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
+    const response = { results: [{ url: "https://example.com/original", title: "Original", text: "body" }] };
+    const pending = controller.explorationEvidenceObserver(cycle.id, operation.id, operation.requestHash)(response);
+    response.results[0].url = "https://example.com/mutated";
+    response.results[0].title = "Mutated";
+    await pending;
+    expect((await controller.status())?.candidates).toMatchObject([
+      {
+        url: "https://example.com/original",
+        title: "Original",
+      },
+    ]);
+    await controller.detach();
+  });
   it("curates candidates and external sources into selected-only previews without processing rows or automatic coverage", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);

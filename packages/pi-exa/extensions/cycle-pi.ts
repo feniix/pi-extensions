@@ -312,6 +312,13 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                     };
                   },
                   raw: async (response) => {
+                    let sourceSnapshot: unknown;
+                    let snapshotError: string | undefined;
+                    try {
+                      sourceSnapshot = structuredClone(response);
+                    } catch (error) {
+                      snapshotError = error instanceof Error ? error.message : String(error);
+                    }
                     const costs =
                       typeof response === "object" && response !== null && "costDollars" in response
                         ? response.costDollars
@@ -330,7 +337,8 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                     await cycles.reconcileExploration(savedCycle, operationId, requestHash, receivedReceipt);
                     observed = true;
                     try {
-                      await capture(response);
+                      if (snapshotError !== undefined) throw new Error(snapshotError);
+                      await capture(sourceSnapshot);
                     } catch (error) {
                       candidateCaptureError = `Candidate metadata was not confirmed durable; explicitly curate the returned content without repeating paid work. ${error instanceof Error ? error.message : String(error)}`;
                     }

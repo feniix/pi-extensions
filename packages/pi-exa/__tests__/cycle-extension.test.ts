@@ -178,6 +178,27 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("snapshots SDK evidence before receipt persistence can yield to another response mutation", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    const fixture = {
+      results: [{ id: "source", url: "https://example.com/original", title: "Original", text: "body" }],
+      costDollars: { total: 0.007 },
+    };
+    offlineSearch.mockImplementationOnce(async () => {
+      vi.mocked(fs.rename).mockImplementation(async (...args) => {
+        fixture.results[0].url = "https://example.com/mutated";
+        fixture.results[0].title = "Mutated";
+        return original.rename(...args);
+      });
+      return fixture;
+    });
+    const response = await pi.call("web_search_exa", { query: "topic", cycleId: status.id });
+    expect(response.details.candidates).toMatchObject([{ url: "https://example.com/original", title: "Original" }]);
+  });
   it("keeps concurrent reversed SDK completions bound to their own operation and candidates", async () => {
     const pi = await host();
     await pi.command?.handler("start topic", pi.context);

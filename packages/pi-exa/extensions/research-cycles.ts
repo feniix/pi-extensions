@@ -576,8 +576,11 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     explorationEvidenceObserver(cycleId: string, operationId: string, requestHash: string) {
       const captureGeneration = generation;
       const current = () => captureGeneration === generation && activeId === cycleId;
-      return async (response: unknown) =>
-        ordered(() =>
+      return async (response: unknown) => {
+        // This temporary snapshot is never written as a response archive.
+        // The policy below retains only bounded source metadata.
+        const snapshot = structuredClone(response);
+        return ordered(() =>
           transaction(async () => {
             if (!current()) return { captured: false };
             const record = await owned();
@@ -598,7 +601,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
               retrievedAt: new Date().toISOString(),
             };
             if (!Value.Check(evidenceProvenanceSchema, provenance)) throw new Error("Invalid evidence provenance.");
-            const candidates = captureCandidates(response, provenance, record.candidates);
+            const candidates = captureCandidates(snapshot, provenance, record.candidates);
             if (canonicalResearchJson(candidates) !== canonicalResearchJson(record.candidates ?? [])) {
               record.candidates = candidates;
               await write(record);
@@ -606,6 +609,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             return { captured: current(), candidateCount: candidates.length };
           }),
         );
+      };
     },
     async grantUncertainty(cycleId: string, targetType: "request" | "liability", subjectId: string, dollars: number) {
       return activate((assertCurrent) =>
