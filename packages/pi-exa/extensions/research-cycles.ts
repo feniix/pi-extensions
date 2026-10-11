@@ -196,9 +196,13 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     const assertCurrent = () => {
       if (captured !== generation) throw new Error("Research cycle activation was detached.");
     };
-    return ordered(() => {
+    return ordered(async () => {
       assertCurrent();
-      return action(assertCurrent);
+      const result = await action(assertCurrent);
+      // Transaction cleanup also awaits filesystem operations; detach during
+      // lock release must not turn a revoked activation into a success token.
+      assertCurrent();
+      return result;
     });
   }
 
@@ -460,9 +464,10 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     async reserveExploration(tool: string, args: Record<string, unknown>, assertions: ArtifactAssertions = {}) {
       const request = structuredClone(args);
       const reference = structuredClone(assertions);
-      return ordered(() =>
+      return activate((assertCurrent) =>
         transaction(async () => {
           const record = await owned();
+          assertCurrent();
           assertArtifactTarget(record, reference);
           if (record.archived || record.status !== "planning") throw new Error("CYCLE_NOT_EXECUTABLE");
           const estimate = estimateExploration(tool, request);
@@ -485,8 +490,10 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             status: "reserved",
             createdAt: new Date().toISOString(),
           };
+          assertCurrent();
           record.ledger.push(operation);
           await write(record);
+          assertCurrent();
           return { operation, assessment };
         }),
       );

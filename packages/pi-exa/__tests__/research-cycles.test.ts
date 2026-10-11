@@ -9,7 +9,7 @@ import { withResearchStorageLock } from "../extensions/research-storage-lock.js"
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof fs>();
-  return { ...original, rename: vi.fn(original.rename), open: vi.fn(original.open) };
+  return { ...original, rename: vi.fn(original.rename), open: vi.fn(original.open), unlink: vi.fn(original.unlink) };
 });
 
 const roots: string[] = [];
@@ -17,6 +17,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.mocked(fs.open).mockReset();
   vi.mocked(fs.rename).mockReset();
+  vi.mocked(fs.unlink).mockReset();
   vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -171,6 +172,61 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it.each(["read", "commit", "release"])("fences a reservation detached during its %s", async (phase) => {
+    const root = await mkdtemp(join(tmpdir(), "exa-reserve-fence-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "operator" });
+    const cycle = await controller.start("topic");
+    await controller.grantBudget(cycle.id, 1);
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    let entered = () => {};
+    let release = () => {};
+    const barrier = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let armed = true;
+    vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const handle = await original.open(...args);
+      if (phase === "read" && armed && String(args[0]).endsWith(`${cycle.id}.json`)) {
+        armed = false;
+        entered();
+        await blocked;
+      }
+      return handle;
+    });
+    vi.mocked(fs.rename).mockImplementation(async (...args) => {
+      await original.rename(...args);
+      if (phase === "commit" && armed && String(args[1]).endsWith(`${cycle.id}.json`)) {
+        armed = false;
+        entered();
+        await blocked;
+      }
+    });
+    vi.mocked(fs.unlink).mockImplementation(async (...args) => {
+      await original.unlink(...args);
+      if (phase === "release" && armed && String(args[0]).endsWith(".lock")) {
+        armed = false;
+        entered();
+        await blocked;
+      }
+    });
+    const reserving = controller.reserveExploration("web_search_exa", { query: "topic" });
+    const rejected = expect(reserving).rejects.toThrow("activation was detached");
+    await barrier;
+    const detaching = controller.detach();
+    release();
+    const outcomes = await Promise.allSettled([rejected, detaching]);
+    for (const outcome of outcomes) if (outcome.status === "rejected") throw outcome.reason;
+    expect(await controller.status()).toBeUndefined();
+    const saved = await controller.inspect(cycle.id);
+    expect(saved.owner).toBeUndefined();
+    if (phase === "read") expect(saved.ledger).toEqual([]);
+    else expect(saved.ledger).toMatchObject([{ status: "unknown" }]);
+  });
+
   it.each([
     "grant-cycle",
     "grant-project",
