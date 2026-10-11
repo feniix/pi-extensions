@@ -1,1 +1,13 @@
+keep going through the backlog following the same pattern we have been doing so far
+pick a new layer
+implement it 
+run /parallel-review
+and so on and so forth
+
+---
+
+if you have questions, use jev dont ask me
+
+---
+
 do not forget to make discrete incremental commits
