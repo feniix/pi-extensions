@@ -361,6 +361,9 @@ describe("durable research cycles", () => {
     "liability-link",
     "original-operation",
     "duplicate-id",
+    "liability-id",
+    "operation-id",
+    "budget-id",
   ])("rejects a corrupt saved replacement %s before reacquiring ownership", async (corruption) => {
     const { controller, cycle, hash, root } = await readyAgent();
     const { attempt } = await controller.reserveAgent();
@@ -379,6 +382,11 @@ describe("durable research cycles", () => {
       permission.liabilityPermissionId = "missing";
     else if (corruption === "original-operation" && "operationId" in permission) permission.operationId = "foreign";
     else if (corruption === "duplicate-id") saved.grants.push(structuredClone(permission));
+    else if (corruption === "liability-id" && "id" in permission && "liabilityPermissionId" in permission)
+      permission.id = permission.liabilityPermissionId;
+    else if (corruption === "operation-id" && "id" in permission) permission.id = attempt.operationId;
+    else if (corruption === "budget-id" && "id" in permission && "id" in saved.grants[0])
+      permission.id = saved.grants[0].id;
     const json = JSON.stringify(saved);
     const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
     await writeFile(path, json);

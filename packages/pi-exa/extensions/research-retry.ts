@@ -78,7 +78,11 @@ export function validateReplacementRecords(
   ledger: readonly object[],
   identity: AccountingIdentity,
 ): void {
-  const ids = new Set<string>();
+  const ids = new Set<string>(
+    [...grants, ...ledger, ...attempts]
+      .filter((entry) => !("kind" in entry) || entry.kind !== "exa-replacement-permission-v1")
+      .flatMap((entry) => ("id" in entry && typeof entry.id === "string" ? [entry.id] : [])),
+  );
   for (const entry of grants) {
     if (!("kind" in entry) || entry.kind !== "exa-replacement-permission-v1") continue;
     if (!Value.Check(replacementPermissionSchema, entry)) throw new Error("Invalid replacement permission.");
