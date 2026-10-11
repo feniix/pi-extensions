@@ -137,19 +137,84 @@ export const EXA_RATE_PROFILE = {
   version: "exa-published-2026-03-03-v1",
   source: "https://exa.ai/docs/changelog/pricing-update",
   publication: "March 3, 2026",
+  reviewed: "October 11, 2026",
 } as const;
 
 export function estimateExploration(tool: string, args: Record<string, unknown>): ExplorationEstimate {
-  if (tool === "web_search_exa") {
-    const count = args.numResults ?? 5;
-    if (typeof count === "number" && Number.isSafeInteger(count) && count >= 1 && count <= 20) {
-      return {
-        dollars: (7 + Math.max(0, count - 10)) / 1000,
-        basis: `${EXA_RATE_PROFILE.version}; ${EXA_RATE_PROFILE.publication}; bundled text/highlights; ${count} results; ${EXA_RATE_PROFILE.source}`,
-      };
-    }
+  const unknown = { dollars: null, basis: "No supported published-price assessment for this operation." };
+  const keys =
+    tool === "web_search_exa"
+      ? ["query", "numResults"]
+      : tool === "web_fetch_exa"
+        ? ["urls", "maxCharacters", "highlights", "summary", "maxAgeHours"]
+        : tool === "web_search_advanced_exa"
+          ? [
+              "query",
+              "numResults",
+              "category",
+              "type",
+              "systemPrompt",
+              "outputSchema",
+              "startPublishedDate",
+              "endPublishedDate",
+              "includeDomains",
+              "excludeDomains",
+              "includeText",
+              "excludeText",
+              "userLocation",
+              "moderation",
+              "textMaxCharacters",
+              "contextMaxCharacters",
+              "enableHighlights",
+              "highlightsNumSentences",
+              "highlightsMaxCharacters",
+              "highlightsQuery",
+              "enableSummary",
+              "summaryQuery",
+            ]
+          : [];
+  if (Object.keys(args).some((key) => !keys.includes(key))) return unknown;
+  const priced = (units: number, basis: string): ExplorationEstimate => ({
+    dollars: units / 1000,
+    basis: `${EXA_RATE_PROFILE.version}; published ${EXA_RATE_PROFILE.publication}; reviewed ${EXA_RATE_PROFILE.reviewed}; ${basis}; ${EXA_RATE_PROFILE.source}`,
+  });
+  if (tool === "web_fetch_exa") {
+    if (!Array.isArray(args.urls) || args.urls.length < 1 || args.urls.length > 50) return unknown;
+    const summary =
+      typeof args.summary === "object" &&
+      args.summary !== null &&
+      "query" in args.summary &&
+      Boolean(args.summary.query);
+    const types = 1 + (args.highlights === true ? 1 : 0) + (summary ? 1 : 0);
+    return priced(args.urls.length * types, `${args.urls.length} pages; ${types} content types at $1/1000 pages/type`);
   }
-  return { dollars: null, basis: "No supported published-price assessment for this operation." };
+  if (tool === "web_search_exa" || tool === "web_search_advanced_exa") {
+    const count = args.numResults ?? (tool === "web_search_exa" ? 5 : 10);
+    if (
+      typeof count !== "number" ||
+      !Number.isSafeInteger(count) ||
+      count < 1 ||
+      count > (tool === "web_search_exa" ? 20 : 100)
+    )
+      return unknown;
+    const mode = args.type ?? "auto";
+    const base =
+      mode === "deep"
+        ? 12
+        : mode === "deep-reasoning"
+          ? 15
+          : mode === "auto" || mode === "fast" || mode === "instant"
+            ? 7
+            : undefined;
+    if (base === undefined) return unknown;
+    const summaries =
+      args.enableSummary !== false && (args.enableSummary === true || Boolean(args.summaryQuery)) ? count : 0;
+    return priced(
+      base + Math.max(0, count - 10) + summaries,
+      `${mode}; ${count} results; bundled text/highlights; ${summaries} separately billed summaries`,
+    );
+  }
+  return unknown;
 }
 
 export function assessExploration(

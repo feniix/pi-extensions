@@ -25,6 +25,30 @@ describe("exploratory accounting policy", () => {
     });
   });
 
+  it.each([
+    [
+      "web_fetch_exa",
+      { urls: ["https://a.test", "https://b.test"], highlights: true, summary: { query: "why" } },
+      0.006,
+    ],
+    ["web_search_advanced_exa", { query: "q", type: "deep", numResults: 15, enableSummary: true }, 0.032],
+    ["web_search_advanced_exa", { query: "q", type: "deep-reasoning", numResults: 5 }, 0.015],
+  ])("uses the published per-request and per-content basis for %s", (tool, args, dollars) => {
+    expect(estimateExploration(tool, args)).toMatchObject({
+      dollars,
+      basis: expect.stringContaining("exa-published-2026-03-03-v1"),
+    });
+  });
+
+  it.each([
+    ["web_search_exa", { query: "q", contact: true }],
+    ["web_search_advanced_exa", { query: "q", type: "deep-lite" }],
+    ["web_search_advanced_exa", { query: "q", type: "deep", subpages: 2 }],
+    ["web_search_advanced_exa", { query: "q", type: "deep", additionalQueries: ["extra"] }],
+  ])("requires exact-request uncertainty permission for unsupported extras/modes in %s", (tool, args) => {
+    expect(estimateExploration(tool, args).dollars).toBeNull();
+  });
+
   it("counts explicitly approved uncertainty only for the exact named liability", () => {
     const operation = {
       kind: "exa-exploration-v1",
