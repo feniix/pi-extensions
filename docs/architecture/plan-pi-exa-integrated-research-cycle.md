@@ -159,6 +159,30 @@ and transport mechanics are implementation choices subject to these invariants
 and repository dependency policy. Unavailable vendor guarantees use the defined
 fail-closed/uncertainty paths, not invented support.
 
+## #156 evidence implementation decisions
+
+The operator approved metadata-first candidate retention and the public testing
+seams: candidate normalization/curation policy, the real-filesystem cycle
+controller, and registered Pi tools with mocked SDK responses/compiler previews.
+
+Cycle-attributed retrievals retain only stable candidate identities, bounded
+titles/URLs, retrieval state and operation-bound provenance. Source bodies,
+highlights, summaries, generated answers, processing rows and full SDK responses
+are not automatically retained. Useful content notes are explicit curation.
+Candidate capture does not select evidence or satisfy criteria.
+
+Candidate selection/rejection is an explicit planning update. Selection records
+a planner source and a labeled execution-plan evidence reference; rejection
+removes that candidate's selection without erasing its provenance. Existing
+explicit source updates remain the external-evidence interface. Only selected
+source facts and provenance enter previews; input rows remain explicit.
+
+Automatic capture requires the original active planning cycle and runtime
+ownership. Detach/archive/ownership change prevents delayed callbacks from
+changing evidence; late accounting remains a separate operation-bound capability.
+Candidate metadata is backward-compatible optional durable state, not a raw
+response archive. Standalone, default opt-out and MCP calls do not capture it.
+
 ## #155 accounting design grill
 
 The operator approved the accounting-policy, real-filesystem controller, and
