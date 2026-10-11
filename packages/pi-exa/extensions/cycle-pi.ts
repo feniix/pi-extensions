@@ -24,7 +24,7 @@ import { evidenceDecisionSchema } from "./research-evidence.js";
 import { agentAttemptSchema } from "./research-execution.js";
 import { createResearchPlanner } from "./research-planner.js";
 import { exaResearchStepParams, exaResearchSummaryParams } from "./schemas.js";
-import type { AgentLifecycleObserver } from "./web-research.js";
+import type { AgentInspectionOptions, AgentLifecycleObserver } from "./web-research.js";
 
 const targetProperties = {
   cycleId: Type.Optional(Type.String()),
@@ -35,6 +35,13 @@ const referenceProperties = {
   artifactHash: Type.Optional(Type.String()),
 };
 const referenceParams = Type.Object(referenceProperties, { additionalProperties: false });
+const statusParams = Type.Object(
+  {
+    ...targetProperties,
+    action: Type.Optional(Type.Union([Type.Literal("status"), Type.Literal("resume")])),
+  },
+  { additionalProperties: false },
+);
 const stepParams = Type.Object(
   {
     ...exaResearchStepParams.properties,
@@ -66,7 +73,19 @@ function view(record: ResearchCycle) {
       error: error instanceof Error ? error.message : String(error),
     };
   }
-  return { ...visible, ...createResearchPlanner(record.plan).getStatus(), accounting };
+  const last = record.attempts.at(-1);
+  const nextSafeAction = Value.Check(agentAttemptSchema, last)
+    ? last.status === "not-dispatched"
+      ? "Proven nondispatch is retained. Replacement research remains gated; do not silently submit again."
+      : !last.result?.remoteId
+        ? "No saved remote ID: preserve the possible submission as unknown. Inspect history; never submit replacement research."
+        : last.result.processing === "validated" && last.result.remoteStatus === "completed"
+          ? "Review validated results and unmet criteria. Completion blocks further submissions; findings do not satisfy criteria automatically."
+          : "Inspect the same saved Agent attempt with web_research_exa researchMode=recover and explicit cycleId. This never creates replacement research."
+    : last
+      ? "Legacy attempt has no frozen recovery contract. Inspect its original history manually; never submit automatic replacement research."
+      : "Update the plan and preview the compiled request. Only operator grants and fresh request assessments can authorize spending.";
+  return { ...visible, ...createResearchPlanner(record.plan).getStatus(), accounting, nextSafeAction };
 }
 
 function result(details: Record<string, unknown>, text = JSON.stringify(details, null, 2), isError = false) {
@@ -95,11 +114,16 @@ export type CycleRetrievalFactory = (
 export type CycleAgentFactory = (
   observer: AgentLifecycleObserver,
 ) => Parameters<PiToolRegistration["registerTool"]>[0] | undefined;
+export type CycleInspectionFactory = (
+  runId: string,
+  observer: NonNullable<AgentInspectionOptions["observer"]>,
+) => Parameters<PiToolRegistration["registerTool"]>[0] | undefined;
 
 export function cyclePiRegistration(
   pi: ExtensionAPI,
   retrievalFactory?: CycleRetrievalFactory,
   agentFactory?: CycleAgentFactory,
+  inspectionFactory?: CycleInspectionFactory,
 ): PiToolRegistration {
   const controllers = new Map<string, Promise<ResearchCycles>>();
   const get = (ctx: ExtensionContext) => {
@@ -208,6 +232,13 @@ export function cyclePiRegistration(
       const paid = tool.name.startsWith("web_");
       pi.registerTool({
         ...tool,
+        ...(tool.name === "exa_research_status"
+          ? {
+              parameters: statusParams,
+              description:
+                "Inspect active cycle or discover saved cycle summaries without activating them. action=resume with explicit cycleId acquires exclusive saved-cycle ownership; it never grants spending permission. Recover an existing Agent attempt with web_research_exa researchMode=recover, never previousRunId continuation.",
+            }
+          : {}),
         ...(tool.name === "exa_research_step"
           ? {
               parameters: stepParams,
@@ -234,12 +265,19 @@ export function cyclePiRegistration(
                 Type.Intersect([
                   tool.name === "web_research_exa" ? Type.Omit(tool.parameters, ["query"]) : tool.parameters,
                   Type.Object({
-                    researchMode: Type.Optional(Type.Union([Type.Literal("active"), Type.Literal("standalone")])),
+                    researchMode: Type.Optional(
+                      Type.Union([
+                        Type.Literal("active"),
+                        Type.Literal("standalone"),
+                        ...(tool.name === "web_research_exa" ? [Type.Literal("recover")] : []),
+                      ]),
+                    ),
                     ...targetProperties,
                     ...(tool.name === "web_research_exa"
                       ? {
                           query: Type.Optional(Type.String({ minLength: 1 })),
                           artifactHash: Type.Optional(Type.String()),
+                          attemptId: Type.Optional(Type.String()),
                         }
                       : {}),
                   }),
@@ -252,24 +290,106 @@ export function cyclePiRegistration(
             // Capture JSON input before the first await; caller-owned arrays
             // must not change the request after permission hashing/assessment.
             const paidInput = paid ? structuredClone(params) : undefined;
+            const statusInput = tool.name === "exa_research_status" ? structuredClone(params) : undefined;
             const cycles = await get(ctx);
+            if (tool.name === "exa_research_status") {
+              if (!Value.Check(statusParams, statusInput)) throw new Error("Invalid cycle status action.");
+              if (statusInput.action === "resume") {
+                if (!statusInput.cycleId) throw new Error("Explicit cycleId is required to resume a saved cycle.");
+                return result(
+                  view(await cycles.resume(statusInput.cycleId, { expectedRevision: statusInput.expectedRevision })),
+                );
+              }
+              const active = await cycles.status(statusInput);
+              if (active) return result(view(active));
+              const found = await cycles.discover();
+              return result({
+                active: false,
+                savedCycles: found.cycles.map((cycle) => ({
+                  id: cycle.id,
+                  revision: cycle.revision,
+                  status: cycle.status,
+                  archived: cycle.archived ?? false,
+                })),
+                unreadableCycleIds: found.unreadableCycleIds,
+                nextSafeAction:
+                  "Explicitly resume a saved cycle with action=resume and cycleId, or use /exa-research start. Discovery never activates a cycle or grants spending permission.",
+              });
+            }
             const explicitStandalone =
               paid &&
-              typeof params === "object" &&
-              params !== null &&
-              Reflect.get(params, "researchMode") === "standalone";
+              typeof paidInput === "object" &&
+              paidInput !== null &&
+              Reflect.get(paidInput, "researchMode") === "standalone";
             const record = explicitStandalone ? undefined : await cycles.status();
             if (paid) {
               if (typeof paidInput !== "object" || paidInput === null) throw new Error("Invalid tool arguments.");
-              const { researchMode, cycleId, expectedRevision, artifactHash, ...standalone } = paidInput as Record<
-                string,
-                unknown
-              >;
-              if (researchMode !== undefined && researchMode !== "active" && researchMode !== "standalone") {
+              const { researchMode, cycleId, expectedRevision, artifactHash, attemptId, ...standalone } =
+                paidInput as Record<string, unknown>;
+              if (
+                researchMode !== undefined &&
+                researchMode !== "active" &&
+                researchMode !== "standalone" &&
+                researchMode !== "recover"
+              ) {
                 throw new Error("Invalid researchMode.");
               }
               const reference = { cycleId, expectedRevision, artifactHash };
               if (!Value.Check(referenceParams, reference)) throw new Error("Invalid artifact reference.");
+              if (researchMode === "recover") {
+                if (tool.name !== "web_research_exa")
+                  throw new Error("Recovery is only supported by web_research_exa.");
+                if (!record || typeof cycleId !== "string" || !cycleId)
+                  throw new Error("Explicitly resume the saved cycle, then recover with its cycleId.");
+                if (attemptId !== undefined && typeof attemptId !== "string") throw new Error("Invalid attemptId.");
+                if (Object.keys(standalone).length)
+                  throw new Error(
+                    "EXECUTION_CONFLICT: Recovery accepts references only, never query/effort/continuation overrides.",
+                  );
+                if (!inspectionFactory)
+                  throw new Error("Existing-run inspection is not enabled; no SDK request was dispatched.");
+                const prepared = await cycles.prepareAgentRecovery({ ...reference, attemptId });
+                let unavailable = false;
+                try {
+                  const inspector = inspectionFactory(prepared.runId, prepared.observer);
+                  if (!inspector) throw new Error("Existing-run inspection is not enabled.");
+                  const response = await inspector.execute(
+                    id,
+                    prepared.attempt.artifact.request,
+                    signal,
+                    onUpdate,
+                    ctx,
+                  );
+                  unavailable = Boolean(response.isError);
+                } catch {
+                  unavailable = true;
+                }
+                if (unavailable) await prepared.onUnavailable();
+                const current = await cycles.inspect(cycleId);
+                const execution = current.attempts.find(
+                  (entry) => Value.Check(agentAttemptSchema, entry) && entry.id === prepared.attempt.id,
+                );
+                const invalid =
+                  !Value.Check(agentAttemptSchema, execution) ||
+                  execution.result?.processing === "failed" ||
+                  execution.status === "failed";
+                return result(
+                  {
+                    cycleId,
+                    attemptId: prepared.attempt.id,
+                    inspectionOnly: true,
+                    execution,
+                    accounting: view(current).accounting,
+                    status: current.status,
+                    nextSafeAction: unavailable
+                      ? "INSPECTION_UNAVAILABLE: Existing remote outcome was not confirmed. Inspect the same saved run again; do not submit replacement research."
+                      : "Review recovered state; pending/unknown work requires another explicit inspection, never automatic replacement. Findings do not satisfy criteria automatically.",
+                  },
+                  undefined,
+                  unavailable || invalid,
+                );
+              }
+              if (attemptId !== undefined) throw new Error("attemptId is only valid in explicit recovery mode.");
               if (
                 researchMode === "standalone" &&
                 (cycleId !== undefined || expectedRevision !== undefined || artifactHash !== undefined)
@@ -500,8 +620,6 @@ export function cyclePiRegistration(
                   const updated = await cycles.recordStep(params);
                   return result({ ...updated, cycle: view(updated.cycle) });
                 }
-              case "exa_research_status":
-                return result(view(record));
               case "exa_research_summary":
                 if (!Value.Check(summaryParams, params)) throw new Error("Invalid research summary arguments.");
                 if (params.mode === undefined || params.mode === "payload" || params.mode === "execution_plan") {

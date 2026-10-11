@@ -30,6 +30,7 @@ const offlineSearch = vi.hoisted(() =>
 const offlineCreate = vi.hoisted(() =>
   vi.fn<(params: unknown) => Promise<AgentRun>>(async () => ({ id: "offline", status: "completed" })),
 );
+const offlineGet = vi.hoisted(() => vi.fn<(runId: string) => Promise<AgentRun>>());
 const offlineEndpoints = vi.hoisted(() => ({
   search: vi.fn(),
   getContents: vi.fn(),
@@ -54,7 +55,7 @@ vi.mock("exa-js", () => ({
       offlineEndpoints.answer(...args);
       return offlineSearch(...args);
     };
-    agent = { runs: { create: offlineCreate } };
+    agent = { runs: { create: offlineCreate, get: offlineGet } };
   },
 }));
 
@@ -65,6 +66,7 @@ afterEach(async () => {
   vi.mocked(nativeFs.renameSync).mockReset();
   offlineSearch.mockReset().mockResolvedValue({ results: [], requestId: "offline" });
   offlineCreate.mockReset().mockResolvedValue({ id: "offline", status: "completed" });
+  offlineGet.mockReset();
   for (const endpoint of Object.values(offlineEndpoints)) endpoint.mockClear();
   vi.unstubAllEnvs();
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
@@ -218,8 +220,8 @@ describe("Pi cycle commands and tools", () => {
     await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
   });
 
-  async function readyAgentHost() {
-    const pi = await host();
+  async function readyAgentHost(timeoutMs?: number) {
+    const pi = await host(true, timeoutMs);
     await pi.command?.handler("start question", pi.context);
     await pi.call("exa_research_step", {
       topic: "question",
@@ -245,6 +247,152 @@ describe("Pi cycle commands and tools", () => {
     await pi.command?.handler(`approve-request ${artifact.cycleId} ${pause.details.requestHash} 0.2`, pi.context);
     return { pi, artifact };
   }
+
+  it("requires explicit assistant resume after session restart and recovers the existing invalid result with one GET", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    offlineCreate.mockResolvedValueOnce({
+      id: "agent_run_recover",
+      status: "completed",
+      output: { structured: { answer: 42 } },
+      costDollars: { total: 0.1 },
+    });
+    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    const before = (await pi.call("exa_research_status")).details;
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+    const inactive = await pi.call("exa_research_status");
+    expect(inactive.details).toMatchObject({ active: false, savedCycles: [{ id: artifact.cycleId }] });
+    expect(offlineGet).not.toHaveBeenCalled();
+    expect((await pi.call("web_research_exa", { researchMode: "recover", cycleId: artifact.cycleId })).isError).toBe(
+      true,
+    );
+    expect((await pi.call("exa_research_status", { action: "resume", cycleId: artifact.cycleId })).details.id).toBe(
+      artifact.cycleId,
+    );
+    offlineGet.mockResolvedValueOnce({
+      id: "agent_run_recover",
+      status: "completed",
+      output: { structured: { answer: "recovered" } },
+      costDollars: { total: 0.1 },
+    });
+    const response = await pi.call("web_research_exa", {
+      researchMode: "recover",
+      cycleId: artifact.cycleId,
+      artifactHash: artifact.hash,
+    });
+    expect(response.isError).toBeFalsy();
+    expect(response.details).toMatchObject({
+      inspectionOnly: true,
+      status: "completed",
+      execution: { result: { processing: "validated", taskOutput: { answer: "recovered" } } },
+      accounting: { reportedDollars: 0.1 },
+    });
+    const after = (await pi.call("exa_research_status")).details;
+    expect(after.grants).toEqual(before.grants);
+    expect(after.ledger).toHaveLength(1);
+    expect(after.attempts).toHaveLength(1);
+    expect(offlineGet).toHaveBeenCalledExactlyOnceWith("agent_run_recover");
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
+  it("keeps unavailable existing-run GET unknown and rejects recovery request overrides without SDK work", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    offlineCreate.mockResolvedValueOnce({
+      id: "agent_run_pending",
+      status: "running",
+      costDollars: { total: 0.02 },
+    });
+    offlineGet.mockRejectedValue(Object.assign(new Error("not found"), { statusCode: 404 }));
+    await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    offlineGet.mockClear();
+    expect(
+      (
+        await pi.call("web_research_exa", {
+          researchMode: "recover",
+          cycleId: artifact.cycleId,
+          query: "new paid query",
+        })
+      ).isError,
+    ).toBe(true);
+    expect(offlineGet).not.toHaveBeenCalled();
+    const response = await pi.call("web_research_exa", { researchMode: "recover", cycleId: artifact.cycleId });
+    expect(response.isError).toBe(true);
+    expect(response.details).toMatchObject({
+      status: "unknown",
+      inspectionOnly: true,
+      execution: { status: "unknown" },
+      accounting: { reason: "UNKNOWN_LIABILITY" },
+    });
+    expect(offlineGet).toHaveBeenCalledTimes(1);
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
+  it("reports pending inspection as provisional without polling or releasing interrupted liability", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    offlineCreate.mockResolvedValueOnce({ id: "agent_run_pending", status: "running" });
+    offlineGet.mockRejectedValueOnce(Object.assign(new Error("not found"), { statusCode: 404 }));
+    await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    offlineGet.mockClear().mockResolvedValueOnce({
+      id: "agent_run_pending",
+      status: "running",
+      costDollars: { total: 0.05 },
+    });
+    const response = await pi.call("web_research_exa", { researchMode: "recover", cycleId: artifact.cycleId });
+    expect(response.isError).toBeFalsy();
+    expect(response.details).toMatchObject({
+      status: "unknown",
+      execution: { result: { remoteStatus: "running", processing: "pending", provisionalTotalDollars: 0.05 } },
+      accounting: { reason: "UNKNOWN_LIABILITY", reportedDollars: 0 },
+    });
+    expect(offlineGet).toHaveBeenCalledTimes(1);
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
+  it("keeps missing-ID submissions unknown after assistant resume and performs no recovery GET", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    const interruption = new AbortController();
+    offlineCreate.mockImplementationOnce(() => {
+      interruption.abort();
+      return new Promise(() => {});
+    });
+    await pi.call("web_research_exa", { cycleId: artifact.cycleId }, interruption.signal);
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+    await pi.call("exa_research_status", { action: "resume", cycleId: artifact.cycleId });
+    const response = await pi.call("web_research_exa", { researchMode: "recover", cycleId: artifact.cycleId });
+    expect(response.isError).toBe(true);
+    expect(response.content).toMatchObject([{ text: expect.stringMatching(/RECOVERY_UNAVAILABLE.*saved remote ID/) }]);
+    const status = (await pi.call("exa_research_status")).details;
+    expect(status).toMatchObject({ status: "unknown", attempts: [{ status: "unknown" }] });
+    expect(status.nextSafeAction).toMatch(/no saved remote ID.*unknown/i);
+    expect(offlineGet).not.toHaveBeenCalled();
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
+  it("does not let assistant resume steal another live runtime's cycle ownership", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    const tool = pi.tools.get("exa_research_status");
+    if (!tool) throw new Error("Missing status tool");
+    const other = {
+      ...pi.context,
+      sessionManager: { getSessionId: () => "other-session" },
+    } as unknown as ExtensionToolContext;
+    const response = await tool.execute(
+      "other",
+      { action: "resume", cycleId: artifact.cycleId },
+      undefined,
+      undefined,
+      other,
+    );
+    expect(response.isError).toBe(true);
+    expect(response.content).toMatchObject([{ text: expect.stringMatching(/another live session/) }]);
+    expect((await pi.call("exa_research_status")).details.id).toBe(artifact.cycleId);
+    expect(offlineCreate).not.toHaveBeenCalled();
+    expect(offlineGet).not.toHaveBeenCalled();
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
 
   it("persists and exposes privacy-safe remote failure diagnostics without allowing replacement", async () => {
     const { pi, artifact } = await readyAgentHost();
@@ -1393,13 +1541,19 @@ describe("Pi cycle commands and tools", () => {
     expect(status.details).toMatchObject({ revision: 1, status: "planning" });
     const id = status.details.id;
     await pi.handlers.get("session_tree")?.({} as never, pi.context);
-    expect((await pi.call("exa_research_status")).isError).toBe(true);
+    expect((await pi.call("exa_research_status")).details).toMatchObject({
+      active: false,
+      savedCycles: [{ id }],
+    });
     await pi.command?.handler(`resume ${id}`, pi.context);
     const resumed = await pi.call("exa_research_status");
     expect(resumed.details).toMatchObject({ id, revision: 1 });
     const reset = await pi.call("exa_research_reset");
     expect(reset.details).toMatchObject({ id, archived: true });
-    expect((await pi.call("exa_research_status")).isError).toBe(true);
+    expect((await pi.call("exa_research_status")).details).toMatchObject({
+      active: false,
+      savedCycles: [{ id, archived: true }],
+    });
   });
 
   it("requires explicit attribution before exploratory dispatch", async () => {

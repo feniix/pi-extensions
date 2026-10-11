@@ -17,8 +17,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPiTools } from "@feniix/bridgekit/pi";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
-import { type CycleAgentFactory, type CycleRetrievalFactory, cyclePiRegistration } from "./cycle-pi.js";
-import { createExaTools, type ExaToolTimeouts } from "./tools.js";
+import {
+  type CycleAgentFactory,
+  type CycleInspectionFactory,
+  type CycleRetrievalFactory,
+  cyclePiRegistration,
+} from "./cycle-pi.js";
+import { createExaTools, type ExaToolsOptions, type ExaToolTimeouts } from "./tools.js";
 import { getExaRenderers } from "./tui-renderers.js";
 
 export {
@@ -137,7 +142,7 @@ export default function exaExtension(pi: ExtensionAPI) {
         );
         return selected;
       };
-      const agentFactory: CycleAgentFactory = (agentObserver) => {
+      const researchFactory = (options: Pick<ExaToolsOptions, "agentObserver" | "agentInspection">) => {
         let selected: ReturnType<CycleAgentFactory>;
         registerPiTools(
           {
@@ -149,12 +154,15 @@ export default function exaExtension(pi: ExtensionAPI) {
             resolveApiKey: () => resolveAuth(pi).apiKey || undefined,
             isToolEnabled: (name) => name === "web_research_exa" && isToolEnabledForConfig(pi, resolvedConfig, name),
             timeouts: resolvePiTimeouts(pi),
-            agentObserver,
+            ...options,
           }),
         );
         return selected;
       };
-      registerPiTools(cyclePiRegistration(pi, retrievalFactory, agentFactory), tools);
+      const agentFactory: CycleAgentFactory = (agentObserver) => researchFactory({ agentObserver });
+      const inspectionFactory: CycleInspectionFactory = (runId, observer) =>
+        researchFactory({ agentInspection: { runId, observer } });
+      registerPiTools(cyclePiRegistration(pi, retrievalFactory, agentFactory, inspectionFactory), tools);
       cyclesInstalled = true;
     }
   });
