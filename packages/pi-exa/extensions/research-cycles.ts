@@ -165,6 +165,18 @@ function code(error: unknown): string | undefined {
   return typeof error === "object" && error !== null && "code" in error ? String(error.code) : undefined;
 }
 
+function validateCandidateSourceReferences(record: ResearchCycle) {
+  for (const candidate of record.candidates ?? []) {
+    if (
+      candidate.sourceId !== undefined &&
+      !record.plan.sources.some((source) => source.id === candidate.sourceId && source.url === candidate.url)
+    )
+      throw new Error(
+        `Invalid candidate source reference for ${candidate.id}; correct conflicting source IDs/URLs before retrying the step.`,
+      );
+  }
+}
+
 function orphanExplorations(record: ResearchCycle) {
   for (const operation of record.ledger) {
     if (
@@ -337,11 +349,6 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         operationIds.add(provenance.operationId);
       }
       if (
-        candidate.sourceId !== undefined &&
-        !record.plan.sources.some((source) => source.id === candidate.sourceId && source.url === candidate.url)
-      )
-        throw new Error("Invalid candidate source reference.");
-      if (
         candidate.selectedProvenance?.some(
           (entry) =>
             !candidate.provenance.some((known) => canonicalResearchJson(entry) === canonicalResearchJson(known)),
@@ -349,10 +356,14 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
       )
         throw new Error("Invalid selected evidence provenance.");
     }
+    validateCandidateSourceReferences(record);
     return record;
   }
 
   async function write(record: ResearchCycle) {
+    // Enforce the same source identity invariant on publication and restore.
+    // A planner warning must never make durable curation unreadable.
+    validateCandidateSourceReferences(record);
     const target = filename(record.id);
     const temporary = `${target}.${randomUUID()}.tmp`;
     let file: FileHandle | undefined;

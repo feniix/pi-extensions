@@ -178,6 +178,34 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("returns an actionable same-step source conflict while retaining an inspectable original cycle", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+    offlineSearch.mockResolvedValue({
+      results: [{ id: "candidate", url: "https://candidate.example", title: "Candidate" }],
+      costDollars: { total: 0.007 },
+    });
+    const retrieved = await pi.call("web_search_exa", { query: "topic", cycleId: status.id });
+    const candidates = retrieved.details.candidates;
+    if (!Array.isArray(candidates) || !candidates[0]) throw new Error("Missing candidate");
+    const before = (await pi.call("exa_research_status")).details;
+    const conflict = await pi.call("exa_research_step", {
+      topic: "topic",
+      stage: "source_retrieval",
+      note: "Conflicting selection",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+      evidence: [{ candidateId: candidates[0].id, decision: "select", label: "Useful" }],
+      sources: [{ id: candidates[0].id, title: "Other", url: "https://other.example" }],
+    });
+    expect(conflict.isError).toBe(true);
+    expect(JSON.stringify(conflict.content)).toContain("Invalid candidate source reference");
+    expect((await pi.call("exa_research_status")).details).toEqual(before);
+    expect(offlineSearch).toHaveBeenCalledTimes(1);
+  });
   it("snapshots SDK evidence before receipt persistence can yield to another response mutation", async () => {
     const pi = await host();
     await pi.command?.handler("start topic", pi.context);

@@ -172,6 +172,55 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it("rejects a same-step source collision without committing an unreadable cycle or consuming the step", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
+    await controller.explorationEvidenceObserver(
+      cycle.id,
+      operation.id,
+      operation.requestHash,
+    )({
+      results: [{ url: "https://candidate.example", title: "Candidate" }],
+    });
+    const before = await controller.status();
+    const candidate = before?.candidates?.[0];
+    if (!candidate) throw new Error("Missing candidate");
+    await expect(
+      controller.recordStep({
+        topic: "question",
+        stage: "source_retrieval",
+        note: "Select",
+        thought_number: 1,
+        total_thoughts: 1,
+        next_step_needed: false,
+        evidence: [{ candidateId: candidate.id, decision: "select", label: "Useful" }],
+        sources: [{ id: candidate.id, title: "Conflicting source", url: "https://other.example" }],
+      }),
+    ).rejects.toThrow("Invalid candidate source reference");
+    expect(await controller.status()).toEqual(before);
+    await controller.recordStep({
+      topic: "question",
+      stage: "source_retrieval",
+      note: "Corrected selection",
+      thought_number: 1,
+      total_thoughts: 1,
+      next_step_needed: false,
+      evidence: [{ candidateId: candidate.id, decision: "select", label: "Useful" }],
+    });
+    expect(await controller.status()).toMatchObject({
+      revision: 1,
+      candidates: [{ decision: "selected", sourceId: candidate.id }],
+      plan: { sources: [{ id: candidate.id, url: candidate.url }] },
+    });
+    await controller.detach();
+    await controller.resume(cycle.id);
+    expect((await controller.status())?.revision).toBe(1);
+    await controller.detach();
+  });
   it("freezes returned candidate metadata before asynchronous storage work", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);
