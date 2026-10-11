@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { assessExploration, estimateExploration } from "../extensions/research-accounting.js";
 
 describe("exploratory accounting policy", () => {
+  const identity = { cycleId: "cycle", projectId: "project" };
   const grant = {
     kind: "exa-grant-v1",
     id: "grant-1",
@@ -16,7 +17,7 @@ describe("exploratory accounting policy", () => {
   it("requires operator permission even for a published-price estimate", () => {
     const estimate = estimateExploration("web_search_exa", { query: "topic", numResults: 5 });
     expect(estimate).toMatchObject({ dollars: 0.007, basis: expect.stringContaining("March 3, 2026") });
-    expect(assessExploration([], [], estimate, "web_search_exa")).toMatchObject({
+    expect(assessExploration([], [], estimate, "web_search_exa", identity)).toMatchObject({
       canDispatch: false,
       reason: "APPROVAL_REQUIRED",
       reportedDollars: 0,
@@ -26,13 +27,21 @@ describe("exploratory accounting policy", () => {
 
   it("uses the latest total ceiling rather than summing repeated approvals", () => {
     const estimate = estimateExploration("web_search_exa", {});
-    expect(assessExploration([grant, { ...grant, id: "grant-2" }], [], estimate, "web_search_exa")).toMatchObject({
+    expect(
+      assessExploration([grant, { ...grant, id: "grant-2" }], [], estimate, "web_search_exa", identity),
+    ).toMatchObject({
       canDispatch: true,
       ceilingDollars: 0.01,
       proposedDollars: 0.007,
     });
     expect(
-      assessExploration([grant, { ...grant, id: "grant-2", ceilingMicros: 6_000 }], [], estimate, "web_search_exa"),
+      assessExploration(
+        [grant, { ...grant, id: "grant-2", ceilingMicros: 6_000 }],
+        [],
+        estimate,
+        "web_search_exa",
+        identity,
+      ),
     ).toMatchObject({ canDispatch: false, reason: "INSUFFICIENT_BALANCE", ceilingDollars: 0.006 });
   });
 
@@ -50,7 +59,7 @@ describe("exploratory accounting policy", () => {
       createdAt: "2026-10-10T00:00:00Z",
     };
     const estimate = estimateExploration("web_search_exa", {});
-    expect(assessExploration([grant], [operation], estimate, "web_search_exa")).toMatchObject({
+    expect(assessExploration([grant], [operation], estimate, "web_search_exa", identity)).toMatchObject({
       canDispatch: false,
       reason: "INSUFFICIENT_BALANCE",
       pendingEstimatedDollars: 0.007,
@@ -61,6 +70,7 @@ describe("exploratory accounting policy", () => {
         [{ ...operation, status: "reported", reportedMicros: 1_000 }],
         estimate,
         "web_search_exa",
+        identity,
       ),
     ).toMatchObject({
       canDispatch: true,
@@ -83,7 +93,7 @@ describe("exploratory accounting policy", () => {
       createdAt: "2026-10-10T00:00:00Z",
     };
     expect(
-      assessExploration([grant], [unknown], estimateExploration("web_search_exa", {}), "web_search_exa"),
+      assessExploration([grant], [unknown], estimateExploration("web_search_exa", {}), "web_search_exa", identity),
     ).toMatchObject({ canDispatch: false, reason: "UNKNOWN_LIABILITY", unresolvedOperationIds: ["unknown-1"] });
   });
 
@@ -102,16 +112,22 @@ describe("exploratory accounting policy", () => {
       createdAt: "2026-10-10T00:00:00Z",
     };
     expect(
-      assessExploration([grant], [restored], estimateExploration("web_search_exa", {}), "web_search_exa"),
+      assessExploration([grant], [restored], estimateExploration("web_search_exa", {}), "web_search_exa", identity),
     ).toMatchObject({ reportedDollars: 0.002, canDispatch: false, reason: "UNKNOWN_LIABILITY" });
   });
 
   it("rejects malformed or duplicate recognized grants rather than falling back to an older approval", () => {
     const estimate = estimateExploration("web_search_exa", {});
     expect(() =>
-      assessExploration([grant, { ...grant, id: "grant-2", ceilingMicros: -1 }], [], estimate, "web_search_exa"),
+      assessExploration(
+        [grant, { ...grant, id: "grant-2", ceilingMicros: -1 }],
+        [],
+        estimate,
+        "web_search_exa",
+        identity,
+      ),
     ).toThrow("Invalid accounting record");
-    expect(() => assessExploration([grant, grant], [], estimate, "web_search_exa")).toThrow(
+    expect(() => assessExploration([grant, grant], [], estimate, "web_search_exa", identity)).toThrow(
       "Duplicate accounting identity",
     );
   });

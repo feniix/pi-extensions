@@ -171,6 +171,31 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it.each([
+    "grant-cycle",
+    "grant-project",
+    "ledger-cycle",
+  ])("rejects restored accounting identity outside its containing cycle: %s", async (mismatch) => {
+    const root = await mkdtemp(join(tmpdir(), "exa-accounting-identity-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "operator" });
+    const cycle = await controller.start("topic");
+    await controller.grantBudget(cycle.id, 1);
+    await controller.reserveExploration("web_search_exa", { query: "topic" });
+    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+    const saved = JSON.parse(await readFile(path, "utf8"));
+    if (mismatch === "grant-cycle") saved.grants[0].cycleId = "foreign-cycle";
+    else if (mismatch === "grant-project") saved.grants[0].projectId = "foreign-project";
+    else saved.ledger[0].cycleId = "foreign-cycle";
+    const corrupted = JSON.stringify(saved);
+    await writeFile(path, corrupted);
+    await expect(controller.inspect(cycle.id)).rejects.toThrow("Accounting identity conflict");
+    await expect(controller.reserveExploration("web_search_exa", { query: "new" })).rejects.toThrow(
+      "Accounting identity conflict",
+    );
+    expect(await readFile(path, "utf8")).toBe(corrupted);
+  });
+
   it("durably shares one operator ceiling between simultaneous exploratory reservations", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-accounting-"));
     roots.push(root);

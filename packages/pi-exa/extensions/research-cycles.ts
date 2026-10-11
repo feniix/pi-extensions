@@ -285,7 +285,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     // Validate semantic identity invariants and derive diagnostics from facts,
     // not cached evidence/inspection flags from disk.
     record.plan = createResearchPlanner(record.plan).snapshot();
-    validateAccountingRecords(record.grants, record.ledger);
+    validateAccountingRecords(record.grants, record.ledger, { cycleId: record.id, projectId: record.projectId });
     return record;
   }
 
@@ -466,7 +466,10 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           assertArtifactTarget(record, reference);
           if (record.archived || record.status !== "planning") throw new Error("CYCLE_NOT_EXECUTABLE");
           const estimate = estimateExploration(tool, request);
-          const assessment = assessExploration(record.grants, record.ledger, estimate, tool);
+          const assessment = assessExploration(record.grants, record.ledger, estimate, tool, {
+            cycleId: record.id,
+            projectId: record.projectId,
+          });
           if (!assessment.canDispatch)
             throw new Error(`${assessment.reason}: inspect accounting and obtain operator approval.`);
           if (estimate.dollars === null) throw new Error("UNCERTAINTY_APPROVAL_REQUIRED");

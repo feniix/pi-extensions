@@ -67,7 +67,17 @@ function addMoney(left: number, right: number) {
   return sum;
 }
 
-export function validateAccountingRecords(grants: readonly object[], ledger: readonly object[]) {
+export interface AccountingIdentity {
+  cycleId: string;
+  projectId: string;
+}
+
+export function validateAccountingRecords(
+  grants: readonly object[],
+  ledger: readonly object[],
+  identity: AccountingIdentity,
+) {
+  if (!identity?.cycleId || !identity.projectId) throw new Error("Accounting target is required.");
   const ids = new Set<string>();
   for (const record of [...grants, ...ledger]) {
     const kind = "kind" in record ? record.kind : undefined;
@@ -79,6 +89,13 @@ export function validateAccountingRecords(grants: readonly object[], ledger: rea
           : undefined;
     if (!schema) continue;
     if (!Value.Check(schema, record)) throw new Error("Invalid accounting record.");
+    if (
+      !("cycleId" in record) ||
+      record.cycleId !== identity.cycleId ||
+      (kind === "exa-grant-v1" && (!("projectId" in record) || record.projectId !== identity.projectId))
+    ) {
+      throw new Error("Accounting identity conflict.");
+    }
     if (!("id" in record) || typeof record.id !== "string") throw new Error("Invalid accounting record identity.");
     if (ids.has(record.id)) throw new Error("Duplicate accounting identity.");
     ids.add(record.id);
@@ -120,8 +137,9 @@ export function assessExploration(
   ledger: readonly object[],
   estimate: ExplorationEstimate,
   tool: string,
+  identity: AccountingIdentity,
 ) {
-  validateAccountingRecords(grants, ledger);
+  validateAccountingRecords(grants, ledger, identity);
   const known = grants.filter((grant): grant is SpendingGrant => Value.Check(spendingGrantSchema, grant));
   const latest = known.at(-1);
   const proposed = estimate.dollars === null ? null : moneyMicros(estimate.dollars);
