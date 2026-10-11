@@ -5,6 +5,7 @@ import type { ExtensionAPI, ExtensionContext, ExtensionToolContext } from "@eare
 import { createEventBus, createExtensionRuntime } from "@earendil-works/pi-coding-agent";
 import type { PiToolRegistration } from "@feniix/bridgekit/pi";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseArgs } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js";
 import { loadExtensionFromFactory } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js";
@@ -12,15 +13,18 @@ import { cyclePiRegistration } from "../extensions/cycle-pi.js";
 import exaExtension from "../extensions/index.js";
 
 const offlineSearch = vi.hoisted(() => vi.fn(async () => ({ results: [], requestId: "offline" })));
+const offlineCreate = vi.hoisted(() => vi.fn(async () => ({ id: "offline", status: "completed" })));
 vi.mock("exa-js", () => ({
   Exa: class {
     search = offlineSearch;
+    agent = { runs: { create: offlineCreate } };
   },
 }));
 
 const directories: string[] = [];
 afterEach(async () => {
   offlineSearch.mockClear();
+  offlineCreate.mockClear();
   vi.unstubAllEnvs();
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
@@ -39,6 +43,7 @@ async function host(enabled = true) {
         "exa_research_summary",
         "exa_research_reset",
         "web_search_exa",
+        "web_research_exa",
       ],
       apiKey: "offline-fixture-key",
     }),
@@ -124,6 +129,70 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("keeps query optional for active compilation but mandatory for unrelated standalone research", async () => {
+    const pi = await host();
+    const schema = pi.tools.get("web_research_exa")?.parameters;
+    if (!schema) throw new Error("Missing research schema");
+    expect(Value.Check(schema, { researchMode: "active" })).toBe(true);
+    expect((await pi.call("web_research_exa", { researchMode: "standalone" })).isError).toBe(true);
+    expect(offlineCreate).not.toHaveBeenCalled();
+  });
+
+  it("does not let compiled cycle attribution become unrelated standalone work", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    const attributed = await pi.call("web_research_exa", {
+      query: "topic",
+      metadata: { cycleId: status.id, revision: "0" },
+      researchMode: "standalone",
+    });
+    expect(attributed.isError).toBe(true);
+    expect(offlineCreate).not.toHaveBeenCalled();
+  });
+
+  it("previews the compiled artifact and reports conflicts without dispatching paid work", async () => {
+    const pi = await host();
+    await pi.command?.handler("start pricing", pi.context);
+    const incomplete = await pi.call("exa_research_summary", { mode: "payload" });
+    expect(incomplete.isError).toBe(true);
+    expect(incomplete.details).toMatchObject({
+      issues: expect.arrayContaining([expect.objectContaining({ code: "MISSING_TASK_SCHEMA" })]),
+    });
+    expect(
+      (
+        await pi.call("exa_research_step", {
+          topic: "pricing",
+          stage: "framing",
+          note: "PRIVATE_STEP_CHATTER",
+          thought_number: 1,
+          total_thoughts: 1,
+          next_step_needed: false,
+          expectedRevision: 0,
+          executionPlan: { goal: "Compare prices", taskSchema: { type: "object" } },
+        })
+      ).isError,
+    ).not.toBe(true);
+    const summary = await pi.call("exa_research_summary", { mode: "payload", expectedRevision: 1 });
+    expect(summary.isError).not.toBe(true);
+    const artifact = summary.details.artifact;
+    expect(artifact).toMatchObject({ artifactVersion: 1, revision: 1, request: { effort: "medium" } });
+    expect((await pi.call("exa_research_summary")).details.artifact).toEqual(artifact);
+    if (typeof artifact !== "object" || !artifact || !("hash" in artifact)) throw new Error("Missing artifact hash");
+    expect((await pi.call("web_research_exa", { artifactHash: artifact.hash, effort: "high" })).details).toMatchObject({
+      issues: [expect.objectContaining({ code: "EXECUTION_CONFLICT", path: "request.effort" })],
+    });
+    const gated = await pi.call("web_research_exa", { artifactHash: artifact.hash });
+    expect(gated.isError).toBe(true);
+    expect(gated.content[0]).toMatchObject({ text: expect.stringContaining("no request was dispatched") });
+    expect((await pi.call("exa_research_summary", { mode: "payload", expectedRevision: 0 })).details).toMatchObject({
+      issues: [expect.objectContaining({ code: "STALE_REVISION" })],
+    });
+    expect(JSON.stringify(artifact)).not.toContain("PRIVATE_STEP_CHATTER");
+    expect(offlineSearch).not.toHaveBeenCalled();
+    expect(offlineCreate).not.toHaveBeenCalled();
+  });
+
   it("activates after real Pi flag application on startup and reload", async () => {
     const hostContext = await host(false);
     expect([...parseArgs(["--exa-enable-cycles"]).unknownFlags.keys()]).toEqual(["exa-enable-cycles"]);

@@ -4,9 +4,40 @@ import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil
 import type { PiToolRegistration } from "@feniix/bridgekit/pi";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import {
+  assertArtifactTarget,
+  compileResearchArtifact,
+  executionPlanSchema,
+  ResearchArtifactError,
+} from "./research-artifacts.js";
 import { createResearchCycles, type ResearchCycle, type ResearchCycles } from "./research-cycles.js";
 import { createResearchPlanner } from "./research-planner.js";
 import { exaResearchStepParams, exaResearchSummaryParams } from "./schemas.js";
+
+const targetProperties = {
+  cycleId: Type.Optional(Type.String()),
+  expectedRevision: Type.Optional(Type.Integer({ minimum: 0 })),
+};
+const referenceProperties = {
+  ...targetProperties,
+  artifactHash: Type.Optional(Type.String()),
+};
+const referenceParams = Type.Object(referenceProperties, { additionalProperties: false });
+const stepParams = Type.Object(
+  {
+    ...exaResearchStepParams.properties,
+    ...targetProperties,
+    executionPlan: Type.Optional(executionPlanSchema),
+  },
+  { additionalProperties: false },
+);
+const summaryParams = Type.Object(
+  {
+    ...exaResearchSummaryParams.properties,
+    ...referenceProperties,
+  },
+  { additionalProperties: false },
+);
 
 function view(record: ResearchCycle) {
   const { owner: _owner, ...visible } = record;
@@ -105,6 +136,20 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
       const paid = tool.name.startsWith("web_");
       pi.registerTool({
         ...tool,
+        ...(tool.name === "exa_research_step"
+          ? {
+              parameters: stepParams,
+              description:
+                "Update the active durable plan. executionPlan fields replace their whole persisted field; omitted fields remain unchanged. Set a goal, explicit selectedEvidence source IDs/labels, optional input.data/exclusion processing rows, draft-07 root-object taskSchema and execution controls before preview. This does not approve or dispatch work.",
+            }
+          : {}),
+        ...(tool.name === "exa_research_summary"
+          ? {
+              parameters: summaryParams,
+              description:
+                "Preview the versioned compiled research request with mode execution_plan or payload; brief/source_pack inspect curated planner facts. Compile errors name fields to fix. Artifacts do not authorize paid work.",
+            }
+          : {}),
         ...(tool.name === "exa_research_reset"
           ? {
               description:
@@ -115,11 +160,16 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
           ? {
               parameters: Type.Evaluate(
                 Type.Intersect([
-                  tool.parameters,
+                  tool.name === "web_research_exa" ? Type.Omit(tool.parameters, ["query"]) : tool.parameters,
                   Type.Object({
                     researchMode: Type.Optional(Type.Union([Type.Literal("active"), Type.Literal("standalone")])),
-                    cycleId: Type.Optional(Type.String()),
-                    expectedRevision: Type.Optional(Type.Integer({ minimum: 0 })),
+                    ...targetProperties,
+                    ...(tool.name === "web_research_exa"
+                      ? {
+                          query: Type.Optional(Type.String({ minLength: 1 })),
+                          artifactHash: Type.Optional(Type.String()),
+                        }
+                      : {}),
                   }),
                 ]),
               ),
@@ -136,20 +186,38 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
             const record = explicitStandalone ? undefined : await cycles.status();
             if (paid) {
               if (typeof params !== "object" || params === null) throw new Error("Invalid tool arguments.");
-              const { researchMode, cycleId, expectedRevision, ...standalone } = params as Record<string, unknown>;
+              const { researchMode, cycleId, expectedRevision, artifactHash, ...standalone } = params as Record<
+                string,
+                unknown
+              >;
               if (researchMode !== undefined && researchMode !== "active" && researchMode !== "standalone") {
                 throw new Error("Invalid researchMode.");
               }
-              if (cycleId !== undefined && cycleId !== record?.id) throw new Error("Active cycle ID mismatch.");
-              if (expectedRevision !== undefined && expectedRevision !== record?.revision)
-                throw new Error("Stale cycle revision.");
+              const reference = { cycleId, expectedRevision, artifactHash };
+              if (!Value.Check(referenceParams, reference)) throw new Error("Invalid artifact reference.");
+              if (record) assertArtifactTarget(record, reference);
+              else if (cycleId !== undefined || expectedRevision !== undefined)
+                throw new Error("No active research cycle.");
               if (researchMode === "active" && !record) throw new Error("No active research cycle.");
               if (record && researchMode !== "standalone") {
+                if (tool.name === "web_research_exa") {
+                  compileResearchArtifact(record, { ...reference, executionFields: standalone });
+                }
                 throw new Error("Integrated paid research is not available in this slice; no request was dispatched.");
               }
-              if (standalone.previousRunId !== undefined) {
-                if (typeof standalone.previousRunId !== "string") throw new Error("Invalid previousRunId.");
+              if (artifactHash !== undefined) throw new Error("Artifact references require active-cycle research.");
+              const metadata = standalone.metadata;
+              const attributedCycleId =
+                typeof metadata === "object" && metadata !== null && "cycleId" in metadata
+                  ? metadata.cycleId
+                  : undefined;
+              if (standalone.previousRunId !== undefined && typeof standalone.previousRunId !== "string")
+                throw new Error("Invalid previousRunId.");
+              if (attributedCycleId !== undefined || standalone.previousRunId !== undefined) {
                 const saved = await cycles.list();
+                if (saved.some((cycle) => cycle.id === attributedCycleId)) {
+                  throw new Error("Attributed cycle requests cannot be dispatched as unrelated standalone work.");
+                }
                 if (
                   saved.some((cycle) =>
                     cycle.attempts.some((attempt) => "runId" in attempt && attempt.runId === standalone.previousRunId),
@@ -158,12 +226,13 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
                   throw new Error("Recorded cycle attempts cannot be continued as unrelated standalone work.");
                 }
               }
+              if (!Value.Check(tool.parameters, standalone)) throw new Error("Invalid standalone tool arguments.");
               return tool.execute(id, standalone, signal, onUpdate, ctx);
             }
             if (!record) throw new Error("No active research cycle. Use /exa-research start or resume.");
             switch (tool.name) {
               case "exa_research_step":
-                if (!Value.Check(exaResearchStepParams, params)) throw new Error("Invalid research step arguments.");
+                if (!Value.Check(stepParams, params)) throw new Error("Invalid research step arguments.");
                 {
                   const updated = await cycles.recordStep(params);
                   return result({ ...updated, cycle: view(updated.cycle) });
@@ -171,8 +240,13 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
               case "exa_research_status":
                 return result(view(record));
               case "exa_research_summary":
-                if (!Value.Check(exaResearchSummaryParams, params))
-                  throw new Error("Invalid research summary arguments.");
+                if (!Value.Check(summaryParams, params)) throw new Error("Invalid research summary arguments.");
+                assertArtifactTarget(record, params);
+                if (params.mode === undefined || params.mode === "payload" || params.mode === "execution_plan") {
+                  const artifact = compileResearchArtifact(record, params);
+                  return result({ artifact, canExecute: false });
+                }
+                if (params.artifactHash !== undefined) compileResearchArtifact(record, params);
                 return result(
                   view(record),
                   `Cycle: ${record.id}\nRevision: ${record.revision}\nStatus: ${record.status}\n${createResearchPlanner(record.plan).getSummary(params)}`,
@@ -185,7 +259,11 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
                 return tool.execute(id, params, signal, onUpdate, ctx);
             }
           } catch (error) {
-            return result({}, error instanceof Error ? error.message : String(error), true);
+            return result(
+              error instanceof ResearchArtifactError ? { issues: error.issues } : {},
+              error instanceof Error ? error.message : String(error),
+              true,
+            );
           }
         },
       });

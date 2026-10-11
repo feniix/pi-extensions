@@ -166,13 +166,87 @@ inspection diagnostics are recomputed from retained facts.
 Unknown execution remains unknown after
 resume; completed records cannot be edited back into executable planning.
 
-This release implements **local persistence only**. Integrated paid retrieval/
+This release implements **local persistence and request compilation only**. Integrated paid retrieval/
 Agent execution and `/exa-research approve` are unavailable until their safety
 slices land. Active-cycle web calls fail before dispatch; `researchMode:
 "standalone"` explicitly selects unrelated legacy retrieval.
 With no active cycle, normal standalone web tools remain available.
-Continuations identifying a saved cycle attempt remain blocked even with a
-standalone override or after archival.
+Continuations identifying a saved cycle attempt and requests carrying a saved
+cycle's `metadata.cycleId` remain blocked even with a standalone override or after archival.
+
+#### Structured plans and artifact previews
+
+In cycle mode, `exa_research_step` accepts `executionPlan` alongside the existing
+required step fields. For example, after `/exa-research start pricing`:
+
+```json
+{
+  "topic": "pricing",
+  "stage": "framing",
+  "note": "Frame the comparison",
+  "thought_number": 1,
+  "total_thoughts": 2,
+  "next_step_needed": true,
+  "expectedRevision": 0,
+  "executionPlan": {
+    "goal": "Compare current official US prices",
+    "scope": ["US"],
+    "constraints": ["Distinguish uncertain claims"],
+    "taskSchema": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string" },
+        "citations": { "type": "array", "items": { "type": "string", "format": "uri" } }
+      },
+      "required": ["summary", "citations"],
+      "additionalProperties": false
+    },
+    "controls": { "effort": "medium" }
+  }
+}
+```
+
+Each supplied `executionPlan` field **replaces that whole field**. Omitted fields
+remain unchanged; objects and arrays are not deep-merged. `controls: {}` restores
+the medium/default controls; `input: {}` clears processing/exclusion rows;
+`selectedEvidence: []` clears the selection. `taskSchema: null` clears the contract
+and blocks compilation; `previousRunId: null` clears continuation.
+
+Use `selectedEvidence: [{ "sourceId": "S1", "label": "Official pricing", "notes": "Relevant table" }]`
+only after recording that source (the same step may record and select it).
+Selected URLs, provenance and notes become labeled **untrusted query context**.
+Only explicitly supplied `input.data` and `input.exclusion` arrays become
+processing/exclusion records; evidence is never converted into rows.
+Save only curated, nonsecret values: explicit rows may contain sensitive data.
+
+`exa_research_summary` defaults to compilation in cycle mode; `execution_plan`
+and `payload` do the same. `brief` / `source_pack` retain read-only planner views.
+The returned `details.artifact` includes artifact version, cycle/revision,
+brief, selected evidence, output contract, controls, optional input/continuation,
+the actual SDK-shaped `request`, and a canonical SHA-256 `hash`. No raw step
+chatter or unselected candidate content enters that request. The hash is an
+identity check, not authorization or remote idempotency.
+
+Persist a goal and draft-07 root-object task schema before compiling. Local
+schema/result validation supports local references and standard formats, without
+Deep Search property/depth limits. Unknown keywords/formats, async schemas and
+unresolved remote references fail closed; validation never fetches schemas.
+Schema dialect is draft-07 when `$schema` is omitted.
+
+Controls allow `minimal`, `low`, `medium` (default), `high`, `xhigh`, or `auto`;
+cycle `max` / `ultra` remain deferred. `controls.budget.maxCostDollars` is only
+for `auto`, within the documented $1–$100 server range, **not a cycle spending
+grant or hard cycle cap**. Optional `controls.dataSources` names up to five
+Connect providers but grants no provider/contact permission. Optional
+`previousRunId` describes a new continuation run, never recovery.
+
+`cycleId`, `expectedRevision` and `artifactHash` on previews/active Agent calls
+assert the intended snapshot. Active Agent `query` may be omitted. Explicit
+execution fields must equal the compiled authoritative values: scalars exactly,
+JSON objects ignoring key order, arrays retaining order. Conflicts identify the
+field to update; execution never adds fields, deep-merges or mutates the plan.
+Even a valid artifact has `canExecute: false` in this rollout.
 
 The storage uses short exclusive filesystem transactions and durable replacement,
 including synchronization of the namespace's containing directories.
