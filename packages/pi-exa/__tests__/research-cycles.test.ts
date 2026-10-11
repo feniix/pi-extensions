@@ -172,6 +172,101 @@ describe("research storage availability regressions", () => {
 });
 
 describe("durable research cycles", () => {
+  it.each([
+    "detach",
+    "archive",
+  ] as const)("prevents candidate publication when %s revokes capture during temporary-file sync", async (action) => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const handle = await original.open(...args);
+      if (String(args[0]).endsWith(".tmp")) {
+        const sync = handle.sync.bind(handle);
+        vi.spyOn(handle, "sync").mockImplementationOnce(async () => {
+          enter();
+          await hold;
+          await sync();
+        });
+      }
+      return handle;
+    });
+    const pending = controller.explorationEvidenceObserver(
+      cycle.id,
+      operation.id,
+      operation.requestHash,
+    )({
+      results: [{ url: "https://example.com/revoked", title: "Revoked" }],
+    });
+    await entered;
+    const ending = controller[action]();
+    release();
+    await expect(pending).rejects.toThrow("capture was detached before publication");
+    await ending;
+    expect((await controller.inspect(cycle.id)).candidates ?? []).toEqual([]);
+    vi.mocked(fs.open).mockReset();
+    await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.009 });
+    expect((await controller.inspect(cycle.id)).ledger).toMatchObject([{ reportedMicros: 9_000 }]);
+  });
+
+  it("reports an already-published capture truthfully when archive revokes during directory sync", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const options = { root: join(root, "store"), cwd: root, sessionId: "one" };
+    const controller = await createResearchCycles(options);
+    const cycle = await controller.start("question");
+    await controller.grantBudget(cycle.id, 1);
+    const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    let enter!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const handle = await original.open(...args);
+      if (String(args[0]) === join(options.root, controller.projectId)) {
+        const sync = handle.sync.bind(handle);
+        vi.spyOn(handle, "sync").mockImplementationOnce(async () => {
+          enter();
+          await hold;
+          await sync();
+        });
+      }
+      return handle;
+    });
+    const pending = controller.explorationEvidenceObserver(
+      cycle.id,
+      operation.id,
+      operation.requestHash,
+    )({
+      results: [{ url: "https://example.com/published", title: "Published" }],
+    });
+    await entered;
+    const archiving = controller.archive();
+    release();
+    expect(await pending).toMatchObject({ captured: true });
+    await archiving;
+    expect(await controller.inspect(cycle.id)).toMatchObject({
+      archived: true,
+      candidates: [{ url: "https://example.com/published" }],
+    });
+  });
   it("refreshes candidate-owned metadata on explicit reselection while preserving curated source and selection notes", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);

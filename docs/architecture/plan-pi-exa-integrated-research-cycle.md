@@ -180,6 +180,10 @@ source facts and provenance enter previews; input rows remain explicit.
 Automatic capture requires the original active planning cycle and runtime
 ownership. Detach/archive/ownership change prevents delayed callbacks from
 changing evidence; late accounting remains a separate operation-bound capability.
+The generation fence and final candidate namespace replacement are one synchronous
+publication step under the filesystem lock. Revocation during asynchronous
+preparation prevents publication; revocation after replacement does not undo
+the already-published capture. File/directory synchronization remains required.
 Candidate metadata is backward-compatible optional durable state, not a raw
 response archive. Standalone, default opt-out and MCP calls do not capture it.
 

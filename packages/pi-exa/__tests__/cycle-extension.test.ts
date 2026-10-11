@@ -1,3 +1,4 @@
+import * as nativeFs from "node:fs";
 import * as fs from "node:fs/promises";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,6 +17,10 @@ import exaExtension from "../extensions/index.js";
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof fs>();
   return { ...original, unlink: vi.fn(original.unlink), rename: vi.fn(original.rename) };
+});
+vi.mock("node:fs", async (importOriginal) => {
+  const original = await importOriginal<typeof nativeFs>();
+  return { ...original, renameSync: vi.fn(original.renameSync) };
 });
 
 const offlineSearch = vi.hoisted(() =>
@@ -54,6 +59,7 @@ const directories: string[] = [];
 afterEach(async () => {
   vi.mocked(fs.unlink).mockReset();
   vi.mocked(fs.rename).mockReset();
+  vi.mocked(nativeFs.renameSync).mockReset();
   offlineSearch.mockReset().mockResolvedValue({ results: [], requestId: "offline" });
   offlineCreate.mockClear();
   for (const endpoint of Object.values(offlineEndpoints)) endpoint.mockClear();
@@ -339,12 +345,9 @@ describe("Pi cycle commands and tools", () => {
     await pi.command?.handler("start topic", pi.context);
     const status = (await pi.call("exa_research_status")).details;
     await pi.command?.handler(`approve ${status.id} 1`, pi.context);
-    const original = await vi.importActual<typeof fs>("node:fs/promises");
     offlineSearch.mockImplementationOnce(async () => {
-      let replacements = 0;
-      vi.mocked(fs.rename).mockImplementation(async (...args) => {
-        if (++replacements === 2) throw new Error("candidate persistence denied");
-        return original.rename(...args);
+      vi.mocked(nativeFs.renameSync).mockImplementationOnce(() => {
+        throw new Error("candidate persistence denied");
       });
       return {
         results: [

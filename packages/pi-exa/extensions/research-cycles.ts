@@ -4,7 +4,7 @@
  */
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, renameSync } from "node:fs";
 import { chmod, type FileHandle, lstat, mkdir, open, readdir, realpath, rename, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -360,7 +360,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     return record;
   }
 
-  async function write(record: ResearchCycle) {
+  async function write(record: ResearchCycle, beforePublish?: () => void) {
     // Enforce the same source identity invariant on publication and restore.
     // A planner warning must never make durable curation unreadable.
     validateCandidateSourceReferences(record);
@@ -373,7 +373,13 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
       await file.sync();
       await file.close();
       file = undefined;
-      await rename(temporary, target);
+      if (beforePublish) {
+        // Only the final namespace replacement is synchronous: no JS lifecycle
+        // revocation can interleave between this fence and publication. All
+        // preparation/fsync remains async, under the existing exclusive lock.
+        beforePublish();
+        renameSync(temporary, target);
+      } else await rename(temporary, target);
       await syncDirectory(directory);
     } finally {
       await file?.close();
@@ -588,6 +594,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
       const captureGeneration = generation;
       const current = () => captureGeneration === generation && activeId === cycleId;
       return async (response: unknown) => {
+        if (!current()) return { captured: false };
         // This temporary snapshot is never written as a response archive.
         // The policy below retains only bounded source metadata.
         const snapshot = structuredClone(response);
@@ -615,9 +622,13 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             const candidates = captureCandidates(snapshot, provenance, record.candidates);
             if (canonicalResearchJson(candidates) !== canonicalResearchJson(record.candidates ?? [])) {
               record.candidates = candidates;
-              await write(record);
+              await write(record, () => {
+                if (!current()) throw new Error("Research evidence capture was detached before publication.");
+              });
             }
-            return { captured: current(), candidateCount: candidates.length };
+            // Publication is the linearization point. A later revocation during
+            // directory sync does not undo a capture already committed.
+            return { captured: true, candidateCount: candidates.length };
           }),
         );
       };

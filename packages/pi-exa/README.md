@@ -352,7 +352,11 @@ Criteria still need explicit evidence-backed updates, not automatic satisfaction
 
 Candidate metadata, selected sources and curated notes survive explicit resume.
 Old capture capabilities are fenced on detach/archive/reattach; late accounting
-can still reconcile its original operation. If candidate persistence fails after
+can still reconcile its original operation.
+Revocation before the atomic candidate namespace replacement prevents publication;
+a capture already published before revocation remains recorded, including when
+directory synchronization is still pending.
+If candidate persistence fails after
 cost reconciliation, the returned content is preserved with a durability warning:
 explicitly curate it instead of repeating paid work. Standalone/default-opt-out
 and MCP calls do not install candidate capture.
