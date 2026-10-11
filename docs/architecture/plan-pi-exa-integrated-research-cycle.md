@@ -213,6 +213,27 @@ under the existing opt-in flag and exact operator permissions, with all
 unavailable recovery/replacement paths failing closed. Do not invent a new flag
 or test-only bypass. Evidence: `/tmp/pi-exa-157-jev-activation-{request,response}.json`.
 
+## #158 delegated recovery decisions
+
+Jev selected explicit Pi-only actions on existing tools: status `action=resume`
+with a saved cycle ID, and Agent `researchMode=recover` for the existing
+attempt. Default status remains inspection; neither startup nor saved-state
+discovery implicitly resumes or grants spending consent. Standalone/MCP
+contracts remain unchanged.
+
+Recovery is one bounded SDK `agent.runs.get(id)` per explicit invocation, not
+`create(previousRunId)`, an automatic polling loop or remote cancellation.
+Local timeout/abort leaves the original attempt outcome uncertain; attached
+call-local observers may still reconcile a late genuine reply. Missing IDs,
+404/auth/network failures remain actionable unknown, not fabricated remote
+failure. GET must bind the original saved attempt and validate/reprocess with
+its frozen artifact/schema, without a new operation, grant or submission.
+Source: Exa get-a-run primary documentation and pinned SDK 2.23.0.
+Evidence: `/tmp/pi-exa-158-jev-{request,response}.json`.
+
+The SDK inspection slice is implemented first; integrated resume/recovery
+actions remain gated until controller and registered Pi regressions pass.
+
 ## #157 review decisions
 
 Fresh full-diff review identified two non-blocking display/diagnostic gaps.

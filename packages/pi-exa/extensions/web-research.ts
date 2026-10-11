@@ -44,6 +44,27 @@ export interface AgentLifecycleObserver {
   raw: (phase: "create" | "get" | "cancel", run: AgentRun) => Promise<void>;
 }
 
+export interface AgentInspectionOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  observer?: {
+    beforeGet: () => Promise<() => void>;
+    raw: AgentLifecycleObserver["raw"];
+  };
+}
+
+export class AgentInspectionInterruptedError extends Error {
+  constructor(
+    readonly runId: string,
+    readonly reason: "timeout" | "aborted",
+  ) {
+    super(
+      `Inspection of Agent run ${runId} stopped locally (${reason}); no remote cancellation or new submission was requested. Inspect the same existing attempt.`,
+    );
+    this.name = "AgentInspectionInterruptedError";
+  }
+}
+
 export class AgentResearchCancelledError extends Error {
   readonly runId?: string;
   readonly cancelError?: string;
@@ -213,6 +234,53 @@ function formatCompletedRun(run: AgentRun, outputSchema: DeepOutputSchema): Tool
       ...(run.completedAt ? { completedAt: run.completedAt } : {}),
       ...(formatted.parsedOutput === undefined ? {} : { parsedOutput: formatted.parsedOutput }),
     },
+  };
+}
+
+/**
+ * One explicit existing-run GET. Not continuation/create or an automatic
+ * poll/cancel lifecycle. The original-attempt observer owns result validation
+ * and accounting; this helper exposes no raw response/output archive.
+ */
+export async function inspectResearchRun(
+  apiKey: string,
+  runId: string,
+  options: AgentInspectionOptions = {},
+): Promise<ToolPerformResult> {
+  if (!/^[A-Za-z0-9_.:-]{1,200}$/.test(runId)) throw new Error("Invalid Agent run ID.");
+  const deadline = Date.now() + (options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS);
+  const assertWait = () => {
+    if (options.signal?.aborted) throw new AgentInspectionInterruptedError(runId, "aborted");
+    if (Date.now() >= deadline) throw new AgentInspectionInterruptedError(runId, "timeout");
+  };
+  assertWait();
+  const exa = getExaClient(apiKey);
+  const guard = await options.observer?.beforeGet();
+  assertWait();
+  // No await between the ownership/generation fence and the single SDK GET.
+  guard?.();
+  const observed = exa.agent.runs.get(runId).then(async (reply) => {
+    if (reply.id !== runId) throw new Error("Agent inspection remote identity conflict.");
+    if (!["queued", "running", "completed", "failed", "cancelled"].includes(reply.status))
+      throw new Error("Invalid Agent inspection remote status.");
+    try {
+      await options.observer?.raw("get", reply);
+    } catch {
+      throw new AgentLifecycleObservationError(runId);
+    }
+    return reply;
+  });
+  let run: AgentRun;
+  try {
+    run = await withLifecycleBound(observed, deadline, options.signal);
+  } catch (error) {
+    if (error instanceof AgentLifecycleAbortError) throw new AgentInspectionInterruptedError(runId, "aborted");
+    if (error instanceof AgentLifecycleDeadlineError) throw new AgentInspectionInterruptedError(runId, "timeout");
+    throw error;
+  }
+  return {
+    text: `Existing Agent run ${runId}: ${run.status}. This was one GET inspection, not replacement research or remote cancellation.`,
+    details: { runId, remoteStatus: run.status, inspectionOnly: true },
   };
 }
 
