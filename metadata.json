@@ -1,0 +1,39 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4NPYFNFMFQZG4W6RCG148TV",
+  "strategy": "manual-commit",
+  "branch": "pi-exa-cycle/accounting",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "packages/pi-exa/__tests__/cycle-extension.test.ts",
+    "packages/pi-exa/__tests__/research-accounting.test.ts",
+    "packages/pi-exa/__tests__/research-cycles.test.ts",
+    "packages/pi-exa/extensions/cycle-pi.ts",
+    "packages/pi-exa/extensions/exa-client.ts",
+    "packages/pi-exa/extensions/index.ts",
+    "packages/pi-exa/extensions/research-accounting.ts",
+    "packages/pi-exa/extensions/research-cycles.ts",
+    "packages/pi-exa/extensions/tools.ts",
+    "packages/pi-exa/extensions/web-answer.ts",
+    "packages/pi-exa/extensions/web-fetch.ts",
+    "packages/pi-exa/extensions/web-find-similar.ts",
+    "packages/pi-exa/extensions/web-search-advanced.ts",
+    "packages/pi-exa/extensions/web-search.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 137073,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 4192128,
+    "output_tokens": 41455,
+    "api_call_count": 40
+  }
+}
