@@ -57,7 +57,10 @@ async function host(enabled = true) {
   );
   const tools = new Map<string, Parameters<PiToolRegistration["registerTool"]>[0]>();
   const handlers = new Map<string, (event: never, context: ExtensionContext) => Promise<void>>();
-  const commands = new Map<string, { handler: (args: string, context: ExtensionContext) => Promise<void> }>();
+  const commands = new Map<
+    string,
+    { description?: string; handler: (args: string, context: ExtensionContext) => Promise<void> }
+  >();
   const notify = vi.fn();
   const context = {
     cwd: directory,
@@ -69,8 +72,10 @@ async function host(enabled = true) {
     getFlag: (name: string) =>
       name === "exa-enable-cycles" ? enabled : name === "--exa-config-file" ? config : undefined,
     registerTool: (tool: Parameters<PiToolRegistration["registerTool"]>[0]) => tools.set(tool.name, tool),
-    registerCommand: (name: string, command: { handler: (args: string, context: ExtensionContext) => Promise<void> }) =>
-      commands.set(name, command),
+    registerCommand: (
+      name: string,
+      command: { description?: string; handler: (args: string, context: ExtensionContext) => Promise<void> },
+    ) => commands.set(name, command),
     on: (event: string, handler: (event: never, context: ExtensionContext) => Promise<void>) =>
       handlers.set(event, handler),
   } as unknown as ExtensionAPI;
@@ -136,6 +141,17 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("makes total-ceiling approval discoverable in command help and invalid-action usage", async () => {
+    const pi = await host();
+    expect(pi.command?.description).toContain("approve <cycle-id> <total-dollar-ceiling>");
+    await pi.command?.handler("", pi.context);
+    expect(pi.notify).toHaveBeenLastCalledWith(
+      expect.stringContaining("approve <cycle-id> <total-dollar-ceiling>"),
+      "error",
+    );
+    expect(offlineSearch).not.toHaveBeenCalled();
+  });
+
   it("records total-ceiling operator grants without accepting assistant approval fields or dispatching work", async () => {
     const pi = await host();
     await pi.command?.handler("start topic", pi.context);

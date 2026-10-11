@@ -84,7 +84,7 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
 
   pi.registerCommand("exa-research", {
     description:
-      "Manage durable research cycles: start <topic>, list, resume <id>, archive [id]. Paid cycle work remains gated.",
+      "Manage durable research cycles: start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling>, archive [id]. Paid cycle work remains gated.",
     handler: async (args, ctx) => {
       try {
         const match = /^(\S+)(?:\s+([\s\S]*))?$/.exec(args.trim());
@@ -128,7 +128,9 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
             break;
           }
           default:
-            throw new Error("Use /exa-research start <topic>, list, resume <id>, or archive [id].");
+            throw new Error(
+              "Use /exa-research start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling>, or archive [id].",
+            );
         }
         ctx.ui.notify(text, "info");
       } catch (error) {
