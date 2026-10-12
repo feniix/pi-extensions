@@ -1,0 +1,199 @@
+it looks like it is not quite there?
+
+
+
+
+<pasted_content id="d621">
+❯ pnpm exec pi --no-extensions -e ./packages/pi-exa/extensions/index.ts --exa-enable-cycles
+Model scope: gpt-5.3-codex-spark, gpt-5.5, gpt-5.6-sol, gpt-5.6-luna, gpt-5.6-terra, gpt-6-astra, gpt-6-luna, gpt-6-sol, gpt-6.1-sol (Ctrl+P to cycle)
+
+ ▀▀█  v1.1.0
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+
+[Context]
+  ~/.pi/agent/AGENTS.md, AGENTS.md
+
+[Skills]
+  address-findings, agent-browser, ask-matt, ask-user, brpr, claude-api, claude-handoff, code-search, codebase-design, company-research, council-mode,
+diagnosing-bugs, docx, domain-modeling, exa-research-planner, explain, financial-report-search, frontend-design, gh-stack, git-guardrails-claude-code,
+grill-me, grill-with-docs, grilling, handoff, herdr, hindsight-architect, hindsight-cloud, hindsight-coding-agent, hindsight-docs, hindsight-self-hosted,
+i-have-adhd, implement, implement-spec, improve-codebase-architecture, internal-comms, log-float-time, loop-me, mcp-builder, merge, migrate-to-shoehorn,
+mp-code-review, mp-teach, pdf, people-research, performance-optimization, personal-site-search, pi-subagents, pptx, pr, prototype, python-refactor, recall,
+release, replay, research, research-paper-search, retro, review, scaffold-exercises, search, session-crosslink, session-handoff, session-to-skill,
+setup-matt-pocock-skills, setup-pre-commit, setup-ts-deep-modules, skill-creator, tdd, teach, to-questionnaire, to-spec, to-tickets, triage, typesafe-ai,
+using-entire, voice, wait-what, wayfinder, webapp-testing, what-happened, wizard, writing-beats, writing-for-agents, writing-fragments, writing-shape, xlsx
+
+[Prompts]
+  /council, /fix-pr, /gather-context-and-clarify, /md, /parallel-cleanup, /parallel-research, /parallel-review, /review-loop, /smd
+
+[Extensions]
+  extensions
+
+
+ ping
+
+
+ Pong!
+
+
+ can you research the differences between laya and jev for decisions?
+
+
+
+ [skill] using-entire (ctrl+o to expand)
+
+
+
+ [skill] search (ctrl+o to expand)
+
+
+
+ [skill] typesafe-ai (ctrl+o to expand)
+
+
+
+ [skill] exa-research-planner (ctrl+o to expand)
+
+
+
+ $ entire search "laya jev decisions" --json --compact --limit 5 (timeout 30s)
+
+ ... (68 earlier lines, ctrl+o to expand)
+     "prs": 0,
+     "sessions": 1
+   },
+   "reranked": true
+ }
+
+ Took 3.5s
+
+
+ Entire Search:
+
+ I found prior Jev-related work, but no direct Laya comparison. I’ll check current primary sources, focusing on decision quality, uncertainty, latency,
+ cost, and integration.
+
+
+ web_search_exa  "Laya AI model decisions Jev TypeSafe comparison" (5 results)
+ ▸ Laya and Jev: Classifiers That Don’t Generate – ExploringML — https://exploringml.com/posts/laya-jev-classifier-comparison/
+ ▸ Laya vs Jev: Open-Source vs TypeSafe Decision API · Laya Studio — https://laya.studio/compare/laya-vs-jev
+ ▸ Jev vs Laya: Comparing and Choosing Between Closed-Source and Open-Source System One Decision Models | Wilson Wu —
+ https://wilsonwu.me/en/blog/2026/jev-vs-laya/
+ ▸ Laya vs Jev: an open-source benchmark of typed decision models | Zylver — https://zylver.com/blog/laya-vs-jev-typed-decision-model-benchmark/
+ ▸ Local Laya vs Hosted Jev: Why My Agents Make Typed Decisions on My Mac — https://astgl.com/p/local-laya-vs-hosted-jev-typed-decisions
+ ctrl+o → expand
+
+
+
+ web_fetch_exa  1 URL(s)
+ # (no title)
+ URL: https://docs.typesafe.ai/llms.txt
+ ctrl+o → expand
+
+
+
+ web_search_exa  "Convai Innovations Laya github model card typed-decisions benchmark" (3 results)
+ ▸ convaiinnovations/laya-typed-decisions · Hugging Face — https://huggingface.co/convaiinnovations/laya-typed-decisions
+ ▸ N/A — https://raw.githubusercontent.com/ccjjfdyqlhy/laya/refs/heads/main/README.md
+ ▸ README.md · convaiinnovations/laya-typed-decisions at 5ee0035de4e8db341564dad9e4f24a39b52b7f10 —
+ https://huggingface.co/convaiinnovations/laya-typed-decisions/blob/5ee0035de4e8db341564dad9e4f24a39b52b7f10/README.md
+ ctrl+o → expand
+
+
+
+ web_fetch_exa  3 URL(s)
+ # Models
+ URL: https://docs.typesafe.ai/models.md
+ ctrl+o → expand
+
+
+
+ web_fetch_exa  3 URL(s)
+ # (no title)
+ URL: https://raw.githubusercontent.com/ccjjfdyqlhy/laya/refs/heads/main/README.md
+ ctrl+o → expand
+
+
+
+ [skill] research (ctrl+o to expand)
+
+
+
+ write docs/research/laya-vs-jev-decisions.md
+
+ # Laya vs Jev for typed decisions
+
+ ## Bottom line
+
+ Jev is the better starting hypothesis for varied, zero-shot semantic decisions. Laya is worth evaluating for local/private inference, small fixed decision
+ spaces, or a domain where you can fine-tune and calibrate a specialist. This is a recommendation from published evidence, not a benchmark run in this
+ repository.
+
+ Both return Choice (closed-set selection), Score (ordinal judgment), and Noul (probability of yes), rather than generated prose. Neither replaces
+ deterministic authorization or a general reasoning model. Sources: [Laya
+ README](https://raw.githubusercontent.com/ccjjfdyqlhy/laya/refs/heads/main/README.md), [Jev Choice](https://docs.typesafe.ai/primitives/choice.md), [Jev
+ limitations](https://docs.typesafe.ai/model-jaggedness/jev-1.13.md).
+
+ ## Practical differences
+
+ ... (45 more lines, 55 total, ctrl+o to expand)
+
+
+ Jev is the stronger default for general decisions; Laya is more compelling for local, specialized decisions. Both return typed choices, ordinal scores, and
+ yes/no probabilities—not generated explanations.
+
+ ┌────────────────┬───────────────────────────────────────────────────────────────────────┬─────────────────────────────────────────────────┐
+ │ Difference     │ Laya                                                                  │ Jev                                             │
+ ├────────────────┼───────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ Deployment     │ Open weights, Apache-2.0; self-hostable                               │ Closed, managed API                             │
+ ├────────────────┼───────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ Best fit       │ Narrow tasks you can fine-tune                                        │ Varied questions without training               │
+ ├────────────────┼───────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ Choice options │ Recommended roughly under 20 at default settings                      │ Up to 255                                       │
+ ├────────────────┼───────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ Context        │ Published checkpoints: 512–1,024 tokens; configurable runtime budgets │ 32k state + longest question; 64k total request │
+ ├────────────────┼───────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ Customization  │ Fine-tuning and calibration                                           │ Instructions, criteria, and state               │
+ ├────────────────┼───────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────┤
+ │ Cost           │ Infrastructure and operations                                         │ $0.042/million input tokens; output free        │
+ └────────────────┴───────────────────────────────────────────────────────────────────────┴─────────────────────────────────────────────────┘
+
+ Sources: Laya documentation, Jev models, Jev choices.
+
+ ### The important benchmark catch
+
+ Laya’s specialist reports 76.6% accuracy versus Jev’s published 72.7%, but:
+ - Laya was fine-tuned on that benchmark’s training split.
+ - Untuned Laya scored only 34–36%.
+ - Jev had better probability-distribution matching and lower calibration error.
+ - The publisher explicitly says this was not a controlled head-to-head.
+
+ So “Laya beats Jev” is too broad. The evidence supports “a tuned Laya specialist can outperform published Jev results on its target workflows.” Model card
+
+ ### My recommendation
+
+ For decisions such as source relevance, evidence sufficiency, or routing, I’d start with Jev, then benchmark Laya if local processing or customization
+ matters.
+
+ For spending approval, permissions, accounting, or retry authorization, use neither as the authority: keep those rules deterministic. Confidence summarizes
+ a model’s distribution—not permission or guaranteed correctness. Jev confidence
+
+ Saved the fuller research, caveats, and evaluation checklist to:
+ docs/research/laya-vs-jev-decisions.md
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/src/personal/pi/pi-extensions (release/pi-exa-6.1.0)
+↑60k ↓2.6k R282k CH97.2% $0.175 (sub) 22.0%/272k (auto)
+</pasted_content id="d621">
+
+---
+
+I ran it like this 
+
+pnpm exec pi --no-extensions -e ./packages/pi-exa/extensions/index.ts --exa-enable-cycles
