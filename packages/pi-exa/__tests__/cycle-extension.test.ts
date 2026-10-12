@@ -477,6 +477,58 @@ describe("Pi cycle commands and tools", () => {
     return { pi, artifact };
   }
 
+  it("keeps completed selected-only final-report diagnostics consistent without changing saved criteria", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    expect(
+      (
+        await pi.call("exa_research_step", {
+          topic: "question",
+          stage: "synthesis_plan",
+          note: "Curate only one source",
+          thought_number: 2,
+          total_thoughts: 2,
+          next_step_needed: false,
+          criteria: [
+            { id: "C1", label: "Selected support", status: "supported", evidenceRefs: ["S1"] },
+            { id: "C2", label: "Recorded support", status: "supported", evidenceRefs: ["U1"] },
+          ],
+          sources: [
+            { id: "S1", title: "Selected", contentNotes: "Selected curated notes" },
+            { id: "U1", title: "Unselected", contentNotes: "UNSELECTED_PRIVATE_NOTES" },
+          ],
+          executionPlan: { selectedEvidence: [{ sourceId: "S1", label: "Selected" }] },
+        })
+      ).isError,
+    ).not.toBe(true);
+    const pause = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    await pi.command?.handler(`approve-request ${artifact.cycleId} ${pause.details.requestHash} 0.2`, pi.context);
+    offlineCreate.mockResolvedValueOnce({
+      id: "offline_projected_criteria",
+      status: "completed",
+      costDollars: { total: 0.1 },
+      output: { structured: { answer: "Selected evidence only" } },
+    });
+    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(false);
+    const before = (await pi.call("exa_research_status")).details;
+    expect(before.finalReport).toMatchObject({ criteriaRequiringReview: [] });
+    for (const mode of ["brief", "source_pack"]) {
+      const summary = await pi.call("exa_research_summary", { mode });
+      const report = summary.details.finalReport;
+      if (!report || typeof report !== "object") throw new Error("Missing final report");
+      expect(report).toMatchObject({
+        recordedCriteria: summary.details.criteria,
+        criteriaRequiringReview: [
+          expect.objectContaining({ id: "C2", status: "supported", evidenceIssues: ["Unresolved evidence ref: U1"] }),
+        ],
+      });
+      expect(JSON.stringify(summary)).not.toContain("UNSELECTED_PRIVATE_NOTES");
+    }
+    expect((await pi.call("exa_research_status")).details).toEqual(before);
+    expect(offlineCreate).toHaveBeenCalledOnce();
+    expect(offlineGet).not.toHaveBeenCalled();
+    expect(offlineCancel).not.toHaveBeenCalled();
+  });
+
   it.each([
     { originalDollars: 0.000123, conflict: false },
     { originalDollars: 0.000124, conflict: true },

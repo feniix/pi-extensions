@@ -372,6 +372,9 @@ Default/payload/execution-plan summary modes remain compiler previews, not a way
 to reopen completed work. `/exa-research list` retains reports for archived
 cycles. Recovery reports remain visible through status/summary after the
 explicit existing-run GET.
+Criterion diagnostics match the requested evidence view: status sees all recorded
+sources, while selected-only summaries flag references to unselected sources as
+unresolved. This read-only projection never changes saved criteria.
 
 Report findings, remaining gaps, scope exclusions and assumptions honestly.
 Show API-reported costs separately from pending estimates, unknown operation

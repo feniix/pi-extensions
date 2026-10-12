@@ -65,7 +65,7 @@ Test names below are searchable substrings, not unstable line references.
 | 17 | Pi “requires explicit assistant resume ... existing invalid result with one GET”; cycles “revalidates remotely completed but locally invalid output with the frozen task schema”. |
 | 18 | Pi pending exposure/overspend, exact unsupported-request consent and zero receipts; accounting shared pending exposure, once-only reconciliation and conservative decimal rounding. |
 | 19 | Pi specific replacement-command/duplicate-success test; cycles exact-bound risk/liability funding and immutable historical proof; lifecycle “preserves both genuine late successes”. |
-| 20 | Portable-tools standalone planner/Agent regressions; extension and MCP transport tests; Pi opt-out registration, metadata-prefix preservation and default descriptions. |
+| 20 | Portable-tools standalone planner/Agent regressions; extension and MCP wiring tests; Pi opt-out registration, metadata-prefix preservation and default descriptions. |
 
 Test suites:
 
@@ -85,6 +85,8 @@ Test suites:
 - Real registration/flag/lifecycle callbacks and re-created controllers are
   tested, not an interactive full Pi terminal reload. Filesystem fault injection
   and separate-process crash reproduction are not power-loss certification.
+- MCP construction/delegation is tested in process; MCP wire-protocol round-trip
+  qualification is not claimed.
 - Atomic local intents/one-use guards prevent local duplicate authorization;
   they do not create server idempotency or a distributed transaction with Exa.
   Cross-process visibility begins at durable publication of genuine outcomes.
@@ -97,6 +99,9 @@ Test suites:
 - Final reports preserve recorded gaps and proposed dispositions, even when a
   valid generated task output claims satisfaction. Completed plans remain
   immutable; evaluation belongs in the final answer, not an automatic plan edit.
+  Criterion diagnostics match each view's evidence scope: status uses all recorded
+  sources, while brief/source-pack summaries recompute against selected sources
+  without changing saved coverage or buying further research.
 - Locked/unreadable/legacy stores fail closed for continuation attribution.
   Discovery exposes only coarse unreadable IDs; unrelated explicit standalone
   work remains available. Offline repair must preserve history and live owners.

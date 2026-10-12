@@ -74,6 +74,7 @@ const summaryParams = Type.Object(
 
 function view(record: ResearchCycle) {
   const { owner: _owner, ...visible } = record;
+  const planningStatus = createResearchPlanner(record.plan).getStatus();
   let accounting: Record<string, unknown>;
   try {
     accounting = summarizeAccounting(record.grants, record.ledger, { cycleId: record.id, projectId: record.projectId });
@@ -108,8 +109,8 @@ function view(record: ResearchCycle) {
           cycleId: record.id,
           status: record.status,
           completionSummary,
-          recordedCriteria: record.plan.criteria,
-          criteriaRequiringReview: record.plan.criteria.filter(
+          recordedCriteria: planningStatus.criteria,
+          criteriaRequiringReview: planningStatus.criteria.filter(
             (criterion) =>
               (criterion.status !== "supported" && criterion.status !== "excluded") ||
               criterion.evidenceIssues.length > 0,
@@ -124,7 +125,7 @@ function view(record: ResearchCycle) {
       : undefined;
   return {
     ...visible,
-    ...createResearchPlanner(record.plan).getStatus(),
+    ...planningStatus,
     accounting,
     nextSafeAction,
     completionSummary,
