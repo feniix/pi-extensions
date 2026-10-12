@@ -1282,20 +1282,21 @@ export function cyclePiRegistration(
                       "APPROVAL_NOT_GRANTED: the confirmation dialog was declined, dismissed, aborted or timed out. Nothing was submitted and no grant was recorded; the proposal stays open for a later explicit approval.",
                       true,
                     );
-                  if (proposal.approval)
-                    await cycles.grantDialogApproval(cycleId, {
-                      requestHash: proposal.requestHash,
-                      expectedRevision: artifact.revision,
-                      artifactHash: artifact.hash,
-                      allowanceDollars: proposal.approval.allowanceDollars,
-                      ceilingDollars: proposal.approval.ceilingDollars,
-                      tools: proposal.approval.tools,
-                    });
-                  const prepared = await cycles.reserveAgent({
-                    cycleId,
-                    expectedRevision: artifact.revision,
-                    artifactHash: artifact.hash,
-                  });
+                  // Approval and reservation land in one write: never an approval without its attempt.
+                  const prepared = proposal.approval
+                    ? await cycles.approveAndReserveAgent(cycleId, {
+                        requestHash: proposal.requestHash,
+                        expectedRevision: artifact.revision,
+                        artifactHash: artifact.hash,
+                        allowanceDollars: proposal.approval.allowanceDollars,
+                        ceilingDollars: proposal.approval.ceilingDollars,
+                        tools: proposal.approval.tools,
+                      })
+                    : await cycles.reserveAgent({
+                        cycleId,
+                        expectedRevision: artifact.revision,
+                        artifactHash: artifact.hash,
+                      });
                   return dispatchAcknowledged(
                     cycles,
                     prepared,

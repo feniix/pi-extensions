@@ -10,6 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
+import { ownProcessStartTime, processAlive } from "./process-identity.js";
 import {
   assessExploration,
   ExplorationApprovalError,
@@ -119,7 +120,16 @@ const snapshotSchema = Type.Object(
   },
   strict,
 );
-const ownerSchema = Type.Object({ sessionId: Type.String(), token: Type.String(), pid: count }, strict);
+const ownerSchema = Type.Object(
+  {
+    sessionId: Type.String(),
+    token: Type.String(),
+    pid: count,
+    /** Process start time of `pid`, so a reused pid is not mistaken for the original owner. */
+    processStart: Type.Optional(Type.String({ minLength: 1 })),
+  },
+  strict,
+);
 // Known versioned operational records are validated by their policy modules.
 // Opaque legacy records remain inspectable, never inferred as consent or no liability.
 const objects = Type.Array(Type.Object({}, { additionalProperties: true }));
@@ -243,14 +253,8 @@ export function projectResearchSummary(record: ResearchCycle, params?: ResearchS
  * is stale; any other probe result, including EPERM, means a live process elsewhere.
  * Age alone never authorizes takeover.
  */
-export function ownerAlive(owner: { pid: number } | undefined): boolean {
-  if (!owner) return false;
-  try {
-    process.kill(owner.pid, 0);
-    return true;
-  } catch (error) {
-    return code(error) !== "ESRCH";
-  }
+export function ownerAlive(owner: { pid: number; processStart?: string } | undefined): boolean {
+  return owner ? processAlive(owner.pid, owner.processStart) : false;
 }
 
 /**
@@ -275,7 +279,13 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
   const projectId = await researchProjectId(options.cwd);
   const directory = join(options.root, projectId);
   let completionScope: string | undefined;
-  const owner = { sessionId: options.sessionId, token: randomUUID(), pid: process.pid };
+  const ownProcessStart = ownProcessStartTime();
+  const owner = {
+    sessionId: options.sessionId,
+    token: randomUUID(),
+    pid: process.pid,
+    ...(ownProcessStart === undefined ? {} : { processStart: ownProcessStart }),
+  };
   let activeId: string | undefined;
   let leasedId: string | undefined;
   let generation = 0;
@@ -567,6 +577,103 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     });
   }
 
+  /**
+   * Freeze and reserve one Agent attempt on an owned record in memory. The caller writes the
+   * record once, so callers can combine the reservation with other changes atomically.
+   */
+  const prepareAgentReservation = (
+    record: ResearchCycle,
+    reference: ArtifactAssertions,
+    transitionMode?: "retry" | "replace",
+  ) => {
+    assertAccountingAvailable(record.id);
+    const artifact = draftArtifact(record, reference);
+    if (record.attempts.length && !transitionMode)
+      throw new Error("AGENT_ATTEMPT_EXISTS: inspect/recover the existing attempt; replacement is gated.");
+    const requestHash = agentRequestHash(artifact.request);
+    const attemptFacts = transitionMode
+      ? retryAttemptFacts(record.attempts, record.ledger, { cycleId: record.id, projectId })
+      : [];
+    const retryHistory = transitionMode
+      ? assessRetryHistory(attemptFacts, record.grants, { cycleId: record.id, projectId }, requestHash, transitionMode)
+      : undefined;
+    if (retryHistory && !retryHistory.eligible) throw new Error(retryHistory.reason);
+    for (const id of retryHistory?.replacementPermissionIds ?? []) {
+      const permission = record.grants.find((entry) => "id" in entry && entry.id === id);
+      if (!Value.Check(replacementPermissionSchema, permission)) throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
+      const latest = [...record.grants]
+        .reverse()
+        .find(
+          (entry) =>
+            Value.Check(uncertaintyPermissionSchema, entry) &&
+            entry.targetType === "liability" &&
+            entry.subjectId === permission.operationId,
+        );
+      const source = record.attempts.find((entry) => "id" in entry && entry.id === permission.attemptId);
+      const sourceFact = attemptFacts.find(
+        (fact) => fact.id === permission.attemptId && fact.operationId === permission.operationId,
+      );
+      if (!Value.Check(agentAttemptSchema, source) || sourceFact?.knownLiabilityMicros === undefined)
+        throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
+      if (
+        !Value.Check(uncertaintyPermissionSchema, latest) ||
+        latest.id !== permission.liabilityPermissionId ||
+        permission.originalAllowanceMicros < sourceFact.knownLiabilityMicros
+      )
+        throw new Error("REPLACEMENT_LIABILITY_CHANGED");
+    }
+    const assessment = assessAgent(record.grants, record.ledger, artifact.request, {
+      cycleId: record.id,
+      projectId,
+    });
+    if (!assessment.canDispatch)
+      throw new ExplorationApprovalError(record.id, "web_research_exa", requestHash, artifact.request, assessment);
+    if (assessment.proposedMicros === null || !assessment.requestPermissionId)
+      throw new Error("UNCERTAINTY_APPROVAL_REQUIRED");
+    const createdAt = nextAuthorizationTime(record.grants, record.attempts, record.ledger);
+    const operation: ExplorationOperation = {
+      kind: "exa-exploration-v1",
+      id: randomUUID(),
+      cycleId: record.id,
+      revision: record.revision,
+      tool: "web_research_exa",
+      requestHash,
+      estimateMicros: assessment.proposedMicros,
+      basis: `${assessment.rateProfile.version}; full exact-request operator assessment, not a vendor cap.`,
+      requestPermissionId: assessment.requestPermissionId,
+      status: "reserved",
+      createdAt,
+    };
+    const attempt = {
+      kind: "exa-agent-attempt-v1",
+      id: randomUUID(),
+      cycleId: record.id,
+      projectId,
+      operationId: operation.id,
+      revision: record.revision,
+      requestHash,
+      artifact,
+      assessment: retryHistory ? { ...assessment, retryHistory } : assessment,
+      ...(transitionMode && retryHistory
+        ? {
+            transitionMode,
+            sourceAttemptIds: retryHistory.sourceAttemptIds,
+            replacementPermissionIds: retryHistory.replacementPermissionIds,
+            retryAuthorization: freezeRetryAuthorization(record.grants, record.attempts, record.ledger, {
+              cycleId: record.id,
+              projectId,
+            }),
+          }
+        : {}),
+      status: "intent",
+      createdAt,
+    };
+    if (!Value.Check(agentAttemptSchema, attempt)) throw new Error("Invalid prepared Agent intent.");
+    record.ledger.push(operation);
+    record.attempts.push(attempt);
+    record.status = "running";
+    return { attempt: structuredClone(attempt), artifact: structuredClone(artifact), assessment };
+  };
   /** The latest grant wins, so a dialog grant keeps any wider ceiling or scope recorded meanwhile. */
   const mergeWithLatestGrant = (record: ResearchCycle, ceilingMicros: number, tools: readonly string[]) => {
     const latest = record.grants
@@ -802,11 +909,12 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
       );
     },
     /**
-     * Record one trusted-dialog approval as a single durable write: the lifetime
-     * ceiling/scope and the one-use exact-request permission for the proposal the
-     * operator actually saw. A write failure leaves no half-approval behind.
+     * Record one trusted-dialog approval and reserve the approved Agent attempt in a single
+     * durable write: the lifetime ceiling/scope, the one-use exact-request permission and the
+     * frozen attempt. If the reservation cannot be made, nothing is written, so an approval is
+     * never recorded without its attempt.
      */
-    async grantDialogApproval(
+    async approveAndReserveAgent(
       cycleId: string,
       approval: {
         requestHash: string;
@@ -862,9 +970,14 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           if (!Value.Check(spendingGrantSchema, grant) || !Value.Check(uncertaintyPermissionSchema, permission))
             throw new Error("Invalid dialog approval scope or amount.");
           record.grants.push(grant as SpendingGrant, permission);
+          const reserved = prepareAgentReservation(record, {
+            cycleId,
+            expectedRevision: approval.expectedRevision,
+            artifactHash: approval.artifactHash,
+          });
           await write(record, assertCurrent);
           assertCurrent();
-          return record;
+          return reserved;
         }),
       );
     },
@@ -874,107 +987,10 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         transaction(async () => {
           const record = await owned();
           assertCurrent();
-          assertAccountingAvailable(record.id);
-          const artifact = draftArtifact(record, reference);
-          if (record.attempts.length && !transitionMode)
-            throw new Error("AGENT_ATTEMPT_EXISTS: inspect/recover the existing attempt; replacement is gated.");
-          const requestHash = agentRequestHash(artifact.request);
-          const attemptFacts = transitionMode
-            ? retryAttemptFacts(record.attempts, record.ledger, { cycleId: record.id, projectId })
-            : [];
-          const retryHistory = transitionMode
-            ? assessRetryHistory(
-                attemptFacts,
-                record.grants,
-                { cycleId: record.id, projectId },
-                requestHash,
-                transitionMode,
-              )
-            : undefined;
-          if (retryHistory && !retryHistory.eligible) throw new Error(retryHistory.reason);
-          for (const id of retryHistory?.replacementPermissionIds ?? []) {
-            const permission = record.grants.find((entry) => "id" in entry && entry.id === id);
-            if (!Value.Check(replacementPermissionSchema, permission)) throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
-            const latest = [...record.grants]
-              .reverse()
-              .find(
-                (entry) =>
-                  Value.Check(uncertaintyPermissionSchema, entry) &&
-                  entry.targetType === "liability" &&
-                  entry.subjectId === permission.operationId,
-              );
-            const source = record.attempts.find((entry) => "id" in entry && entry.id === permission.attemptId);
-            const sourceFact = attemptFacts.find(
-              (fact) => fact.id === permission.attemptId && fact.operationId === permission.operationId,
-            );
-            if (!Value.Check(agentAttemptSchema, source) || sourceFact?.knownLiabilityMicros === undefined)
-              throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
-            if (
-              !Value.Check(uncertaintyPermissionSchema, latest) ||
-              latest.id !== permission.liabilityPermissionId ||
-              permission.originalAllowanceMicros < sourceFact.knownLiabilityMicros
-            )
-              throw new Error("REPLACEMENT_LIABILITY_CHANGED");
-          }
-          const assessment = assessAgent(record.grants, record.ledger, artifact.request, {
-            cycleId: record.id,
-            projectId,
-          });
-          if (!assessment.canDispatch)
-            throw new ExplorationApprovalError(
-              record.id,
-              "web_research_exa",
-              requestHash,
-              artifact.request,
-              assessment,
-            );
-          if (assessment.proposedMicros === null || !assessment.requestPermissionId)
-            throw new Error("UNCERTAINTY_APPROVAL_REQUIRED");
-          const createdAt = nextAuthorizationTime(record.grants, record.attempts, record.ledger);
-          const operation: ExplorationOperation = {
-            kind: "exa-exploration-v1",
-            id: randomUUID(),
-            cycleId: record.id,
-            revision: record.revision,
-            tool: "web_research_exa",
-            requestHash,
-            estimateMicros: assessment.proposedMicros,
-            basis: `${assessment.rateProfile.version}; full exact-request operator assessment, not a vendor cap.`,
-            requestPermissionId: assessment.requestPermissionId,
-            status: "reserved",
-            createdAt,
-          };
-          const attempt = {
-            kind: "exa-agent-attempt-v1",
-            id: randomUUID(),
-            cycleId: record.id,
-            projectId,
-            operationId: operation.id,
-            revision: record.revision,
-            requestHash,
-            artifact,
-            assessment: retryHistory ? { ...assessment, retryHistory } : assessment,
-            ...(transitionMode && retryHistory
-              ? {
-                  transitionMode,
-                  sourceAttemptIds: retryHistory.sourceAttemptIds,
-                  replacementPermissionIds: retryHistory.replacementPermissionIds,
-                  retryAuthorization: freezeRetryAuthorization(record.grants, record.attempts, record.ledger, {
-                    cycleId: record.id,
-                    projectId,
-                  }),
-                }
-              : {}),
-            status: "intent",
-            createdAt,
-          };
-          if (!Value.Check(agentAttemptSchema, attempt)) throw new Error("Invalid prepared Agent intent.");
-          record.ledger.push(operation);
-          record.attempts.push(attempt);
-          record.status = "running";
+          const reserved = prepareAgentReservation(record, reference, transitionMode);
           await write(record, assertCurrent);
           assertCurrent();
-          return { attempt: structuredClone(attempt), artifact: structuredClone(artifact), assessment };
+          return reserved;
         }),
       );
     },

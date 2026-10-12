@@ -376,13 +376,10 @@ describe("guided research from request through approved submission", () => {
     const pi = await host();
     const { cycleId, projectId } = await readyCycle(pi);
     const proposal = await propose(pi, cycleId);
-    // The dialog approval publishes first (one atomic write); the frozen intent publication fails.
-    const original = vi.mocked(nativeFs.renameSync).getMockImplementation();
-    vi.mocked(nativeFs.renameSync)
-      .mockImplementationOnce((from, to) => (original as typeof nativeFs.renameSync)(from, to))
-      .mockImplementationOnce(() => {
-        throw new Error("EIO: simulated publication failure");
-      });
+    // Approval and frozen intent are one atomic publication; when it fails, nothing is recorded.
+    vi.mocked(nativeFs.renameSync).mockImplementationOnce(() => {
+      throw new Error("EIO: simulated publication failure");
+    });
     const submitted = await pi.call("web_research_exa", {
       researchMode: "submit",
       cycleId,
@@ -393,8 +390,7 @@ describe("guided research from request through approved submission", () => {
     expect(pi.confirms).toHaveLength(1);
     expect(offlineCreate).not.toHaveBeenCalled();
     const record = JSON.parse(await readFile(await pi.recordPath(cycleId, projectId), "utf8"));
-    // Both approval records landed together; no half-approval and no attempt.
-    expect(record.grants).toHaveLength(2);
+    expect(record.grants).toEqual([]);
     expect(record.attempts).toEqual([]);
     expect(record.status).toBe("planning");
   });
