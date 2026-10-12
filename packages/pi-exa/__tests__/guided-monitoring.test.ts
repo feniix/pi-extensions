@@ -395,6 +395,8 @@ describe("background monitoring and completion delivery", () => {
     expect(offlineGet).toHaveBeenCalledTimes(calls);
 
     // Archive from the origin runtime pauses observation and warns that remote work may continue.
+    // Keep the run pending: explicit resume re-registers monitoring before archive.
+    offlineGet.mockImplementation(async (runId) => ({ id: runId, status: "running" }));
     const origin = await host({ directory: pi.directory, sessionId: "session-one" });
     const resumed = await origin.call("exa_research_status", { action: "resume", cycleId });
     expect(resumed.isError).toBe(false);
