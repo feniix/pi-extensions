@@ -79,7 +79,7 @@ async function host(enabled = true) {
   };
 }
 
-describe("Pi cycle commands and tools", () => {
+describe("Pi standalone and cycle discovery availability", () => {
   it("keeps explicit standalone search available despite lost cycle ownership or a blocked store", async () => {
     const pi = await host();
     await pi.command?.handler("start topic", pi.context);
@@ -115,7 +115,9 @@ describe("Pi cycle commands and tools", () => {
     expect(pi.notify).toHaveBeenLastCalledWith(expect.stringContaining(String(status.id)), "info");
     expect(JSON.stringify(pi.notify.mock.calls.at(-1))).not.toContain("SECRET_UNREADABLE_RECORD");
   });
+});
 
+describe("Pi cycle commands and tools", () => {
   it("activates after real Pi flag application on startup and reload", async () => {
     const hostContext = await host(false);
     expect([...parseArgs(["--exa-enable-cycles"]).unknownFlags.keys()]).toEqual(["exa-enable-cycles"]);

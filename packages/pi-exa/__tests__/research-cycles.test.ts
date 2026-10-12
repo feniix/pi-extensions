@@ -21,7 +21,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe("durable research cycles", () => {
+describe("research storage availability regressions", () => {
   it("does not spend its contention deadline preparing an uncontended lock", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);
@@ -168,7 +168,9 @@ describe("durable research cycles", () => {
     const parent = dirname(root);
     expect(vi.mocked(fs.open).mock.calls.some(([path]) => String(path) === parent)).toBe(false);
   });
+});
 
+describe("durable research cycles", () => {
   it("retains a failed-start lease until explicit cleanup, even after replacement", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);
