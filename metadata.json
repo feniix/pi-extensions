@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4RD61X89QMD2N932EB2Q0ZX",
+  "strategy": "manual-commit",
+  "branch": "pi-exa-guided/prototype",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "docs/research/2026-10-12-pi-guided-background-host-capabilities.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 160,
+    "cache_creation_tokens": 13490,
+    "cache_read_tokens": 1690886,
+    "output_tokens": 10554,
+    "api_call_count": 5
+  }
+}
