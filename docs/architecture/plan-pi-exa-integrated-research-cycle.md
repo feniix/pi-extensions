@@ -227,6 +227,26 @@ liability continue; no cancel request is issued.
    session's `session_start` discovery surface it. Foreign sessions report but
    never deliver another session's notice.
 
+### Review hardening (2026-10-12)
+
+- Notices are claimed with a serialized `pending → sent` write before `sendMessage`, so a
+  monitor tick and an explicit resume cannot both deliver one notice; a failed send
+  releases the claim. A re-sent uncertain notice keeps a persisted `possibleDuplicate`
+  label until it is delivered.
+- A terminal outcome returned in a foreground tool result (explicit recover, or an
+  acknowledgement that is already terminal) is never notified again: resume only reports
+  terminal attempts that a background monitor owned, and recover acknowledges an existing
+  monitor's notice with `channel: "tool-result"`.
+- A genuine create acknowledgement that arrives after `SUBMISSION_UNKNOWN` (including an
+  unknown original after a replacement) is adopted into background monitoring.
+- Dialog approvals merge with the grant current at write time (never lowering a ceiling
+  or scope), recheck for an existing attempt inside the write, and are not offered while
+  overspend, conflicting receipts or unassessed unknown liabilities exist.
+- Provider/contact requests have no package estimate: the operator assesses the exact
+  request by command and the dialog confirms that existing funding.
+- Monitors detach only on non-cancellable events (`session_shutdown`, `session_tree`); a
+  vetoed switch or fork keeps observing. Ticks act only for the live entry of their key.
+
 ### Lifecycle fences
 
 Stop timers and mark monitors `paused:SHUTDOWN` on `session_shutdown` for every

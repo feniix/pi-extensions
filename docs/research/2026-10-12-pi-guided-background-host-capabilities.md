@@ -59,7 +59,7 @@ The SDK test (`guided-prototype.test.ts`) proves, against a real Pi 1.1.0
 3. Declined dialog: `APPROVAL_NOT_GRANTED`, zero creates, proposal still open.
 4. Superseded proposal: `PROPOSAL_STALE`, no dialog, zero creates.
 5. Completion during an active response: notice appended after the streaming
-   answer, then a report turn; repeated terminal observations yield one notice.
+   answer, then a report turn.
 6. Aborting the chat turn: `agent_settled aborted=true`, no remote cancel, job
    still running, completion delivered later, still one create.
 7. Transient GET errors back off with growing delays; exhausted errors pause with
@@ -88,6 +88,28 @@ Run the prototype interactively with your own model:
 pi -e packages/pi-exa/__tests__/fixtures/guided-prototype/pi-entry.ts
 # ask for research, approve the dialog, then: /exa-proto complete run_1
 ```
+
+## Known prototype simplifications
+
+The prototype is design evidence for host capabilities, not a model of the production
+store. A 2026-10-12 review recorded these deliberate gaps; the production implementation
+(#172–#174) addresses each of them and the prototype is not maintained further:
+
+- The prototype store is one JSON file rewritten whole without a lock or merge, and its
+  attempt IDs are counter-based; an unreadable file is replaced by an empty store.
+  Production uses the private, locked, validated per-cycle controller.
+- Proposal consumption is checked before the dialog only, so parallel submits of one
+  proposal could each create. Production rechecks inside the approval write and refuses
+  a second attempt.
+- A GET in flight across `session_shutdown` can finish its tick, and timer callbacks do
+  not catch storage errors. Production fences ticks by monitor identity and pauses on
+  storage failure.
+- Every create rejection is classified unknown, and a late acknowledgement racing the
+  deadline can be left unmonitored. Production keeps the conservative unknown rule but
+  adopts genuine late acknowledgements into background monitoring.
+- Acknowledgement is observed only on `agent_settled`, with no `uncertain` state.
+  Production also acknowledges at session start and marks sent-but-unconfirmed notices
+  uncertain.
 
 ## Unsupported guarantees (explicit)
 

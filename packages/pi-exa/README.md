@@ -88,8 +88,9 @@ pi -e npm:@feniix/pi-exa -- --exa-config-file ~/.config/pi/exa.json
 ### Optional API base URL
 
 Set `EXA_BASE_URL` to point the Exa SDK at a self-hosted proxy or a controllable
-endpoint mock (the repository's qualification smoke uses one). Unset means the
-SDK default `https://api.exa.ai`. The value is never written to cycle records.
+endpoint mock (the repository's qualification smoke uses one). It must be an absolute
+`http(s)` URL; the API key is sent to that host. Unset means the SDK default
+`https://api.exa.ai`. The value is never written to cycle records.
 
 ### Shared non-secret settings
 
@@ -163,6 +164,11 @@ material decisions through Pi's own confirmation dialog:
    `cycleId` and `proposalId` opens a trusted host confirmation dialog (TUI or
    RPC; ten-minute timeout). Only its real answer records the lifetime scope/
    ceiling and the one-use exact-request permission, in one durable write.
+   Requests with Exa Connect providers have no package estimate: the operator
+   assesses the exact request with `/exa-research approve` and `approve-request`,
+   and the dialog then confirms that funding. The dialog is not offered while
+   overspend, conflicting receipts or unassessed unknown liabilities exist
+   (`DIALOG_APPROVAL_BLOCKED`).
    Decline, dismissal, timeout or a headless mode submits nothing
    (`APPROVAL_NOT_GRANTED` / `APPROVAL_UNAVAILABLE`); a plan edit after the
    proposal fails as `PROPOSAL_STALE`; metered `auto` effort without
