@@ -37,10 +37,13 @@ Use that branch instead of the standalone fast path/payload defaults below:
    `APPROVAL_NOT_GRANTED`, `APPROVAL_UNAVAILABLE`, `PROPOSAL_STALE` and
    `ESTIMATE_UNAVAILABLE` pauses instead of working around them.
 6. An acknowledged submission returns the saved Exa run ID while the job is
-   pending. Report the run ID, say that monitoring is not available in this
-   version, and do not poll, resubmit or invent success after
-   `SUBMISSION_UNKNOWN`; one explicit `researchMode: "recover"` inspection reads
-   the same saved run later.
+   pending and registers host-owned background monitoring. Report the run ID and
+   that a completion notice will arrive in this session; let the user keep
+   chatting. Do not poll, resubmit or invent success after `SUBMISSION_UNKNOWN`.
+   If the result says monitoring is paused, say so and offer explicit
+   `researchMode: "recover"` or resume. When an `exa-research-completion` message
+   arrives, that turn is a report: use status/summary only and never submit,
+   retry or replace; a processing failure uses one explicit same-run recovery.
 7. After success, use `exa_research_summary` with `mode: "brief"` or
    `"source_pack"` for findings, recorded gaps, assumptions and classified usage.
    Assess evidence yourself: generated claims/JSON and remote success do not

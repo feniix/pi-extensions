@@ -127,6 +127,8 @@ Example:
 - `--exa-submit-timeout-ms <ms>`: bounded wait for the Exa create acknowledgement in guided cycle
   submission (`researchMode: "submit"`, built-in 30000). Expiry leaves the attempt unknown; it never
   cancels or resubmits, and a genuine late acknowledgement is saved on the original attempt.
+- `--exa-monitor-interval-ms <ms>`: delay before the first background check of an approved run
+  (built-in 5000). Later checks back off ×1.5 up to 60 s with ±20 % jitter.
 
 > For ordinary Exa SDK calls, the timeout bounds the JS-side wait because `exa-js` does not yet accept `AbortSignal` ([exa-labs/exa-js#158](https://github.com/exa-labs/exa-js/issues/158)). `web_research_exa` owns the Agent run lifecycle and calls Exa's cancel endpoint on host abort or timeout once Exa has returned a run ID.
 
@@ -166,10 +168,36 @@ material decisions through Pi's own confirmation dialog:
    not cancel the remote run. If no acknowledgement arrives in time the attempt
    stays `unknown` (`SUBMISSION_UNKNOWN`): nothing is invented or resubmitted and
    a late genuine run ID is saved on that attempt.
-5. **Later.** Background monitoring and completion notification are not available
-   in this version; the tool result says so. Inspect the same saved run with
-   `researchMode: "recover"` and report findings with `exa_research_summary`
-   `mode: "brief"` or `"source_pack"`.
+5. **Background monitoring.** The extension registers a host-owned monitor for
+   the saved run and returns control. It performs bounded, non-overlapping GETs
+   on that run only (first after 5 s, then ×1.5 backoff capped at 60 s), while
+   you keep chatting. Monitoring has no create, retry, replace or cancel
+   authority. Transient errors back off; eight consecutive failures or ten
+   minutes of silence pause it (`TRANSIENT_EXHAUSTED`); authentication and
+   not-found errors pause it immediately (`AUTH`, `NOT_FOUND`); three hours of
+   observation pause it (`MONITOR_LIFETIME`). A paused monitor is not a failed run:
+   the remote work and its liability continue. If registration itself fails after
+   the create, the result still carries the saved run ID with `monitoring: "paused"`.
+6. **Completion.** On a terminal observation the extension persists the remote
+   facts, classified usage and local validation outcome first, then records one
+   completion notice per attempt and delivers it to the originating session with
+   Pi's message queue: an idle session wakes the assistant immediately, an active
+   response is finished first. The notice names the attempt and asks the assistant
+   to report with `exa_research_status` (final report, recorded gaps, usage) and
+   `exa_research_summary` `mode: "brief"` or `"source_pack"`; the reporting turn
+   performs no paid research. Invalid local output after remote success is
+   reported as a processing failure with same-run `researchMode: "recover"`
+   guidance. Repeated terminal observations never create a second notice.
+7. **Lifecycle fences.** Session switch, fork, tree navigation, reload and
+   shutdown stop local timers and mark monitors `SHUTDOWN`; archive marks them
+   `ARCHIVED` and warns that remote work may continue. On the next start, stale
+   monitors become `RESTART` and pending notices are listed, never delivered into
+   a different session or resumed implicitly. A notice that was sent but whose
+   session entry is missing after a restart is marked `uncertain`; Pi offers no
+   delivery acknowledgement API, so acknowledgement comes from observing the
+   persisted `exa-research-completion` entry and exactly-once delivery across
+   crashes is not claimed. Explicit resume (`exa_research_status` `action:
+   "resume"`) is how a paused monitor is picked up again.
 
 Optional exploratory retrieval during planning (for example `web_search_exa`
 with the active `cycleId`) is disclosed through the same dialog when no lifetime
