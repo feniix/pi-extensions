@@ -44,6 +44,10 @@ Use that branch instead of the standalone fast path/payload defaults below:
    `researchMode: "recover"` or resume. When an `exa-research-completion` message
    arrives, that turn is a report: use status/summary only and never submit,
    retry or replace; a processing failure uses one explicit same-run recovery.
+   After a restart, saved cycles are only discovered; when the user asks to
+   continue, resume explicitly with `exa_research_status` `action: "resume"`
+   and the cycle ID, which also re-registers paused monitoring and delivers
+   pending notices. Resume is not spending consent.
 7. After success, use `exa_research_summary` with `mode: "brief"` or
    `"source_pack"` for findings, recorded gaps, assumptions and classified usage.
    Assess evidence yourself: generated claims/JSON and remote success do not

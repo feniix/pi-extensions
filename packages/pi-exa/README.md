@@ -196,8 +196,19 @@ material decisions through Pi's own confirmation dialog:
    session entry is missing after a restart is marked `uncertain`; Pi offers no
    delivery acknowledgement API, so acknowledgement comes from observing the
    persisted `exa-research-completion` entry and exactly-once delivery across
-   crashes is not claimed. Explicit resume (`exa_research_status` `action:
-   "resume"`) is how a paused monitor is picked up again.
+   crashes is not claimed.
+8. **Recovery.** Explicit resume (`exa_research_status` `action: "resume"`, or
+   `/exa-research resume`) reacquires ownership, re-registers eligible paused
+   monitors for the existing saved run (no create, no reservation), creates the
+   missing notice for a terminal attempt whose notice scheduling crashed, and
+   delivers pending or uncertain notices into the resuming session. A re-sent
+   uncertain notice is labeled as a possible duplicate of the same single run.
+   A live owner in another runtime refuses the resume; only ownerless or
+   proven-dead owners' monitors are treated as stale on start. Local interruption
+   keeps an attempt `unknown` while its saved run ID, frozen artifact, grants and
+   liability survive; late original facts settle after archive without
+   reactivating monitoring or delivering into the archived context. Resume never
+   infers spending consent.
 
 Optional exploratory retrieval during planning (for example `web_search_exa`
 with the active `cycleId`) is disclosed through the same dialog when no lifetime
