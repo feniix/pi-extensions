@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4RKMFWSJYVKC1N5W1SXABPB",
+  "strategy": "manual-commit",
+  "branch": "pi-exa-guided/qualification",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "packages/pi-exa/__tests__/guided-monitoring.test.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 96,
+    "cache_creation_tokens": 3594,
+    "cache_read_tokens": 2098540,
+    "output_tokens": 2350,
+    "api_call_count": 3
+  }
+}
