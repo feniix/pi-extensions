@@ -47,7 +47,7 @@ function dead(pid: number) {
 
 export async function withResearchStorageLock<T>(directory: string, action: () => Promise<T>): Promise<T> {
   const path = join(directory, ".lock");
-  const deadline = Date.now() + 1000;
+  const deadline = performance.now() + 1000;
   const candidate = join(directory, `.lock-owner-${randomUUID()}.tmp`);
   const owner = { kind: "research-storage-lock-v1", pid: process.pid, token: randomUUID() };
   const file = await open(candidate, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
@@ -70,7 +70,7 @@ export async function withResearchStorageLock<T>(directory: string, action: () =
     );
 
   async function acquire(target: string, depth = 0): Promise<() => Promise<void>> {
-    while (Date.now() < deadline) {
+    while (performance.now() < deadline) {
       try {
         await link(candidate, target);
         return async () => {

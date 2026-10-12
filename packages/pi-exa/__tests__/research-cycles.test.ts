@@ -52,6 +52,7 @@ describe("durable research cycles", () => {
       token: "00000000-0000-4000-8000-000000000002",
     });
     await writeFile(lock, live, { mode: 0o600 });
+    vi.spyOn(Date, "now").mockReturnValue(0);
     await expect(controller.list()).rejects.toThrow(lock);
     expect(await readFile(lock, "utf8")).toBe(live);
     await writeFile(lock, "");
