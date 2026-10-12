@@ -4,7 +4,9 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
+import { Value } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { explorationOperationSchema } from "../extensions/research-accounting.js";
 import { canonicalResearchJson } from "../extensions/research-artifacts.js";
 import { createResearchCycles, projectResearchSummary, researchProjectId } from "../extensions/research-cycles.js";
 import { agentRequestHash } from "../extensions/research-execution.js";
@@ -513,6 +515,35 @@ describe("durable research cycles", () => {
     await controller.detach();
     await controller.resume(cycle.id);
     expect((await controller.status())?.status).toBe("completed");
+    await controller.detach();
+  });
+
+  it("checks the complete replacement liability floor before assessment without consuming permissions", async () => {
+    const { controller, cycle, hash, root } = await readyAgent();
+    const first = (await controller.reserveAgent()).attempt;
+    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+    (await original.beforeCreate())();
+    await original.raw("create", {
+      id: "agent_unknown_complete_floor",
+      status: "running",
+      costDollars: { total: 0.15 },
+    });
+    await original.finish();
+    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+    await controller.grantReplacement(cycle.id, first.id, hash, 0.2);
+    // A readable durable financial-history fixture: conflicting known cost
+    // exceeds both the saved reported/provisional floor and old risk consent.
+    const saved = await controller.inspect(cycle.id);
+    const operation = saved.ledger.find((entry) => "id" in entry && entry.id === first.operationId);
+    if (!Value.Check(explorationOperationSchema, operation)) throw new Error("Missing original operation");
+    operation.conflictingMicros = [300000];
+    const path = join(root, "store", cycle.projectId, `${cycle.id}.json`);
+    await writeFile(path, JSON.stringify(saved));
+    const before = await readFile(path, "utf8");
+    expect((await controller.inspect(cycle.id)).ledger).toEqual(saved.ledger);
+    await expect(controller.reserveAgent({}, "replace")).rejects.toThrow("REPLACEMENT_LIABILITY_CHANGED");
+    expect(await readFile(path, "utf8")).toBe(before);
+    expect((await controller.inspect(cycle.id)).attempts).toHaveLength(1);
     await controller.detach();
   });
 

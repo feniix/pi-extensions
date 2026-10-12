@@ -759,9 +759,12 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           if (record.attempts.length && !transitionMode)
             throw new Error("AGENT_ATTEMPT_EXISTS: inspect/recover the existing attempt; replacement is gated.");
           const requestHash = agentRequestHash(artifact.request);
+          const attemptFacts = transitionMode
+            ? retryAttemptFacts(record.attempts, record.ledger, { cycleId: record.id, projectId })
+            : [];
           const retryHistory = transitionMode
             ? assessRetryHistory(
-                retryAttemptFacts(record.attempts, record.ledger, { cycleId: record.id, projectId }),
+                attemptFacts,
                 record.grants,
                 { cycleId: record.id, projectId },
                 requestHash,
@@ -781,15 +784,15 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                   entry.subjectId === permission.operationId,
               );
             const source = record.attempts.find((entry) => "id" in entry && entry.id === permission.attemptId);
-            if (!Value.Check(agentAttemptSchema, source)) throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
+            const sourceFact = attemptFacts.find(
+              (fact) => fact.id === permission.attemptId && fact.operationId === permission.operationId,
+            );
+            if (!Value.Check(agentAttemptSchema, source) || sourceFact?.knownLiabilityMicros === undefined)
+              throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
             if (
               !Value.Check(uncertaintyPermissionSchema, latest) ||
               latest.id !== permission.liabilityPermissionId ||
-              permission.originalAllowanceMicros <
-                Math.max(
-                  agentOperation(record, source).reportedMicros ?? 0,
-                  moneyMicros(source.result?.provisionalTotalDollars ?? 0),
-                )
+              permission.originalAllowanceMicros < sourceFact.knownLiabilityMicros
             )
               throw new Error("REPLACEMENT_LIABILITY_CHANGED");
           }
