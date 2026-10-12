@@ -25,7 +25,8 @@ publication version mismatches are called out explicitly.
 
 - **Coalesce unchanged Agent observations and reuse status projections**, avoiding redundant record rewrites and repeated storage-hierarchy synchronization while preserving changed/late usage, results, conflicting receipts and durability repair.
 - Add `ajv` and `ajv-formats` for synchronous local draft-07 task/result validation; validation does not fetch remote schemas.
-- Standalone/default-opt-out/MCP behavior and existing tool enablement remain unchanged. Cycle `max`/`ultra` and MCP cycle parity remain outside this rollout. SDK receipts are not independently verified invoices; estimates and lifetime ceilings are not vendor billing caps.
+- Standalone/default-opt-out/MCP behavior and existing tool enablement remain unchanged. Cycle `max`/`ultra` and MCP cycle parity remain outside this rollout.
+- Validate the extension against Pi 1.1.0 (`@earendil-works/pi-coding-agent`, `pi-ai`, `pi-tui`); the 6.1.0 guided background workflow targets the latest Pi 1.x extension API. SDK receipts are not independently verified invoices; estimates and lifetime ceilings are not vendor billing caps.
 
 ### Fixed
 
