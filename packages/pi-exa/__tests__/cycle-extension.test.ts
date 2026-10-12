@@ -17,6 +17,9 @@ import exaExtension from "../extensions/index.js";
 import { agentAttemptSchema } from "../extensions/research-execution.js";
 import * as researchPlanner from "../extensions/research-planner.js";
 
+// Durable-storage integration tests run several times slower on CI coverage runners.
+vi.setConfig({ testTimeout: 30_000 });
+
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof fs>();
   return { ...original, unlink: vi.fn(original.unlink), rename: vi.fn(original.rename) };

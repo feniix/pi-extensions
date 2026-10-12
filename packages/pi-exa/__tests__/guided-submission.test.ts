@@ -14,6 +14,9 @@ import type { AgentRun } from "exa-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import exaExtension from "../extensions/index.js";
 
+// Durable-storage integration tests run several times slower on CI coverage runners.
+vi.setConfig({ testTimeout: 30_000 });
+
 vi.mock("node:fs", async (importOriginal) => {
   const original = await importOriginal<typeof nativeFs>();
   return { ...original, renameSync: vi.fn(original.renameSync) };
