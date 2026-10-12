@@ -33,7 +33,8 @@ Use that branch instead of the standalone fast path/payload defaults below:
 5. Call `exa_research_summary` `mode: "proposal"` and present the readable
    proposal. Submit with `web_research_exa` `researchMode: "submit"`, the active
    `cycleId` and that `proposalId`; the host dialog decides. Your words, flags or
-   amounts are never consent. A changed plan needs a new proposal; explain
+   amounts are never consent. `researchMode: "active"` is refused with
+   `GUIDED_SUBMISSION_REQUIRED`; use `submit`. A changed plan needs a new proposal; explain
    `APPROVAL_NOT_GRANTED`, `APPROVAL_UNAVAILABLE`, `PROPOSAL_STALE` and
    `ESTIMATE_UNAVAILABLE` pauses instead of working around them.
 6. An acknowledged submission returns the saved Exa run ID while the job is

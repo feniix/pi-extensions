@@ -52,7 +52,8 @@ guards, late-observation accounting and immutable historical consent proofs.
 Keep remote lifecycle, local processing, local monitoring and notice delivery as
 separate state dimensions; a stopped monitor is not a failed Agent run.
 
-Existing cycle submission currently inherits the shared wait/poll behavior.
+Existing cycle submission inherited the shared wait/poll behavior (removed 2026-10-12;
+see "#171 settled implementation contract").
 The redesigned Pi path must not inherit cancellation-on-chat-interruption from
 the blocking standalone path. Standalone/default-opt-out/MCP retain that
 existing contract. Explicit recovery remains one bounded saved-run GET; it is
