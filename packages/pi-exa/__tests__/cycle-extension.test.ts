@@ -80,6 +80,42 @@ async function host(enabled = true) {
 }
 
 describe("Pi cycle commands and tools", () => {
+  it("keeps explicit standalone search available despite lost cycle ownership or a blocked store", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    const directory = join(pi.context.cwd, "agent", "research-cycles", String(status.projectId));
+    const path = join(directory, `${status.id}.json`);
+    const record = JSON.parse(await readFile(path, "utf8"));
+    record.owner.token = "another-runtime";
+    await writeFile(path, JSON.stringify(record));
+    expect((await pi.call("web_search_exa", { query: "unrelated", researchMode: "standalone" })).isError).not.toBe(
+      true,
+    );
+    await writeFile(join(directory, ".lock"), "", { mode: 0o600 });
+    expect((await pi.call("web_search_exa", { query: "unrelated", researchMode: "standalone" })).isError).not.toBe(
+      true,
+    );
+    expect(offlineSearch).toHaveBeenCalledTimes(2);
+    expect(
+      (await pi.call("web_search_exa", { query: "unrelated", researchMode: "standalone", cycleId: status.id })).isError,
+    ).toBe(true);
+    expect(offlineSearch).toHaveBeenCalledTimes(2);
+  });
+
+  it("lists readable cycles with coarse unreadable IDs without displaying malformed contents", async () => {
+    const pi = await host();
+    await pi.command?.handler("start topic", pi.context);
+    const status = (await pi.call("exa_research_status")).details;
+    const directory = join(pi.context.cwd, "agent", "research-cycles", String(status.projectId));
+    const broken = "00000000-0000-4000-8000-000000000003";
+    await writeFile(join(directory, `${broken}.json`), "{SECRET_UNREADABLE_RECORD", { mode: 0o600 });
+    await pi.command?.handler("list", pi.context);
+    expect(pi.notify).toHaveBeenLastCalledWith(expect.stringContaining(broken), "info");
+    expect(pi.notify).toHaveBeenLastCalledWith(expect.stringContaining(String(status.id)), "info");
+    expect(JSON.stringify(pi.notify.mock.calls.at(-1))).not.toContain("SECRET_UNREADABLE_RECORD");
+  });
+
   it("activates after real Pi flag application on startup and reload", async () => {
     const hostContext = await host(false);
     expect([...parseArgs(["--exa-enable-cycles"]).unknownFlags.keys()]).toEqual(["exa-enable-cycles"]);

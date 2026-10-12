@@ -69,9 +69,15 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
           case "start":
             text = JSON.stringify(view(await cycles.start(value)), null, 2);
             break;
-          case "list":
-            text = JSON.stringify((await cycles.list()).map(view), null, 2);
+          case "list": {
+            const found = await cycles.discover();
+            text = JSON.stringify(
+              { cycles: found.cycles.map(view), unreadableCycleIds: found.unreadableCycleIds },
+              null,
+              2,
+            );
             break;
+          }
           case "resume": {
             const record = await cycles.resume(value);
             text = JSON.stringify(view(record), null, 2) + warning(record);
@@ -122,7 +128,12 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
         async execute(id, params, signal, onUpdate, ctx) {
           try {
             const cycles = await get(ctx);
-            const record = await cycles.status();
+            const explicitStandalone =
+              paid &&
+              typeof params === "object" &&
+              params !== null &&
+              Reflect.get(params, "researchMode") === "standalone";
+            const record = explicitStandalone ? undefined : await cycles.status();
             if (paid) {
               if (typeof params !== "object" || params === null) throw new Error("Invalid tool arguments.");
               const { researchMode, cycleId, expectedRevision, ...standalone } = params as Record<string, unknown>;

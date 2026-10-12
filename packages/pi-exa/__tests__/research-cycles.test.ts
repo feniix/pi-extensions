@@ -21,6 +21,113 @@ afterEach(async () => {
 });
 
 describe("durable research cycles", () => {
+  it("recovers a proven dead transaction lock without dropping records", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("topic");
+    const lock = join(root, "store", controller.projectId, ".lock");
+    await writeFile(
+      lock,
+      JSON.stringify({
+        kind: "research-storage-lock-v1",
+        pid: 2147483647,
+        token: "00000000-0000-4000-8000-000000000001",
+      }),
+      { mode: 0o600 },
+    );
+    expect((await controller.list()).map((record) => record.id)).toEqual([cycle.id]);
+    await expect(stat(lock)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("retains live and legacy unknown locks and names the lock requiring repair", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    await controller.start("topic");
+    const lock = join(root, "store", controller.projectId, ".lock");
+    const live = JSON.stringify({
+      kind: "research-storage-lock-v1",
+      pid: process.pid,
+      token: "00000000-0000-4000-8000-000000000002",
+    });
+    await writeFile(lock, live, { mode: 0o600 });
+    await expect(controller.list()).rejects.toThrow(lock);
+    expect(await readFile(lock, "utf8")).toBe(live);
+    await writeFile(lock, "");
+    await expect(controller.list()).rejects.toThrow(lock);
+    expect(await readFile(lock, "utf8")).toBe("");
+  });
+
+  it("serializes competing stale-lock reclaimers and recovers a crashed reclaimer", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const options = { root: join(root, "store"), cwd: root, sessionId: "one" };
+    const first = await createResearchCycles(options);
+    const second = await createResearchCycles({ ...options, sessionId: "two" });
+    await first.list();
+    const directory = join(options.root, first.projectId);
+    const token = "00000000-0000-4000-8000-000000000004";
+    await writeFile(
+      join(directory, ".lock"),
+      JSON.stringify({
+        kind: "research-storage-lock-v1",
+        pid: 2147483647,
+        token,
+      }),
+      { mode: 0o600 },
+    );
+    await writeFile(
+      join(directory, `.lock.recovery-${token}`),
+      JSON.stringify({
+        kind: "research-storage-lock-v1",
+        pid: 2147483647,
+        token: "00000000-0000-4000-8000-000000000005",
+      }),
+      { mode: 0o600 },
+    );
+    const created = await Promise.all([first.start("first"), second.start("second")]);
+    expect(created[0].id).not.toBe(created[1].id);
+    expect(await first.list()).toHaveLength(2);
+    expect((await fs.readdir(directory)).filter((name) => name.startsWith(".lock"))).toEqual([]);
+  });
+
+  it("discovers readable cycles with unreadable IDs while strict attribution listing remains closed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const cycle = await controller.start("topic");
+    const broken = "00000000-0000-4000-8000-000000000003";
+    await writeFile(join(root, "store", controller.projectId, `${broken}.json`), "{PRIVATE_MALFORMED", { mode: 0o600 });
+    expect(await controller.discover()).toMatchObject({ cycles: [{ id: cycle.id }], unreadableCycleIds: [broken] });
+    await expect(controller.list()).rejects.toThrow("incomplete");
+  });
+
+  it("does not revoke a pending activation when archiving an unrelated saved cycle", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    const old = await controller.start("old");
+    await controller.archive();
+    const pending = controller.start("active");
+    const archived = controller.archive(old.id);
+    expect((await pending).plan.topic).toBe("active");
+    await archived;
+    expect((await controller.status())?.plan.topic).toBe("active");
+  });
+
+  it("syncs the storage hierarchy once per controller, not on every read", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+    await controller.start("topic");
+    vi.mocked(fs.open).mockClear();
+    await controller.status();
+    await controller.list();
+    const parent = dirname(root);
+    expect(vi.mocked(fs.open).mock.calls.some(([path]) => String(path) === parent)).toBe(false);
+  });
+
   it("retains a failed-start lease until explicit cleanup, even after replacement", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);
@@ -151,8 +258,13 @@ describe("durable research cycles", () => {
     expect(synced).toEqual(expect.arrayContaining([root, join(root, "new"), dirname(store), store]));
     await controller.detach();
     fail = true;
-    await expect(controller.start("unsafe")).rejects.toThrow("directory sync failed");
-    expect(await controller.status()).toBeUndefined();
+    const fresh = await createResearchCycles({ root: store, cwd: root, sessionId: "two" });
+    await expect(fresh.start("unsafe")).rejects.toThrow("directory sync failed");
+    expect(await fresh.status()).toBeUndefined();
+    fail = false;
+    expect((await fresh.start("retry after repaired initialization")).plan.topic).toBe(
+      "retry after repaired initialization",
+    );
   });
 
   it("ignores inherited Git repository-location overrides", async () => {

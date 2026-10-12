@@ -12,6 +12,7 @@ import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import { createResearchPlanner, type ResearchPlannerSnapshot } from "./research-planner.js";
 import type { ResearchStepInput, ResearchSummaryParams } from "./research-planner-types.js";
+import { withResearchStorageLock } from "./research-storage-lock.js";
 import { exaResearchStepParams, researchCriterion, researchGap, researchSource } from "./schemas.js";
 
 const strict = { additionalProperties: false };
@@ -146,6 +147,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
   let leasedId: string | undefined;
   let generation = 0;
   let localQueue: Promise<void> = Promise.resolve();
+  let initialization: Promise<void> | undefined;
 
   function ordered<T>(action: () => Promise<T>): Promise<T> {
     const job = localQueue.then(action);
@@ -201,30 +203,34 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid())) {
       throw new Error("Research cycle storage must be a private, owned directory, not a symlink.");
     }
-    await chmod(path, 0o700);
+    if ((info.mode & 0o777) !== 0o700) await chmod(path, 0o700);
   }
 
   async function transaction<T>(action: () => Promise<T>): Promise<T> {
-    await initialize();
-    const lockPath = join(directory, ".lock");
-    const deadline = Date.now() + 1_000;
-    let lock: FileHandle | undefined;
-    while (!lock) {
-      try {
-        lock = await open(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
-      } catch (error) {
-        if (code(error) !== "EEXIST" || Date.now() >= deadline) {
-          throw new Error("Research cycle storage is locked or unavailable; no state changed.", { cause: error });
-        }
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-    }
-    try {
-      return await action();
-    } finally {
-      await lock.close();
-      await unlink(lockPath);
-    }
+    initialization ??= initialize().catch((error: unknown) => {
+      initialization = undefined;
+      throw error;
+    });
+    await initialization;
+    // Keep ownership/non-symlink checks fresh, without repeating hierarchy sync.
+    await privateDirectory(options.root);
+    await privateDirectory(directory);
+    return withResearchStorageLock(directory, action);
+  }
+
+  async function discover() {
+    return transaction(async () => {
+      const files = await readdir(directory);
+      const ids = files
+        .filter((name) => name.endsWith(".json") && uuid.test(name.slice(0, -5)))
+        .map((name) => name.slice(0, -5))
+        .sort();
+      const results = await Promise.allSettled(ids.map(read));
+      return {
+        cycles: results.flatMap((result) => (result.status === "fulfilled" ? [result.value] : [])),
+        unreadableCycleIds: results.flatMap((result, index) => (result.status === "rejected" ? [ids[index]] : [])),
+      };
+    });
   }
 
   async function read(id: string): Promise<ResearchCycle> {
@@ -338,15 +344,12 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     async inspect(id: string) {
       return transaction(() => read(id));
     },
+    discover,
     async list() {
-      return transaction(async () => {
-        const files = await readdir(directory);
-        return Promise.all(
-          files
-            .filter((name) => name.endsWith(".json") && uuid.test(name.slice(0, -5)))
-            .map((name) => read(name.slice(0, -5))),
-        );
-      });
+      const found = await discover();
+      if (found.unreadableCycleIds.length)
+        throw new Error("Research cycle attribution is incomplete; unreadable records require repair.");
+      return found.cycles;
     },
     async resume(id: string) {
       return activate((assertCurrent) =>
@@ -402,7 +405,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     },
     async archive(id = activeId) {
       if (!id) throw new Error("No active research cycle to archive.");
-      generation++;
+      if (id === activeId || id === leasedId) generation++;
       return ordered(() =>
         transaction(async () => {
           const record = await read(id);

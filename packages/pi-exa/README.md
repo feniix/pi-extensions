@@ -134,7 +134,9 @@ Example:
 Start Pi with `--exa-enable-cycles` to use durable research planning:
 
 - `/exa-research start <topic>` creates an isolated cycle without paid work.
-- `/exa-research list` lists saved cycles in this project.
+- `/exa-research list` lists readable saved cycles and coarse unreadable cycle IDs
+  in this project. Unreadable contents are never displayed; attribution checks
+  remain fail-closed until those records are repaired.
 - `/exa-research resume <cycle-id>` explicitly acquires ownership after restart.
 - `/exa-research archive [cycle-id]` detaches and archives without deleting history.
 
@@ -148,6 +150,14 @@ Inherited Git repository/discovery environment overrides do not change that iden
 
 Curated JSON lives under the configured Pi agent directory's
 `research-cycles/<project-id>/`, outside git, with private permissions.
+Short transaction locks publish complete private PID/token records atomically.
+Only proven-dead process owners are reclaimed; live processes are never evicted
+by age. Competing reclaimers serialize, including bounded crashed-reclaimer
+recovery. Legacy empty, malformed or unverifiable locks are retained: the error
+names the lock path for explicit offline repair after confirming no process is
+using the store. Never remove a live process lock or delete cycle history.
+Storage hierarchy synchronization runs once per controller; private directory
+ownership/type checks and record publication synchronization remain enforced.
 Per-step raw notes/update payloads are not retained; selected source notes,
 criteria, assumptions, gaps and revision metadata are retained.
 Credentials and full raw retrieval archives are not written by this planner.
