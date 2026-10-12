@@ -18,7 +18,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPiTools } from "@feniix/bridgekit/pi";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
 import {
-  type CycleAgentFactory,
   type CycleInspectionFactory,
   type CycleMonitorInspector,
   type CycleRetrievalFactory,
@@ -169,10 +168,8 @@ export default function exaExtension(pi: ExtensionAPI) {
         );
         return selected;
       };
-      const researchFactory = (
-        options: Pick<ExaToolsOptions, "agentObserver" | "agentInspection" | "agentSubmission">,
-      ) => {
-        let selected: ReturnType<CycleAgentFactory>;
+      const researchFactory = (options: Pick<ExaToolsOptions, "agentInspection" | "agentSubmission">) => {
+        let selected: ReturnType<CycleSubmissionFactory>;
         registerPiTools(
           {
             registerTool: (tool) => {
@@ -188,7 +185,6 @@ export default function exaExtension(pi: ExtensionAPI) {
         );
         return selected;
       };
-      const agentFactory: CycleAgentFactory = (agentObserver) => researchFactory({ agentObserver });
       const inspectionFactory: CycleInspectionFactory = (runId, observer) =>
         researchFactory({ agentInspection: { runId, observer } });
       const submissionFactory: CycleSubmissionFactory = (observer) =>
@@ -204,7 +200,6 @@ export default function exaExtension(pi: ExtensionAPI) {
       const registration = cyclePiRegistration(
         pi,
         retrievalFactory,
-        agentFactory,
         inspectionFactory,
         submissionFactory,
         monitorInspector,

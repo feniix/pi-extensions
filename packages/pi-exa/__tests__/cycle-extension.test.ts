@@ -110,21 +110,39 @@ async function host(enabled = true, timeoutMs?: number) {
   >();
   const notify = vi.fn();
   const flags = vi.fn();
+  // The trusted host dialog: approve by default; tests override per call.
+  const confirm = vi.fn(async (_title: string, _message: string, _options?: { timeout?: number }) => true);
+  const sendMessage = vi.fn();
+  const entries: Array<{ type: string; id: string; customType?: string; details?: unknown }> = [];
+  sendMessage.mockImplementation((message: { customType: string; details?: unknown }) => {
+    entries.push({
+      type: "custom_message",
+      id: `entry-${entries.length + 1}`,
+      customType: message.customType,
+      details: message.details,
+    });
+  });
   const context = {
     cwd: directory,
-    sessionManager: { getSessionId: () => "session-one" },
-    ui: { notify },
+    hasUI: true,
+    mode: "tui",
+    signal: undefined,
+    sessionManager: { getSessionId: () => "session-one", getEntries: () => [...entries] },
+    ui: { notify, confirm },
   } as unknown as ExtensionToolContext;
   const pi = {
     registerFlag: flags,
+    sendMessage,
     getFlag: (name: string) =>
       name === "exa-enable-cycles"
         ? enabled
         : name === "exa-config-file"
           ? config
-          : name === "exa-timeout-ms" && timeoutMs !== undefined
-            ? String(timeoutMs)
-            : undefined,
+          : name === "exa-monitor-interval-ms"
+            ? "20"
+            : name === "exa-timeout-ms" && timeoutMs !== undefined
+              ? String(timeoutMs)
+              : undefined,
     registerTool: (tool: Parameters<PiToolRegistration["registerTool"]>[0]) => tools.set(tool.name, tool),
     registerCommand: (
       name: string,
@@ -136,17 +154,31 @@ async function host(enabled = true, timeoutMs?: number) {
   exaExtension(pi);
   await handlers.get("session_start")?.({} as never, context);
   const command = commands.get("exa-research");
+  const call = (name: string, args = {}, signal?: AbortSignal) => {
+    const tool = tools.get(name);
+    if (!tool) throw new Error(`Missing tool ${name}`);
+    return tool.execute("call", args, signal, undefined, context);
+  };
   return {
     tools,
     handlers,
     context,
     notify,
     flags,
+    confirm,
+    sendMessage,
     command,
-    call: (name: string, args = {}, signal?: AbortSignal) => {
-      const tool = tools.get(name);
-      if (!tool) throw new Error(`Missing tool ${name}`);
-      return tool.execute("call", args, signal, undefined, context);
+    call,
+    /** Guided submission: propose the current compiled request, then submit it through the dialog. */
+    submit: async (cycleIdValue: unknown, signal?: AbortSignal) => {
+      const cycleId = String(cycleIdValue);
+      const proposal = await call("exa_research_summary", { mode: "proposal", cycleId });
+      if (proposal.isError) return proposal;
+      return call(
+        "web_research_exa",
+        { researchMode: "submit", cycleId, proposalId: proposal.details.proposalId },
+        signal,
+      );
     },
   };
 }
@@ -234,8 +266,10 @@ describe("Pi cycle commands and tools", () => {
         input: { data: [{ region: "US" }], exclusion: [{ region: "EU" }] },
       },
     });
+    pi.confirm.mockResolvedValueOnce(false);
     const deniedSearch = await pi.call("web_search_exa", { query: "official US pricing", cycleId });
     expect(deniedSearch.isError).toBe(true);
+    expect(deniedSearch.content[0].text).toContain("APPROVAL_NOT_GRANTED");
     expect(offlineSearch).not.toHaveBeenCalled();
     await pi.command?.handler(`approve ${cycleId} 1 web_search_exa,web_research_exa`, pi.context);
     offlineSearch.mockResolvedValueOnce({
@@ -296,10 +330,10 @@ describe("Pi cycle commands and tools", () => {
     );
     const conflict = await pi.call("web_research_exa", { cycleId, query: "unapproved override" });
     expect(conflict.isError).toBe(true);
-    const deniedAgent = await pi.call("web_research_exa", { cycleId });
-    expect(deniedAgent.isError).toBe(true);
+    const blockedActive = await pi.call("web_research_exa", { cycleId });
+    expect(blockedActive.isError).toBe(true);
+    expect(blockedActive.content[0].text).toContain("GUIDED_SUBMISSION_REQUIRED");
     expect(offlineCreate).not.toHaveBeenCalled();
-    await pi.command?.handler(`approve-request ${cycleId} ${deniedAgent.details.requestHash} 0.2`, pi.context);
     const completedReply = {
       id: "offline_full_cycle",
       status: "completed",
@@ -311,8 +345,10 @@ describe("Pi cycle commands and tools", () => {
       },
     } satisfies AgentRun;
     offlineCreate.mockResolvedValueOnce(completedReply);
-    const completed = await pi.call("web_research_exa", { cycleId, artifactHash: artifact.hash });
+    const completed = await pi.submit(cycleId);
     expect(completed.isError).toBe(false);
+    // One declined exploration dialog, one approved submission dialog.
+    expect(pi.confirm).toHaveBeenCalledTimes(2);
     expect(offlineCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         input: { data: [{ region: "US" }], exclusion: [{ region: "EU" }] },
@@ -471,9 +507,11 @@ describe("Pi cycle commands and tools", () => {
     });
     const preview = await pi.call("exa_research_summary");
     const artifact = preview.details.artifact as { cycleId: string; revision: number; hash: string; request: object };
-    await pi.command?.handler(`approve ${artifact.cycleId} 1 web_research_exa`, pi.context);
-    const pause = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
-    await pi.command?.handler(`approve-request ${artifact.cycleId} ${pause.details.requestHash} 0.2`, pi.context);
+    // Blocking researchMode=active is gone: the guided dialog grants scope and exact-request permission.
+    const blocked = await pi.call("web_research_exa", { researchMode: "active", cycleId: artifact.cycleId });
+    expect(blocked.isError).toBe(true);
+    expect(blocked.content[0].text).toContain("GUIDED_SUBMISSION_REQUIRED");
+    expect(offlineCreate).not.toHaveBeenCalled();
     return { pi, artifact };
   }
 
@@ -500,15 +538,13 @@ describe("Pi cycle commands and tools", () => {
         })
       ).isError,
     ).not.toBe(true);
-    const pause = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
-    await pi.command?.handler(`approve-request ${artifact.cycleId} ${pause.details.requestHash} 0.2`, pi.context);
     offlineCreate.mockResolvedValueOnce({
       id: "offline_projected_criteria",
       status: "completed",
       costDollars: { total: 0.1 },
       output: { structured: { answer: "Selected evidence only" } },
     });
-    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(false);
+    expect((await pi.submit(artifact.cycleId)).isError).toBe(false);
     const before = (await pi.call("exa_research_status")).details;
     expect(before.finalReport).toMatchObject({ criteriaRequiringReview: [] });
     for (const mode of ["brief", "source_pack"]) {
@@ -544,7 +580,7 @@ describe("Pi cycle commands and tools", () => {
       costDollars: { total: originalDollars },
     } satisfies AgentRun;
     offlineCreate.mockResolvedValueOnce(reply);
-    const initial = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    const initial = await pi.submit(artifact.cycleId);
     expect(initial.isError).toBe(false);
     const status = (await pi.call("exa_research_status")).details;
     await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
@@ -591,9 +627,9 @@ describe("Pi cycle commands and tools", () => {
       costDollars: { total: 0.1 },
       output: { structured: { answer: "done" } },
     });
-    const response = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    const response = await pi.submit(artifact.cycleId);
     expect(response.isError).toBe(false);
-    expect(views).toHaveBeenCalledTimes(2);
+    expect(views).toHaveBeenCalled();
     expect(response.details).toMatchObject({
       status: "completed",
       completionSummary: { remoteCompletedAttemptIds: [response.details.attemptId], duplicateSuccess: false },
@@ -617,14 +653,19 @@ describe("Pi cycle commands and tools", () => {
         costDollars: { total: 0.1 },
         output: { structured: { answer: "retry" } },
       });
-    const failed = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    const failed = await pi.submit(artifact.cycleId);
     expect(failed.isError).toBe(true);
-    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    expect((await pi.submit(artifact.cycleId)).isError).toBe(true);
     expect((await pi.call("web_research_exa", { researchMode: "retry" })).isError).toBe(true);
     const denied = await pi.call("web_research_exa", { researchMode: "retry", cycleId: artifact.cycleId });
     expect(JSON.stringify(denied.content)).toContain("UNCERTAINTY_APPROVAL_REQUIRED");
     expect(offlineCreate).toHaveBeenCalledTimes(1);
     await pi.command?.handler(`approve-request ${artifact.cycleId} ${failed.details.requestHash} 0.2`, pi.context);
+    // Fresh exact funding alone is not enough: the lifetime ceiling must cover the total exposure.
+    const underfunded = await pi.call("web_research_exa", { researchMode: "retry", cycleId: artifact.cycleId });
+    expect(JSON.stringify(underfunded.content)).toContain("INSUFFICIENT_BALANCE");
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    await pi.command?.handler(`approve ${artifact.cycleId} 1 web_research_exa`, pi.context);
     const retried = await pi.call("web_research_exa", {
       researchMode: "retry",
       cycleId: artifact.cycleId,
@@ -651,11 +692,6 @@ describe("Pi cycle commands and tools", () => {
   it("requires the specific operator replacement command and surfaces both late duplicate successes without another run", async () => {
     const { pi, artifact } = await readyAgentHost();
     let resolveOriginal!: (reply: AgentRun) => void;
-    let published!: () => void;
-    const completionUpdates: unknown[] = [];
-    const latePublication = new Promise<void>((done) => {
-      published = done;
-    });
     const signal = new AbortController();
     offlineCreate
       .mockImplementationOnce(() => {
@@ -670,20 +706,9 @@ describe("Pi cycle commands and tools", () => {
         costDollars: { total: 0.1 },
         output: { structured: { replacement: "new schema" } },
       });
-    const tool = pi.tools.get("web_research_exa");
-    if (!tool) throw new Error("Agent tool missing");
-    const interrupted = await tool.execute(
-      "first",
-      { cycleId: artifact.cycleId },
-      signal.signal,
-      (update) => {
-        if (update.details?.remoteStatus === "completed") {
-          completionUpdates.push(update);
-          published();
-        }
-      },
-      pi.context,
-    );
+    const interrupted = await pi.submit(artifact.cycleId, signal.signal);
+    expect(interrupted.isError).toBe(true);
+    expect(interrupted.content[0].text).toContain("SUBMISSION_UNKNOWN");
     if (!Value.Check(agentAttemptSchema, interrupted.details.execution)) throw new Error("Saved original missing");
     const first = interrupted.details.execution;
     const amended = await pi.call("exa_research_step", {
@@ -734,6 +759,11 @@ describe("Pi cycle commands and tools", () => {
     await pi.command?.handler(`approve-replacement ${artifact.cycleId} ${first.id} ${draftHash} 0.2`, pi.context);
     expect(pi.notify).toHaveBeenLastCalledWith(expect.stringMatching(/duplicate work.*additional charges/i), "info");
     expect(offlineCreate).toHaveBeenCalledTimes(1);
+    // The dialog ceiling covered one run; replacement needs a fresh total-exposure ceiling.
+    const underfunded = await pi.call("web_research_exa", { researchMode: "replace", cycleId: artifact.cycleId });
+    expect(underfunded.content[0].text).toContain("INSUFFICIENT_BALANCE");
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    await pi.command?.handler(`approve ${artifact.cycleId} 1 web_research_exa`, pi.context);
     const replaced = await pi.call("web_research_exa", { researchMode: "replace", cycleId: artifact.cycleId });
     expect(replaced.isError).toBe(false);
     resolveOriginal({
@@ -742,7 +772,12 @@ describe("Pi cycle commands and tools", () => {
       costDollars: { total: 0.1 },
       output: { structured: { answer: "original" } },
     });
-    await latePublication;
+    // The late original acknowledgement settles its own attempt without another run.
+    await vi.waitFor(async () =>
+      expect((await pi.call("exa_research_status")).details.completionSummary).toMatchObject({
+        duplicateSuccess: true,
+      }),
+    );
     const status = await pi.call("exa_research_status");
     expect(status.details).toMatchObject({
       status: "completed",
@@ -760,12 +795,6 @@ describe("Pi cycle commands and tools", () => {
         result: expect.objectContaining({ taskOutput: { replacement: "new schema" } }),
       }),
     ]);
-    expect(completionUpdates).toContainEqual(
-      expect.objectContaining({
-        details: expect.objectContaining({ completionSummary: expect.objectContaining({ duplicateSuccess: true }) }),
-        content: [expect.objectContaining({ text: expect.stringMatching(/duplicate successes/i) })],
-      }),
-    );
     expect((await pi.call("web_research_exa", { researchMode: "replace", cycleId: artifact.cycleId })).isError).toBe(
       true,
     );
@@ -783,7 +812,7 @@ describe("Pi cycle commands and tools", () => {
       output: { structured: { answer: 42 } },
       costDollars: { total: 0.1 },
     });
-    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    expect((await pi.submit(artifact.cycleId)).isError).toBe(true);
     const before = (await pi.call("exa_research_status")).details;
     await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
     const inactive = await pi.call("exa_research_status");
@@ -830,7 +859,13 @@ describe("Pi cycle commands and tools", () => {
       costDollars: { total: 0.02 },
     });
     offlineGet.mockRejectedValue(Object.assign(new Error("not found"), { statusCode: 404 }));
-    await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    await pi.submit(artifact.cycleId);
+    // The background monitor's single GET pauses it on not-found; recovery remains explicit.
+    await vi.waitFor(async () =>
+      expect((await pi.call("exa_research_status")).details.monitors).toMatchObject([
+        { state: "paused", reason: "NOT_FOUND" },
+      ]),
+    );
     offlineGet.mockClear();
     expect(
       (
@@ -859,7 +894,12 @@ describe("Pi cycle commands and tools", () => {
     const { pi, artifact } = await readyAgentHost();
     offlineCreate.mockResolvedValueOnce({ id: "agent_run_pending", status: "running" });
     offlineGet.mockRejectedValueOnce(Object.assign(new Error("not found"), { statusCode: 404 }));
-    await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    await pi.submit(artifact.cycleId);
+    await vi.waitFor(async () =>
+      expect((await pi.call("exa_research_status")).details.monitors).toMatchObject([
+        { state: "paused", reason: "NOT_FOUND" },
+      ]),
+    );
     offlineGet.mockClear().mockResolvedValueOnce({
       id: "agent_run_pending",
       status: "running",
@@ -867,10 +907,12 @@ describe("Pi cycle commands and tools", () => {
     });
     const response = await pi.call("web_research_exa", { researchMode: "recover", cycleId: artifact.cycleId });
     expect(response.isError).toBeFalsy();
+    // A paused monitor is not a failed or unknown run: the remote work stays running and its
+    // reservation stays pending until a terminal receipt.
     expect(response.details).toMatchObject({
-      status: "unknown",
+      status: "running",
       execution: { result: { remoteStatus: "running", processing: "pending", provisionalTotalDollars: 0.05 } },
-      accounting: { reason: "UNKNOWN_LIABILITY", reportedDollars: 0 },
+      accounting: { reportedDollars: 0, pendingEstimatedDollars: 0.1 },
     });
     expect(offlineGet).toHaveBeenCalledTimes(1);
     expect(offlineCreate).toHaveBeenCalledTimes(1);
@@ -884,7 +926,7 @@ describe("Pi cycle commands and tools", () => {
       interruption.abort();
       return new Promise(() => {});
     });
-    await pi.call("web_research_exa", { cycleId: artifact.cycleId }, interruption.signal);
+    await pi.submit(artifact.cycleId, interruption.signal);
     await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
     await pi.call("exa_research_status", { action: "resume", cycleId: artifact.cycleId });
     const response = await pi.call("web_research_exa", { researchMode: "recover", cycleId: artifact.cycleId });
@@ -929,7 +971,7 @@ describe("Pi cycle commands and tools", () => {
       output: { structured: { answer: 42 } },
       costDollars: { total: 0.1 },
     });
-    await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    await pi.submit(artifact.cycleId);
     const before = (await pi.call("exa_research_status")).details;
     let started!: () => void;
     const reachedGet = new Promise<void>((resolve) => {
@@ -990,7 +1032,7 @@ describe("Pi cycle commands and tools", () => {
       },
       costDollars: { total: 0.01 },
     });
-    const response = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    const response = await pi.submit(artifact.cycleId);
     expect(response.isError).toBe(true);
     expect(response.details).toMatchObject({
       status: "failed",
@@ -1001,7 +1043,7 @@ describe("Pi cycle commands and tools", () => {
     const record = (await pi.call("exa_research_status")).details;
     expect(record).toMatchObject({ attempts: [{ result: { remoteError: { category: "invalid-request" } } }] });
     expect(JSON.stringify(record)).not.toMatch(/secret|credential|private excerpt/);
-    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    expect((await pi.submit(artifact.cycleId)).isError).toBe(true);
     expect(offlineCreate).toHaveBeenCalledTimes(1);
     await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
   });
@@ -1011,7 +1053,7 @@ describe("Pi cycle commands and tools", () => {
     vi.mocked(nativeFs.renameSync).mockImplementationOnce(() => {
       throw new Error("intent publication denied");
     });
-    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    expect((await pi.submit(artifact.cycleId)).isError).toBe(true);
     expect(offlineCreate).not.toHaveBeenCalled();
     expect((await pi.call("exa_research_status")).details).toMatchObject({
       status: "planning",
@@ -1029,14 +1071,14 @@ describe("Pi cycle commands and tools", () => {
       output: { structured: { answer: 7 } },
       costDollars: { total: 0.1 },
     });
-    const response = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    const response = await pi.submit(artifact.cycleId);
     expect(response.isError).toBe(true);
     expect(response.details).toMatchObject({
       status: "completed",
       execution: { result: { processing: "failed" } },
       accounting: { reportedDollars: 0.1 },
     });
-    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    expect((await pi.submit(artifact.cycleId)).isError).toBe(true);
     expect(offlineCreate).toHaveBeenCalledTimes(1);
     const override = await pi.call("web_research_exa", {
       query: "continue it",
@@ -1062,7 +1104,7 @@ describe("Pi cycle commands and tools", () => {
       });
     });
     const signal = new AbortController();
-    const call = pi.call("web_research_exa", { cycleId: artifact.cycleId }, signal.signal);
+    const call = pi.submit(artifact.cycleId, signal.signal);
     await entered;
     signal.abort();
     expect((await call).isError).toBe(true);
@@ -1071,7 +1113,7 @@ describe("Pi cycle commands and tools", () => {
       attempts: [{ status: "unknown" }],
       ledger: [{ status: "unknown" }],
     });
-    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    expect((await pi.submit(artifact.cycleId)).isError).toBe(true);
     resolve({
       id: "agent_run_late",
       status: "completed",
@@ -1113,15 +1155,20 @@ describe("Pi cycle commands and tools", () => {
     const status = await pi.call("exa_research_status");
     expect(status.details.accounting).toMatchObject({ ledgerHealthy: true, assessmentOnly: true });
     expect(status.details.accounting).not.toHaveProperty("canDispatch");
-    const paused = await pi.call("web_research_exa", {
+    const blocked = await pi.call("web_research_exa", {
       cycleId: artifact.cycleId,
       expectedRevision: artifact.revision,
       artifactHash: artifact.hash,
     });
-    expect(paused.isError).toBe(true);
-    expect(paused.details.assessment).toMatchObject({ reason: "UNCERTAINTY_APPROVAL_REQUIRED" });
+    expect(blocked.isError).toBe(true);
+    expect(blocked.content[0].text).toContain("GUIDED_SUBMISSION_REQUIRED");
     expect(offlineCreate).not.toHaveBeenCalled();
-    await pi.command?.handler(`approve-request ${artifact.cycleId} ${paused.details.requestHash} 0.2`, pi.context);
+    // The host dialog records the lifetime scope and exact-request permission together.
+    pi.confirm.mockResolvedValueOnce(false);
+    const declined = await pi.submit(artifact.cycleId);
+    expect(declined.isError).toBe(true);
+    expect(declined.content[0].text).toContain("APPROVAL_NOT_GRANTED");
+    expect(offlineCreate).not.toHaveBeenCalled();
     offlineCreate.mockResolvedValueOnce({
       id: "agent_run_final",
       status: "completed",
@@ -1129,11 +1176,7 @@ describe("Pi cycle commands and tools", () => {
       output: { structured: { answer: "result" } },
       costDollars: { total: 0.1 },
     });
-    const finished = await pi.call("web_research_exa", {
-      cycleId: artifact.cycleId,
-      expectedRevision: artifact.revision,
-      artifactHash: artifact.hash,
-    });
+    const finished = await pi.submit(artifact.cycleId);
     expect(finished.isError).not.toBe(true);
     expect(offlineCreate).toHaveBeenCalledExactlyOnceWith(artifact.request);
     expect(await pi.call("exa_research_status")).toMatchObject({
@@ -1143,7 +1186,7 @@ describe("Pi cycle commands and tools", () => {
         accounting: { reportedDollars: 0.1 },
       },
     });
-    expect((await pi.call("web_research_exa", { cycleId: artifact.cycleId })).isError).toBe(true);
+    expect((await pi.submit(artifact.cycleId)).isError).toBe(true);
     expect(offlineCreate).toHaveBeenCalledTimes(1);
     await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
   });
@@ -1387,6 +1430,7 @@ describe("Pi cycle commands and tools", () => {
       costDollars: { total: 0.007 },
     };
     offlineSearch.mockResolvedValue(fixture);
+    pi.confirm.mockResolvedValueOnce(false);
     expect((await pi.call("web_search_exa", { query: "topic", cycleId: status.id })).isError).toBe(true);
     expect(offlineSearch).not.toHaveBeenCalled();
     await pi.command?.handler(`approve ${status.id} 1`, pi.context);
@@ -1692,11 +1736,15 @@ describe("Pi cycle commands and tools", () => {
     const args = { query: "topic", cycleId: status.id };
     const first = pi.call("web_search_exa", args);
     await barrier;
+    pi.confirm.mockResolvedValueOnce(false);
     const denied = await pi.call("web_search_exa", args);
-    expect(denied.details.assessment).toMatchObject({
-      reason: "INSUFFICIENT_BALANCE",
-      pendingEstimatedDollars: 0.007,
-    });
+    expect(denied.isError).toBe(true);
+    expect(denied.content[0].text).toContain("APPROVAL_NOT_GRANTED");
+    expect(pi.confirm).toHaveBeenLastCalledWith(
+      "Approve exploratory Exa retrieval?",
+      expect.stringContaining("Existing liabilities: $0.01 assessed"),
+      expect.anything(),
+    );
     resolve({ results: [], costDollars: { total: 0.02 } });
     expect((await first).details.accounting).toMatchObject({
       reason: "OVERSPEND",
@@ -1910,7 +1958,7 @@ describe("Pi cycle commands and tools", () => {
         }
       } else {
         expect(preview.isError).toBe(true);
-        expect(preview.content[0]).toMatchObject({ text: expect.stringContaining("APPROVAL_REQUIRED") });
+        expect(preview.content[0]).toMatchObject({ text: expect.stringContaining("GUIDED_SUBMISSION_REQUIRED") });
         expect(offlineCreate).not.toHaveBeenCalled();
         expect(preview.details).not.toHaveProperty("issues");
       }
@@ -1982,7 +2030,7 @@ describe("Pi cycle commands and tools", () => {
     });
     const gated = await pi.call("web_research_exa", { artifactHash: artifact.hash });
     expect(gated.isError).toBe(true);
-    expect(gated.content[0]).toMatchObject({ text: expect.stringContaining("APPROVAL_REQUIRED") });
+    expect(gated.content[0]).toMatchObject({ text: expect.stringContaining("GUIDED_SUBMISSION_REQUIRED") });
     expect(offlineCreate).not.toHaveBeenCalled();
     expect((await pi.call("exa_research_summary", { mode: "payload", expectedRevision: 0 })).details).toMatchObject({
       issues: [expect.objectContaining({ code: "STALE_REVISION" })],
