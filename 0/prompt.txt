@@ -1,0 +1,465 @@
+fix it
+
+---
+
+Inspect subagent updates above. Answer pending supervisor requests within your authority. For completed work, read saved results and resume the already-authorized parent task, or report completion. If approval is required, explicitly ask the user. Do not silently yield, rerun completed work, or infer new authorization.
+
+---
+
+reread fs
+
+---
+
+are the gh issues 114 and 115 still valid?
+
+---
+
+is the agent research's output plain text or structured output?
+
+---
+
+lets bump the pi-exa version
+
+---
+
+can we test the pi-exa extension locally before releasing?
+
+---
+
+see this
+
+
+
+ ▀▀█  v1.0.3
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+
+[Context]
+  ~/.pi/agent/AGENTS.md, AGENTS.md
+
+[Skills]
+  address-findings, agent-browser, ask-matt, ask-user, brpr, claude-api, claude-handoff, code-search, codebase-design, company-research, council-mode,
+diagnosing-bugs, docx, domain-modeling, exa-research-planner, explain, financial-report-search, frontend-design, gh-stack, git-guardrails-claude-code,
+grill-me, grill-with-docs, grilling, handoff, herdr, hindsight-architect, hindsight-cloud, hindsight-coding-agent, hindsight-docs, hindsight-self-hosted,
+i-have-adhd, implement, implement-spec, improve-codebase-architecture, internal-comms, log-float-time, loop-me, mcp-builder, merge, migrate-to-shoehorn,
+mp-code-review, mp-teach, pdf, people-research, performance-optimization, personal-site-search, pi-subagents, pptx, pr, prototype, python-refactor, recall,
+release, replay, research, research-paper-search, retro, review, scaffold-exercises, search, session-crosslink, session-handoff, session-to-skill,
+setup-matt-pocock-skills, setup-pre-commit, setup-ts-deep-modules, skill-creator, tdd, teach, to-questionnaire, to-spec, to-tickets, triage, typesafe-ai,
+using-entire, voice, wait-what, wayfinder, webapp-testing, what-happened, wizard, writing-beats, writing-for-agents, writing-fragments, writing-shape, xlsx
+
+[Prompts]
+  /council, /fix-pr, /gather-context-and-clarify, /md, /parallel-cleanup, /parallel-research, /parallel-review, /review-loop, /smd
+
+[Extensions]
+  extensions
+
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Update Available
+ New version 1.1.0 is available. Run pi update
+ Changelog: https://pi.dev/changelog
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ Error: Use /exa-research start <topic>, list, resume <id>, approve <cycle-id> <total-dollar-ceiling> [tool,tool...], approve-request <cycle-id>
+ <request-hash> <assessed-dollars>, approve-liability <cycle-id> <operation-id> <assessed-dollars>, approve-replacement <cycle-id> <unknown-attempt-id>
+ <new-request-hash> <assessed-original-dollars>, or archive [id].
+
+
+ do an exa research
+
+
+
+ [skill] exa-research-planner (ctrl+o to expand)
+
+
+ What topic or question should I research?
+
+ To start a tracked Exa research cycle, use:
+ /exa-research start <topic>
+
+
+ can you do a guided research? so I do not have to manually do it
+
+
+ Yes—I can guide the process conversationally: clarify your goal, propose a scope, gather sources, and produce a cited report. You won’t need to construct
+ queries or tool calls; I’ll ask for approval before paid deep research.
+
+ What topic would you like to research, and what do you want to learn or decide?
+
+
+ laya vs jev
+
+
+
+ [skill] ask-user (ctrl+o to expand)
+
+
+ Clarifying names
+
+ I need to figure out if "laya" refers to "Layla." I'll ask in a simple way to avoid confusion. The question could be about distinguishing between "jev" and
+ "laya," which opens up possibilities for misunderstanding. It's important to clarify so I can provide accurate information or help. Let's get that
+ straightened out! Making sure I'm clear on names is key to my response.
+
+ Do you mean Jev from TypeSafe? And which Laya—can you share its URL or company name?
+
+ Once we identify both, I’ll guide a comparison of capabilities, accuracy, latency, pricing, and integration effort.
+
+
+ https://github.com/NandhaKishorM/laya
+
+
+
+ web_fetch_exa  1 URL(s)
+ # NandhaKishorM/laya
+ URL: https://github.com/NandhaKishorM/laya
+ ctrl+o → expand
+
+
+ Got it: Laya vs TypeSafe’s Jev. Laya describes itself as a non-autoregressive engine for typed decisions, so I’ll compare decision quality—not general
+ chatbot performance—and distinguish benchmark claims from verified evidence.
+
+ What should the comparison help you decide?
+
+ 1. Which to use in an application — accuracy, latency, cost, privacy, integration.
+ 2. Whether Laya is a credible Jev alternative — architecture, benchmarks, limitations.
+ 3. Both — my recommended default.
+
+ You can also describe your use case.
+
+
+ 3
+
+
+ Planning research approval
+
+ I need to get the standalone research approval since it was mentioned before doing paid deep research. It seems I can start with some preliminary sources,
+ as the user selected without cost. My next step is to fetch the typesafe skill and then do a quick search. After that, I'll plan the necessary consent
+ process. It looks like I have a clear path ahead!
+
+
+ [skill] typesafe-ai (ctrl+o to expand)
+
+
+ Considering research execution
+
+ I'm thinking about executing a standalone medium, but I need explicit approval first. It's tricky because I don't have the pricing details yet. I should
+ gather evidence quickly and present the scope to seek low or medium approval. The user wants guidance to avoid excessive costs, so I'll proceed with
+ source-first research using fetch search instead of a paid agent. This way, I can deliver a substantive report more affordably!
+
+ I’ll cover both: whether Laya is a credible Jev alternative and when to choose either. I’ll start with public documentation and benchmark evidence,
+ separating vendor claims from demonstrated results.
+
+
+ web_fetch_exa  3 URL(s)
+ # (no title)
+ URL: https://docs.typesafe.ai/llms.txt
+ ctrl+o → expand
+
+
+
+ web_search_exa  "TypeSafe Jev Laya decision model comparison benchmark Jev pricing latency" (5 results)
+ ▸ Laya vs Jev: Open-Source vs TypeSafe Decision API · Laya Studio — https://laya.studio/compare/laya-vs-jev
+ ▸ Jev vs Laya: an honest comparison · Laya Studio — https://laya.studio/blog/jev-vs-laya-honest-comparison
+ ▸ Laya and Jev: Classifiers That Don’t Generate – ExploringML — https://exploringml.com/posts/laya-jev-classifier-comparison/
+ ▸ Laya vs Jev Benchmark: Why the Numbers Conflict & How to Choose — JevLab — https://jevlab.dev/laya-vs-jev-benchmark
+ ▸ Laya vs Jev: an open-source benchmark of typed decision models | Zylver — https://zylver.com/blog/laya-vs-jev-typed-decision-model-benchmark/
+ ctrl+o → expand
+
+
+
+ web_fetch_exa  5 URL(s)
+ # Models
+ URL: https://docs.typesafe.ai/models.md
+ ctrl+o → expand
+
+
+ Initial finding
+
+ Laya is a credible alternative in the same category, but “Laya beats Jev” is not supported by a controlled head-to-head benchmark. My provisional
+ recommendation: Jev for a general-purpose application; Laya when self-hosting or domain-specific tuning matters.
+
+ Both return typed Choice, Score, and yes/no probabilities, rather than generated prose.
+
+ ### Practical comparison
+
+ ┌────────────────────┬──────────────────────────────────────────────────────────────────────────┬─────────────────────────────────────────────────────────┐
+ │ Factor             │ Laya                                                                     │ Jev                                                     │
+ ├────────────────────┼──────────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤
+ │ Deployment         │ Open weights, self-hostable, Apache-2.0                                  │ Hosted proprietary API                                  │
+ ├────────────────────┼──────────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤
+ │ Customization      │ Can fine-tune and recalibrate                                            │ Instructions and criteria; no customer-specific         │
+ │                    │                                                                          │ fine-tuning                                             │
+ ├────────────────────┼──────────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤
+ │ Many choices       │ Documented degradation with large option sets; recommends roughly ≤20    │ Supports up to 255                                      │
+ ├────────────────────┼──────────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤
+ │ Context            │ Checkpoint-dependent: 512–1,024 by default; multilingual supports up to  │ 32k state + longest question; 64k total request         │
+ │                    │ 8,192                                                                    │                                                         │
+ ├────────────────────┼──────────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤
+ │ Cost               │ Hardware, hosting, and maintenance—not free inference                    │ Published price: $0.042/million input tokens, output    │
+ │                    │                                                                          │ free                                                    │
+ ├────────────────────┼──────────────────────────────────────────────────────────────────────────┼─────────────────────────────────────────────────────────┤
+ │ Operational burden │ You manage inference and model versions                                  │ Provider manages inference                              │
+ └────────────────────┴──────────────────────────────────────────────────────────────────────────┴─────────────────────────────────────────────────────────┘
+
+ Sources: Laya documentation, Jev models, Jev API.
+
+ ### What weakens Laya’s headline claims?
+
+ 1. Fine-tuned versus zero-shot is a material distinction.
+ Laya reports 76.6% on typed decisions for its specialist checkpoint, versus a published 72.7% for Jev. But Laya’s base checkpoints score approximately
+ 35–36%, below the 46.1% majority baseline. Its benchmark document also says the specialist result has no committed result artifact yet. That supports
+ evaluating the specialist—not assuming equivalent general-purpose capability. Source
+
+ 2. The speed comparison uses different measurement boundaries.
+ Laya’s roughly 33–40 ms is local T4 inference. Jev’s roughly 236–276 ms includes a hosted HTTP request. These are useful deployment measurements, but not
+ proof that Laya’s underlying model is 7× faster. Laya’s documented CPU timings are considerably higher. Source
+
+ 3. Calibration claims are not directly comparable.
+ Laya’s headline 0.081 ECE follows temperature fitting. Its benchmark reports substantial overconfidence before fitting. Meanwhile, the independent
+ benchmark behind Jev’s often-quoted 0.246 ECE explicitly limits that figure to a particular uncertainty test. Neither establishes universally safer
+ automation. Laya benchmarks · Independent benchmark corrections
+
+ 4. Laya’s own sources disagree on safety performance.
+ Its Hugging Face card advertises 96.7% moderation/safety accuracy on in-task evaluation, while its repository reports 53% on held-out toxic-chat. Different
+ evaluation conditions can explain this—but the marketing figure should not justify a production safety deployment. Model card · Benchmarks
+
+ ### My provisional recommendation
+
+ - Start with Jev for changing decision schemas, large label sets, longer inputs, or avoiding GPU operations.
+ - Evaluate Laya for local/offline processing, control over weights, or stable tasks where you can fine-tune and validate calibration.
+ - Neither guarantees correct decisions or injection resistance. Jev also explicitly documents adversarial-content, option-order, numeric, and long-context
+   failure modes. Source
+
+ I’ve inspected public sources through Exa; I haven’t run either model or launched a paid Agent research run.
+
+ Next guided question: what would you use it for—agent/tool routing, document classification, extraction, safety checks, or something else?
+
+
+ but you did not use exa agent search
+
+
+ You’re right—I used Exa Search and Fetch, not Exa Research Agent. That was a preliminary review, not the Agent research you requested.
+
+ May I now run one medium-effort Exa Research Agent pass comparing Laya and Jev for both practical adoption and benchmark credibility? This is a paid call;
+ I haven’t verified its exact price.
+
+
+ do a high effort one
+
+
+
+ web_research_exa  "Research Laya (https://github.com/NandhaKishorM/laya, Convai Innovations checkpoints) versus TypeSafe Jev for two goals: assess whether
+ Laya is a credible alternative, and recommend when application developers should choose each. Produce an evidence-grounded technical comparison covering
+ typed decision primitives and API compatibility; actual architecture and training claims (including RLCD, distinguishing disclosed details from inference);
+ zero-shot versus fine-tuned quality; benchmark methodology, provenance, artifacts, training overlap, sample sizes, checkpoint/version differences and
+ reproducibility; probability calibration versus provider-defined confidence; latency with equivalent measurement boundaries, CPU/GPU and batching; context
+ and option-count limits; multilingual performance; current published pricing and total self-hosting costs; licensing including model weights; privacy/data
+ retention versus actual legal commitments; deployment and operational maturity; documented failures and security limitations. Prioritize official TypeSafe
+ docs https://docs.typesafe.ai/llms.txt, Laya source code/model cards and BENCHMARKS.md, and independent benchmark repositories
+ https://github.com/nibzard/decision-model-benchmark and https://github.com/AbdelStark/jev-benchmarks. Trace comparison claims to original experiments
+ rather than repeating comparison marketing. Specifically investigate Laya's specialist typed-decisions accuracy 0.766 versus base approximately 0.35-0.36
+ and published Jev 0.727, missing specialist result artifacts, inconsistent moderation claims between model card and held-out benchmarks, local T4 latency
+ versus hosted Jev latency, inappropriate cross-suite ECE comparisons, Banking77 72-label pilot versus full 77-label evaluation, and corrected or superseded
+ benchmark results. Verify those figures rather than assuming they remain current. No application use case was specified: provide conditional
+ recommendations for general zero-shot decisions, stable fine-tuned routing, large label spaces, multilingual traffic, local/private deployment and
+ safety-critical decisions. Return an executive verdict, comparison table, detailed benchmark audit, conditional recommendations, a proposed fair
+ head-to-head evaluation design, unresolved evidence gaps, and linked primary sources. Do not run model APIs or claim to have benchmarked them."
+ Cancelled.
+ ctrl+o → expand
+
+
+ Tool output: expanded
+
+ Error: This operation was aborted
+
+
+ why did it hang?
+
+
+ The Agent call returned “Cancelled”, with no report or run ID. I can’t tell whether it was cancelled before submission or while Exa was processing it.
+
+ High-effort Agent research is asynchronous and can appear idle while it works, but I don’t have enough information to identify why this call stopped—or
+ whether it incurred a charge.
+
+ I won’t automatically retry, since that could duplicate work and costs.
+
+
+ so if it is asyncronous why is the pi client waiting?
+
+
+
+ read ~/src/personal/pi/pi-extensions/.entire/graph-agent.md
+
+
+ Error: Codex error: An error occurred while processing your request. You can retry your request, or contact us through our help center at help.openai.com
+ if the error persists.
+
+ Because Exa’s API is asynchronous, but the tool wrapper waits synchronously.
+
+ The tool’s documented behavior is:
+
+ 1. Submit an Exa Agent job.
+ 2. Poll that job until completion.
+ 3. Return the finished report to Pi.
+
+ So Pi keeps the tool call open—and waits—while Exa works in the background. “Asynchronous” describes Exa’s job execution, not a background task in Pi.
+
+ To avoid that wait, the extension would need separate start and status/result operations: return the run ID immediately, then retrieve the report later. My
+ earlier explanation blurred that distinction.
+
+ Tool output: collapsed
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/src/personal/pi/pi-extensions (main)
+↑120k ↓2.9k R447k CH0.0% $0.314 (sub) 21.8%/272k (auto)
+
+---
+
+we probably need to rethink this
+
+---
+
+I like this "Request → clarify → preview scope/cost → approve → submit → continue chatting → inspect completion → report gaps."
+
+the user should do something like say: I want to research such and such topic and the agent will ask me questions to hone the research request
+
+lets chat more about this
+
+---
+
+the ux should be that when the request is submitted I get back the research id and the agent will check in the background (while returning the control to the user) and when research is completed the agent lets me know?
+
+---
+
+sounds good
+
+---
+
+should we write the spec?
+
+---
+
+all this new work will be part of 6.1.0
+
+---
+
+probably stash the current state while we work on it?
+
+---
+
+write the spec now then?
+
+---
+
+<skill name="to-tickets" location="/Users/feniix/.pi/agent/skills/to-tickets/SKILL.md">
+References are relative to /Users/feniix/.pi/agent/skills/to-tickets.
+
+# To Tickets
+
+Break a plan, spec, or conversation into a set of **tickets**: tracer-bullet vertical slices, each declaring the tickets that **block** it.
+
+The issue tracker and triage label vocabulary should have been provided to you. If not, tell the user to run `/setup-matt-pocock-skills`.
+
+## Process
+
+### 1. Gather context
+
+Work from whatever is already in the conversation context. If the user passes a reference (a spec path, an issue number or URL) as an argument, fetch it and read its full body and comments.
+
+### 2. Explore the codebase (optional)
+
+If you have not already explored the codebase, do so to understand the current state of the code. Ticket titles and descriptions should use the project's domain glossary vocabulary, and respect ADRs in the area you're touching.
+
+Look for opportunities to prefactor the code to make the implementation easier. "Make the change easy, then make the easy change."
+
+### 3. Draft vertical slices
+
+Break the work into **tracer bullet** tickets.
+
+<vertical-slice-rules>
+
+- Each slice cuts a narrow but COMPLETE path through every layer (schema, API, UI, tests): vertical, NOT a horizontal slice of one layer
+- A completed slice is demoable or verifiable on its own
+- Each slice is sized to fit in a single fresh context window
+- Any prefactoring should be done first
+
+</vertical-slice-rules>
+
+Give each ticket its **blocking edges**: the other tickets that must complete before it can start. A ticket with no blockers can start immediately.
+
+**Wide refactors are the exception to vertical slicing.** A **wide refactor** is one mechanical change (rename a column, retype a shared symbol) whose **blast radius** fans across the whole codebase, so a single edit breaks thousands of call sites at once and no vertical slice can land green. Don't force it into a tracer bullet; sequence it as **expand–contract**. First expand: add the new form beside the old so nothing breaks. Then migrate the call sites over in batches sized by blast radius (per package, per directory), each batch its own ticket blocked by the expand, keeping CI green batch to batch because the old form still exists. Finally contract: delete the old form once no caller remains, in a ticket blocked by every migrate batch. When even the batches can't stay green alone, keep the sequence but let them share an integration branch that all block a final integrate-and-verify ticket; green is promised only there.
+
+### 4. Quiz the user
+
+Present the proposed breakdown as a numbered list. For each ticket, show:
+
+- **Title**: short descriptive name
+- **Blocked by**: which other tickets (if any) must complete first
+- **What it delivers**: the end-to-end behaviour this ticket makes work
+
+Ask the user:
+
+- Does the granularity feel right? (too coarse / too fine)
+- Are the blocking edges correct: does each ticket only depend on tickets that genuinely gate it?
+- Should any tickets be merged or split further?
+
+Iterate until the user approves the breakdown.
+
+### 5. Publish the tickets to the configured tracker
+
+Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured; the tickets are the same either way, only the shape of the blocking edges changes:
+
+- **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below: one ticket per file, never a single combined file.
+- **A real issue tracker (GitHub, Linear, …)** → publish one issue per ticket in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers. Use the platform's native blocking / sub-issue relationship where it has one; otherwise set each ticket's "Blocked by" to the blocking issues. Apply the `ready-for-agent` triage label unless instructed otherwise; the tickets are agent-grabbable by construction.
+
+Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
+
+Do NOT close or modify any parent issue.
+
+<local-ticket-template>
+
+# <NN>: <Ticket title>
+
+**What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective, not a layer-by-layer implementation list.
+
+**Blocked by:** the numbers/titles of the tickets that gate this one, or "None (can start immediately)".
+
+**Status:** ready-for-agent
+
+- [ ] Acceptance criterion 1
+- [ ] Acceptance criterion 2
+
+</local-ticket-template>
+
+<issue-template>
+
+## Parent
+
+A reference to the parent issue on the tracker (if the source was an existing issue, otherwise omit this section).
+
+## What to build
+
+The end-to-end behaviour this ticket makes work, from the user's perspective, not layer-by-layer implementation.
+
+## Acceptance criteria
+
+- [ ] Criterion 1
+- [ ] Criterion 2
+
+## Blocked by
+
+- A reference to each blocking ticket, or "None (can start immediately)".
+
+</issue-template>
+
+In either form, avoid specific file paths or code snippets: they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.
+</skill>
+
+---
+
+post them
