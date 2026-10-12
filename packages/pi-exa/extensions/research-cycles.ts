@@ -44,6 +44,7 @@ import {
   curateAgentRun,
   validateAgentAttempts,
 } from "./research-execution.js";
+import { type MonitorRecord, monitorRecordSchema } from "./research-monitor.js";
 import { createResearchPlanner, type ResearchPlannerSnapshot } from "./research-planner.js";
 import type { ResearchSummaryParams } from "./research-planner-types.js";
 import {
@@ -139,6 +140,7 @@ const recordSchema = Type.Object(
     plan: snapshotSchema,
     executionPlan: Type.Optional(executionPlanSchema),
     candidates: Type.Optional(Type.Array(candidateSchema)),
+    monitors: Type.Optional(Type.Array(monitorRecordSchema)),
     attempts: objects,
     ledger: objects,
     grants: objects,
@@ -1594,6 +1596,64 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         }
         return { ...result, cycle: record };
       });
+    },
+    /**
+     * Register host-owned background monitoring for an acknowledged attempt in the
+     * owning session. Monitoring has no create/retry/replace/cancel authority.
+     */
+    async registerMonitor(cycleId: string, attemptId: string) {
+      return ordered(() =>
+        transaction(async () => {
+          const record = await owned();
+          assertArtifactTarget(record, { cycleId });
+          const attempt = record.attempts.find((entry) => "id" in entry && entry.id === attemptId);
+          if (!Value.Check(agentAttemptSchema, attempt) || !attempt.result?.remoteId)
+            throw new Error("MONITOR_UNAVAILABLE: no acknowledged remote run ID to observe.");
+          if (attempt.result.terminal) throw new Error("MONITOR_UNAVAILABLE: the attempt is already terminal.");
+          record.monitors ??= [];
+          const existing = record.monitors.find((entry) => entry.attemptId === attemptId);
+          if (existing && (existing.state === "registered" || existing.state === "running"))
+            return { monitor: structuredClone(existing), created: false };
+          const monitor: MonitorRecord = existing ?? {
+            kind: "exa-monitor-v1",
+            attemptId,
+            runId: attempt.result.remoteId,
+            originSessionId: owner.sessionId,
+            state: "registered",
+            gets: 0,
+            consecutiveTransientErrors: 0,
+            startedAt: new Date().toISOString(),
+          };
+          monitor.state = "registered";
+          delete monitor.reason;
+          monitor.originSessionId = owner.sessionId;
+          monitor.startedAt = new Date().toISOString();
+          monitor.consecutiveTransientErrors = 0;
+          delete monitor.nextDelayMs;
+          if (!existing) record.monitors.push(monitor);
+          if (!Value.Check(monitorRecordSchema, monitor)) throw new Error("Invalid monitor record.");
+          await write(record);
+          return { monitor: structuredClone(monitor), created: !existing };
+        }),
+      );
+    },
+    /**
+     * Operation-bound monitor fact update: reads the record directly, never
+     * acquires or replaces ownership, never touches plan, grants or attempts.
+     */
+    async updateMonitor(cycleId: string, attemptId: string, mutate: (monitor: MonitorRecord) => void) {
+      return ordered(() =>
+        transaction(async () => {
+          const record = await read(cycleId);
+          const monitor = record.monitors?.find((entry) => entry.attemptId === attemptId);
+          if (!monitor) throw new Error("MONITOR_UNKNOWN: no monitor is recorded for this attempt.");
+          const before = JSON.stringify(monitor);
+          mutate(monitor);
+          if (!Value.Check(monitorRecordSchema, monitor)) throw new Error("Invalid monitor record update.");
+          if (before !== JSON.stringify(monitor)) await write(record);
+          return structuredClone(monitor);
+        }),
+      );
     },
     async archive(id = activeId) {
       if (!id) throw new Error("No active research cycle to archive.");
