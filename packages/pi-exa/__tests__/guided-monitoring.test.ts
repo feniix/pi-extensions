@@ -407,6 +407,43 @@ describe("background monitoring and completion delivery", () => {
     expect(offlineCreate).toHaveBeenCalledTimes(1);
   });
 
+  it("pauses on local storage failure after a successful GET without an unhandled rejection, and resumes scheduling after tree navigation", async () => {
+    const pi = await host();
+    offlineGet.mockResolvedValue(completedRun("agent_run_pending"));
+    const original = vi.mocked(fs.rename).getMockImplementation() as typeof fs.rename;
+    const { cycleId, projectId, attemptId } = await submitted(pi, "Laya versus Jev", () => {
+      // Create acknowledgement, monitor registration, the running-state write and the
+      // terminal receipt publish; the monitor's own counter write after the successful GET fails once.
+      vi.mocked(fs.rename)
+        .mockImplementationOnce((from, to) => original(from, to))
+        .mockImplementationOnce((from, to) => original(from, to))
+        .mockImplementationOnce((from, to) => original(from, to))
+        .mockImplementationOnce((from, to) => original(from, to))
+        .mockRejectedValueOnce(new Error("EIO: monitor publication failed"));
+    });
+    await vi.waitFor(
+      async () => expect(monitorOf(await pi.record(cycleId, projectId), attemptId)?.state).toBe("paused"),
+      { timeout: 4_000, interval: 25 },
+    );
+    const paused = monitorOf(await pi.record(cycleId, projectId), attemptId);
+    expect(paused?.reason).toBe("STORAGE");
+    const record = await pi.record(cycleId, projectId);
+    expect(record.status).toBe("completed");
+    expect(pi.sent).toHaveLength(0);
+    const status = await pi.call("exa_research_status", { cycleId });
+    expect(String(status.details.nextSafeAction)).toContain("Background monitoring is paused");
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+
+    // Tree navigation detaches this cycle; a fresh cycle afterwards must still be monitored.
+    await pi.emit("session_tree", {});
+    offlineGet.mockReset().mockImplementation(async (runId) => completedRun(runId));
+    offlineCreate.mockResolvedValueOnce({ id: "agent_run_after_tree", status: "running" });
+    const next = await submitted(pi, "Jev versus Julia");
+    expect(next.result.details).toMatchObject({ runId: "agent_run_after_tree", monitoring: "registered" });
+    await vi.waitFor(() => expect(pi.sent).toHaveLength(1), { timeout: 4_000 });
+    expect(pi.sent[0].message.details).toMatchObject({ runId: "agent_run_after_tree" });
+  });
+
   it("surfaces a sent-but-unconfirmed notice as uncertain on restart instead of resending or dropping it", async () => {
     const pi = await host();
     offlineGet.mockResolvedValue(completedRun("agent_run_pending"));

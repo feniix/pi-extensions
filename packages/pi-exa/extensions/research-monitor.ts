@@ -47,6 +47,7 @@ export const monitorPauseReasons = [
   "DETACHED",
   "ARCHIVED",
   "REGISTRATION_FAILED",
+  "STORAGE",
 ] as const;
 export type MonitorPauseReason = (typeof monitorPauseReasons)[number];
 
@@ -99,6 +100,7 @@ export const monitorRecordSchema = Type.Object(
         Type.Literal("DETACHED"),
         Type.Literal("ARCHIVED"),
         Type.Literal("REGISTRATION_FAILED"),
+        Type.Literal("STORAGE"),
       ]),
     ),
     gets: integer,

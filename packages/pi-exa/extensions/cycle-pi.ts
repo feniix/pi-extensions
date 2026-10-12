@@ -127,6 +127,10 @@ function view(record: ResearchCycle) {
             : facts.length
               ? "Confirmed failure or proven nondispatch is retained. Revise and preview the draft; explicit researchMode=retry requires new exact-request funding and current total exposure approval. No automatic resubmission."
               : "Update the plan and preview the compiled request. Only operator grants and fresh request assessments can authorize spending.";
+  const pausedMonitors = (record.monitors ?? []).filter((monitor) => monitor.state === "paused");
+  const monitoringGuidance = pausedMonitors.length
+    ? ` Background monitoring is paused for ${pausedMonitors.map((monitor) => `attempt ${monitor.attemptId} (${monitor.reason ?? "unknown reason"})`).join(", ")}: the remote run and its liability continue; explicitly resume the cycle or inspect the same attempt with researchMode=recover. Monitoring never creates, retries, replaces or cancels research.`
+    : "";
   const completionSummary = { remoteCompletedAttemptIds: completedIds, duplicateSuccess };
   const finalReport =
     record.status === "completed"
@@ -152,7 +156,7 @@ function view(record: ResearchCycle) {
     ...visible,
     ...planningStatus,
     accounting,
-    nextSafeAction,
+    nextSafeAction: `${nextSafeAction}${monitoringGuidance}`,
     completionSummary,
     ...(finalReport ? { finalReport } : {}),
   };
@@ -242,9 +246,12 @@ export function cyclePiRegistration(
     );
   };
   const trackObservation = (key: string, work: Promise<void>) => {
-    const tracked = work.finally(() => {
-      if (observations.get(key) === tracked) observations.delete(key);
-    });
+    // Background work must never surface as an unhandled rejection from a host timer.
+    const tracked = work
+      .catch(() => {})
+      .finally(() => {
+        if (observations.get(key) === tracked) observations.delete(key);
+      });
     observations.set(key, tracked);
     return tracked;
   };
@@ -253,7 +260,7 @@ export function cyclePiRegistration(
     scheduled.delete(monitorKey(entry.cycleId, entry.attemptId));
     try {
       await entry.cycles.updateMonitor(entry.cycleId, entry.attemptId, (monitor) => {
-        if (monitor.state === "stopped") return;
+        if (monitor.state === "stopped" || monitor.state === "paused") return;
         monitor.state = "paused";
         monitor.reason = reason;
       });
@@ -308,9 +315,11 @@ export function cyclePiRegistration(
       });
     } catch (error) {
       // A stale runtime throws here: keep the notice pending for reconciliation.
-      await entry.cycles.updateMonitor(entry.cycleId, entry.attemptId, (current) => {
-        if (current.notice) current.notice.deliveryError = error instanceof Error ? error.message : String(error);
-      });
+      await entry.cycles
+        .updateMonitor(entry.cycleId, entry.attemptId, (current) => {
+          if (current.notice) current.notice.deliveryError = error instanceof Error ? error.message : String(error);
+        })
+        .catch(() => {});
     }
   };
   const scheduleMonitor = (entry: ScheduledMonitor, delayMs: number) => {
@@ -331,6 +340,13 @@ export function cyclePiRegistration(
     const key = monitorKey(entry.cycleId, entry.attemptId);
     if (!scheduled.has(key)) return;
     const { cycles, cycleId, attemptId } = entry;
+    // Non-overlapping in both directions: wait for an explicit recovery GET of this cycle.
+    await Promise.allSettled(
+      [...observations]
+        .filter(([other]) => other !== key && other.startsWith(`${cycleId}/`))
+        .map(([, promise]) => promise),
+    );
+    if (shuttingDown || !scheduled.has(key)) return;
     try {
       const record = await cycles.inspect(cycleId);
       const found = record.monitors?.find((candidate) => candidate.attemptId === attemptId);
@@ -381,39 +397,50 @@ export function cyclePiRegistration(
       return;
     }
     // The lifecycle observer already persisted the remote facts, results and accounting.
-    const after = await cycles.inspect(cycleId);
-    const execution = after.attempts.find((item) => Value.Check(agentAttemptSchema, item) && item.id === attemptId);
-    const result = Value.Check(agentAttemptSchema, execution) ? execution.result : undefined;
-    const updated = await cycles.updateMonitor(cycleId, attemptId, (monitor) => {
-      monitor.gets += 1;
-      monitor.consecutiveTransientErrors = 0;
-      monitor.lastSuccessAt = new Date().toISOString();
-      delete monitor.lastErrorKind;
-      if (!result?.terminal) monitor.nextDelayMs = nextMonitorDelay(monitor.nextDelayMs, bounds);
-    });
-    if (!result?.terminal) {
-      scheduleMonitor(entry, updated.nextDelayMs ?? bounds.initialDelayMs);
-      return;
+    try {
+      const after = await cycles.inspect(cycleId);
+      const execution = after.attempts.find((item) => Value.Check(agentAttemptSchema, item) && item.id === attemptId);
+      const result = Value.Check(agentAttemptSchema, execution) ? execution.result : undefined;
+      const updated = await cycles.updateMonitor(cycleId, attemptId, (monitor) => {
+        monitor.gets += 1;
+        monitor.consecutiveTransientErrors = 0;
+        monitor.lastSuccessAt = new Date().toISOString();
+        delete monitor.lastErrorKind;
+        if (!result?.terminal) monitor.nextDelayMs = nextMonitorDelay(monitor.nextDelayMs, bounds);
+      });
+      if (!result?.terminal) {
+        scheduleMonitor(entry, updated.nextDelayMs ?? bounds.initialDelayMs);
+        return;
+      }
+      // Terminal facts are durable; schedule exactly one notice per attempt, then deliver.
+      scheduled.delete(key);
+      const outcome =
+        result.remoteStatus === "completed"
+          ? "completed"
+          : result.remoteStatus === "cancelled"
+            ? "cancelled"
+            : "failed";
+      await cycles.updateMonitor(cycleId, attemptId, (monitor) => {
+        monitor.state = "stopped";
+        delete monitor.reason;
+        monitor.notice ??= {
+          id: randomUUID(),
+          outcome,
+          processing: result.processing,
+          state: "pending",
+          createdAt: new Date().toISOString(),
+        };
+      });
+      await deliverNotice(entry);
+    } catch {
+      // Local storage trouble pauses observation; the remote run and its liability continue.
+      await pauseMonitor(entry, "STORAGE");
     }
-    // Terminal facts are durable; schedule exactly one notice per attempt, then deliver.
-    scheduled.delete(key);
-    const outcome =
-      result.remoteStatus === "completed" ? "completed" : result.remoteStatus === "cancelled" ? "cancelled" : "failed";
-    await cycles.updateMonitor(cycleId, attemptId, (monitor) => {
-      monitor.state = "stopped";
-      delete monitor.reason;
-      monitor.notice ??= {
-        id: randomUUID(),
-        outcome,
-        processing: result.processing,
-        state: "pending",
-        createdAt: new Date().toISOString(),
-      };
-    });
-    await deliverNotice(entry);
   };
   const registerMonitoring = async (cycles: ResearchCycles, cycleId: string, attemptId: string, sessionId: string) => {
     const { monitor } = await cycles.registerMonitor(cycleId, attemptId);
+    // A live registration proves this runtime owns the cycle: lift any earlier detach latch.
+    shuttingDown = false;
     const entry: ScheduledMonitor = { cycles, cycleId, attemptId, sessionId };
     scheduleMonitor(entry, bounds.initialDelayMs);
     return monitor;
@@ -429,9 +456,10 @@ export function cyclePiRegistration(
     }
     return seen;
   };
+  const acknowledgedNoticeIds = new Set<string>();
   const acknowledgeNotices = async (ctx: ExtensionContext) => {
     const seen = deliveredNoticeIds(ctx);
-    if (!seen.size) return;
+    if (![...seen.keys()].some((id) => !acknowledgedNoticeIds.has(id))) return;
     const cycles = await get(ctx);
     const found = await cycles.discover();
     for (const record of found.cycles) {
@@ -447,25 +475,26 @@ export function cyclePiRegistration(
               current.notice.acknowledgedEntryId = entryId;
             }
           })
+          .then(() => acknowledgedNoticeIds.add(notice.id))
           .catch(() => {});
       }
     }
   };
 
-  const detach = async () => {
-    await pauseAllMonitors("SHUTDOWN");
+  const detach = async (reason: MonitorPauseReason = "SHUTDOWN") => {
+    await pauseAllMonitors(reason);
     const pending = [...controllers.values()];
     controllers.clear();
     const outcomes = await Promise.allSettled(pending.map(async (controller) => (await controller).detach()));
     const errors = outcomes.flatMap((outcome) => (outcome.status === "rejected" ? [outcome.reason] : []));
     if (errors.length) throw new AggregateError(errors, "Cycle detached locally; ownership release failed.");
   };
-  pi.on("session_before_switch", detach);
-  pi.on("session_before_fork", detach);
-  pi.on("session_tree", detach);
-  pi.on("session_shutdown", detach);
+  pi.on("session_before_switch", () => detach("DETACHED"));
+  pi.on("session_before_fork", () => detach("DETACHED"));
+  pi.on("session_tree", () => detach("DETACHED"));
+  pi.on("session_shutdown", () => detach("SHUTDOWN"));
   const sessionStarted = async (ctx: ExtensionContext) => {
-    await detach();
+    await detach("RESTART");
     // Discovery only: previous runtimes' monitors pause, pending notices surface,
     // and sent notices without a session entry become uncertain. Nothing resumes.
     currentSessionId = ctx.sessionManager.getSessionId();
