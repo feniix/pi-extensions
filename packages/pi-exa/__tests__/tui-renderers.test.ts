@@ -31,6 +31,16 @@ describe("pi-exa TUI renderers", () => {
     expect(renderers.renderResult).toBeTypeOf("function");
   });
 
+  it.each([
+    [{ researchMode: "submit", proposalId: "abc123", cycleId: "c1" }, "web_research_exa submit proposal abc123"],
+    [{ researchMode: "recover", cycleId: "c1" }, "web_research_exa recover"],
+    [{ query: "laya vs jev" }, 'web_research_exa "laya vs jev"'],
+  ])("renders the research call without an empty query: %j", (args, expected) => {
+    const renderCall = getExaRenderers("web_research_exa").renderCall;
+    const component = renderCall?.(args, theme, {}) as Text;
+    expect(renderComponent(component).trim()).toBe(expected);
+  });
+
   it("does not register renderers for local planner tools", () => {
     expect(getExaRenderers("exa_research_step")).toEqual({});
   });
