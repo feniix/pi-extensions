@@ -484,7 +484,8 @@ export function cyclePiRegistration(
                   const execution = current.attempts.find(
                     (entry) => Value.Check(agentAttemptSchema, entry) && entry.id === attempt.id,
                   );
-                  const accounting = view(current).accounting;
+                  const currentView = view(current);
+                  const accounting = currentView.accounting;
                   const incompleteOrInvalid =
                     !Value.Check(agentAttemptSchema, execution) || execution.result?.processing !== "validated";
                   return result(
@@ -498,10 +499,10 @@ export function cyclePiRegistration(
                       execution,
                       accounting,
                       status: current.status,
-                      completionSummary: view(current).completionSummary,
-                      nextSafeAction: view(current).nextSafeAction,
+                      completionSummary: currentView.completionSummary,
+                      nextSafeAction: currentView.nextSafeAction,
                     },
-                    `Exa cycle ${attempt.cycleId}; Agent attempt ${attempt.id}; status ${current.status}.\n${JSON.stringify(execution, null, 2)}\nUsage classification: ${JSON.stringify(accounting)}\n${view(current).nextSafeAction}\nNo automatic retry, replacement or gap closing. Estimates are not vendor caps; API-reported costs are not independently verified invoices.`,
+                    `Exa cycle ${attempt.cycleId}; Agent attempt ${attempt.id}; status ${current.status}.\n${JSON.stringify(execution, null, 2)}\nUsage classification: ${JSON.stringify(accounting)}\n${currentView.nextSafeAction}\nNo automatic retry, replacement or gap closing. Estimates are not vendor caps; API-reported costs are not independently verified invoices.`,
                     response.isError || incompleteOrInvalid,
                   );
                 }

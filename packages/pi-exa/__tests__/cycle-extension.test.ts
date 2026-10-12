@@ -15,6 +15,7 @@ import { loadExtensionFromFactory } from "../../../node_modules/@earendil-works/
 import { cyclePiRegistration } from "../extensions/cycle-pi.js";
 import exaExtension from "../extensions/index.js";
 import { agentAttemptSchema } from "../extensions/research-execution.js";
+import * as researchPlanner from "../extensions/research-planner.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof fs>();
@@ -64,6 +65,7 @@ vi.mock("exa-js", () => ({
 const directories: string[] = [];
 afterEach(async () => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   vi.mocked(fs.unlink).mockReset();
   vi.mocked(fs.rename).mockReset();
   vi.mocked(nativeFs.renameSync).mockReset();
@@ -301,6 +303,42 @@ describe("Pi cycle commands and tools", () => {
     expect(retained.attempts).toHaveLength(1);
     expect(offlineCreate).toHaveBeenCalledOnce();
     expect(offlineGet).toHaveBeenCalledExactlyOnceWith(reply.id);
+    expect(offlineCancel).not.toHaveBeenCalled();
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
+  it("projects Agent progress and final response once each with consistent completion guidance", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    const original = researchPlanner.createResearchPlanner;
+    const views = vi.fn();
+    vi.spyOn(researchPlanner, "createResearchPlanner").mockImplementation((...args) => {
+      const planner = original(...args);
+      return {
+        ...planner,
+        getStatus: () => {
+          views();
+          return planner.getStatus();
+        },
+      };
+    });
+    offlineCreate.mockResolvedValueOnce({
+      id: "agent_project_once",
+      status: "completed",
+      costDollars: { total: 0.1 },
+      output: { structured: { answer: "done" } },
+    });
+    const response = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    expect(response.isError).toBe(false);
+    expect(views).toHaveBeenCalledTimes(2);
+    expect(response.details).toMatchObject({
+      status: "completed",
+      completionSummary: { remoteCompletedAttemptIds: [response.details.attemptId], duplicateSuccess: false },
+    });
+    expect(response.content[0]).toMatchObject({
+      text: expect.stringContaining(String(response.details.nextSafeAction)),
+    });
+    expect(offlineCreate).toHaveBeenCalledOnce();
+    expect(offlineGet).not.toHaveBeenCalled();
     expect(offlineCancel).not.toHaveBeenCalled();
     await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
   });
