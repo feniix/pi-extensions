@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4Q30D9Y1J80NNM462RZT4TT",
+  "strategy": "manual-commit",
+  "branch": "pi-exa-cycle/workflow",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "CONCEPTS.md",
+    "docs/architecture/pi-exa-cycle-qualification.md",
+    "docs/architecture/plan-pi-exa-integrated-research-cycle.md",
+    "docs/prd/PRD-010-pi-exa-integrated-research-cycle.md",
+    "packages/pi-exa/README.md",
+    "packages/pi-exa/__tests__/cycle-extension.test.ts",
+    "packages/pi-exa/extensions/cycle-pi.ts",
+    "packages/pi-exa/skills/exa-research-planner/SKILL.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 237232,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 6356352,
+    "output_tokens": 29587,
+    "api_call_count": 40
+  }
+}
