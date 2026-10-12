@@ -235,9 +235,13 @@ liability continue; no cancel request is issued.
   releases the claim. A re-sent uncertain notice keeps a persisted `possibleDuplicate`
   label until it is delivered.
 - A terminal outcome returned in a foreground tool result (explicit recover, or an
-  acknowledgement that is already terminal) is never notified again: resume only reports
-  terminal attempts that a background monitor owned, and recover acknowledges an existing
-  monitor's notice with `channel: "tool-result"`.
+  acknowledgement that is already terminal) is recorded as an acknowledged notice with
+  `channel: "tool-result"` and never notified again. Every reported terminal attempt has a
+  monitor record, so resume notifies a terminal attempt without one (for example a late
+  acknowledgement that arrived after detach).
+- Session start summarizes other sessions' undelivered notices in one line without
+  delivering them; an invalid `EXA_BASE_URL` pauses monitoring as `CONFIGURATION` instead
+  of retrying, and the value is never echoed.
 - A genuine create acknowledgement that arrives after `SUBMISSION_UNKNOWN` (including an
   unknown original after a replacement) is adopted into background monitoring.
 - Dialog approvals merge with the grant current at write time (never lowering a ceiling
@@ -253,9 +257,6 @@ Accepted residuals (not fixed):
 - The approval write and the attempt reservation are two serialized transactions. The
   recheck inside the approval write closes the dialog-open window; a retry landing between
   the grant and the reservation can still leave a recorded approval without an attempt.
-- A late terminal acknowledgement that arrives after its cycle detached cannot register a
-  monitor record, so resume treats it as foreground-reported. The outcome is retained and
-  shown by status; no completion notice is sent.
 - Owner liveness is pid-based; pid reuse after a crash is the foundation's existing limit.
 
 ### Lifecycle fences
