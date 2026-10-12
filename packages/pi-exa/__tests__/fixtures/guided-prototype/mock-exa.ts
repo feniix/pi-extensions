@@ -41,6 +41,7 @@ export function createMockExa(options: MockExaOptions = {}) {
   const queuedGetErrors = new Map<string, number[]>();
   const heldCreates: Array<() => void> = [];
   let holdCreate = options.holdCreate ?? false;
+  const rejectedCreates: number[] = [];
 
   const nextRun = (request: Record<string, unknown>): MockRun => {
     const run: MockRun = { id: `run_${counters.create}`, status: "running", request };
@@ -54,10 +55,17 @@ export function createMockExa(options: MockExaOptions = {}) {
     /** One create per approved submission. Resolves immediately unless creates are held. */
     create(request: Record<string, unknown>): Promise<MockRun> {
       counters.create += 1;
+      const rejection = rejectedCreates.shift();
+      if (rejection !== undefined)
+        return Promise.reject(new MockExaError(`mock create rejected ${rejection}`, rejection));
       if (!holdCreate) return Promise.resolve(nextRun(request));
       return new Promise<MockRun>((resolve) => {
         heldCreates.push(() => resolve(nextRun(request)));
       });
+    },
+    /** Make the next create fail definitively with an HTTP-like status before any run exists. */
+    rejectNextCreate(statusCode: number): void {
+      rejectedCreates.push(statusCode);
     },
     /** Release every held create, delivering a genuine late acknowledgement. */
     releaseCreate(): void {

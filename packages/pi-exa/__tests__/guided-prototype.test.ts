@@ -6,7 +6,7 @@
  * capability write-up lives in docs/research/2026-10-12-pi-guided-background-host-capabilities.md.
  */
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
@@ -100,6 +100,8 @@ interface HostOptions {
   exa?: MockExa;
   root?: string;
   responses: Step[];
+  /** Reopen an existing session file instead of creating a new session. */
+  sessionFile?: string;
 }
 
 async function host(options: HostOptions) {
@@ -131,7 +133,9 @@ async function host(options: HostOptions) {
     ],
   });
   await resourceLoader.reload();
-  const sessionManager = SessionManager.create(root, join(root, "sessions"));
+  const sessionManager = options.sessionFile
+    ? SessionManager.open(options.sessionFile, join(root, "sessions"))
+    : SessionManager.create(root, join(root, "sessions"));
   const { session } = await createAgentSession({
     cwd: root,
     agentDir: join(root, "agent"),
@@ -472,5 +476,81 @@ describe("guided background research prototype (Pi 1.x SDK session, mocked Exa)"
     expect(store.attempts[0].notice?.state).toBe("pending");
     expect(store.attempts[0].originSessionId).toBe(h.sessionManager.getSessionId());
     expect(exa.counters.create).toBe(1);
+  });
+
+  it("lets only one of two parallel submits of the same proposal create a run", async () => {
+    const h = await host({
+      responses: [
+        proposeCall(),
+        (context: TranscriptContext) => {
+          const last = context.messages.at(-1) as { content?: unknown } | undefined;
+          const proposalId = /\(([0-9a-f]{16})\)/.exec(JSON.stringify(last?.content ?? ""))?.[1] ?? "missing";
+          // Two submits of one proposal in a single assistant message run in parallel.
+          return fauxAssistantMessage(
+            [
+              fauxToolCall("exa_proto_research", { action: "submit", proposalId }),
+              fauxToolCall("exa_proto_research", { action: "submit", proposalId }),
+            ],
+            { stopReason: "toolUse" },
+          );
+        },
+        say("One of them was refused."),
+      ],
+    });
+    await h.session.prompt("research Laya versus Jev twice");
+    expect(h.confirms).toHaveLength(2);
+    expect(h.exa.counters.create).toBe(1);
+    expect(h.toolResults().some((text) => text.includes("PROPOSAL_STALE"))).toBe(true);
+  });
+
+  it("moves an unreadable store aside instead of overwriting it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-guided-proto-corrupt-"));
+    directories.push(root);
+    const directory = join(root, "agent", "research-cycles-prototype");
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "state.json"), "{ not json with a recorded liability");
+    const h = await host({ root, responses: [proposeCall(), say("Proposed.")] });
+    await h.session.prompt("research Laya versus Jev");
+    const files = await readdir(directory);
+    const preserved = files.find((name) => name.startsWith("state.json.corrupt-"));
+    expect(preserved).toBeDefined();
+    expect(await readFile(join(directory, preserved as string), "utf8")).toContain("recorded liability");
+    expect((await h.store()).proposals).toHaveLength(1);
+  });
+
+  it("classifies a definitive create refusal as rejected, not unknown, and reopens the proposal", async () => {
+    const exa = createMockExa();
+    exa.rejectNextCreate(422);
+    const h = await host({ exa, responses: [proposeCall(), submitLatestProposal, say("Rejected.")] });
+    await h.session.prompt("research Laya versus Jev");
+    expect(h.toolResults().at(-1)).toContain("SUBMISSION_REJECTED");
+    const store = await h.store();
+    expect(store.attempts[0].state).toBe("rejected");
+    expect(store.proposals[0].consumedByAttemptId).toBeUndefined();
+    expect(h.prototype.activeTimers()).toBe(0);
+  });
+
+  it("acknowledges at session start a notice whose session entry was persisted before settlement", async () => {
+    const exa = createMockExa();
+    const h = await host({ exa, responses: [proposeCall(), submitLatestProposal, say("Started."), say("Report.")] });
+    await h.session.prompt("research Laya versus Jev");
+    exa.complete("run_1");
+    await h.waitFor(() => h.events().includes("notice_sent:notice_attempt_1"));
+    await h.waitFor(() => h.completionEntries().length === 1);
+    // Simulate a quit before agent_settled acknowledged it: rewind the stored state to "sent".
+    const path = h.prototype.stateFile;
+    const store = JSON.parse(await readFile(path, "utf8"));
+    store.attempts[0].notice.state = "sent";
+    delete store.attempts[0].notice.acknowledgedEntryId;
+    await writeFile(path, JSON.stringify(store));
+    h.session.dispose();
+    const reopened = await host({
+      exa,
+      root: h.root,
+      responses: [say("Hello.")],
+      sessionFile: h.sessionManager.getSessionFile(),
+    });
+    expect(reopened.events()).toContain("notice_acknowledged:notice_attempt_1");
+    expect((await reopened.store()).attempts[0].notice?.state).toBe("acknowledged");
   });
 });

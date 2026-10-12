@@ -18,10 +18,21 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { processAlive } from "../../../extensions/process-identity.js";
 import type { MockExa, MockRun } from "./mock-exa.js";
 
 export const COMPLETION_CUSTOM_TYPE = "exa-proto-completion";
@@ -70,7 +81,8 @@ export type MonitorPauseReason =
   | "MONITOR_LIFETIME"
   | "SHUTDOWN"
   | "RESTART"
-  | "LATE_ACKNOWLEDGEMENT";
+  | "LATE_ACKNOWLEDGEMENT"
+  | "STORAGE";
 
 export interface Proposal {
   id: string;
@@ -84,7 +96,7 @@ export interface Proposal {
 
 export interface Notice {
   id: string;
-  state: "pending" | "sent" | "acknowledged";
+  state: "pending" | "sent" | "acknowledged" | "uncertain";
   sentAt?: number;
   acknowledgedEntryId?: string;
   deliveryError?: string;
@@ -96,7 +108,8 @@ export interface Attempt {
   topic: string;
   originSessionId: string;
   /** Local submission lifecycle; separate from remote, monitoring and delivery. */
-  state: "submitting" | "acknowledged" | "unknown";
+  /** `rejected`: Exa refused the create definitively before any run existed; no liability. */
+  state: "submitting" | "acknowledged" | "unknown" | "rejected";
   runId?: string;
   remote?: { status: MockRun["status"]; stopReason?: MockRun["stopReason"]; error?: string };
   monitor: {
@@ -135,21 +148,70 @@ export interface ObservedEvent {
 
 const emptyStore = (): PrototypeStore => ({ version: 1, proposals: [], attempts: [] });
 
+/**
+ * Read the store. A missing file is an empty store; an unreadable or unknown-version file is
+ * moved aside (never overwritten) so recorded attempts and liabilities are not lost.
+ */
 function loadStore(path: string): PrototypeStore {
+  if (!existsSync(path)) return emptyStore();
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as PrototypeStore;
-    return parsed.version === 1 ? parsed : emptyStore();
+    if (parsed.version === 1 && Array.isArray(parsed.proposals) && Array.isArray(parsed.attempts)) return parsed;
   } catch {
-    return emptyStore();
+    /* fall through: preserve the unreadable file below */
+  }
+  renameSync(path, `${path}.corrupt-${Date.now()}`);
+  return emptyStore();
+}
+
+/**
+ * Short exclusive lock around read-merge-write, so runtimes sharing the file never erase each
+ * other's records. A lock whose owner process is gone is reclaimed; a live one is waited for.
+ */
+function withStoreLock<T>(path: string, action: () => T): T {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const lock = `${path}.lock`;
+  const deadline = Date.now() + 2_000;
+  for (;;) {
+    try {
+      const fd = openSync(lock, "wx", 0o600);
+      writeFileSync(fd, String(process.pid));
+      closeSync(fd);
+      break;
+    } catch (error) {
+      if ((error as { code?: string }).code !== "EEXIST") throw error;
+      const owner = Number(readFileSync(lock, "utf8"));
+      if (Number.isInteger(owner) && owner > 0 && !processAlive(owner)) {
+        unlinkSync(lock);
+        continue;
+      }
+      if (Date.now() > deadline) throw new Error(`Prototype store is locked at ${lock}.`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+  try {
+    return action();
+  } finally {
+    if (existsSync(lock) && statSync(lock).isFile()) unlinkSync(lock);
   }
 }
 
-/** Atomic replace: same-directory temporary file, then rename. */
+/** Merge records another runtime added; this runtime's own records win on the same id. */
+function mergeStore(into: PrototypeStore, disk: PrototypeStore): void {
+  for (const proposal of disk.proposals)
+    if (!into.proposals.some((entry) => entry.id === proposal.id)) into.proposals.push(proposal);
+  for (const attempt of disk.attempts)
+    if (!into.attempts.some((entry) => entry.id === attempt.id)) into.attempts.push(attempt);
+}
+
+/** Atomic replace under the store lock: merge, same-directory temporary file, then rename. */
 function saveStore(path: string, store: PrototypeStore): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, JSON.stringify(store, null, 2), { mode: 0o600 });
-  renameSync(temporary, path);
+  withStoreLock(path, () => {
+    mergeStore(store, loadStore(path));
+    const temporary = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(store, null, 2), { mode: 0o600 });
+    renameSync(temporary, path);
+  });
 }
 
 function statusCodeOf(error: unknown): number | undefined {
@@ -187,7 +249,12 @@ export function proposalText(proposal: Proposal): string {
 
 const params = Type.Object(
   {
-    action: Type.Union([Type.Literal("propose"), Type.Literal("submit"), Type.Literal("status")]),
+    action: Type.Union([
+      Type.Literal("propose"),
+      Type.Literal("submit"),
+      Type.Literal("status"),
+      Type.Literal("resume"),
+    ]),
     topic: Type.Optional(Type.String({ minLength: 1 })),
     effort: Type.Optional(Type.Union([Type.Literal("medium"), Type.Literal("high")])),
     proposalId: Type.Optional(Type.String({ minLength: 1 })),
@@ -216,6 +283,8 @@ export function createGuidedPrototype(pi: ExtensionAPI, options: GuidedPrototype
   };
   const persist = () => saveStore(stateFile, store);
   const attempt = (id: string) => store.attempts.find((entry) => entry.id === id);
+  // A function call, so TypeScript does not narrow the state across the awaited GET.
+  const isFenced = (entry: Attempt) => entry.monitor.state === "paused" || entry.monitor.state === "stopped";
 
   const pauseMonitor = (entry: Attempt, reason: MonitorPauseReason, deliveryError?: string) => {
     entry.monitor.state = "paused";
@@ -263,7 +332,15 @@ export function createGuidedPrototype(pi: ExtensionAPI, options: GuidedPrototype
     entry.monitor.nextDelayMs = delayMs;
     const timer = setTimeout(() => {
       timers.delete(entry.id);
-      void tick(entry.id);
+      // A failing tick (storage, unexpected error) pauses instead of an unhandled rejection.
+      void tick(entry.id).catch(() => {
+        try {
+          pauseMonitor(entry, "STORAGE");
+        } catch {
+          entry.monitor.state = "paused";
+          entry.monitor.reason = "STORAGE";
+        }
+      });
     }, delay);
     timers.set(entry.id, timer);
   };
@@ -287,6 +364,7 @@ export function createGuidedPrototype(pi: ExtensionAPI, options: GuidedPrototype
     try {
       run = await withDeadline(exa.get(entry.runId), bounds.getDeadlineMs, "Agent run GET");
     } catch (error) {
+      if (shuttingDown || isFenced(entry)) return;
       const statusCode = statusCodeOf(error);
       note(`get_failed:${entry.id}:${statusCode ?? "transient"}`);
       if (statusCode === 401 || statusCode === 403) {
@@ -310,13 +388,19 @@ export function createGuidedPrototype(pi: ExtensionAPI, options: GuidedPrototype
       schedule(entry, nextDelay(entry));
       return;
     }
+    // A GET in flight across shutdown or a pause records nothing for the fenced runtime.
+    if (shuttingDown || isFenced(entry)) return;
+    // Persist pending observations only when something material changed: the remote status,
+    // or recovery from transient errors. Plain counters are not worth a full store rewrite.
+    const materialChange = entry.remote?.status !== run.status || entry.monitor.consecutiveTransientErrors > 0;
     entry.monitor.gets += 1;
     entry.monitor.consecutiveTransientErrors = 0;
     entry.monitor.lastSuccessAt = now();
     entry.remote = { status: run.status, stopReason: run.stopReason, error: run.error?.message };
     note(`get_ok:${entry.id}:${run.status}`);
     if (run.status === "queued" || run.status === "running") {
-      persist();
+      // Persist only when the remote status changes; counters are not worth a full rewrite.
+      if (materialChange) persist();
       schedule(entry, nextDelay(entry));
       return;
     }
@@ -378,6 +462,28 @@ export function createGuidedPrototype(pi: ExtensionAPI, options: GuidedPrototype
         changed = true;
       }
     }
+    // Acknowledge by observation at start too, and mark sent-but-unconfirmed notices uncertain.
+    const entryNotices = new Map<string, string>();
+    for (const entry of ctx.sessionManager.getEntries?.() ?? []) {
+      if (entry.type !== "custom_message" || entry.customType !== COMPLETION_CUSTOM_TYPE) continue;
+      const noticeId = (entry.details as { noticeId?: string } | undefined)?.noticeId;
+      if (noticeId) entryNotices.set(noticeId, entry.id);
+    }
+    for (const entry of store.attempts) {
+      const notice = entry.notice;
+      if (!notice || notice.state !== "sent") continue;
+      const entryId = entryNotices.get(notice.id);
+      if (entryId) {
+        notice.state = "acknowledged";
+        notice.acknowledgedEntryId = entryId;
+        changed = true;
+        note(`notice_acknowledged:${notice.id}`);
+      } else if (entry.originSessionId === sessionId) {
+        notice.state = "uncertain";
+        changed = true;
+        note(`notice_uncertain:${notice.id}`);
+      }
+    }
     if (changed) persist();
     const pending = store.attempts.filter((entry) => entry.notice && entry.notice.state !== "acknowledged");
     for (const entry of pending) {
@@ -409,6 +515,8 @@ export function createGuidedPrototype(pi: ExtensionAPI, options: GuidedPrototype
 
   pi.on("agent_settled", (event, ctx) => {
     note(`agent_settled:aborted=${event.aborted}`);
+    // Nothing to acknowledge unless a notice is in flight: skip the session scan.
+    if (!store.attempts.some((entry) => entry.notice?.state === "sent")) return;
     // Acknowledgement by observation: Pi appended our custom message to the session.
     let changed = false;
     for (const entry of ctx.sessionManager.getEntries()) {
@@ -437,6 +545,19 @@ export function createGuidedPrototype(pi: ExtensionAPI, options: GuidedPrototype
     parameters: params,
     async execute(_toolCallId, input, _signal, _onUpdate, ctx: ExtensionContext) {
       if (input.action === "status") return result(JSON.stringify(view(), null, 2), view());
+      if (input.action === "resume") {
+        // Explicit resume: deliver this session's pending or uncertain notices.
+        const delivered: string[] = [];
+        for (const entry of store.attempts) {
+          const notice = entry.notice;
+          if (!notice || entry.originSessionId !== sessionId) continue;
+          if (notice.state === "uncertain") notice.state = "pending";
+          if (notice.state !== "pending") continue;
+          deliver(entry);
+          if (entry.notice?.state === "sent") delivered.push(notice.id);
+        }
+        return result(`Resumed; delivered ${delivered.length} notice(s).`, { delivered });
+      }
       if (input.action === "propose") {
         if (!input.topic) return result("PROPOSAL_INVALID: topic is required.", {}, true);
         const effort = input.effort ?? "medium";
@@ -487,6 +608,14 @@ export function createGuidedPrototype(pi: ExtensionAPI, options: GuidedPrototype
           { proposalId: proposal.id, submitted: false },
           true,
         );
+      // Re-check after the dialog: a parallel submit or a newer proposal may have consumed or
+      // superseded this one while the dialog was open. Consumption below is synchronous.
+      if (proposal.superseded || proposal.consumedByAttemptId)
+        return result(
+          `PROPOSAL_STALE: proposal ${proposal.id} was ${proposal.consumedByAttemptId ? "already submitted" : "superseded"} while the dialog was open; nothing was submitted.`,
+          { proposalId: proposal.id, submitted: false },
+          true,
+        );
       const entry: Attempt = {
         id: `attempt_${store.attempts.length + 1}`,
         proposalId: proposal.id,
@@ -529,6 +658,38 @@ export function createGuidedPrototype(pi: ExtensionAPI, options: GuidedPrototype
       try {
         run = await withDeadline(createPromise, bounds.createWaitMs, "Agent run create");
       } catch (error) {
+        const statusCode = statusCodeOf(error);
+        if (
+          statusCode !== undefined &&
+          statusCode >= 400 &&
+          statusCode < 500 &&
+          statusCode !== 408 &&
+          statusCode !== 429
+        ) {
+          // A definitive refusal before any run exists: no liability, and the proposal reopens.
+          entry.state = "rejected";
+          proposal.consumedByAttemptId = undefined;
+          persist();
+          note(`create_rejected:${entry.id}:${statusCode}`);
+          return result(
+            `SUBMISSION_REJECTED: Exa refused the create (${statusCode}) before any run existed; nothing is running and no charge is pending. Fix the request and approve again.`,
+            { attemptId: entry.id, runId: null, state: "rejected", statusCode },
+            true,
+          );
+        }
+        if (entry.runId) {
+          // The genuine acknowledgement landed just after the deadline fired.
+          entry.state = "acknowledged";
+          entry.monitor.state = "paused";
+          entry.monitor.reason = "LATE_ACKNOWLEDGEMENT";
+          persist();
+          note(`late_ack:${entry.id}:${entry.runId}`);
+          return result(
+            `Research acknowledged late: ${entry.runId} (attempt ${entry.id}). Background monitoring is paused; resume explicitly to observe it.`,
+            { attemptId: entry.id, runId: entry.runId, state: "acknowledged", monitoring: "paused" },
+            true,
+          );
+        }
         entry.state = "unknown";
         persist();
         note(`create_unknown:${entry.id}`);
