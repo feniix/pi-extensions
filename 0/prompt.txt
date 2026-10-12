@@ -1,0 +1,77 @@
+<task-notification>
+<task-id>a1b563d777ac7329c</task-id>
+<tool-use-id>toolu_01G3n3FScVDmBLJmVBLhZNxJ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-feniix-src-personal-pi-pi-extensions/90caff9b-07c1-45ca-be6f-308aff547939/tasks/a1b563d777ac7329c.output</output-file>
+<status>completed</status>
+<summary>Agent "/code-review 183" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Effort level: reusing **high** from last time. Typing a level (for example `/code-review high`) changes it.
+
+I reviewed PR 183 (`pi-exa-guided/review-fixes` into `pi-exa-guided/hide-active`); the local HEAD `d5a0c26` is the PR head. Typecheck passes and the pi-exa tests pass (590 passed, 8 skipped). None of the findings below was confirmed by running it; each comes from tracing the source.
+
+```json
+[
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 1120,
+    "summary": "Explicit recovery calls releaseRecovery() before recordForegroundReport(). A monitor tick waiting in awaitObservations can resume in that gap, and observeOnce never re-checks isCurrent before its GET. Its unconditional `monitor.state = \"running\"` write (line 418) can also overwrite the `stopped` state that recordForegroundReport just wrote.",
+    "failure_scenario": "A monitor timer fires during researchMode=recover and blocks on the recovery observation. Recovery gets a terminal result, then releases. The tick reads state `registered`/`running` before recordForegroundReport's update lands. It then sends a second GET for the same run (prepareAgentRecovery plus monitorInspector), and it may write state=`running` over `stopped`. The result is a monitor record stuck in `running` with an acknowledged notice and no scheduled entry; the next session start then pauses it as a RESTART leftover."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 688,
+    "summary": "Session-start discovery now only warns about notices whose originSessionId is the current session, and it skips every cycle with a live owner (line 671). The old 'belongs to another session' warning was removed and nothing replaces it.",
+    "failure_scenario": "A run completes while session A is open, but delivery fails or Pi quits, leaving the notice `pending` or `uncertain` with origin A. The user opens a new session B and never reopens A. Session B shows no warning, the paused monitor shows up only in view(), and the user is never prompted to resume the cycle. The completed (and charged) research result goes unreported."
+  },
+  {
+    "file": "packages/pi-exa/extensions/research-proposal.ts",
+    "line": 53,
+    "summary": "The new ESTIMATE_UNAVAILABLE guidance for Exa Connect providers tells the operator to run `/exa-research approve &lt;cycle-id&gt; &lt;ceiling&gt; web_research_exa`. Operator grants replace the scope (the latest grant wins, and this path does no merging), so following it removes every exploration tool granted earlier.",
+    "failure_scenario": "A cycle already has a grant covering web_search_exa and web_fetch_exa. The operator follows the guidance, which records a grant scoped only to web_research_exa. Every later exploratory web_search_exa or web_fetch_exa call in that cycle now fails the scope check and needs fresh approval."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 574,
+    "summary": "resumeMonitoring now skips terminal attempts that have no monitor record. The old code created a stopped monitor and a notice for them. It assumes every such attempt was reported in the foreground, but a late acknowledgement whose adoption failed breaks that assumption.",
+    "failure_scenario": "Submission returns SUBMISSION_UNKNOWN, then the runtime detaches (switch, quit or tree). A genuine late create acknowledgement with a terminal status is still persisted by observer.raw. adoptLateAcknowledgement then throws in registerMonitor (no longer owned), so no monitor record exists. On a later explicit resume the attempt is terminal with no monitor and hits `continue`, so its outcome is never reported."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 517,
+    "summary": "adoptLateAcknowledgement clears the runtime-wide `shuttingDown` latch from a background callback just so deliverNotice will send. The new per-entry isCurrent mechanism is the right place for this, rather than resetting the global flag from yet another path.",
+    "failure_scenario": "Late adoption work clears the shutdown latch for every monitor in the runtime, not just its own attempt. Any path where a detached runtime still owns the cycle (for example a failed ownership release followed by a late ack) would re-enable scheduling and delivery across all monitors after a detach. That makes the shutdown fence depend on ordering instead of on state."
+  },
+  {
+    "file": "packages/pi-exa/extensions/exa-client.ts",
+    "line": 41,
+    "summary": "resolveExaBaseUrl now throws inside getExaClient on every call. In the background monitor that config error falls through classifyObservationError as `transient`, and the message echoes the raw EXA_BASE_URL value.",
+    "failure_scenario": "With EXA_BASE_URL=api.exa.ai (no scheme), each monitor tick throws, is classified transient and retries with backoff until TRANSIENT_EXHAUSTED, instead of pausing at once as a configuration error. The error text, including the full env value (which could carry credentials or tokens in the URL), is shown in tool errors."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 770,
+    "summary": "The raw('create') wrapper calls adopt() once adoption.unacknowledged is set, and the closed-attempt check at line 770 calls adopt() again. A late acknowledgement landing during observer.finish() therefore starts two concurrent adoptLateAcknowledgement runs under the same observations key.",
+    "failure_scenario": "The duplicate run does redundant work: two inspect reads, two registerMonitor transactions, and for a terminal ack two updateMonitor writes plus two deliverNotice claims. The second trackObservation also overwrites the first's map entry. It is harmless only because the controller queue serializes writes; a single idempotent latch would do the same job."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 1180,
+    "summary": "Guided submit checks whether submission is enabled by calling submissionFactory with a dummy observer. That builds a whole createExaTools set and runs registerPiTools just to test one flag, and dispatchAcknowledged builds it all again moments later.",
+    "failure_scenario": "Every guided submit builds every Exa tool definition twice. Calling isToolEnabledForConfig for web_research_exa (or exposing a cheap predicate next to submissionFactory) gives the same answer without building and throwing away a tool set."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 1125,
+    "summary": "This PR adds findAgentAttempt, but the recovery path still inlines the same `current.attempts.find(entry =&gt; Value.Check(agentAttemptSchema, entry) &amp;&amp; entry.id === ...)` lookup, followed by another Value.Check.",
+    "failure_scenario": "The duplicated lookup and validation logic can drift from findAgentAttempt. Calling findAgentAttempt(current, prepared.attempt.id) removes both the find and the later re-check."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 478,
+    "summary": "The 'stop monitor, delete reason, create notice if missing' update is copied with small differences in observeOnce (478), adoptLateAcknowledgement (515), resumeMonitoring (579) and recordForegroundReport.",
+    "failure_scenario": "There are four near-identical updateMonitor closures, and they already differ in paused-state handling: observeOnce skips paused monitors, the others don't. A future change to the notice lifecycle has to be made in four places. One helper such as stopWithNotice(monitor, result, { skipPaused }) would remove the copies."
+  }
+]
+```</result>
+<usage><subagent_tokens>130452</subagent_tokens><tool_uses>24</tool_uses><duration_ms>382540</duration_ms></usage>
+</task-notification>
