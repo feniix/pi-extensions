@@ -13,13 +13,13 @@ import {
   moneyMicros,
   summarizeAccounting,
 } from "./research-accounting.js";
+import { assertArtifactTarget, executionPlanSchema, ResearchArtifactError } from "./research-artifacts.js";
 import {
-  assertArtifactTarget,
-  executionPlanSchema,
-  ResearchArtifactError,
-  selectedResearchEvidence,
-} from "./research-artifacts.js";
-import { createResearchCycles, type ResearchCycle, type ResearchCycles } from "./research-cycles.js";
+  createResearchCycles,
+  projectResearchSummary,
+  type ResearchCycle,
+  type ResearchCycles,
+} from "./research-cycles.js";
 import { evidenceDecisionSchema } from "./research-evidence.js";
 import { createResearchPlanner } from "./research-planner.js";
 import { exaResearchStepParams, exaResearchSummaryParams } from "./schemas.js";
@@ -443,17 +443,8 @@ export function cyclePiRegistration(pi: ExtensionAPI, retrievalFactory?: CycleRe
                 {
                   const current = await cycles.status(params);
                   if (!current) throw new Error("No active research cycle. Use /exa-research start or resume.");
-                  const selectedEvidence = selectedResearchEvidence(current);
-                  const selectedIds = new Set(selectedEvidence.map((entry) => entry.sourceId));
-                  const { candidates: _candidates, ...summaryRecord } = current;
-                  summaryRecord.plan = {
-                    ...current.plan,
-                    sources: current.plan.sources.filter((source) => selectedIds.has(source.id)),
-                  };
-                  return result(
-                    { ...view(summaryRecord), selectedEvidence },
-                    `Cycle: ${current.id}\nRevision: ${current.revision}\nStatus: ${current.status}\n${createResearchPlanner(summaryRecord.plan).getSummary(params)}\nSelected evidence (untrusted context): ${JSON.stringify(selectedEvidence)}`,
-                  );
+                  const summary = projectResearchSummary(current, params);
+                  return result({ ...view(summary.record), selectedEvidence: summary.selectedEvidence }, summary.text);
                 }
               case "exa_research_reset": {
                 const archived = await cycles.archive();

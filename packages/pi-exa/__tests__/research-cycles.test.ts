@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createResearchCycles, researchProjectId } from "../extensions/research-cycles.js";
+import { createResearchCycles, projectResearchSummary, researchProjectId } from "../extensions/research-cycles.js";
 import { withResearchStorageLock } from "../extensions/research-storage-lock.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -193,7 +193,10 @@ describe("durable research cycles", () => {
     });
     vi.mocked(fs.open).mockImplementation(async (...args) => {
       const handle = await original.open(...args);
-      if (String(args[0]).endsWith(".tmp")) {
+      if (
+        String(args[0]).startsWith(join(root, "store", controller.projectId, `${cycle.id}.json.`)) &&
+        String(args[0]).endsWith(".tmp")
+      ) {
         const sync = handle.sync.bind(handle);
         vi.spyOn(handle, "sync").mockImplementationOnce(async () => {
           enter();
@@ -463,6 +466,15 @@ describe("durable research cycles", () => {
     ]);
     expect(preview.input).toBeUndefined();
     expect(preview.request.query).not.toMatch(/RAW BODY|Unselected|External note/);
+    const original = await controller.status();
+    if (!original) throw new Error("Missing active cycle");
+    const before = structuredClone(original);
+    const summary = projectResearchSummary(original, { mode: "source_pack" });
+    expect(summary.record.plan.sources).toHaveLength(1);
+    expect(summary.record).not.toHaveProperty("candidates");
+    expect(summary.selectedEvidence).toEqual(preview.selectedEvidence);
+    expect(summary.text).toBe(await controller.summary({ mode: "source_pack" }));
+    expect(original).toEqual(before);
     expect(await controller.summary({ mode: "source_pack" })).not.toContain("External note");
     await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.007 });
     await controller.detach();

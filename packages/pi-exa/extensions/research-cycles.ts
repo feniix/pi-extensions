@@ -189,6 +189,22 @@ function orphanExplorations(record: ResearchCycle) {
   }
 }
 
+/** Shared selected-only projection for durable and Pi summaries. Never mutate saved state. */
+export function projectResearchSummary(record: ResearchCycle, params?: ResearchSummaryParams) {
+  const selectedEvidence = selectedResearchEvidence(record);
+  const selectedIds = new Set(selectedEvidence.map((entry) => entry.sourceId));
+  const { candidates: _candidates, ...summaryRecord } = record;
+  summaryRecord.plan = {
+    ...record.plan,
+    sources: record.plan.sources.filter((source) => selectedIds.has(source.id)),
+  };
+  return {
+    record: summaryRecord,
+    selectedEvidence,
+    text: `Cycle: ${record.id}\nRevision: ${record.revision}\nStatus: ${record.status}\n${createResearchPlanner(summaryRecord.plan).getSummary(params)}\nSelected evidence (untrusted context): ${JSON.stringify(selectedEvidence)}`,
+  };
+}
+
 export async function createResearchCycles(options: ResearchCycleOptions) {
   const projectId = await researchProjectId(options.cwd);
   const directory = join(options.root, projectId);
@@ -507,10 +523,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     async summary(params?: ResearchSummaryParams) {
       return transaction(async () => {
         const record = await owned();
-        const selectedEvidence = selectedResearchEvidence(record);
-        const selectedIds = new Set(selectedEvidence.map((entry) => entry.sourceId));
-        const plan = { ...record.plan, sources: record.plan.sources.filter((source) => selectedIds.has(source.id)) };
-        return `Cycle: ${record.id}\nRevision: ${record.revision}\nStatus: ${record.status}\n${createResearchPlanner(plan).getSummary(params)}\nSelected evidence (untrusted context): ${JSON.stringify(selectedEvidence)}`;
+        return projectResearchSummary(record, params).text;
       });
     },
     async preview(assertions: ArtifactAssertions = {}) {
