@@ -262,6 +262,48 @@ describe("Pi cycle commands and tools", () => {
     return { pi, artifact };
   }
 
+  it.each([
+    { originalDollars: 0.000123, conflict: false },
+    { originalDollars: 0.000124, conflict: true },
+  ])("uses a real mock SDK GET to distinguish legacy receipt replay from changed dollars $originalDollars", async ({
+    originalDollars,
+    conflict,
+  }) => {
+    const { pi, artifact } = await readyAgentHost();
+    const reply = {
+      id: "agent_historical_receipt",
+      status: "completed",
+      output: { structured: { answer: "done" } },
+      costDollars: { total: originalDollars },
+    } satisfies AgentRun;
+    offlineCreate.mockResolvedValueOnce(reply);
+    const initial = await pi.call("web_research_exa", { cycleId: artifact.cycleId });
+    expect(initial.isError).toBe(false);
+    const status = (await pi.call("exa_research_status")).details;
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+    const path = join(pi.context.cwd, "agent", "research-cycles", String(status.projectId), `${artifact.cycleId}.json`);
+    const legacy = JSON.parse(await readFile(path, "utf8"));
+    legacy.ledger[0].reportedMicros = Math.ceil(originalDollars * 1_000_000);
+    await writeFile(path, JSON.stringify(legacy));
+    await pi.command?.handler(`resume ${artifact.cycleId}`, pi.context);
+    offlineGet.mockResolvedValueOnce({ ...reply, costDollars: { total: 0.000123 } });
+    const recovered = await pi.call("web_research_exa", {
+      researchMode: "recover",
+      cycleId: artifact.cycleId,
+      attemptId: initial.details.attemptId,
+    });
+    expect(recovered.isError).toBe(false);
+    const retained = JSON.parse(await readFile(path, "utf8"));
+    expect(retained.ledger[0].reportedMicros).toBe(124);
+    expect(retained.ledger[0].conflictingMicros ?? []).toEqual(conflict ? [123] : []);
+    expect(retained.grants).toEqual(legacy.grants);
+    expect(retained.attempts).toHaveLength(1);
+    expect(offlineCreate).toHaveBeenCalledOnce();
+    expect(offlineGet).toHaveBeenCalledExactlyOnceWith(reply.id);
+    expect(offlineCancel).not.toHaveBeenCalled();
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
   it("requires explicit assistant resume after session restart and recovers the existing invalid result with one GET", async () => {
     const { pi, artifact } = await readyAgentHost();
     offlineCreate.mockResolvedValueOnce({
