@@ -277,24 +277,27 @@ export function cyclePiRegistration(
       [...scheduled.values()].filter((entry) => entry.cycleId === cycleId).map((entry) => pauseMonitor(entry, reason)),
     );
   };
-  const deliverNotice = async (entry: ScheduledMonitor) => {
+  const deliverNotice = async (
+    entry: ScheduledMonitor,
+    options: { possibleDuplicate?: boolean } = {},
+  ): Promise<boolean> => {
     const record = await entry.cycles.inspect(entry.cycleId);
     const monitor = record.monitors?.find((candidate) => candidate.attemptId === entry.attemptId);
     const notice = monitor?.notice;
-    if (!monitor || !notice || notice.state !== "pending") return;
+    if (!monitor || !notice || notice.state !== "pending") return false;
     // Deliver only into the originating session; foreign/detached origins keep the pending notice.
-    if (shuttingDown || monitor.originSessionId !== entry.sessionId) return;
+    if (shuttingDown || monitor.originSessionId !== entry.sessionId) return false;
     try {
       pi.sendMessage(
         {
           customType: COMPLETION_NOTICE_TYPE,
-          content: completionNoticeText({
+          content: `${completionNoticeText({
             cycleId: entry.cycleId,
             attemptId: entry.attemptId,
             runId: monitor.runId,
             outcome: notice.outcome,
             processing: notice.processing,
-          }),
+          })}${options.possibleDuplicate ? " This notice was re-sent after an explicit resume because its earlier delivery could not be confirmed; it may duplicate an earlier report and still describes the same single run." : ""}`,
           display: true,
           details: {
             noticeId: notice.id,
@@ -303,6 +306,7 @@ export function cyclePiRegistration(
             runId: monitor.runId,
             outcome: notice.outcome,
             processing: notice.processing,
+            ...(options.possibleDuplicate ? { possibleDuplicate: true } : {}),
           },
         },
         { triggerTurn: true, deliverAs: "followUp" },
@@ -313,6 +317,7 @@ export function cyclePiRegistration(
           current.notice.sentAt = new Date().toISOString();
         }
       });
+      return true;
     } catch (error) {
       // A stale runtime throws here: keep the notice pending for reconciliation.
       await entry.cycles
@@ -320,11 +325,14 @@ export function cyclePiRegistration(
           if (current.notice) current.notice.deliveryError = error instanceof Error ? error.message : String(error);
         })
         .catch(() => {});
+      return false;
     }
   };
   const scheduleMonitor = (entry: ScheduledMonitor, delayMs: number) => {
     if (shuttingDown) return;
     const key = monitorKey(entry.cycleId, entry.attemptId);
+    const previous = scheduled.get(key);
+    if (previous?.timer) clearTimeout(previous.timer);
     if (entry.timer) clearTimeout(entry.timer);
     entry.timer = setTimeout(
       () => {
@@ -397,6 +405,9 @@ export function cyclePiRegistration(
       return;
     }
     // The lifecycle observer already persisted the remote facts, results and accounting.
+    // A monitor paused or archived while the GET was in flight records nothing further:
+    // late original facts are kept, but no notice is scheduled for a detached context.
+    if (!scheduled.has(key) || shuttingDown) return;
     try {
       const after = await cycles.inspect(cycleId);
       const execution = after.attempts.find((item) => Value.Check(agentAttemptSchema, item) && item.id === attemptId);
@@ -438,9 +449,11 @@ export function cyclePiRegistration(
     }
   };
   const registerMonitoring = async (cycles: ResearchCycles, cycleId: string, attemptId: string, sessionId: string) => {
-    const { monitor } = await cycles.registerMonitor(cycleId, attemptId);
+    const { monitor, created } = await cycles.registerMonitor(cycleId, attemptId);
     // A live registration proves this runtime owns the cycle: lift any earlier detach latch.
     shuttingDown = false;
+    // An already scheduled live monitor is never duplicated by a repeated resume.
+    if (!created && scheduled.has(monitorKey(cycleId, attemptId))) return monitor;
     const entry: ScheduledMonitor = { cycles, cycleId, attemptId, sessionId };
     scheduleMonitor(entry, bounds.initialDelayMs);
     return monitor;
@@ -455,6 +468,64 @@ export function cyclePiRegistration(
       if (noticeId) seen.set(noticeId, entry.id);
     }
     return seen;
+  };
+  /**
+   * Explicit resume: the user asked for this cycle again, so re-register eligible
+   * paused monitors, create the missing notice for a terminal attempt whose
+   * scheduling crashed, and deliver pending/uncertain notices into this session.
+   * Nothing here creates, retries, replaces or cancels research or grants consent.
+   */
+  const resumeMonitoring = async (cycles: ResearchCycles, cycleId: string, sessionId: string) => {
+    // A successful cycles.resume proved this runtime owns the cycle live.
+    shuttingDown = false;
+    const record = await cycles.inspect(cycleId);
+    const resumed: Array<{ attemptId: string; action: string }> = [];
+    for (const item of record.attempts) {
+      if (!Value.Check(agentAttemptSchema, item)) continue;
+      const result = item.result;
+      if (!result?.remoteId) continue;
+      const attemptId = item.id;
+      const existing = record.monitors?.find((monitor) => monitor.attemptId === attemptId);
+      const entry: ScheduledMonitor = { cycles, cycleId, attemptId, sessionId };
+      if (result.terminal) {
+        if (!existing) await cycles.registerMonitor(cycleId, attemptId, { terminal: true });
+        const outcome =
+          result.remoteStatus === "completed"
+            ? "completed"
+            : result.remoteStatus === "cancelled"
+              ? "cancelled"
+              : "failed";
+        const updated = await cycles.updateMonitor(cycleId, attemptId, (current) => {
+          current.state = "stopped";
+          delete current.reason;
+          current.originSessionId = sessionId;
+          current.notice ??= {
+            id: randomUUID(),
+            outcome,
+            processing: result.processing,
+            state: "pending",
+            createdAt: new Date().toISOString(),
+          };
+          if (current.notice.state === "uncertain") {
+            current.notice.state = "pending";
+            delete current.notice.deliveryError;
+          }
+        });
+        if (updated.notice?.state === "pending") {
+          const possibleDuplicate = existing?.notice?.state === "uncertain" || existing?.notice?.state === "sent";
+          const sent = await deliverNotice(entry, { possibleDuplicate });
+          resumed.push({
+            attemptId,
+            action: sent ? (possibleDuplicate ? "notice re-sent" : "notice delivered") : "notice pending",
+          });
+        }
+        continue;
+      }
+      if (existing?.state === "stopped") continue;
+      await registerMonitoring(cycles, cycleId, attemptId, sessionId);
+      resumed.push({ attemptId, action: "monitoring resumed" });
+    }
+    return resumed;
   };
   const acknowledgedNoticeIds = new Set<string>();
   const acknowledgeNotices = async (ctx: ExtensionContext) => {
@@ -508,8 +579,20 @@ export function cyclePiRegistration(
     const found = await cycles.discover().catch(() => ({ cycles: [] as ResearchCycle[], unreadableCycleIds: [] }));
     const entryIds = new Set(deliveredNoticeIds(ctx).keys());
     for (const record of found.cycles) {
+      // A live owner elsewhere keeps its monitors; only ownerless or proven-dead
+      // owners' monitors are stale. Age alone never authorizes takeover.
+      let ownerLive = false;
+      if (record.owner) {
+        try {
+          process.kill(record.owner.pid, 0);
+          ownerLive = true;
+        } catch (error) {
+          // Only a proven-dead process (ESRCH) is stale; EPERM means a live process elsewhere.
+          ownerLive = (error as { code?: string }).code !== "ESRCH";
+        }
+      }
       for (const monitor of record.monitors ?? []) {
-        const stale = monitor.state === "registered" || monitor.state === "running";
+        const stale = !ownerLive && (monitor.state === "registered" || monitor.state === "running");
         const notice = monitor.notice;
         const sentWithoutEntry =
           notice?.state === "sent" && monitor.originSessionId === currentSessionId && !entryIds.has(notice.id);
@@ -567,8 +650,10 @@ export function cyclePiRegistration(
             break;
           }
           case "resume": {
-            const record = await cycles.resume(value);
-            text = JSON.stringify(view(record), null, 2) + warning(record);
+            await cycles.resume(value);
+            const resumedMonitoring = await resumeMonitoring(cycles, value, ctx.sessionManager.getSessionId());
+            const record = await cycles.inspect(value);
+            text = JSON.stringify({ ...view(record), resumedMonitoring }, null, 2) + warning(record);
             break;
           }
           case "archive": {
@@ -725,9 +810,17 @@ export function cyclePiRegistration(
               }
               if (statusInput.action === "resume") {
                 if (!statusInput.cycleId) throw new Error("Explicit cycleId is required to resume a saved cycle.");
-                return result(
-                  view(await cycles.resume(statusInput.cycleId, { expectedRevision: statusInput.expectedRevision })),
+                await cycles.resume(statusInput.cycleId, { expectedRevision: statusInput.expectedRevision });
+                const resumedMonitoring = await resumeMonitoring(
+                  cycles,
+                  statusInput.cycleId,
+                  ctx.sessionManager.getSessionId(),
                 );
+                return result({
+                  ...view(await cycles.inspect(statusInput.cycleId)),
+                  resumedMonitoring,
+                  spending: false,
+                });
               }
               const active = await cycles.status(statusInput);
               if (active) return result(view(active));

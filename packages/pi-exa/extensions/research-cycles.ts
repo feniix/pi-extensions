@@ -1601,7 +1601,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
      * Register host-owned background monitoring for an acknowledged attempt in the
      * owning session. Monitoring has no create/retry/replace/cancel authority.
      */
-    async registerMonitor(cycleId: string, attemptId: string) {
+    async registerMonitor(cycleId: string, attemptId: string, options: { terminal?: boolean } = {}) {
       return ordered(() =>
         transaction(async () => {
           const record = await owned();
@@ -1609,9 +1609,26 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           const attempt = record.attempts.find((entry) => "id" in entry && entry.id === attemptId);
           if (!Value.Check(agentAttemptSchema, attempt) || !attempt.result?.remoteId)
             throw new Error("MONITOR_UNAVAILABLE: no acknowledged remote run ID to observe.");
-          if (attempt.result.terminal) throw new Error("MONITOR_UNAVAILABLE: the attempt is already terminal.");
           record.monitors ??= [];
           const existing = record.monitors.find((entry) => entry.attemptId === attemptId);
+          if (attempt.result.terminal) {
+            // A terminal attempt gets no observation, only a stopped record that can hold its notice.
+            if (!options.terminal) throw new Error("MONITOR_UNAVAILABLE: the attempt is already terminal.");
+            if (existing) return { monitor: structuredClone(existing), created: false };
+            const stopped: MonitorRecord = {
+              kind: "exa-monitor-v1",
+              attemptId,
+              runId: attempt.result.remoteId,
+              originSessionId: owner.sessionId,
+              state: "stopped",
+              gets: 0,
+              consecutiveTransientErrors: 0,
+              startedAt: new Date().toISOString(),
+            };
+            record.monitors.push(stopped);
+            await write(record);
+            return { monitor: structuredClone(stopped), created: true };
+          }
           if (existing && (existing.state === "registered" || existing.state === "running"))
             return { monitor: structuredClone(existing), created: false };
           const monitor: MonitorRecord = existing ?? {
