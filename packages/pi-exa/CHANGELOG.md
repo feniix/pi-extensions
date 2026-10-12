@@ -27,6 +27,7 @@ publication version mismatches are called out explicitly.
 - Add `ajv` and `ajv-formats` for synchronous local draft-07 task/result validation; validation does not fetch remote schemas.
 - Standalone/default-opt-out/MCP behavior and existing tool enablement remain unchanged. Cycle `max`/`ultra` and MCP cycle parity remain outside this rollout.
 - Validate the extension against Pi 1.1.0 (`@earendil-works/pi-coding-agent`, `pi-ai`, `pi-tui`); the 6.1.0 guided background workflow targets the latest Pi 1.x extension API. SDK receipts are not independently verified invoices; estimates and lifetime ceilings are not vendor billing caps.
+- Settle the 6.1.0 guided background host contract (#171): proposal-bound `submit` approval through the Pi confirmation dialog, bounded create acknowledgement, non-overlapping monitor cadence/backoff and pause limits, and completion delivery acknowledged by the persisted session entry. Evidence lives in `docs/research/2026-10-12-pi-guided-background-host-capabilities.md` and the prototype experiments under `__tests__/fixtures/guided-prototype/`; no shipped behavior changes yet.
 
 ### Fixed
 

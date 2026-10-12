@@ -2,7 +2,7 @@
 title: "Pi integrated Exa cycle: offline qualification"
 prd: PRD-010
 issue: 160
-status: "Merged v1.2 foundation only; 6.1.0 guided/background qualification pending"
+status: "Merged v1.2 foundation; #171 prototype evidence recorded; 6.1.0 guided/background qualification pending"
 ---
 
 # Qualification boundary
@@ -12,6 +12,19 @@ adds conversational setup/approval, immediate submission acknowledgement,
 background monitoring and safe completion delivery (scenarios 21–36).
 Those behaviors are not implemented or verified by the evidence below.
 The v1.2 foundation is merged; 6.1.0 remains unpublished pending the new gates.
+
+**#171 prototype evidence (design gates, not release qualification).** The
+[Pi 1.1.0 host capability research](../research/2026-10-12-pi-guided-background-host-capabilities.md)
+and the runnable prototype in `packages/pi-exa/__tests__/fixtures/guided-prototype/`
+settle the approval surface, background lifecycle, wakeup, acknowledgement and
+bounds for scenarios 21–36. Experiments: `guided-prototype.test.ts` (in-process
+Pi SDK session, scripted model, mocked Exa job: approval, headless/declined/stale
+refusal, pending-job responsiveness, active-turn delivery, abort without cancel,
+transient/auth/not-found pauses, unknown create with late ID, stale-runtime
+delivery fence) and `guided-prototype.rpc.test.ts` (real `pi --mode rpc` process
+with the forwarded confirm dialog, `get_entries` notice verification, session
+replacement and a cancelled dialog). They exercise prototype code, not the
+production cycle controller; scenarios 21–36 stay unqualified until #172–#175.
 
 The opt-in Pi workflow is implemented behind `--exa-enable-cycles`, off by
 default. Registered tools retain their original enablement and standalone

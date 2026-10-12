@@ -2,7 +2,7 @@
 title: "Pi-first integrated Exa research-cycle contract"
 prd: PRD-010
 issue: 152
-status: "6.1.0 guided background redesign; implementation design gates open"
+status: "6.1.0 guided background redesign; #171 implementation contract settled, #172–#175 pending"
 ---
 
 # Pi-first integrated research-cycle contract
@@ -126,6 +126,112 @@ ownership transfer, stale approval, unknown create and missed/ambiguous notices.
 Finish with an interactive Pi smoke, not merely scripted callback invocation.
 PRD scenarios 21–36 are the new release gates; old qualification does not satisfy
 them. Live paid testing and publication require separate authority.
+
+## #171 settled implementation contract
+
+Evidence: [Pi host capability research](../research/2026-10-12-pi-guided-background-host-capabilities.md)
+against Pi 1.1.0 (workspace pin moved from 1.0.3) and the runnable prototype in
+`packages/pi-exa/__tests__/fixtures/guided-prototype/`. These decisions close the
+four design gates above for #172–#175; they are implementation contract, not
+prototype approval or spending authority. Material deviation requires operator review.
+
+### Public actions
+
+Keep the four planner names and the existing paid tools; add literals, not tools.
+
+- `exa_research_summary mode="proposal"`: compile the current revision through the
+  existing artifact compiler and render the readable proposal (question, scope and
+  exclusions, criteria, carried assumptions, source strategy and selected context,
+  deliverable, effort, providers/contact scope, processing/exclusion/continuation
+  records, estimate and basis, lifetime allowance, existing liabilities, material
+  uncertainty, and what is not a vendor cap). Return a `proposalId` bound to the
+  artifact hash, plan revision and assessment basis. Non-spending; a newer proposal
+  supersedes older unconsumed ones.
+- `web_research_exa researchMode="submit"` with `cycleId` and `proposalId`: the only
+  guided submission path. Inside the tool: recheck the proposal is current and
+  unconsumed; if `ctx.hasUI` is false return `APPROVAL_UNAVAILABLE` and pause; call
+  `ctx.ui.confirm` with the proposal text and the approval timeout; on `true` issue
+  the lifetime scope and exact-request grants bound to that proposal (reusing the
+  existing grant records), freeze and reserve the attempt exactly as `reserveAgent`
+  does today, perform one bounded create, publish the remote ID, register the
+  monitor, and return `{ cycleId, attemptId, runId, remoteStatus, monitoring }`
+  without waiting for a terminal state. Any other dialog result returns
+  `APPROVAL_NOT_GRANTED` and submits nothing. Model-writable parameters never carry
+  consent; the grant is written only on the `true` branch of the host dialog.
+- `exa_research_status` adds `monitor` (state, reason, gets, next delay, last
+  success) and `notices` (pending / sent / acknowledged, acknowledged entry ID) to
+  its view; `action="resume"` additionally restarts an eligible paused monitor for
+  an acquired cycle (#174). Status never spawns a competing monitor.
+- Existing `researchMode="active"` keeps the foundation's blocking contract for
+  compatibility with already opted-in callers; tool guidance routes guided requests
+  to `submit`. `recover`, `retry`, `replace`, standalone, default-opt-out and MCP
+  behavior are unchanged. `recover` remains one bounded GET and shares the monitor's
+  observation coordination so it cannot overlap a running check.
+
+### Consent binding
+
+`proposalId = hash(artifactHash, revision, assessmentBasis)`. The dialog body is the
+rendered proposal; the operator never copies the hash. A plan edit changes the
+artifact hash and therefore supersedes the proposal: approval of a superseded or
+consumed proposal fails with `PROPOSAL_STALE` before any dialog or create. Decline,
+dismissal, timeout and headless invocation are indistinguishable "not granted"
+results; none is a consent event and none consumes the proposal.
+
+### Submission and observation bounds
+
+| Bound | Value | Basis |
+|---|---|---|
+| Create acknowledgement wait | 30 s | Separates acknowledgement from the 180 s full-run default; Exa creates return an ID in seconds. Expiry leaves the attempt `unknown`; a genuine late ID settles the original attempt with monitoring paused (`LATE_ACKNOWLEDGEMENT`). |
+| Per-GET deadline | 15 s | One bounded request; deadlines never hold storage locks. |
+| First check after acknowledgement | 5 s | Agent runs rarely finish sooner; avoids an immediate wasted GET. |
+| Backoff | ×1.5 per pending observation or transient failure, capped at 60 s, ±20 % jitter, non-overlapping (the next check is scheduled only after the previous one completes) | Keeps long runs cheap while bounding notification latency to about one minute. |
+| Transient failures | pause after 8 consecutive failures or 10 min without a successful GET | `ExaError` exposes no retry guidance, so local limits apply. |
+| Auth (401/403) and not-found (404) | pause immediately (`AUTH`, `NOT_FOUND`) | Not proof of remote failure; remote outcome and liability stay separate. |
+| Monitor lifetime | pause after 3 h (`MONITOR_LIFETIME`) | Exa publishes no maximum duration; explicit resume restarts observation without create. |
+| Approval dialog timeout | 10 min | Expiry grants nothing. |
+
+Monitoring has no create, continuation, retry, replacement or cancel authority.
+Interrupting a chat turn aborts only the model turn: the saved run and its
+liability continue; no cancel request is issued.
+
+### Completion delivery protocol
+
+1. On a terminal observation persist remote status, stop reason, classified usage
+   and the local processing outcome on the attempt.
+2. Persist one notice per attempt/terminal outcome with state `pending`. Repeated
+   terminal observations of the same attempt create no second notice.
+3. Deliver with `pi.sendMessage({ customType: "exa-research-completion", content:
+   <attempt reference and read-only instruction>, display: true, details:
+   { noticeId, cycleId, attemptId, runId, status } }, { triggerTurn: true,
+   deliverAs: "followUp" })`. Idle origin → wakes now; streaming origin → after
+   pending work; never `steer`. Content is a reference, never vendor output.
+   Mark the notice `sent`.
+4. Acknowledge by observation: on `agent_settled` or `session_start`, find the
+   `custom_message` entry carrying `details.noticeId` in the session and mark the
+   notice `acknowledged` with the entry ID. A `sent` notice without an entry after
+   restart is `uncertain` and is reconciled, not re-sent automatically and not
+   dropped. Exactly-once is not claimed.
+5. A stale runtime (session replacement, reload, SDK dispose) throws on
+   `sendMessage`; keep the notice `pending`, record the error, and let the origin
+   session's `session_start` discovery surface it. Foreign sessions report but
+   never deliver another session's notice.
+
+### Lifecycle fences
+
+Stop timers and mark monitors `paused:SHUTDOWN` on `session_shutdown` for every
+reason; `session_start` marks any monitor left `registered`/`running` as
+`paused:RESTART` and reports pending notices without delivering them. Explicit
+resume (#174) reacquires ownership and restarts eligible monitors. Archive stops
+monitoring and delivery and warns that remote work may continue.
+
+### State dimensions
+
+Keep four independent dimensions on each attempt: local submission
+(`submitting`/`acknowledged`/`unknown`), remote lifecycle (`queued`/`running`/
+`completed`/`failed`/`cancelled` plus stop reason), monitoring (`none`/
+`registered`/`running`/`paused:<reason>`/`stopped`) and delivery
+(`pending`/`sent`/`acknowledged`/`uncertain`). A paused monitor is not a failed
+run; a sent notice is not a delivered one.
 
 ## Activation and host separation
 
