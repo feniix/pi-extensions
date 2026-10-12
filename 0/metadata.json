@@ -3,12 +3,13 @@
   "checkpoint_id": "01M4RGW0Y5JVD5VS1997KHG3EY",
   "session_id": "90caff9b-07c1-45ca-be6f-308aff547939",
   "strategy": "manual-commit",
-  "created_at": "2026-10-12T16:59:26.842454Z",
+  "created_at": "2026-10-12T17:00:31.442318Z",
   "branch": "pi-exa-guided/recovery",
   "checkpoints_count": 1,
   "files_touched": [
     "packages/pi-exa/CHANGELOG.md",
     "packages/pi-exa/README.md",
+    "packages/pi-exa/__tests__/guided-recovery.test.ts",
     "packages/pi-exa/skills/exa-research-planner/SKILL.md"
   ],
   "agent": "Claude Code",
@@ -18,11 +19,11 @@
   "transcript_lines_at_start": 1961,
   "compact_transcript_start": 135,
   "token_usage": {
-    "input_tokens": 0,
-    "cache_creation_tokens": 0,
-    "cache_read_tokens": 0,
-    "output_tokens": 0,
-    "api_call_count": 0
+    "input_tokens": 64,
+    "cache_creation_tokens": 2042,
+    "cache_read_tokens": 1153783,
+    "output_tokens": 604,
+    "api_call_count": 2
   },
   "skill_events_version": 1,
   "skill_events": [
@@ -62,14 +63,14 @@
     "turn_count": 6
   },
   "initial_attribution": {
-    "calculated_at": "2026-10-12T16:59:26.772854Z",
-    "agent_lines": 18,
-    "agent_removed": 2,
+    "calculated_at": "2026-10-12T17:00:31.376162Z",
+    "agent_lines": 0,
+    "agent_removed": 1,
     "human_added": 0,
     "human_modified": 0,
     "human_removed": 0,
-    "total_committed": 18,
-    "total_lines_changed": 20,
+    "total_committed": 0,
+    "total_lines_changed": 1,
     "agent_percentage": 100,
     "metric_version": 2
   }
