@@ -230,7 +230,11 @@ describe("background monitoring and completion delivery", () => {
       processing: "validated",
     });
 
-    record = await pi.record(cycleId, projectId);
+    // The sent state is persisted right after the host accepted the message.
+    await vi.waitFor(async () => {
+      record = await pi.record(cycleId, projectId);
+      expect(monitorOf(record, attemptId)?.notice).toMatchObject({ state: "sent" });
+    });
     expect(record.status).toBe("completed");
     expect(record.attempts[0]).toMatchObject({
       status: "completed",
