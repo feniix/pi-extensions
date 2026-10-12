@@ -167,11 +167,14 @@ Keep the four planner names and the existing paid tools; add literals, not tools
   projection) and `exa_research_summary mode="brief"` / `mode="source_pack"` for
   selected-only findings, recorded gaps, assumptions and classified usage. No new
   result action is added and the reporting turn performs no paid call.
-- Existing `researchMode="active"` keeps the foundation's blocking contract for
-  compatibility with already opted-in callers; tool guidance routes guided requests
-  to `submit`. Retaining it is an operator decision pending review: PRD-010 v1.3
-  replaces blocking cycle execution, so #172 may instead hide `active` behind
-  `submit`. `recover`, `retry`, `replace`, standalone, default-opt-out and MCP
+- Blocking `researchMode="active"` cycle execution is removed (operator decision,
+  2026-10-12). With an active cycle it returns `GUIDED_SUBMISSION_REQUIRED` after
+  surfacing structured conflicts and stale references; guided submission is the
+  only normal dispatch. Explicitly funded `retry` / `replace` keep their
+  command-based consent but dispatch through the same non-blocking path with
+  background monitoring. Standalone/default-opt-out/MCP calls are unchanged.
+  Guided `submit` refuses a cycle that already has a saved attempt before any
+  dialog, so an approval is never recorded for a refused submission. `recover`, `retry`, `replace`, standalone, default-opt-out and MCP
   behavior are unchanged. `recover` remains one bounded GET and shares the monitor's
   observation coordination so it cannot overlap a running check.
 

@@ -210,8 +210,8 @@ Layout, colors and scrolling were not evaluated beyond what is listed.
   monitoring runs only while Pi is open; crash points are in-process filesystem
   fault injection; the automated smoke is RPC-protocol and the interactive TUI run
   above is manual evidence, not a CI gate;
-  `researchMode=active` remains the foundation's blocking path (operator decision
-  pending) while guided requests route to `submit`.
+  blocking `researchMode=active` cycle execution is removed (`GUIDED_SUBMISSION_REQUIRED`);
+  explicitly funded retry/replacement dispatch through the same non-blocking path.
 
 ## Revalidation
 

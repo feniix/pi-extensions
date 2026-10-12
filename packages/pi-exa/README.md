@@ -393,9 +393,13 @@ dispatchability; Agent still needs its exact-request approval.
 #### Compiled Agent attempts
 
 With cycles enabled, the guided `researchMode: "submit"` path above obtains both
-permissions through the confirmation dialog. The advanced `researchMode: "active"`
-call keeps the foundation's blocking contract and executes the exact current
-artifact after **both** operator permissions are recorded by command:
+permissions through the confirmation dialog and is the only normal dispatch.
+Blocking cycle execution (`researchMode: "active"`, or no mode with an active
+cycle) is not available: it reports structured conflicts or stale references
+first, then returns `GUIDED_SUBMISSION_REQUIRED` without dispatching. The
+explicitly funded `retry` / `replace` paths dispatch the same non-blocking way,
+with background monitoring, after **both** operator permissions are recorded by
+command:
 
 1. `/exa-research approve <cycle-id> <total-dollar-ceiling> web_research_exa`
    explicitly includes Agent in the lifetime tool scope (include other desired
