@@ -1,10 +1,11 @@
 ---
 title: "pi-exa Integrated Research Cycle"
 prd: PRD-010
-status: "Implemented; offline qualification; merge pending"
+status: "6.1.0 guided background workflow specified; implementation pending"
 owner: "Sebastian Otaegui"
 issue: "N/A"
-version: "1.2"
+version: "1.3"
+target_release: "6.1.0"
 ---
 
 # PRD: pi-exa Integrated Research Cycle
@@ -20,8 +21,12 @@ enrich execution or receive its results.
 This contract connects those tools through package-enforced opt-in Pi integration while
 leaving judgment and orchestration with the calling assistant.
 The operator agreed to the behavior below through a design interview.
-Implementation is offline-qualified in the current stack; merge/release and
-live paid qualification are not claimed.
+The v1.2 safety foundation is merged and offline-qualified. Local interactive
+testing exposed an incomplete user experience: no cycle was started, the
+assistant fell back to standalone retrieval, and an Agent call held the
+conversation open while polling. This revision defines the guided background
+workflow required for **6.1.0**. That version remains unpublished; its preliminary
+manifest/changelog bump is stashed. Existing tests do not qualify this new UX.
 
 Related documents:
 
@@ -32,8 +37,133 @@ Related documents:
 - [Feasibility and Jev decision record](../research/pi-exa-integrated-cycle-feasibility.md)
 - [Settled Pi-first execution contract](../architecture/plan-pi-exa-integrated-research-cycle.md)
 
-This proposal revises the earlier in-memory-only, manually bridged design.
-It does not authorize implementation or change existing tool defaults.
+This revision replaces manual normal-path cycle setup and blocking cycle
+execution, while preserving the durable safety foundation. It specifies the
+target behavior; it does not itself authorize paid testing or publication.
+
+## 6.1.0 user experience
+
+**Request → clarify → preview scope/cost → approve → submit → return research ID
+and control → monitor in the background → notify completion → report gaps.**
+
+The user describes a research topic in ordinary language. The assistant manages
+the plan and cycle mechanics. The user makes material scope and spending
+decisions; the normal path must not require slash commands, IDs copied between
+tools, JSON schemas or request hashes.
+
+### Guided planning
+
+- An explicit request for guided research lets the assistant create a local,
+  non-spending draft and clarify the objective. It does not authorize retrieval.
+- Ask focused questions only where answers materially change the research.
+  For a specific initial request, propose a brief with labeled assumptions
+  instead of forcing a questionnaire. Do not ask for information already given.
+- Clarify the decision/use case, scope, source expectations, output and relevant
+  effort/cost trade-offs. The assistant maintains criteria, gaps and a structured
+  task contract behind the scenes.
+- Preliminary Search/Fetch calls are optional paid exploration, not free
+  clarification. Explain and authorize their scope before using them.
+- A requested Agent pass must not silently become a Search/Fetch-only report.
+  If Agent is disabled or unavailable, disclose that and offer an alternative.
+  Enabling cycle support does not silently change tool enablement.
+- Guided intent uses explicit cycle routing. Failure to start/resume that cycle
+  is actionable, not permission to execute equivalent standalone work.
+
+### Proposal and approval
+
+Before Agent submission, show a readable proposal containing:
+
+- The research question, scope/exclusions, criteria and carried assumptions.
+- Expected deliverable and source strategy, including selected context.
+- Effort, providers/contact-capable work and any continuation/input records.
+- Estimated cost and its basis, lifetime allowance, existing liabilities and
+  material uncertainty. State what is not a vendor-enforced limit.
+
+The package binds the proposal to its exact compiled request and revision.
+Approval is a real operator action against that proposal through a trusted
+host confirmation surface. The assistant may request the confirmation but
+cannot manufacture a grant from an approval boolean, copied conversation text,
+its own interpretation of “yes,” or a budget argument. The operator need not
+read or copy the internal hash. Changed request/scope requires a new proposal
+and approval; decline, dismissal, timeout and stale responses grant nothing.
+
+The normal guided path requires this proposal; it cannot skip preview because
+the assistant judges the plan ready. Existing advanced commands may remain as
+an alternative trusted interface, not a prerequisite for ordinary use.
+
+### Submission and background monitoring
+
+- Freeze and durably claim the approved attempt before one SDK create.
+- On acknowledgement, persist and return the **Exa research run ID**, together
+  with a local cycle/attempt reference and initial status. Return control without
+  waiting for a terminal result or performing the entire polling loop.
+- Example: “Research started: `<run-id>`. I’ll notify you when it finishes.
+  You can continue chatting.” Promise monitoring only after it is registered.
+- If acknowledgement does not arrive within a bounded submission wait, report
+  the local attempt reference and uncertainty, not an invented remote ID,
+  successful-start message or automatic retry. Persist genuine late IDs/results.
+- A package-owned monitor checks only the saved run in the background while
+  Pi remains running. It does not require repeated assistant turns, a blocking
+  tool call or a model choosing to poll.
+- Monitor checks never create/continue/retry/replace research, widen grants or
+  fetch additional sources. Remote work can continue incurring charges under
+  its original request; monitoring does not establish a new billing cap.
+- Use bounded requests and backoff. Temporary failures are monitoring problems,
+  not proof of remote failure. Persistent errors pause monitoring with an
+  actionable warning, preserving the run and liability.
+- Users can ask for status/results without starting another run or creating
+  a competing monitor. Multiple approved cycles may be monitored independently.
+
+### Completion and conversation lifecycle
+
+Persist the genuine terminal outcome, classified usage and local processing
+result before scheduling completion delivery. Notify the originating session
+at a safe turn boundary; do not interrupt an answer being written or inject
+private results into a different session/project. A completion can wake an idle
+assistant to report findings, sources, evidence limitations, recorded gaps and
+usage. The reporting turn must not buy further research.
+
+Completion delivery is keyed to attempt/terminal outcome and deduplicated during
+normal operation. Persist a pending notice separately from delivered/acknowledged
+state so a crash does not silently lose a result. If the host cannot provide
+atomic delivery acknowledgement, do not claim exactly-once notification across
+crashes: retain an inspectable pending/uncertain notice and reconcile on resume.
+Two late successes must both remain visible without buying a third run.
+
+Interrupting the conversation or the completed submission tool does not cancel
+the saved remote run. Stopping monitoring is distinct from remote cancellation.
+This revision adds no automatic remote cancellation; any new explicit remote
+cancellation UI needs a separate settled contract and must not erase liability.
+
+On shutdown, stop local timers and retain state. On restart, show discoverable
+saved running/unknown work and pending results; do not silently attach it.
+The user can request resume conversationally, and the assistant can invoke the
+explicit resume operation without requiring a copied command. Resume checks
+ownership and restarts only eligible monitoring, never submission.
+Session switch/tree/fork detaches monitoring and delivery for the old context;
+late observations may update their original records but cannot take over the
+new context. Surface the pause and resume path. Archive stops monitoring/delivery
+for the archived cycle, retains history and warns that remote work may continue.
+
+### Release boundary and design gates
+
+The guided background flow is part of **6.1.0**, not a deferred follow-up release.
+Standalone/default-opt-out/MCP calls retain their existing blocking semantics.
+The new Pi path must explicitly distinguish submission from result inspection.
+
+Before implementation, verify and settle:
+
+1. A trusted Pi approval surface usable in the normal guided flow, including
+   unavailable-UI/headless behavior. Fail closed with an actionable pause where
+   confirmation is unavailable; do not fall back to inferred prose consent.
+2. Host scheduling and delivery primitives for background monitoring, safe-turn
+   assistant wakeups, origin-session targeting and delivery acknowledgement.
+3. Public tool schema/action names and compatibility with existing opted-in calls.
+4. Submission/GET time bounds, polling cadence/backoff and monitor pause limits.
+
+These are implementation decisions to resolve against Pi/Exa documentation and
+offline prototypes, not assumed SDK features. Material deviations from the
+agreed flow require operator review.
 
 ### Host scope
 
@@ -57,9 +187,11 @@ The intended workflow is:
 2. Exploratory Exa retrievals capture candidate evidence. The assistant selects
    relevant sources; evidence from other tools is explicitly recorded.
 3. The assistant decides when the plan and output contract are ready.
-4. An explicit `web_research_exa` call executes the active plan. Package code
-   compiles its curated state into the request and records execution updates.
-5. A successful Agent run completes the cycle. Results and unresolved gaps are
+4. The assistant presents the scope/cost proposal and requests trusted operator
+   approval. A submission returns its saved research ID and control promptly;
+   package-owned background monitoring records execution updates.
+5. A successful Agent run completes the cycle and schedules notification.
+   Results and unresolved gaps are
    reported; the assistant does not autonomously launch another research cycle.
 
 One cycle targets one successful Agent run, not necessarily one submission:
@@ -75,7 +207,8 @@ Another successful research pass requires operator go-ahead for a new cycle.
 | Capture Exa retrieval candidates during the cycle | Select evidence and record external-tool evidence |
 | Record run IDs, execution state, results, and usage | Interpret results and validate criterion coverage |
 | Track approved budget and remaining known balance | Obtain spending permission and explain uncertainty |
-| Persist curated records and isolate cycles | Explicitly resume or start a cycle |
+| Persist curated records, isolate cycles and monitor saved runs | Start/resume explicitly on the user's behalf |
+| Return submission acknowledgement and safely deliver completion | Present the proposal and final report conversationally |
 | Prevent further execution of a completed cycle | Report gaps and seek permission for another cycle |
 
 The package does not contain an autonomous multi-run reasoning loop.
@@ -123,9 +256,8 @@ submitted and its plan revision.
 
 Execution must use the current revision. A changed plan invalidates a previous
 preview; a caller referencing a stale artifact receives an actionable conflict
-instead of silently submitting a different brief. A preview is not mandatory:
-the assistant can execute the current revision without operator approval of
-every brief.
+instead of silently submitting a different brief. The guided 6.1.0 path requires
+a readable proposal and exact-request approval before submission.
 
 Structured conflicts block execution and return actionable information.
 The assistant resolves them by updating the plan or clarifying intent.
@@ -179,7 +311,8 @@ When no defensible estimate is available, ask before spending rather than invent
 precision. Even a permitted call can overshoot its estimate; report that outcome
 and obtain renewed permission before further paid work.
 
-Confirmed remote failures may be retried within the approved budget.
+Confirmed remote failures may be retried only explicitly with fresh request
+permission and a reassessed approved budget; background monitors never retry.
 A timeout or lost response alone is not confirmation of failure.
 If the outcome is unknown, inspect or recover the existing run where supported;
 obtain operator approval before a replacement submission.
@@ -232,7 +365,8 @@ archives by default. Returned material needs an explicit curation policy.
 
 Sessions have separate plans and budgets even within the same project.
 Restarting does not automatically attach the most recent saved plan.
-Resuming a cycle is explicit.
+Resuming a cycle is explicit, but the assistant can perform that operation
+following a user's conversational request.
 Resuming transfers active ownership explicitly; two sessions must not concurrently
 execute the same saved cycle.
 
@@ -256,8 +390,9 @@ release must not provide destructive cycle deletion.
 ## Acceptance scenarios
 
 The [offline qualification map](../architecture/pi-exa-cycle-qualification.md)
-links each scenario to current regression tests and states the verification
-boundary. Prompt guidance assists the model; it does not autonomously execute
+links the foundation scenarios 1–20 to existing regression tests. It does not
+qualify the new 6.1.0 guided/background scenarios below.
+Prompt guidance assists the model; it does not autonomously execute
 the workflow or establish research adequacy, consent or verified billing.
 
 1. With an active plan, the actual Agent request includes its curated goals,
@@ -291,6 +426,43 @@ the workflow or establish research adequacy, consent or verified billing.
     and records the duplicate-execution risk.
 20. Existing MCP behavior remains unchanged; Pi cycle behavior does not silently
     activate for MCP callers.
+
+### Guided/background release acceptance (not yet implemented)
+
+21. “Research Laya versus Jev” starts a local guided draft, asks only material
+    clarification questions and requires no manual cycle command or schema.
+22. Before any paid exploration or Agent create, the user sees scope/cost and
+    can approve or decline through the trusted host surface. Decline, timeout,
+    stale approval and assistant-forged approval result in zero submissions.
+23. After a proposal edit, the old approval cannot submit the changed request.
+24. A delayed mock remote job returns its saved run ID from submission before
+    completion; the user can send another message while background GETs run.
+25. Completion of that job persists its result and wakes the correct idle
+    session for a report without a user prompt, second create or paid follow-up.
+26. Completion during an active response is queued until a safe boundary.
+    Repeated terminal observations do not produce duplicate normal-path notices.
+27. Crash points before/after receipt publication, notice scheduling and delivery
+    preserve inspectable outcome/notice state. Delivery ambiguity is explicit;
+    no unsupported exactly-once claim is made.
+28. Submission timeout with no ID preserves unknown intent; a late ID is saved
+    on the original attempt. No automatic resubmission or fabricated success.
+29. Transient GET errors back off; exhausted monitoring/auth/not-found errors
+    surface a pause without fabricating remote failure or buying replacement.
+30. Shutdown/restart retains the ID and pending notices. Explicit conversational
+    resume reacquires ownership and monitors the existing run without create.
+31. Session switch, fork, archive and competing runtimes cannot deliver into the
+    wrong conversation, duplicate active monitors or lose late original facts.
+32. Interrupting a chat turn does not remotely cancel submitted work. Archive/
+    stop-monitoring warnings distinguish local observation from remote spending.
+33. Two independently approved cycles return distinct IDs and retain isolated
+    results, grants, liabilities and notifications.
+34. Invalid output after remote completion yields processing-failure guidance
+    and same-run recovery, never a new research pass.
+35. Guided Agent intent cannot silently fall back to standalone Search/Fetch or
+    a blocking standalone Agent call when setup/approval/capabilities fail.
+36. A real interactive Pi smoke demonstrates the entire guided journey with
+    controllable mocked Exa endpoints. Actual paid smoke requires separate
+    operator authorization and is never implied by release preparation.
 
 Keep changes regression-first. The qualification map covers Pi lifecycle,
 session isolation and existing MCP regressions; cross-host integrated-cycle

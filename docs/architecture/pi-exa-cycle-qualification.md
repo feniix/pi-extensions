@@ -2,10 +2,16 @@
 title: "Pi integrated Exa cycle: offline qualification"
 prd: PRD-010
 issue: 160
-status: "Offline qualification; merge/release pending"
+status: "Merged v1.2 foundation only; 6.1.0 guided/background qualification pending"
 ---
 
 # Qualification boundary
+
+**Historical foundation evidence, not 6.1.0 release qualification.** PRD-010 v1.3
+adds conversational setup/approval, immediate submission acknowledgement,
+background monitoring and safe completion delivery (scenarios 21–36).
+Those behaviors are not implemented or verified by the evidence below.
+The v1.2 foundation is merged; 6.1.0 remains unpublished pending the new gates.
 
 The opt-in Pi workflow is implemented behind `--exa-enable-cycles`, off by
 default. Registered tools retain their original enablement and standalone

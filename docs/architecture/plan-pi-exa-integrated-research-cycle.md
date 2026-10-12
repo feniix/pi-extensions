@@ -2,7 +2,7 @@
 title: "Pi-first integrated Exa research-cycle contract"
 prd: PRD-010
 issue: 152
-status: "Implemented; offline qualification; merge pending"
+status: "6.1.0 guided background redesign; implementation design gates open"
 ---
 
 # Pi-first integrated research-cycle contract
@@ -10,11 +10,122 @@ status: "Implemented; offline qualification; merge pending"
 Sources: [PRD-010](../prd/PRD-010-pi-exa-integrated-research-cycle.md),
 [feasibility and Jev evidence](../research/pi-exa-integrated-cycle-feasibility.md),
 [issue #152](https://github.com/feniix/pi-extensions/issues/152).
-Current source implements the opted-in contract, with an
+Current source implements the merged v1.2 safety foundation, with an
 [offline qualification/acceptance map](pi-exa-cycle-qualification.md).
 Operator choices and delegated Jev selections are design evidence, not runtime
-consent. Merge/release and live paid smoke are not claimed. Numbered slice notes
-below are historical milestones, not current availability gates.
+consent. PRD-010 v1.3 requires a guided background workflow before 6.1.0 is
+published. The section below supersedes the foundation's manual normal-path
+commands and submit-and-poll cycle execution. Later sections describe the
+reusable foundation and historical slice decisions, not proof of new UX support.
+
+## 6.1.0 target: separate proposal, submission, observation and delivery
+
+### Boundaries
+
+- **Planner/proposal:** assistant-operated non-spending start/update/preview.
+  Guided intent routes explicitly to its cycle, with no standalone fallback.
+  A human-readable proposal references the canonical request hash/revision
+  internally; no second compiler or model-generated authorization object.
+- **Approval adapter:** actual trusted host response creates durable scoped
+  grants paired to that proposal. Reuse accounting/request/risk checks, without
+  asking the user to copy hashes. Cancellation/unavailable UI/stale response
+  fails closed. A conversational user request starts planning, not spending.
+- **Submitter:** durable frozen intent and exclusive one-use create claim;
+  one bounded create wait, remote-ID publication, monitor registration, then
+  immediate acknowledgement. It does not wait for terminal completion.
+- **Monitor:** host-owned lifecycle service with bounded same-ID GETs, no model
+  polling loop, no create/continuation/replacement/cancel authority.
+- **Reporter/delivery adapter:** terminal receipt and local processing precede
+  durable notification scheduling. Wake the originating assistant at a safe
+  turn boundary with an attempt reference, not raw vendor content as instructions.
+  Reporting is read-only with respect to research spending.
+
+Names above are architectural responsibilities, not settled public API names.
+Do not implement by detaching an untracked promise from the existing blocking
+tool or by telling the assistant to call that tool repeatedly.
+
+### Reuse and changed behavior
+
+Preserve the existing canonical project identity, private store, schema checks,
+curated artifact/result policy, exact grants, monetary arithmetic, final dispatch
+guards, late-observation accounting and immutable historical consent proofs.
+Keep remote lifecycle, local processing, local monitoring and notice delivery as
+separate state dimensions; a stopped monitor is not a failed Agent run.
+
+Existing cycle submission currently inherits the shared wait/poll behavior.
+The redesigned Pi path must not inherit cancellation-on-chat-interruption from
+the blocking standalone path. Standalone/default-opt-out/MCP retain that
+existing contract. Explicit recovery remains one bounded saved-run GET; it is
+not the repeating monitor and must share safe observation coordination.
+
+### Monitor ownership and persistence
+
+Persist monitor intent bound to canonical project, cycle, attempt, saved remote
+ID and originating session. Runtime ownership/generation fences permit at most
+one authorized monitor per attempt across contenders. Use existing proven-dead
+owner recovery principles, not age alone as takeover authority.
+
+Keep network waits outside storage locks. Late genuine responses can settle only
+their original attempt after detach/archive; stale callbacks cannot re-register
+timers, notify a different session or submit work. Coalesce unchanged snapshots
+without losing durability retries, changed costs, conflicts or late success.
+Repeated explicit status/recovery must not spawn parallel polling loops.
+
+Submission and monitor registration can fail independently. If create succeeded
+but scheduling failed, retain and return the saved ID with “monitoring paused,”
+not successful monitoring or submission failure. Bounded submission timeout
+without an ID retains unknown intent. Late acknowledgement is persisted; attach
+monitoring only if the originating ownership/context remains eligible.
+
+Use bounded per-GET deadlines, non-overlapping checks and backoff; honor server
+retry guidance when available. Numerical cadence/error limits are a design gate.
+Auth/not-found/exhausted errors pause observation; remote outcome and financial
+liability remain separate. No background action consumes replacement consent.
+
+Shutdown stops local work; restart discovers resumable records without implicit
+ownership or monitoring. Explicit user-requested assistant resume reacquires the
+cycle and eligible monitor. Switch/fork/tree/archive fences local monitoring and
+delivery; explain the pause. This is an in-process Pi feature, not an always-on
+OS daemon or a promise of notifications after Pi exits.
+
+### Durable completion delivery
+
+Maintain a durable notice identity per attempt/terminal outcome, with originating
+session, pending/delivered state and host acknowledgement when supported.
+Persist the outcome first, then schedule delivery; record failure independently
+from remote completion. Ordinary duplicate observations enqueue one notice.
+Late additional financial facts update the record rather than erase the first
+completion; separately material duplicate success remains reportable.
+
+Do not hold the submission tool open or interrupt an active assistant response.
+Deliver at a safe boundary or wake the idle origin session. For an unavailable/
+detached origin, retain pending state for explicit resume; never redirect to the
+currently active unrelated session. Check ownership again at actual delivery.
+
+There is no assumed atomic transaction between filesystem publication and Pi
+message delivery. Validate host acknowledgement semantics before choosing an
+outbox protocol. Where acknowledgement is ambiguous across crash/restart,
+surface pending/uncertain delivery and reconcile rather than claim exactly-once.
+Completion of local processing/reporting is not evidence of criterion coverage.
+
+### Implementation gates and verification
+
+Before choosing tool schemas or scheduling APIs, inspect the pinned and supported
+Pi extension APIs/examples for trusted confirmation, nonblocking host lifecycle,
+safe-turn wakeup, session targeting and message acknowledgements. Verify Exa's
+create/GET behavior without assuming SDK request abort or server idempotency.
+Record capability evidence and limitations; reopen the design if a requirement
+cannot be met. No new runtime dependency or model judgement service is implied.
+
+Test first at real registered Pi tools/commands, host confirmation/lifecycle
+boundaries, private filesystem controllers and mocked Exa endpoints. Use a
+controllable pending job: submission must finish while the job is still pending,
+a second user turn must remain possible, and terminal transition must cause
+one safe completion delivery. Cover crash/fault injection, simultaneous runs,
+ownership transfer, stale approval, unknown create and missed/ambiguous notices.
+Finish with an interactive Pi smoke, not merely scripted callback invocation.
+PRD scenarios 21–36 are the new release gates; old qualification does not satisfy
+them. Live paid testing and publication require separate authority.
 
 ## Activation and host separation
 
