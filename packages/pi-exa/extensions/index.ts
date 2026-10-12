@@ -21,6 +21,7 @@ import {
   type CycleAgentFactory,
   type CycleInspectionFactory,
   type CycleRetrievalFactory,
+  type CycleSubmissionFactory,
   cyclePiRegistration,
 } from "./cycle-pi.js";
 import { createExaTools, type ExaToolsOptions, type ExaToolTimeouts } from "./tools.js";
@@ -70,6 +71,11 @@ function registerFlags(pi: ExtensionAPI): void {
   });
   pi.registerFlag("--exa-research-timeout-ms", {
     description: "Per-call timeout in ms for web_research_exa Agent runs. Overrides the built-in 180000 default.",
+    type: "string",
+  });
+  pi.registerFlag("--exa-submit-timeout-ms", {
+    description:
+      "Bounded wait in ms for the Exa create acknowledgement in guided cycle submission (researchMode=submit). Expiry leaves the attempt unknown; it never cancels or resubmits. Built-in default 30000.",
     type: "string",
   });
 }
@@ -142,7 +148,9 @@ export default function exaExtension(pi: ExtensionAPI) {
         );
         return selected;
       };
-      const researchFactory = (options: Pick<ExaToolsOptions, "agentObserver" | "agentInspection">) => {
+      const researchFactory = (
+        options: Pick<ExaToolsOptions, "agentObserver" | "agentInspection" | "agentSubmission">,
+      ) => {
         let selected: ReturnType<CycleAgentFactory>;
         registerPiTools(
           {
@@ -162,7 +170,14 @@ export default function exaExtension(pi: ExtensionAPI) {
       const agentFactory: CycleAgentFactory = (agentObserver) => researchFactory({ agentObserver });
       const inspectionFactory: CycleInspectionFactory = (runId, observer) =>
         researchFactory({ agentInspection: { runId, observer } });
-      registerPiTools(cyclePiRegistration(pi, retrievalFactory, agentFactory, inspectionFactory), tools);
+      const submissionFactory: CycleSubmissionFactory = (observer) =>
+        researchFactory({
+          agentSubmission: { observer, createWaitMs: parsePositiveIntFlag(pi.getFlag("--exa-submit-timeout-ms")) },
+        });
+      registerPiTools(
+        cyclePiRegistration(pi, retrievalFactory, agentFactory, inspectionFactory, submissionFactory),
+        tools,
+      );
       cyclesInstalled = true;
     }
   });

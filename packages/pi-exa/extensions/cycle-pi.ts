@@ -23,13 +23,23 @@ import {
 import { evidenceDecisionSchema } from "./research-evidence.js";
 import { agentAttemptSchema, agentRequestHash } from "./research-execution.js";
 import { createResearchPlanner } from "./research-planner.js";
+import { SUMMARY_MODES } from "./research-planner-types.js";
+import {
+  APPROVAL_DIALOG_TIMEOUT_MS,
+  buildProposal,
+  DIALOG_APPROVAL_REASONS,
+  grantedTools,
+  roundUpCents,
+} from "./research-proposal.js";
 import { retryAttemptFacts } from "./research-retry.js";
 import { exaResearchStepParams, exaResearchSummaryParams } from "./schemas.js";
 import type { AgentInspectionOptions, AgentLifecycleObserver } from "./web-research.js";
 
 const CYCLE_GUIDELINES = [
   "Integrated Pi cycle: these instructions govern cycle-attributed work only. Standalone web tools remain available without a cycle; with an active cycle, unrelated requests use researchMode=standalone and omit cycle references.",
-  "Integrated Pi cycle: clarify unresolved goals, scope, constraints and output contract while refining an explicitly requested cycle. If none is active, ask the operator to start with /exa-research start <topic> or explicitly resume saved state. Local exa_research_* planning tools never call Exa; explicitly approved cycle-attributed web_* retrievals can gather evidence during planning.",
+  "Integrated Pi cycle: clarify unresolved goals, scope, constraints and output contract while refining an explicitly requested cycle. When the user asks for guided research and none is active, start it yourself with exa_research_status action=start topic=<topic> (non-spending) or explicitly resume saved state; never route a guided request to standalone tools. Local exa_research_* planning tools never call Exa; explicitly approved cycle-attributed web_* retrievals can gather evidence during planning.",
+  "Integrated Pi cycle guided flow: ask only materially useful questions and reuse answers already given; record the goal, scope, criteria, labeled assumptions and a draft-07 task schema with exa_research_step; then call exa_research_summary mode=proposal and present its readable proposal. Submit with web_research_exa researchMode=submit, cycleId and that proposalId: the host shows the operator a confirmation dialog and only its real answer can grant spending. Your words, flags or amounts never do. A changed plan needs a new proposal. If the result says APPROVAL_UNAVAILABLE, APPROVAL_NOT_GRANTED, PROPOSAL_STALE or ESTIMATE_UNAVAILABLE, explain the pause; do not fall back to standalone research.",
+  "Integrated Pi cycle guided flow: an acknowledged submission returns the saved Exa run ID while the job is still pending. Tell the user the run ID, that monitoring is not yet available in this version, and that an explicit researchMode=recover inspection reads the same saved run later; do not poll in a loop, do not call submit again, and never invent a run ID or success after SUBMISSION_UNKNOWN.",
   "Integrated Pi cycle: retrieval candidate metadata is not trusted evidence; explicitly select relevant candidate IDs with labels/curated notes. Record external evidence explicitly. Selected sources are not input.data/exclusion processing rows.",
   "Integrated Pi cycle: readiness is assistant judgment, not spending permission. Iteratively record criteria, gaps and labeled assumptions; review the compiled preview/schema/current revision and resolve structured or semantic conflicts before execution.",
   "Integrated Pi cycle: cycle-attributed paid work requires operator approvals. approve defines lifetime scope/ceiling; approve-request is fresh one-use full-request consent for Agent research or uncertain retrievals. Assistant amounts, flags, readiness and healthy accounting never authorize spending; explain pauses instead of bypassing them.",
@@ -51,7 +61,8 @@ const referenceParams = Type.Object(referenceProperties, { additionalProperties:
 const statusParams = Type.Object(
   {
     ...targetProperties,
-    action: Type.Optional(Type.Union([Type.Literal("status"), Type.Literal("resume")])),
+    action: Type.Optional(Type.Union([Type.Literal("status"), Type.Literal("resume"), Type.Literal("start")])),
+    topic: Type.Optional(Type.String({ minLength: 1 })),
   },
   { additionalProperties: false },
 );
@@ -67,6 +78,7 @@ const stepParams = Type.Object(
 const summaryParams = Type.Object(
   {
     ...exaResearchSummaryParams.properties,
+    mode: Type.Optional(Type.Union([...SUMMARY_MODES.map((mode) => Type.Literal(mode)), Type.Literal("proposal")])),
     ...referenceProperties,
   },
   { additionalProperties: false },
@@ -163,12 +175,16 @@ export type CycleInspectionFactory = (
   runId: string,
   observer: NonNullable<AgentInspectionOptions["observer"]>,
 ) => Parameters<PiToolRegistration["registerTool"]>[0] | undefined;
+export type CycleSubmissionFactory = (
+  observer: AgentLifecycleObserver,
+) => Parameters<PiToolRegistration["registerTool"]>[0] | undefined;
 
 export function cyclePiRegistration(
   pi: ExtensionAPI,
   retrievalFactory?: CycleRetrievalFactory,
   agentFactory?: CycleAgentFactory,
   inspectionFactory?: CycleInspectionFactory,
+  submissionFactory?: CycleSubmissionFactory,
 ): PiToolRegistration {
   const controllers = new Map<string, Promise<ResearchCycles>>();
   const get = (ctx: ExtensionContext) => {
@@ -292,14 +308,14 @@ export function cyclePiRegistration(
           : {}),
         ...(tool.name === "web_research_exa"
           ? {
-              description: `${tool.description} Pi cycles: active mode executes only the approved compiled request. Explicit researchMode=retry after confirmed failure/nondispatch or researchMode=replace for unknown originals requires cycleId, fresh exact funding and total exposure approval. Replacement additionally requires an unused operator approve-replacement for EVERY unknown original; assistant risk flags/amounts never grant consent. No automatic retry, replacement or gap closing; any success blocks new submissions and duplicate successes remain visible. researchMode=recover performs one existing-run GET with explicit cycleId and optional attemptId; request overrides are forbidden and recovery never creates, polls or cancels. Explicitly resume saved state with exa_research_status action=resume first. previousRunId means new paid continuation, never recovery. Resume and inspection grant no spending permission.`,
+              description: `${tool.description} Pi cycles guided flow: researchMode=submit with cycleId and the proposalId from exa_research_summary mode=proposal asks the operator through the host confirmation dialog, then submits exactly one compiled request and returns the saved run ID while the job is pending (monitoring is not yet available; inspect later with researchMode=recover). Assistant-supplied approvals never count. Pi cycles: active mode executes only the approved compiled request. Explicit researchMode=retry after confirmed failure/nondispatch or researchMode=replace for unknown originals requires cycleId, fresh exact funding and total exposure approval. Replacement additionally requires an unused operator approve-replacement for EVERY unknown original; assistant risk flags/amounts never grant consent. No automatic retry, replacement or gap closing; any success blocks new submissions and duplicate successes remain visible. researchMode=recover performs one existing-run GET with explicit cycleId and optional attemptId; request overrides are forbidden and recovery never creates, polls or cancels. Explicitly resume saved state with exa_research_status action=resume first. previousRunId means new paid continuation, never recovery. Resume and inspection grant no spending permission.`,
             }
           : {}),
         ...(tool.name === "exa_research_status"
           ? {
               parameters: statusParams,
               description:
-                "Inspect active cycle or discover saved cycle summaries without activating them. action=resume with explicit cycleId acquires exclusive saved-cycle ownership; it never grants spending permission. Recover an existing Agent attempt with web_research_exa researchMode=recover, never previousRunId continuation.",
+                "Inspect active cycle or discover saved cycle summaries without activating them. action=start with topic creates a new non-spending guided cycle. action=resume with explicit cycleId acquires exclusive saved-cycle ownership; it never grants spending permission. Recover an existing Agent attempt with web_research_exa researchMode=recover, never previousRunId continuation.",
             }
           : {}),
         ...(tool.name === "exa_research_step"
@@ -313,7 +329,7 @@ export function cyclePiRegistration(
           ? {
               parameters: summaryParams,
               description:
-                "Preview the versioned compiled research request with mode execution_plan or payload; brief/source_pack inspect curated planner facts. Compile errors name fields to fix. Artifacts do not authorize paid work.",
+                "Preview the versioned compiled research request with mode execution_plan or payload; mode=proposal renders the readable scope/cost proposal and its proposalId for guided submission; brief/source_pack inspect curated planner facts. Compile errors name fields to fix. Artifacts and proposals do not authorize paid work.",
             }
           : {}),
         ...(tool.name === "exa_research_reset"
@@ -333,7 +349,12 @@ export function cyclePiRegistration(
                         Type.Literal("active"),
                         Type.Literal("standalone"),
                         ...(tool.name === "web_research_exa"
-                          ? [Type.Literal("recover"), Type.Literal("retry"), Type.Literal("replace")]
+                          ? [
+                              Type.Literal("submit"),
+                              Type.Literal("recover"),
+                              Type.Literal("retry"),
+                              Type.Literal("replace"),
+                            ]
                           : []),
                       ]),
                     ),
@@ -343,6 +364,7 @@ export function cyclePiRegistration(
                           query: Type.Optional(Type.String({ minLength: 1 })),
                           artifactHash: Type.Optional(Type.String()),
                           attemptId: Type.Optional(Type.String()),
+                          proposalId: Type.Optional(Type.String({ minLength: 1 })),
                         }
                       : {}),
                   }),
@@ -359,6 +381,16 @@ export function cyclePiRegistration(
             const cycles = await get(ctx);
             if (tool.name === "exa_research_status") {
               if (!Value.Check(statusParams, statusInput)) throw new Error("Invalid cycle status action.");
+              if (statusInput.action === "start") {
+                if (!statusInput.topic) throw new Error("A topic is required to start a guided research cycle.");
+                const started = await cycles.start(statusInput.topic);
+                return result({
+                  ...view(started),
+                  spending: false,
+                  nextSafeAction:
+                    "Guided draft created without spending. Clarify only material questions, record goal/scope/criteria/assumptions and a task schema with exa_research_step, then preview exa_research_summary mode=proposal.",
+                });
+              }
               if (statusInput.action === "resume") {
                 if (!statusInput.cycleId) throw new Error("Explicit cycleId is required to resume a saved cycle.");
                 return result(
@@ -389,12 +421,13 @@ export function cyclePiRegistration(
             const record = explicitStandalone ? undefined : await cycles.status();
             if (paid) {
               if (typeof paidInput !== "object" || paidInput === null) throw new Error("Invalid tool arguments.");
-              const { researchMode, cycleId, expectedRevision, artifactHash, attemptId, ...standalone } =
+              const { researchMode, cycleId, expectedRevision, artifactHash, attemptId, proposalId, ...standalone } =
                 paidInput as Record<string, unknown>;
               if (
                 researchMode !== undefined &&
                 researchMode !== "active" &&
                 researchMode !== "standalone" &&
+                researchMode !== "submit" &&
                 researchMode !== "recover" &&
                 researchMode !== "retry" &&
                 researchMode !== "replace"
@@ -463,6 +496,8 @@ export function cyclePiRegistration(
                 );
               }
               if (attemptId !== undefined) throw new Error("attemptId is only valid in explicit recovery mode.");
+              if (proposalId !== undefined && researchMode !== "submit")
+                throw new Error("proposalId is only valid with researchMode=submit.");
               if (
                 researchMode === "standalone" &&
                 (cycleId !== undefined || expectedRevision !== undefined || artifactHash !== undefined)
@@ -474,6 +509,137 @@ export function cyclePiRegistration(
                 throw new Error("No active research cycle.");
               if (researchMode === "active" && !record) throw new Error("No active research cycle.");
               if (record && researchMode !== "standalone") {
+                if (tool.name === "web_research_exa" && researchMode === "submit") {
+                  if (typeof cycleId !== "string" || !cycleId)
+                    throw new Error("Guided submission requires the active cycleId; it never targets another cycle.");
+                  if (typeof proposalId !== "string" || !proposalId)
+                    throw new Error(
+                      "PROPOSAL_REQUIRED: call exa_research_summary mode=proposal and submit its proposalId.",
+                    );
+                  if (Object.keys(standalone).length)
+                    throw new Error(
+                      "EXECUTION_CONFLICT: Guided submission executes the approved compiled request only; update the plan instead of passing request fields.",
+                    );
+                  if (!submissionFactory)
+                    throw new Error("Guided submission is not enabled; no SDK request was dispatched.");
+                  const artifact = await cycles.preview(reference);
+                  const proposal = buildProposal(record, artifact);
+                  if (proposal.id !== proposalId)
+                    return result(
+                      {
+                        cycleId,
+                        proposalId,
+                        currentProposalId: proposal.id,
+                        revision: artifact.revision,
+                        submitted: false,
+                      },
+                      `PROPOSAL_STALE: proposal ${proposalId} no longer matches the current compiled request (revision ${artifact.revision}, proposal ${proposal.id}). Present the current proposal again; nothing was submitted.`,
+                      true,
+                    );
+                  if (!proposal.approval)
+                    return result(
+                      { cycleId, proposalId, estimate: proposal.estimate, submitted: false },
+                      `ESTIMATE_UNAVAILABLE: ${proposal.estimate.basis} Nothing was submitted.`,
+                      true,
+                    );
+                  if (!ctx.hasUI)
+                    return result(
+                      { cycleId, proposalId, submitted: false },
+                      "APPROVAL_UNAVAILABLE: no trusted confirmation surface is available in this mode, so the proposal is paused and nothing was submitted. Re-run in interactive or RPC Pi to approve it; assistant text cannot grant consent.",
+                      true,
+                    );
+                  const approved = await ctx.ui.confirm("Approve Exa research spending?", proposal.dialog, {
+                    timeout: APPROVAL_DIALOG_TIMEOUT_MS,
+                    ...(signal ? { signal } : {}),
+                  });
+                  if (!approved)
+                    return result(
+                      { cycleId, proposalId, submitted: false },
+                      "APPROVAL_NOT_GRANTED: the confirmation dialog was declined, dismissed, aborted or timed out. Nothing was submitted and no grant was recorded; the proposal stays open for a later explicit approval.",
+                      true,
+                    );
+                  await cycles.grantDialogApproval(cycleId, {
+                    requestHash: proposal.requestHash,
+                    expectedRevision: artifact.revision,
+                    artifactHash: artifact.hash,
+                    allowanceDollars: proposal.approval.allowanceDollars,
+                    ceilingDollars: proposal.approval.ceilingDollars,
+                    tools: proposal.approval.tools,
+                  });
+                  const prepared = await cycles.reserveAgent({
+                    cycleId,
+                    expectedRevision: artifact.revision,
+                    artifactHash: artifact.hash,
+                  });
+                  const { attempt, assessment } = prepared;
+                  const observer = cycles.agentLifecycleObserver(attempt.cycleId, attempt.id, attempt.requestHash);
+                  let failure: unknown;
+                  try {
+                    const submitter = submissionFactory({ beforeCreate: observer.beforeCreate, raw: observer.raw });
+                    if (!submitter) throw new Error("Agent submission is not enabled; no SDK request was dispatched.");
+                    const response = await submitter.execute(id, prepared.artifact.request, signal, onUpdate, ctx);
+                    if (response.isError) failure = new Error(response.content.map((entry) => entry.text).join("\n"));
+                  } catch (error) {
+                    failure = error;
+                  }
+                  // Decide from the persisted attempt, not from the tool text.
+                  const acknowledgedExecution = (await cycles.inspect(cycleId)).attempts.find(
+                    (entry) => Value.Check(agentAttemptSchema, entry) && entry.id === attempt.id,
+                  );
+                  const runId =
+                    Value.Check(agentAttemptSchema, acknowledgedExecution) &&
+                    typeof acknowledgedExecution.result?.remoteId === "string"
+                      ? acknowledgedExecution.result.remoteId
+                      : undefined;
+                  if (runId === undefined) {
+                    // Nothing acknowledged: close the local wait (unknown if dispatched, not-dispatched otherwise).
+                    await observer.finish();
+                    const closed = await cycles.inspect(cycleId);
+                    const execution = closed.attempts.find(
+                      (entry) => Value.Check(agentAttemptSchema, entry) && entry.id === attempt.id,
+                    );
+                    const state = Value.Check(agentAttemptSchema, execution) ? execution.status : "unknown";
+                    const detail = failure instanceof Error ? failure.message : String(failure ?? "");
+                    return result(
+                      {
+                        cycleId,
+                        attemptId: attempt.id,
+                        proposalId,
+                        runId: null,
+                        state,
+                        accounting: view(closed).accounting,
+                        status: closed.status,
+                        nextSafeAction: view(closed).nextSafeAction,
+                      },
+                      state === "not-dispatched"
+                        ? `SUBMISSION_NOT_DISPATCHED: the approved request was not sent to Exa (${detail}). The reservation was released; approve and submit again explicitly if still wanted.`
+                        : `SUBMISSION_UNKNOWN: Exa did not acknowledge attempt ${attempt.id} (${detail}). The request may have reached Exa; its liability is retained, no run ID was invented, and a genuine late acknowledgement will be saved on this attempt. Inspect with researchMode=recover; never resubmit automatically.`,
+                      true,
+                    );
+                  }
+                  const currentView = view(await cycles.inspect(cycleId));
+                  return result(
+                    {
+                      tool: "web_research_exa",
+                      cycleId,
+                      attemptId: attempt.id,
+                      proposalId,
+                      artifactHash: artifact.hash,
+                      requestHash: attempt.requestHash,
+                      runId,
+                      remoteStatus:
+                        Value.Check(agentAttemptSchema, acknowledgedExecution) && acknowledgedExecution.result
+                          ? acknowledgedExecution.result.remoteStatus
+                          : "running",
+                      assessment,
+                      monitoring: "unavailable",
+                      accounting: currentView.accounting,
+                      status: currentView.status,
+                      nextSafeAction: currentView.nextSafeAction,
+                    },
+                    `Research started: Exa run ${runId} (cycle ${cycleId}, attempt ${attempt.id}). Background monitoring is not available in this version: the saved run continues remotely, and researchMode=recover performs one explicit inspection of this same attempt later. No polling, cancellation or further submission happened. Estimates are not vendor caps; API-reported costs are not verified invoices.`,
+                  );
+                }
                 if (tool.name === "web_research_exa") {
                   if (!agentFactory) {
                     await cycles.preview({ ...reference, executionFields: standalone });
@@ -554,7 +720,42 @@ export function cyclePiRegistration(
                 if (artifactHash !== undefined)
                   throw new Error("Artifact hashes apply to synthesis previews, not exploration.");
                 if (!Value.Check(tool.parameters, standalone)) throw new Error("Invalid exploratory tool arguments.");
-                const { operation, assessment } = await cycles.reserveExploration(tool.name, standalone, reference);
+                let reservation: Awaited<ReturnType<typeof cycles.reserveExploration>>;
+                try {
+                  reservation = await cycles.reserveExploration(tool.name, standalone, reference);
+                } catch (error) {
+                  // Trusted-dialog approval for the simple lifetime scope/ceiling cases only;
+                  // unknown liabilities and uncertain requests keep their operator commands.
+                  const dialogReason =
+                    error instanceof ExplorationApprovalError &&
+                    DIALOG_APPROVAL_REASONS.some((reason) => reason === error.assessment.reason) &&
+                    error.assessment.proposedDollars !== null &&
+                    !error.assessment.blockedOperationIds.length;
+                  if (!dialogReason || !ctx.hasUI) throw error;
+                  const assessed = error.assessment;
+                  const proposedDollars = assessed.proposedDollars ?? 0;
+                  const exposure =
+                    assessed.reportedDollars + assessed.pendingEstimatedDollars + assessed.assessedUnknownDollars;
+                  const ceilingDollars = roundUpCents(Math.max(assessed.ceilingDollars, exposure + proposedDollars));
+                  const tools = [...new Set([...grantedTools(record), tool.name])];
+                  const approved = await ctx.ui.confirm(
+                    "Approve exploratory Exa retrieval?",
+                    [
+                      `${tool.name} for cycle ${error.cycleId} (${record.plan.topic})`,
+                      `Estimated $${proposedDollars.toFixed(2)} (published rate; not a cap). Lifetime ceiling becomes $${ceilingDollars.toFixed(2)}; scope ${tools.join(", ")}.`,
+                      `Existing liabilities: $${exposure.toFixed(2)} assessed, ${assessed.unresolvedOperationIds.length} unresolved.`,
+                      "Approving dispatches this one retrieval and does not authorize Agent research.",
+                    ].join("\n"),
+                    { timeout: APPROVAL_DIALOG_TIMEOUT_MS, ...(signal ? { signal } : {}) },
+                  );
+                  if (!approved)
+                    throw new Error(
+                      "APPROVAL_NOT_GRANTED: the exploratory retrieval dialog was declined, dismissed, aborted or timed out; nothing was dispatched and no grant was recorded.",
+                    );
+                  await cycles.grantBudget(error.cycleId, ceilingDollars, tools, "dialog");
+                  reservation = await cycles.reserveExploration(tool.name, standalone, reference);
+                }
+                const { operation, assessment } = reservation;
                 const { cycleId: savedCycle, id: operationId, requestHash } = operation;
                 const capture = cycles.explorationEvidenceObserver(savedCycle, operationId, requestHash);
                 let started = false;
@@ -707,6 +908,29 @@ export function cyclePiRegistration(
                 }
               case "exa_research_summary":
                 if (!Value.Check(summaryParams, params)) throw new Error("Invalid research summary arguments.");
+                if (params.mode === "proposal") {
+                  const { mode: _mode, ...reference } = params;
+                  const artifact = await cycles.preview(reference);
+                  const proposal = buildProposal(record, artifact);
+                  return result(
+                    {
+                      proposalId: proposal.id,
+                      cycleId: record.id,
+                      revision: proposal.revision,
+                      artifactHash: proposal.artifactHash,
+                      requestHash: proposal.requestHash,
+                      estimate: proposal.estimate,
+                      approval: proposal.approval,
+                      accounting: proposal.accounting,
+                      proposal: proposal.text,
+                      spending: false,
+                      nextSafeAction: proposal.approval
+                        ? "Present this proposal to the user. To submit, call web_research_exa with researchMode=submit, this cycleId and proposalId; the host dialog asks the operator. Any plan change requires a new proposal."
+                        : `ESTIMATE_UNAVAILABLE: ${proposal.estimate.basis}`,
+                    },
+                    `${proposal.text}\n\nNothing was submitted or approved. Approval happens only through the host dialog on researchMode=submit.`,
+                  );
+                }
                 if (params.mode === undefined || params.mode === "payload" || params.mode === "execution_plan") {
                   const artifact = await cycles.preview(params);
                   return result({

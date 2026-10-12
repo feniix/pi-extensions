@@ -13,6 +13,8 @@ export type AgentEffort = (typeof AGENT_EFFORTS)[number];
 
 export const DEFAULT_AGENT_EFFORT: AgentEffort = "medium";
 export const DEFAULT_AGENT_POLL_INTERVAL_MS = 1_000;
+/** Bounded wait for a create acknowledgement in the guided submit-only path (#171 settled). */
+export const DEFAULT_AGENT_CREATE_WAIT_MS = 30_000;
 export const MAX_EFFORT_BETA = "agent-max-effort-2026-07-27";
 const DEFAULT_AGENT_TIMEOUT_MS = 180_000;
 const AGENT_CANCEL_TIMEOUT_MS = 5_000;
@@ -51,6 +53,32 @@ export interface AgentInspectionOptions {
     beforeGet: () => Promise<() => void>;
     raw: AgentLifecycleObserver["raw"];
   };
+}
+
+export interface AgentSubmissionOptions {
+  /** Call-local host hooks; absent in standalone/MCP. Never an authorization boolean. */
+  observer?: AgentLifecycleObserver;
+  /** Bounded wait for the create acknowledgement; expiry leaves the outcome unknown. */
+  createWaitMs?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * The create request was dispatched but no acknowledgement arrived within the
+ * bound (or the local wait was aborted). The remote outcome is unknown: nothing
+ * was cancelled, invented or resubmitted, and a late reply still reaches the
+ * attached observer.
+ */
+export class AgentSubmissionUnacknowledgedError extends Error {
+  constructor(
+    readonly waitMs: number,
+    readonly reason: "timeout" | "aborted",
+  ) {
+    super(
+      `Exa did not acknowledge the Agent run within ${waitMs}ms (${reason}). The submission outcome is unknown; no run ID was invented and no cancellation or resubmission was requested.`,
+    );
+    this.name = "AgentSubmissionUnacknowledgedError";
+  }
 }
 
 export class AgentInspectionInterruptedError extends Error {
@@ -285,6 +313,80 @@ export async function inspectResearchRun(
   return {
     text: `Existing Agent run ${runId}: ${metadata.remoteStatus}. This was one GET inspection, not replacement research or remote cancellation.`,
     details: metadata,
+  };
+}
+
+/**
+ * Guided submit-only lifecycle: one bounded create, remote-ID publication through
+ * the observer, immediate return. No polling, no cancellation, no result
+ * retrieval; background observation is the host's job.
+ */
+export async function submitResearchRun(
+  apiKey: string,
+  params: ResearchParams,
+  options: AgentSubmissionOptions = {},
+): Promise<ToolPerformResult> {
+  const outputSchema = parseOutputSchema(params.outputSchema);
+  const effort = params.effort ?? DEFAULT_AGENT_EFFORT;
+  if (params.budget?.maxCostDollars !== undefined && effort !== "auto" && effort !== "max") {
+    throw new Error("budget.maxCostDollars is only supported with auto or max effort.");
+  }
+  const exa = getExaClient(apiKey);
+  const waitMs = options.createWaitMs ?? DEFAULT_AGENT_CREATE_WAIT_MS;
+  const deadline = Date.now() + waitMs;
+  let createParams: CreateAgentRunParams = {
+    query: params.query,
+    effort,
+    ...(params.systemPrompt === undefined ? {} : { systemPrompt: params.systemPrompt }),
+    ...(outputSchema.type === "object" ? { outputSchema: outputSchema as Record<string, unknown> } : {}),
+    ...(params.input === undefined ? {} : { input: params.input }),
+    ...(params.previousRunId === undefined ? {} : { previousRunId: params.previousRunId }),
+    ...(params.metadata === undefined ? {} : { metadata: params.metadata }),
+    ...(params.dataSources === undefined ? {} : { dataSources: params.dataSources }),
+    ...(params.budget === undefined ? {} : { budget: params.budget }),
+  };
+  if (options.observer) {
+    createParams = structuredClone(createParams);
+    const guard = await options.observer.beforeCreate();
+    // Nothing was dispatched yet: an abort here is an ordinary cancellation.
+    if (options.signal?.aborted) throw new AgentResearchCancelledError();
+    if (Date.now() >= deadline) throw new AgentSubmissionUnacknowledgedError(waitMs, "timeout");
+    // No await between the final host fence and actual SDK invocation.
+    guard();
+  }
+  const observer = options.observer;
+  // The chain stays attached after the bounded wait ends so a late genuine
+  // acknowledgement is still published to the original attempt.
+  const createPromise = (
+    createParams.effort === "max"
+      ? exa.beta.agent.runs.create({ ...createParams, betas: [MAX_EFFORT_BETA] })
+      : exa.agent.runs.create(createParams)
+  ).then(async (reply) => {
+    if (observer) {
+      try {
+        await observer.raw("create", reply);
+      } catch {
+        throw new AgentLifecycleObservationError(reply.id);
+      }
+    }
+    return reply;
+  });
+  let run: AgentRun;
+  try {
+    run = await withLifecycleBound(createPromise, deadline, options.signal);
+  } catch (error) {
+    if (error instanceof AgentLifecycleAbortError) throw new AgentSubmissionUnacknowledgedError(waitMs, "aborted");
+    if (error instanceof AgentLifecycleDeadlineError) throw new AgentSubmissionUnacknowledgedError(waitMs, "timeout");
+    throw error;
+  }
+  return {
+    text: `Exa Agent run ${run.id} acknowledged with status ${run.status}. Submission only: no polling, cancellation or result retrieval was performed.`,
+    details: {
+      runId: run.id,
+      remoteStatus: run.status,
+      submissionOnly: true,
+      ...(run.createdAt ? { createdAt: run.createdAt } : {}),
+    },
   };
 }
 

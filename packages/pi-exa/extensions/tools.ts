@@ -39,6 +39,7 @@ import {
   AgentResearchTimeoutError,
   inspectResearchRun,
   performResearch,
+  submitResearchRun,
 } from "./web-research.js";
 import { DEFAULT_NUM_RESULTS, performWebSearch } from "./web-search.js";
 import { performAdvancedSearch } from "./web-search-advanced.js";
@@ -50,6 +51,8 @@ export interface ExaToolsOptions {
   agentObserver?: AgentLifecycleObserver;
   /** Internal original-attempt GET mode; only the opted-in Pi recovery factory sets it. */
   agentInspection?: { runId: string; observer: NonNullable<AgentInspectionOptions["observer"]> };
+  /** Guided submit-only Agent lifecycle: one bounded create, then return. Absent in standalone/MCP. */
+  agentSubmission?: { observer: AgentLifecycleObserver; createWaitMs?: number };
   /** Resolve the Exa API key at execute time. Return undefined when unconfigured. */
   resolveApiKey?: () => string | undefined;
   /** Host-agnostic gating; tools whose names return false are omitted from the returned array. */
@@ -639,21 +642,41 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
                   ...context,
                   observer: opts.agentInspection.observer,
                 })
-              : performResearch(
-                  apiKey,
-                  {
-                    query: args.query,
-                    systemPrompt: args.systemPrompt,
-                    outputSchema: args.outputSchema,
-                    effort: args.effort,
-                    input: args.input as Parameters<typeof performResearch>[1]["input"],
-                    previousRunId: args.previousRunId,
-                    metadata: args.metadata as Parameters<typeof performResearch>[1]["metadata"],
-                    dataSources: args.dataSources,
-                    budget: args.budget,
-                  },
-                  { ...context, ...(opts.agentObserver ? { observer: opts.agentObserver } : {}) },
-                ),
+              : opts.agentSubmission
+                ? submitResearchRun(
+                    apiKey,
+                    {
+                      query: args.query,
+                      systemPrompt: args.systemPrompt,
+                      outputSchema: args.outputSchema,
+                      effort: args.effort,
+                      input: args.input as Parameters<typeof performResearch>[1]["input"],
+                      previousRunId: args.previousRunId,
+                      metadata: args.metadata as Parameters<typeof performResearch>[1]["metadata"],
+                      dataSources: args.dataSources,
+                      budget: args.budget,
+                    },
+                    {
+                      signal: context.signal,
+                      observer: opts.agentSubmission.observer,
+                      createWaitMs: opts.agentSubmission.createWaitMs,
+                    },
+                  )
+                : performResearch(
+                    apiKey,
+                    {
+                      query: args.query,
+                      systemPrompt: args.systemPrompt,
+                      outputSchema: args.outputSchema,
+                      effort: args.effort,
+                      input: args.input as Parameters<typeof performResearch>[1]["input"],
+                      previousRunId: args.previousRunId,
+                      metadata: args.metadata as Parameters<typeof performResearch>[1]["metadata"],
+                      dataSources: args.dataSources,
+                      budget: args.budget,
+                    },
+                    { ...context, ...(opts.agentObserver ? { observer: opts.agentObserver } : {}) },
+                  ),
         },
         resolveApiKey,
         timeoutFor("web_research_exa"),
