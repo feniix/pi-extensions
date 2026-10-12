@@ -49,7 +49,7 @@ pi -e npm:@feniix/pi-exa
 
 You need an Exa API key from [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) for retrieval tools. The local `exa_research_*` planning tools work without an API key because they do not call Exa network APIs.
 
-If you configure `enabledTools`, it acts as a strict allowlist. Include the `exa_research_*` names if you want the planner tools available with an explicit allowlist.
+If you configure `enabledTools`, it acts as a strict allowlist. Include the `exa_research_*` names if you want the planner tools available with an explicit allowlist. With `--exa-enable-cycles`, the four local `exa_research_*` planner tools stay available even when the allowlist omits them, because cycles need them and they never call Exa or spend.
 
 ### Recommended: environment variable
 
@@ -143,7 +143,9 @@ Example:
 
 ### Opt-in durable Pi planning
 
-Start Pi with `--exa-enable-cycles` to use durable research planning.
+Start Pi with `--exa-enable-cycles` to use durable research planning. Guided
+Agent research also needs `web_research_exa` enabled (`--exa-enable-research`
+or your Exa config); Pi warns at startup when cycles are on without it.
 
 #### Guided research (6.1.0)
 
@@ -151,6 +153,9 @@ The normal path needs no slash commands, copied hashes or hand-written schemas.
 Say what you want researched; the assistant drives the cycle and you make the
 material decisions through Pi's own confirmation dialog:
 
+0. **Offer.** For a plain research request with no active cycle, the assistant
+   first offers a quick answer from a few standalone searches or guided deep
+   research, and waits for your choice. Asking directly for either skips it.
 1. **Draft.** The assistant starts a non-spending cycle with
    `exa_research_status` `action: "start"` and records the goal, scope, criteria,
    labeled assumptions and task schema with `exa_research_step`, asking only
@@ -815,6 +820,6 @@ Same rules as the Pi adapter:
 
 ## Notes
 
-- `exa_research_*` planning tools are enabled by default when no explicit `enabledTools` allowlist is configured, local-only, and do not require an Exa API key.
+- `exa_research_*` planning tools are enabled by default when no explicit `enabledTools` allowlist is configured (and always with `--exa-enable-cycles`), local-only, and do not require an Exa API key.
 - `web_search_advanced_exa` and `web_research_exa` are opt-in and disabled by default.
 - Research/tool output may include both `text` and `details.parsedOutput` depending on `outputSchema.type`.
