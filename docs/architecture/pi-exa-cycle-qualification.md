@@ -125,7 +125,7 @@ Numbers match PRD-010 scenarios 21–36. Test names are searchable substrings.
 | 33 | Monitoring “keeps two approved cycles in different sessions isolated: distinct runs, monitors, results and notices”. |
 | 34 | Monitoring “delivers failure and local-invalid completion notices with recovery guidance and no further research”; recovery “keeps local-invalid results recoverable within the frozen contract, and resume grants no consent” (same-run recover revalidates; one attempt). |
 | 35 | Submission “fails actionably instead of falling back to standalone when guided setup is missing” (`No active research cycle`, `PROPOSAL_REQUIRED`, missing cycleId, explicit standalone still available) and “requires a derivable estimate before proposing metered auto effort” (`ESTIMATE_UNAVAILABLE`). |
-| 36 | Smoke `guided-smoke.rpc.test.ts`: real `pi --mode rpc` process, production extension, real `exa-js` against the controllable mock HTTP server (`EXA_BASE_URL`), scripted model, RPC client as the trusted dialog. Interactive TUI rendering is not covered; paid smoke requires separate operator authorization. |
+| 36 | Smoke `guided-smoke.rpc.test.ts`: real `pi --mode rpc` process, production extension, real `exa-js` against the controllable mock HTTP server (`EXA_BASE_URL`), scripted model, RPC client as the trusted dialog. Plus the manual interactive TUI run below (2026-10-12). Paid smoke requires separate operator authorization. |
 
 Guided suites:
 
@@ -136,6 +136,44 @@ Guided suites:
   [mock Exa server](../../packages/pi-exa/__tests__/fixtures/guided-smoke/mock-exa-server.ts)
 - [Host capability experiments](../../packages/pi-exa/__tests__/guided-prototype.test.ts) and the
   [capability research](../research/2026-10-12-pi-guided-background-host-capabilities.md)
+
+## Interactive TUI smoke (manual, 2026-10-12)
+
+Performed once by hand in a real `pi` 1.1.0 terminal session driven through a
+Herdr pane, with the production extension, the scripted `exa-smoke/scripted`
+model from `__tests__/fixtures/guided-smoke/pi-entry.ts`, an isolated agent
+directory and session directory, `--exa-enable-cycles --exa-monitor-interval-ms
+1000 --exa-config-file <scratch>/exa.json`, and `EXA_BASE_URL` pointed at a
+standalone mock Exa HTTP server. No paid call was made. Observed:
+
+1. Typing “research Laya versus Jev for small structured decisions” made the
+   assistant call `exa_research_status action=start`, `exa_research_step`,
+   `exa_research_summary mode=proposal` and `web_research_exa researchMode=submit`
+   with no slash command, schema or hash typed by the user.
+2. Pi rendered the approval dialog “Approve Exa research spending?” with the topic,
+   effort, estimate, resulting ceiling and scope, providers/rows/continuation,
+   existing liabilities, “Submits exactly one Exa Agent run”, a live 600 s countdown
+   and a Yes/No selector; Herdr reported the agent as `blocked` while it was open.
+3. Selecting Yes produced the tool result “Research started: Exa run tui_run_1 …
+   Background monitoring is registered” and the assistant returned to idle while
+   the mock run stayed `running`; the mock server recorded one `POST /agent/runs`
+   and then `GET /agent/runs/tui_run_1` at roughly 1 s, 1.7 s, 2 s, 3 s and 6 s
+   intervals (the settled ×1.5 backoff).
+4. “unrelated chat while it runs” was answered normally while polling continued.
+5. Completing the mock run made the monitor persist the outcome and deliver the
+   `[exa-research-completion]` custom message, rendered in the transcript; the
+   assistant woke, called `exa_research_status` and reported. The saved record
+   showed cycle `completed`, attempt `completed`/`validated`, cost 0.10, dialog-
+   sourced grants, monitor `stopped` after 11 GETs and the notice `acknowledged`
+   with its session entry ID. Total mock traffic: 1 create, 11 GETs, no cancel.
+6. `/exa-research archive` printed “Archived <cycle-id>.” without an outstanding-
+   work warning, correct for a completed cycle.
+7. Repeating the request opened a fresh dialog; pressing Escape produced
+   `APPROVAL_NOT_GRANTED` with no second create.
+
+The run is recorded evidence, not an automated gate: the TUI transcript was read
+through Herdr's pane reader and the authoritative session JSONL and cycle record.
+Layout, colors and scrolling were not evaluated beyond what is listed.
 
 ## Safety and verification limits
 
@@ -170,7 +208,8 @@ Guided suites:
   are acknowledged by observing the persisted session entry and exactly-once
   delivery across crashes is not claimed; delivery never targets another session;
   monitoring runs only while Pi is open; crash points are in-process filesystem
-  fault injection; the interactive smoke is RPC-protocol, not terminal rendering;
+  fault injection; the automated smoke is RPC-protocol and the interactive TUI run
+  above is manual evidence, not a CI gate;
   `researchMode=active` remains the foundation's blocking path (operator decision
   pending) while guided requests route to `submit`.
 
