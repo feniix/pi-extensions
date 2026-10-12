@@ -199,7 +199,7 @@ describe("durable research cycles", () => {
     await controller.grantBudget(cycle.id, 1, ["web_research_exa"]);
     const hash = agentRequestHash(artifact.request);
     await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
-    return { controller, cycle, artifact, hash };
+    return { controller, cycle, artifact, hash, root };
   }
 
   it("coalesces repeated Agent observations without losing progress, output or conflicting receipts", async () => {
@@ -262,6 +262,50 @@ describe("durable research cycles", () => {
     expect(record.attempts).toHaveLength(1);
     expect(record.ledger).toHaveLength(1);
     await controller.detach();
+  });
+
+  it.each([
+    { originalDollars: 0.000123, incomingDollars: 0.000123, conflictingMicros: [] },
+    { originalDollars: 0.000124, incomingDollars: 0.000123, conflictingMicros: [123] },
+    { originalDollars: 0.000123, incomingDollars: 0.000122, conflictingMicros: [122] },
+  ])("preserves historical rounding only for identical known terminal dollars $originalDollars -> $incomingDollars", async ({
+    originalDollars,
+    incomingDollars,
+    conflictingMicros,
+  }) => {
+    const { controller, cycle, hash, root } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const observer = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await observer.beforeCreate())();
+    const reply = {
+      id: "agent_legacy_receipt",
+      status: "completed",
+      output: { structured: { answer: "done" } },
+      costDollars: { total: originalDollars },
+    } satisfies Parameters<typeof observer.raw>[1];
+    await observer.raw("create", reply);
+    await observer.finish();
+    await controller.detach();
+    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+    const saved = JSON.parse(await readFile(path, "utf8"));
+    // Exact old converter result, with the original curated SDK dollar amount
+    // and all authorization/attempt/operation metadata untouched.
+    saved.ledger[0].reportedMicros = Math.ceil(originalDollars * 1_000_000);
+    await writeFile(path, JSON.stringify(saved));
+    const resumed = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "two" });
+    await resumed.resume(cycle.id);
+    const before = await resumed.inspect(cycle.id);
+    await resumed.agentLifecycleObserver(cycle.id, attempt.id, hash).raw("get", {
+      ...reply,
+      costDollars: { total: incomingDollars },
+    });
+    const after = await resumed.inspect(cycle.id);
+    expect(after.ledger[0]).toMatchObject({ reportedMicros: 124, status: "reported" });
+    expect("conflictingMicros" in after.ledger[0] ? after.ledger[0].conflictingMicros : []).toEqual(conflictingMicros);
+    expect(after.grants).toEqual(before.grants);
+    expect(after.status).toBe("completed");
+    if (!conflictingMicros.length) expect(after).toEqual(before);
+    await resumed.detach();
   });
 
   it("releases only proven pre-SDK nondispatch and never erases the durable attempt or silently replaces it", async () => {

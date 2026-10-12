@@ -755,6 +755,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                 const attempt = savedAgent(record, attemptId, requestHash);
                 const operation = agentOperation(record, attempt);
                 const before = canonicalResearchJson({ attempt, operation, status: record.status });
+                const priorTerminalDollars = attempt.result?.terminal ? attempt.result.totalDollars : undefined;
                 if (attempt.status === "not-dispatched" || operation.status === "not-dispatched")
                   throw new Error("Agent was not dispatched.");
                 const providers: unknown = Reflect.get(attempt.artifact.request, "dataSources");
@@ -800,9 +801,17 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                   const total =
                     observation.totalDollars === undefined ? undefined : moneyMicros(observation.totalDollars);
                   if (total !== undefined) {
-                    if (operation.reportedMicros !== undefined && operation.reportedMicros !== total)
-                      operation.conflictingMicros = [...new Set([...(operation.conflictingMicros ?? []), total])];
-                    else operation.reportedMicros = total;
+                    if (operation.reportedMicros !== undefined && operation.reportedMicros !== total) {
+                      // Recognize an identical known SDK receipt converted by
+                      // the old binary multiplier. Never rewrite that integer,
+                      // or accept this equivalence for changed vendor dollars.
+                      const sameHistoricalReceipt =
+                        observation.totalDollars !== undefined &&
+                        observation.totalDollars === priorTerminalDollars &&
+                        operation.reportedMicros === Math.ceil(observation.totalDollars * 1_000_000);
+                      if (!sameHistoricalReceipt)
+                        operation.conflictingMicros = [...new Set([...(operation.conflictingMicros ?? []), total])];
+                    } else operation.reportedMicros = total;
                     operation.status = "reported";
                   } else if (operation.reportedMicros === undefined) operation.status = "unknown";
                 }
