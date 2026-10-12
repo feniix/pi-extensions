@@ -124,9 +124,22 @@ export function validateAccountingRecords(
 
 export function moneyMicros(dollars: number, permission = false): number {
   if (!Number.isFinite(dollars) || dollars < 0) throw new Error("Invalid monetary amount.");
-  const value = permission ? Math.floor(dollars * 1_000_000) : Math.ceil(dollars * 1_000_000);
-  if (!Number.isSafeInteger(value)) throw new Error("Monetary amount exceeds safe precision.");
-  return value;
+  // Interpret the number's decimal representation, not a binary floating-point
+  // multiplication that can move an exact micro-USD across its boundary.
+  const [mantissa, exponent = "0"] = dollars.toString().split("e");
+  const [whole, fraction = ""] = mantissa.split(".");
+  const significand = BigInt(whole + fraction);
+  const shift = 6 + Number(exponent) - fraction.length;
+  let micros: bigint;
+  if (shift >= 0) {
+    micros = significand * 10n ** BigInt(shift);
+  } else {
+    const denominator = 10n ** BigInt(-shift);
+    micros = significand / denominator;
+    if (!permission && significand % denominator !== 0n) micros++;
+  }
+  if (micros > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Monetary amount exceeds safe precision.");
+  return Number(micros);
 }
 export interface ExplorationEstimate {
   dollars: number | null;

@@ -1,5 +1,43 @@
 import { describe, expect, it } from "vitest";
-import { assessExploration, estimateExploration } from "../extensions/research-accounting.js";
+import { assessExploration, estimateExploration, moneyMicros } from "../extensions/research-accounting.js";
+
+describe("decimal monetary conversion", () => {
+  it.each([
+    [0, 0],
+    [-0, 0],
+    [0.000249, 249],
+    [0.000123, 123],
+    [0.250001, 250001],
+    [1e-6, 1],
+    [12.345678, 12345678],
+    [9007199254.74099, 9007199254740990],
+  ])("preserves exact decimal micro-USD %s", (dollars, micros) => {
+    expect(moneyMicros(dollars, true)).toBe(micros);
+    expect(moneyMicros(dollars)).toBe(micros);
+  });
+
+  it.each([
+    [0.0000001234, 0, 1],
+    [0.0002490001, 249, 250],
+    [1.9999999, 1999999, 2000000],
+    [5e-324, 0, 1],
+  ])("rounds fractional micro-USD %s conservatively by purpose", (dollars, permission, exposure) => {
+    expect(moneyMicros(dollars, true)).toBe(permission);
+    expect(moneyMicros(dollars)).toBe(exposure);
+  });
+
+  it.each([
+    NaN,
+    Infinity,
+    -Infinity,
+    -0.1,
+    Number.MAX_VALUE,
+    9007199254.740992,
+  ])("rejects invalid or unsafe amounts %s for both purposes", (dollars) => {
+    expect(() => moneyMicros(dollars, true)).toThrow();
+    expect(() => moneyMicros(dollars)).toThrow();
+  });
+});
 
 describe("exploratory accounting policy", () => {
   const identity = { cycleId: "cycle", projectId: "project" };
