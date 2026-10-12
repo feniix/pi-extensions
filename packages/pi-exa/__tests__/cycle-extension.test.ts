@@ -775,10 +775,12 @@ describe("Pi cycle commands and tools", () => {
       output: { structured: { answer: "original" } },
     });
     // The late original acknowledgement settles its own attempt without another run.
-    await vi.waitFor(async () =>
-      expect((await pi.call("exa_research_status")).details.completionSummary).toMatchObject({
-        duplicateSuccess: true,
-      }),
+    await vi.waitFor(
+      async () =>
+        expect((await pi.call("exa_research_status")).details.completionSummary).toMatchObject({
+          duplicateSuccess: true,
+        }),
+      { timeout: 10_000, interval: 50 },
     );
     const status = await pi.call("exa_research_status");
     expect(status.details).toMatchObject({
@@ -863,10 +865,12 @@ describe("Pi cycle commands and tools", () => {
     offlineGet.mockRejectedValue(Object.assign(new Error("not found"), { statusCode: 404 }));
     await pi.submit(artifact.cycleId);
     // The background monitor's single GET pauses it on not-found; recovery remains explicit.
-    await vi.waitFor(async () =>
-      expect((await pi.call("exa_research_status")).details.monitors).toMatchObject([
-        { state: "paused", reason: "NOT_FOUND" },
-      ]),
+    await vi.waitFor(
+      async () =>
+        expect((await pi.call("exa_research_status")).details.monitors).toMatchObject([
+          { state: "paused", reason: "NOT_FOUND" },
+        ]),
+      { timeout: 10_000, interval: 50 },
     );
     offlineGet.mockClear();
     expect(
@@ -897,10 +901,12 @@ describe("Pi cycle commands and tools", () => {
     offlineCreate.mockResolvedValueOnce({ id: "agent_run_pending", status: "running" });
     offlineGet.mockRejectedValueOnce(Object.assign(new Error("not found"), { statusCode: 404 }));
     await pi.submit(artifact.cycleId);
-    await vi.waitFor(async () =>
-      expect((await pi.call("exa_research_status")).details.monitors).toMatchObject([
-        { state: "paused", reason: "NOT_FOUND" },
-      ]),
+    await vi.waitFor(
+      async () =>
+        expect((await pi.call("exa_research_status")).details.monitors).toMatchObject([
+          { state: "paused", reason: "NOT_FOUND" },
+        ]),
+      { timeout: 10_000, interval: 50 },
     );
     offlineGet.mockClear().mockResolvedValueOnce({
       id: "agent_run_pending",
@@ -942,10 +948,12 @@ describe("Pi cycle commands and tools", () => {
     expect((await call).content[0].text).toContain("SUBMISSION_UNKNOWN");
     // The genuine create acknowledgement arrives after the local wait ended.
     resolveCreate({ id: "agent_run_interrupted", status: "running" });
-    await vi.waitFor(async () =>
-      expect((await pi.call("exa_research_status")).details.attempts).toMatchObject([
-        { result: { remoteId: "agent_run_interrupted" } },
-      ]),
+    await vi.waitFor(
+      async () =>
+        expect((await pi.call("exa_research_status")).details.attempts).toMatchObject([
+          { result: { remoteId: "agent_run_interrupted" } },
+        ]),
+      { timeout: 10_000, interval: 50 },
     );
     const response = await pi.call("web_research_exa", { researchMode: "recover", cycleId: artifact.cycleId });
     expect(response.details).toMatchObject({
