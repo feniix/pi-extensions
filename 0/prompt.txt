@@ -1,0 +1,249 @@
+what now?
+
+---
+
+is each layer code reviewed?
+
+---
+
+review and fix the issues
+
+---
+
+<task-notification>
+<task-id>a106b5c574b669139</task-id>
+<tool-use-id>toolu_01JBrxkCMZVYYv88c5z6YF3J</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-feniix-src-personal-pi-pi-extensions/90caff9b-07c1-45ca-be6f-308aff547939/tasks/a106b5c574b669139.output</output-file>
+<status>completed</status>
+<summary>Agent "/code-review 176" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Effort level: reusing high from last time; typing a level (for example `/code-review high`) changes it.
+
+```json
+[
+  {
+    "file": "packages/pi-exa/__tests__/fixtures/guided-prototype/prototype.ts",
+    "line": 480,
+    "summary": "The check that a proposal is current and unused runs before `await ctx.ui.confirm` (which can wait up to 10 minutes) and is not repeated afterwards. `consumedByAttemptId` is only set after approval, so the consent bound to a proposal is not enforced. The plan doc's \"#171 settled implementation contract\" uses the same order.",
+    "failure_scenario": "Pi 1.1.0 runs tool calls in parallel by default (`agent.js`: `toolExecution ?? \"parallel\"`). The model sends two `submit` calls with the same proposalId in one assistant message. Both pass the check at line 466, both open a dialog, the operator approves both, and two creates (two paid runs) happen for one proposal. Likewise, a `propose` that runs while the dialog is open marks the proposal superseded, but the pending submit still creates."
+  },
+  {
+    "file": "packages/pi-exa/__tests__/fixtures/guided-prototype/prototype.ts",
+    "line": 288,
+    "summary": "After `await exa.get(...)`, `tick` does not re-check `shuttingDown` or `monitor.state`. A GET that is still in flight when `session_shutdown` fires keeps running the rest of the tick on a runtime that has been fenced.",
+    "failure_scenario": "`session_shutdown` (new_session/resume/reload) marks the attempt paused:SHUTDOWN while a GET is pending. The GET then returns `completed`. `tick` overwrites the monitor state with `stopped`, persists the outcome, creates a notice and calls `pi.sendMessage` on the invalidated runtime. The SHUTDOWN fence the contract describes does not hold for in-flight checks."
+  },
+  {
+    "file": "packages/pi-exa/__tests__/fixtures/guided-prototype/prototype.ts",
+    "line": 217,
+    "summary": "`persist()` writes the runtime's whole in-memory store snapshot over the shared state file, with no lock and no merge. Attempt IDs are `attempt_${store.attempts.length + 1}`, so runtimes or processes sharing the file overwrite each other and can issue the same IDs.",
+    "failure_scenario": "The old runtime's late create acknowledgement (line 520) or in-flight tick persists after a new runtime has added proposals or attempts or marked monitors RESTART. Those records, including attempts that carry liabilities, are erased. Two processes can each create `attempt_2`, so both get `notice_attempt_2`, and the `agent_settled` handler acknowledges the wrong attempt's notice."
+  },
+  {
+    "file": "packages/pi-exa/__tests__/fixtures/guided-prototype/prototype.ts",
+    "line": 138,
+    "summary": "`loadStore` turns any read error, JSON parse error or version mismatch into an empty store without reporting it. The next `persist()` then overwrites the existing file with that empty store.",
+    "failure_scenario": "The state file is truncated, written by a newer schema version, or briefly unreadable at `session_start`. The prototype loads an empty store, and the next propose or tick replaces the file, permanently deleting recorded attempts, run IDs and unknown liabilities. This contradicts the 'liability is retained' guarantee."
+  },
+  {
+    "file": "packages/pi-exa/__tests__/fixtures/guided-prototype/prototype.ts",
+    "line": 531,
+    "summary": "Every create failure, including a definitive rejection that arrives before the deadline (400/401/422), is classified as SUBMISSION_UNKNOWN with the liability retained. The contract says only expiry of the acknowledgement wait makes an attempt unknown.",
+    "failure_scenario": "`exa.create` rejects immediately with 401 or a validation error. The attempt is stored as `unknown`, the proposal is consumed, and the operator is told 'The request may have reached Exa; its liability is retained', even though Exa definitively refused it. The operator ends up with a phantom liability and has to go through the retry/replace path."
+  },
+  {
+    "file": "packages/pi-exa/__tests__/fixtures/guided-prototype/prototype.ts",
+    "line": 266,
+    "summary": "The timer callback calls `void tick(entry.id)` with no catch. Any throw inside `tick` (`persist`/`mkdirSync`/`writeFileSync`/`renameSync`, or an unexpected error) becomes an unhandled rejection.",
+    "failure_scenario": "Disk full, permissions changed, or the scratch dir removed during a tick: `saveStore` throws. With Node's default unhandled-rejection=throw this takes down the Pi process. Otherwise the monitor is left in state `running` with no timer: it never pauses, never resumes and never delivers."
+  },
+  {
+    "file": "packages/pi-exa/__tests__/fixtures/guided-prototype/prototype.ts",
+    "line": 382,
+    "summary": "The prototype does not implement the delivery steps 4–5 that it is cited as evidence for. Acknowledgement by observation only happens on `agent_settled`, not on `session_start`. There is no `uncertain` notice state, and pending notices for the origin session are only reported, never reconciled.",
+    "failure_scenario": "Pi appends the `custom_message`, then restarts before `agent_settled` runs. On resume the notice stays `sent` and is reported as 'not delivered' on every start, even though its entry exists in the session. A notice left `pending` after a stale-runtime throw is never delivered, even when the origin session resumes."
+  },
+  {
+    "file": "packages/pi-exa/__tests__/guided-prototype.test.ts",
+    "line": 352,
+    "summary": "The test titled 'deduplicates repeated terminal observations' never causes a second terminal observation, because the monitor stops after the first one. The `notice_deduplicated` branch never runs, so the assertion passes trivially. The 'backs off ... growing delays' test (line 410) only counts events and never checks the delays.",
+    "failure_scenario": "The research doc (experiments 5 and 7) and the qualification map cite these tests as proof of notice dedup and growing backoff. A regression that issues a second notice on re-observation, or that removes backoff entirely, would still pass. The documented design-gate evidence is overstated."
+  },
+  {
+    "file": "packages/pi-exa/__tests__/fixtures/guided-prototype/prototype.ts",
+    "line": 513,
+    "summary": "The late-acknowledgement handler sets `runId` without persisting when the attempt is still `submitting`. It relies on the main path to finish the transition, and that path's catch then marks the attempt `unknown`.",
+    "failure_scenario": "The create resolves after the deadline timer has already rejected but before the `catch` continuation runs. The handler sees state `submitting`, records the runId and skips the LATE_ACKNOWLEDGEMENT branch. The catch then persists `state: unknown` with a runId and monitor `none`, and returns SUBMISSION_UNKNOWN. The attempt is never monitored and never marked as a late acknowledgement."
+  },
+  {
+    "file": "packages/pi-exa/__tests__/fixtures/guided-prototype/prototype.ts",
+    "line": 414,
+    "summary": "On every settle, `agent_settled` scans the whole session's entries, even when no notice is `sent`. `tick` also rewrites the whole pretty-printed store on every pending observation (line 319). Both are wasted I/O in hot paths.",
+    "failure_scenario": "Long sessions pay an O(entries) scan on every turn for nothing. Over a 3-hour monitor, each 60 s poll rewrites the full store even when only `gets`/`lastSuccessAt` changed, which goes against the CHANGELOG's 'coalesce unchanged Agent observations'. Instead, return early when no notice is in state `sent`, and persist only when the remote status changes."
+  }
+]
+```</result>
+<usage><subagent_tokens>107059</subagent_tokens><tool_uses>19</tool_uses><duration_ms>218821</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a5dcc8076cdf35a33</task-id>
+<tool-use-id>toolu_01HZMmjPtyuCaQA4HcLEPVdx</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-feniix-src-personal-pi-pi-extensions/90caff9b-07c1-45ca-be6f-308aff547939/tasks/a5dcc8076cdf35a33.output</output-file>
+<status>completed</status>
+<summary>Agent "/code-review 179" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Effort: reusing high, the level you last typed. Type a level (for example `/code-review high`) to change it.
+
+I reviewed PR 179 (head `pi-exa-guided/monitoring`, base `pi-exa-guided/submission`) with all 8 angles and no verification pass, so these are unverified candidates. I checked that Pi's `emit` takes a copy of the handler list before dispatch. So the explicit `sessionStarted` call in `index.ts` does not fire twice, and I didn't report it. The CLAUDE.md conventions angle found no violations: the new flag is documented in the README.
+
+```json
+[
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 512,
+    "summary": "sessionStarted pauses every 'registered'/'running' monitor that discover() returns, and discover() returns all cycles in the project directory. That includes monitors owned by another live Pi process or session.",
+    "failure_scenario": "Session A in project X submits and its monitor is running. The user opens a second Pi session B in the same cwd. B's sessionStarted marks A's monitor state=paused, reason=RESTART through updateMonitor, which has no ownership check. A's next tick reads state==='paused', drops its schedule and never delivers the completion notice. The isolation test misses this because both hosts start before either one submits."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 388,
+    "summary": "In the transient-error branch, `await cycles.updateMonitor(...)` is not wrapped in try/catch. A storage failure there rejects observeMonitor, trackObservation swallows the rejection, and the monitor dies silently instead of pausing with STORAGE.",
+    "failure_scenario": "A GET times out (transient) and the following counter write fails (EIO or a rename failure). No reschedule and no pause happen. The record stays state='running', the entry stays in `scheduled` without a timer, view() shows no paused guidance, and the user never gets a notice or a recover hint until restart. This is exactly the 'storage errors escape' case the fix commit says it closes."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 424,
+    "summary": "pauseMonitor (used by archive/reset through pauseCycleMonitors) does not stop a tick that is already running. When that tick finishes it unconditionally sets state='stopped' and delivers a notice, or calls scheduleMonitor, which re-adds the entry to `scheduled`.",
+    "failure_scenario": "The user runs `/exa-research archive` while a monitor GET is in flight. pauseCycleMonitors persists paused/ARCHIVED. The GET then returns terminal, the tick overwrites the monitor to 'stopped', deletes the ARCHIVED reason, and calls pi.sendMessage with triggerTurn. That wakes the assistant to report on a cycle that was just archived. The terminal update should skip monitors that are already paused, or check `scheduled.has(key)` after the GET."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 973,
+    "summary": "If the create acknowledgement is already terminal, registerMonitor throws 'MONITOR_UNAVAILABLE: the attempt is already terminal'. Submit then reports monitoring PAUSED and says 'The run continues remotely', and no monitor or paused record is saved.",
+    "failure_scenario": "Exa answers the create with status 'completed' or 'failed' (a fast run or a late ack). The tool result says monitoring is PAUSED and the run continues, which is wrong because it has already ended. No notice is created or delivered. No monitor record exists, so view() and a restart never surface anything. Any other registration failure also leaves no saved 'paused' record, so the 'paused' state lives only in that one tool result."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 527,
+    "summary": "sessionStarted warns 'it was not delivered automatically' for notices whose session entry exists (state 'sent' with an entry, or 'pending'), because the warning runs before acknowledgeNotices. It also re-warns on every session start about other sessions' notices that this session can never acknowledge.",
+    "failure_scenario": "A notice was delivered and its custom_message entry is in the session, but Pi quit before agent_settled. On restart the user sees '(sent) ... was not delivered automatically', and the notice is then marked acknowledged a few lines later. Separately, any unacknowledged notice from session A produces a warning on every start of every other session in the project, indefinitely."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 130,
+    "summary": "view() adds 'Background monitoring is paused ... the remote run and its liability continue' for any paused monitor, even when the attempt is already terminal. Paused monitors are never cleared when an explicit recover or a STORAGE-paused tick records the terminal outcome.",
+    "failure_scenario": "The monitor pauses with STORAGE after the terminal receipt has been saved; the storage test asserts record.status==='completed' alongside this text. Or an explicit recover confirms completion after an AUTH pause. In both cases nextSafeAction keeps telling the assistant the run and its liability are still live and to recover again, which invites extra GETs and misleads the user."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 492,
+    "summary": "Monitors are paused on session_before_switch and session_before_fork, which other extensions can cancel. A cancelled switch or fork leaves every monitor paused and `shuttingDown` latched, while the user stays in the same session.",
+    "failure_scenario": "Another extension's session_before_switch handler returns {cancel:true}; Pi's runner returns early after earlier handlers have already run. All of this session's monitors are now persisted as paused/DETACHED and the latch stays set, so no completion notice arrives until a new submission or a restart. Pausing in the non-cancellable after-events instead would avoid this."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 467,
+    "summary": "acknowledgeNotices only adds a notice ID to the in-memory acknowledgedNoticeIds set after writing to storage. Notices already saved as 'acknowledged' hit `continue` and are never added, so the early-return guard never trips.",
+    "failure_scenario": "After a restart, a session that contains completion entries for notices already acknowledged in storage runs get(ctx) and a full discover() on every agent_settled. That reads and validates every cycle record in the project (accounting, attempts, replacements) after every agent turn, for the rest of the session."
+  },
+  {
+    "file": "packages/pi-exa/extensions/research-monitor.ts",
+    "line": 150,
+    "summary": "The backoff is off by one: the first successful non-terminal GET computes nextMonitorDelay(undefined), which returns initialDelayMs. The second check therefore runs 5 s after the first, not 7.5 s.",
+    "failure_scenario": "With defaults, the checks run at roughly 5 s, 10 s, 17.5 s and so on, not the 5 s, 12.5 s schedule that the README ('first after 5 s, then ×1.5 backoff') and the PR description promise. That adds one extra GET per run. Setting --exa-monitor-interval-ms above 60000 also makes later checks shorter than the first, because of the maxDelayMs cap."
+  },
+  {
+    "file": "packages/pi-exa/extensions/research-monitor.ts",
+    "line": 92,
+    "summary": "The `reason` union in monitorRecordSchema copies `monitorPauseReasons` by hand instead of deriving from it, and observeMonitor (cycle-pi.ts ~343) re-implements awaitObservations inline with an extra key filter.",
+    "failure_scenario": "If someone adds a pause reason to the array but not to the schema, Value.Check fails in updateMonitor. pauseMonitor swallows that error, so the pause is silently never saved and the monitor stays 'running' on disk. Deriving the union with `Type.Union(monitorPauseReasons.map(r =&gt; Type.Literal(r)))`, and giving awaitObservations an optional exclude-key, removes both copies."
+  }
+]
+```
+
+The most serious is the first finding: opening a second Pi session in the same project stops the first session's live monitors, so their completion notices never arrive. The second is that a storage error after a transient GET failure kills the monitor without marking it paused. Findings 7 to 10 are lower severity, and the last one is a cleanup.</result>
+<usage><subagent_tokens>93281</subagent_tokens><tool_uses>16</tool_uses><duration_ms>197051</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a2ec6ec4409a0e7ec</task-id>
+<tool-use-id>toolu_01T1ymyqvF32SJzUHmZDiJtF</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-feniix-src-personal-pi-pi-extensions/90caff9b-07c1-45ca-be6f-308aff547939/tasks/a2ec6ec4409a0e7ec.output</output-file>
+<status>completed</status>
+<summary>Agent "/code-review 182" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Running at **high** effort, carried over from your last review. Type a level such as `/code-review high` to change it.
+
+I reviewed PR #182 (`pi-exa-guided/hide-active` against `pi-exa-guided/qualification`) and found 10 issues. The most serious one sends the assistant to a path that is guaranteed to fail. The next three concern consent records, duplicate reporting, and a duplicate success that nobody is told about. The rest are lost test coverage and cleanup. This was a findings-only pass, so I didn't run any tests.
+
+```json
+[
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 1006,
+    "summary": "SUBMISSION_NOT_DISPATCHED tells the assistant to 'approve and submit again', but that now always fails: the new pre-dialog check refuses any cycle that already has a saved attempt, and active mode is refused too. The shared helper now also shows this text on the retry/replace path.",
+    "failure_scenario": "A guided submit's create is never sent (no submitter, or beforeCreate fails), so the attempt is saved as not-dispatched. The assistant follows the text and calls researchMode=submit again, which returns AGENT_ATTEMPT_EXISTS every time. The only path that works is approve + approve-request + researchMode=retry, which the cycle's nextSafeAction says but this message contradicts."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 1079,
+    "summary": "The 'no approval for a refused submission' fix is a check on a stale snapshot. `record` is read at the start of the call, the dialog can stay open for up to APPROVAL_DIALOG_TIMEOUT_MS, and grantDialogApproval only runs assertDraft, which accepts failed/unknown cycles that already have attempts.",
+    "failure_scenario": "Two submit (or submit + retry) calls run concurrently. Call A dispatches and ends terminally failed (or not-dispatched) while call B's dialog is open. B's approval passes assertDraft and is persisted, then reserveAgent throws AGENT_ATTEMPT_EXISTS as a raw exception. That is exactly the 'approval recorded for a refused submission' bug the PR says it fixed. The attempts check belongs inside the grantDialogApproval transaction, or grant and reserve should be one transaction."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 1020,
+    "summary": "When the acknowledgement is already terminal, monitoring='terminal' skips monitor registration entirely. resumeMonitoring later finds a terminal attempt with no monitor, creates a new pending notice and delivers it with triggerTurn, so a run that was already reported inline gets reported a second time.",
+    "failure_scenario": "Create returns status 'failed' or 'completed'. The tool result already contains the execution and final report, and the new test asserts `record.monitors` has length 0. After a session restart the operator runs exa_research_status action=resume, a fresh exa-research-completion notice arrives (not marked possibleDuplicate), and the session runs another reporting turn for the same run."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 1151,
+    "summary": "Replace now goes through the non-blocking helper, which registers a monitor only for the new attempt. When the unknown original's create acknowledgement arrives late, the remote ID is saved but nothing monitors that run or sends a notice, so its completion and the resulting duplicate success are never shown in the session.",
+    "failure_scenario": "The original submit is interrupted (SUBMISSION_UNKNOWN), the operator funds a replace, and then the original's create resolves with status 'running'. The original stays unknown/live with a remote ID and no monitor. Its completion (a second paid success) only shows up after an explicit recover or resume. The old blocking path pushed a 'Duplicate successes are retained' update, and the deleted test asserted that update; it was replaced by a status poll."
+  },
+  {
+    "file": "packages/pi-exa/__tests__/cycle-extension.test.ts",
+    "line": 893,
+    "summary": "This test was rewritten so the run is never interrupted (the monitor just pauses on NOT_FOUND) and now expects status 'running' with no unknown liability. The title still says 'without ... releasing interrupted liability', but that case (an interrupted local wait stays unknown after a pending GET) is no longer tested anywhere.",
+    "failure_scenario": "A regression that releases an interrupted attempt's liability, or flips unknown to running when a pending GET comes back, would pass CI, because no test interrupts a run and then recovers it as pending."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 1079,
+    "summary": "The early AGENT_ATTEMPT_EXISTS check reads `record.attempts` from the active cycle without first checking that the caller's cycleId matches record.id.",
+    "failure_scenario": "researchMode=submit with a stale or foreign cycleId, while the active cycle has attempts, returns AGENT_ATTEMPT_EXISTS labelled with the caller's cycleId. The assistant is told that the wrong cycle has an attempt, instead of getting the cycle-mismatch error that preview/assertArtifactTarget would raise."
+  },
+  {
+    "file": "packages/pi-exa/__tests__/cycle-extension.test.ts",
+    "line": 632,
+    "summary": "This assertion was weakened from `toHaveBeenCalledTimes(2)` to `toHaveBeenCalled()`, so the test no longer counts how many times view/status projections are built.",
+    "failure_scenario": "A regression that rebuilds the projection many times per submission (the over-projection that the changelog's 'reuse status projections' work prevents) would still pass."
+  },
+  {
+    "file": "packages/pi-exa/extensions/tools.ts",
+    "line": 51,
+    "summary": "The `agentObserver` option on ExaToolsOptions (and its use at line 678) is now dead: the PR removed the only producer, `agentFactory`/`researchFactory({ agentObserver })`, in index.ts.",
+    "failure_scenario": "The tools keep an unreachable observer branch through the blocking performResearch path, which suggests cycle accounting can still attach there. A later caller could use it and bring back a blocking, cycle-attributed path that skips the guided submission gates."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 952,
+    "summary": "dispatchAcknowledged is a ~110-line closure rebuilt inside execute() on every cycle-attributed paid call, including exploratory retrievals that never use it. It also repeats the `Value.Check(agentAttemptSchema, ...)` and find-by-attempt-id logic three times.",
+    "failure_scenario": "It allocates a large closure that captures the whole execute scope on every web_search/fetch call, and it hides the shared dispatch behind deep nesting. A registration-level helper taking (cycles, prepared, ctx, signal, onUpdate), plus one small `findAgentAttempt(record, id)` helper, would do the same job."
+  },
+  {
+    "file": "packages/pi-exa/extensions/cycle-pi.ts",
+    "line": 1029,
+    "summary": "On the acknowledged path the cycle record is read from storage at least three times: the ack lookup at line 974, inside registerMonitor, and again at line 1029. When the ack is terminal, the line-974 snapshot is already final.",
+    "failure_scenario": "Each inspect is a locked disk read and parse on the tool's critical path. For monitoring='terminal' nothing changes the record in between, so the second inspect only adds latency and could reuse `acknowledgedExecution` and its record."
+  }
+]
+```</result>
+<usage><subagent_tokens>107305</subagent_tokens><tool_uses>23</tool_uses><duration_ms>173674</duration_ms></usage>
+</task-notification>
