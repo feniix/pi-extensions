@@ -493,7 +493,13 @@ describe("background monitoring and completion delivery", () => {
     expect(result.details).toMatchObject({ remoteStatus: "failed", monitoring: "terminal" });
     let record = await pi.record(cycleId, projectId);
     expect(record.status).toBe("failed");
-    expect(record.monitors ?? []).toHaveLength(0);
+    // Reported in the tool result: recorded as acknowledged, never notified again.
+    expect(record.monitors).toEqual([
+      expect.objectContaining({
+        state: "stopped",
+        notice: expect.objectContaining({ state: "acknowledged", channel: "tool-result" }),
+      }),
+    ]);
     // Operator funding by command: lifetime ceiling plus exact-request consent for the retry.
     const command = pi.commands.get("exa-research");
     await command?.handler(`approve ${cycleId} 1 web_research_exa`, pi.context);

@@ -48,6 +48,7 @@ export const monitorPauseReasons = [
   "ARCHIVED",
   "REGISTRATION_FAILED",
   "STORAGE",
+  "CONFIGURATION",
 ] as const;
 export type MonitorPauseReason = (typeof monitorPauseReasons)[number];
 
@@ -105,6 +106,7 @@ export const monitorRecordSchema = Type.Object(
         Type.Literal("ARCHIVED"),
         Type.Literal("REGISTRATION_FAILED"),
         Type.Literal("STORAGE"),
+        Type.Literal("CONFIGURATION"),
       ]),
     ),
     gets: integer,
@@ -120,6 +122,7 @@ export const monitorRecordSchema = Type.Object(
         Type.Literal("not-found"),
         Type.Literal("observation"),
         Type.Literal("detached"),
+        Type.Literal("configuration"),
       ]),
     ),
     notice: Type.Optional(completionNoticeSchema),
@@ -142,6 +145,7 @@ export function classifyObservationError(error: unknown): ObservationFailure {
   if (statusCode === 401 || statusCode === 403) return { kind: "auth", pause: "AUTH" };
   if (statusCode === 404) return { kind: "not-found", pause: "NOT_FOUND" };
   const name = error instanceof Error ? error.name : "";
+  if (name === "ExaConfigurationError") return { kind: "configuration", pause: "CONFIGURATION" };
   const message = error instanceof Error ? error.message : String(error);
   if (name === "AgentInspectionInterruptedError") return { kind: "timeout" };
   if (name === "AgentLifecycleObservationError") return { kind: "observation" };

@@ -622,4 +622,50 @@ describe("recovering monitoring and notifications across interruptions", () => {
     await vi.waitFor(() => expect(pi.sent).toHaveLength(1), { timeout: 3_000 });
     expect(monitorOf(await pi.record(cycleId, projectId), attemptId)).toMatchObject({ state: "stopped" });
   });
+
+  it("notifies on resume a terminal late acknowledgement that arrived after the cycle detached", async () => {
+    const pi = await host({ submitTimeoutMs: 100 });
+    let releaseCreate: ((run: AgentRun) => void) | undefined;
+    offlineCreate.mockImplementationOnce(
+      () =>
+        new Promise<AgentRun>((resolve) => {
+          releaseCreate = resolve;
+        }),
+    );
+    const { cycleId, projectId, result, attemptId } = await submitted(pi);
+    expect(result.content[0].text).toContain("SUBMISSION_UNKNOWN");
+    await pi.emit("session_shutdown", { reason: "quit" });
+    // The genuine acknowledgement lands after detach, already terminal: facts persist, no monitor record.
+    (releaseCreate as (run: AgentRun) => void)(completedRun("agent_run_after_detach"));
+    await vi.waitFor(
+      async () => expect((await pi.record(cycleId, projectId)).attempts[0].result?.terminal).toBe(true),
+      { timeout: 4_000 },
+    );
+    expect(monitorOf(await pi.record(cycleId, projectId), attemptId)).toBeUndefined();
+    const restarted = await host({ directory: pi.directory, sessionId: "session-one" });
+    const resumed = await restarted.call("exa_research_status", { action: "resume", cycleId });
+    expect(resumed.details.resumedMonitoring).toEqual([{ attemptId, action: "notice delivered" }]);
+    expect(restarted.sent).toHaveLength(1);
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("summarizes other sessions' undelivered notices at start without delivering them", async () => {
+    const pi = await host({ sessionId: "session-origin" });
+    offlineGet.mockResolvedValue(completedRun("agent_run_pending"));
+    const { cycleId, projectId, attemptId } = await submitted(pi);
+    await vi.waitFor(() => expect(pi.sent).toHaveLength(1), { timeout: 3_000 });
+    await vi.waitFor(async () =>
+      expect(monitorOf(await pi.record(cycleId, projectId), attemptId)?.notice).toMatchObject({ state: "sent" }),
+    );
+    pi.entries.splice(0);
+    await pi.emit("session_shutdown", { reason: "quit" });
+    // The origin restarts once (notice becomes uncertain) and then never returns.
+    await (await host({ directory: pi.directory, sessionId: "session-origin" })).emit("session_shutdown", {
+      reason: "quit",
+    });
+    const other = await host({ directory: pi.directory, sessionId: "session-other" });
+    expect(other.notify).toHaveBeenCalledWith(expect.stringContaining("from other sessions"), "warning");
+    expect(other.notify).toHaveBeenCalledWith(expect.stringContaining(cycleId), "warning");
+    expect(other.sent).toHaveLength(0);
+  });
 });

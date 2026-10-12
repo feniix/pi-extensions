@@ -26,6 +26,14 @@ export async function observeExaRequest<T>(
   return response;
 }
 
+/** A local configuration problem; retrying cannot fix it. */
+export class ExaConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExaConfigurationError";
+  }
+}
+
 /**
  * Optional Exa API base URL override (`EXA_BASE_URL`), for self-hosted proxies
  * and controllable endpoint mocks in qualification smoke tests. Unset means the
@@ -38,10 +46,11 @@ export function resolveExaBaseUrl(env: NodeJS.ProcessEnv = process.env): string 
   try {
     parsed = new URL(value);
   } catch {
-    throw new Error(`EXA_BASE_URL must be an absolute http(s) URL such as https://api.exa.ai; got "${value}".`);
+    // Never echo the value: a URL can carry credentials.
+    throw new ExaConfigurationError("EXA_BASE_URL must be an absolute http(s) URL such as https://api.exa.ai.");
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:")
-    throw new Error(`EXA_BASE_URL must use http or https; got "${parsed.protocol}".`);
+    throw new ExaConfigurationError("EXA_BASE_URL must use http or https.");
   return value.replace(/\/+$/, "");
 }
 

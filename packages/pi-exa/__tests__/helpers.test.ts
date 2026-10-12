@@ -942,7 +942,17 @@ describe("Exa client base URL and legacy config flag", () => {
     expect(resolveExaBaseUrl({})).toBeUndefined();
     expect(resolveExaBaseUrl({ EXA_BASE_URL: "http://127.0.0.1:9/" })).toBe("http://127.0.0.1:9");
     expect(() => resolveExaBaseUrl({ EXA_BASE_URL: "api.exa.ai" })).toThrow(/EXA_BASE_URL must be an absolute/);
-    expect(() => resolveExaBaseUrl({ EXA_BASE_URL: "ftp://api.exa.ai" })).toThrow(/http or https/);
+    expect(() => resolveExaBaseUrl({ EXA_BASE_URL: "ftp://user:secret@api.exa.ai" })).toThrow(/http or https/);
+    // The value is never echoed: a URL can carry credentials.
+    expect(() => resolveExaBaseUrl({ EXA_BASE_URL: "not a url secret-token" })).not.toThrow(/secret-token/);
+    const { classifyObservationError } = await import("../extensions/research-monitor.js");
+    let configError: unknown;
+    try {
+      resolveExaBaseUrl({ EXA_BASE_URL: "api.exa.ai" });
+    } catch (error) {
+      configError = error;
+    }
+    expect(classifyObservationError(configError)).toEqual({ kind: "configuration", pause: "CONFIGURATION" });
   });
 
   it("warns about the deprecated --exa-config flag once per process", async () => {

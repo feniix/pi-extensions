@@ -209,10 +209,13 @@ export default function exaExtension(pi: ExtensionAPI) {
       };
       const inspectionFactory: CycleInspectionFactory = (runId, observer) =>
         researchFactory({ agentInspection: { runId, observer } });
-      const submissionFactory: CycleSubmissionFactory = (observer) =>
-        researchFactory({
-          agentSubmission: { observer, createWaitMs: parsePositiveIntFlag(pi.getFlag("exa-submit-timeout-ms")) },
-        });
+      const submissionFactory: CycleSubmissionFactory = Object.assign(
+        (observer: Parameters<CycleSubmissionFactory>[0]) =>
+          researchFactory({
+            agentSubmission: { observer, createWaitMs: parsePositiveIntFlag(pi.getFlag("exa-submit-timeout-ms")) },
+          }),
+        { available: () => isToolEnabledForConfig(pi, resolvedConfig, "web_research_exa") },
+      );
       const monitorInspector: CycleMonitorInspector = (runId, observer, timeoutMs) => {
         const apiKey = resolveAuth(pi).apiKey;
         if (!apiKey) throw Object.assign(new Error("Exa API key is not configured."), { statusCode: 401 });

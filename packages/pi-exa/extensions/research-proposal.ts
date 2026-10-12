@@ -50,7 +50,7 @@ export function estimateAgentRequest(request: Record<string, unknown>): AgentEst
     return {
       dollars: null,
       effort,
-      basis: `${providers} Exa Connect provider(s) requested; their add-on charges are not priced by the package. The operator assesses this exact request with /exa-research approve <cycle-id> <ceiling> web_research_exa and /exa-research approve-request <cycle-id> <request-hash> <dollars>, then the dialog confirms it.`,
+      basis: `${providers} Exa Connect provider(s) requested; their add-on charges are not priced by the package. The operator assesses this exact request by command (a lifetime ceiling that keeps the existing tool scope plus web_research_exa, and approve-request for the exact request hash), then the dialog confirms it.`,
     };
   }
   const fixed = Object.entries(AGENT_RATE_PROFILE.fixed).find(([name]) => name === effort)?.[1];
