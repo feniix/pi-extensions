@@ -63,6 +63,18 @@ vi.mock("exa-js", () => ({
 }));
 
 const directories: string[] = [];
+const hostToolNames = [
+  "exa_research_step",
+  "exa_research_status",
+  "exa_research_summary",
+  "exa_research_reset",
+  "web_search_exa",
+  "web_search_advanced_exa",
+  "web_fetch_exa",
+  "web_find_similar_exa",
+  "web_answer_exa",
+  "web_research_exa",
+];
 afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -86,18 +98,7 @@ async function host(enabled = true, timeoutMs?: number) {
   await writeFile(
     config,
     JSON.stringify({
-      enabledTools: [
-        "exa_research_step",
-        "exa_research_status",
-        "exa_research_summary",
-        "exa_research_reset",
-        "web_search_exa",
-        "web_search_advanced_exa",
-        "web_fetch_exa",
-        "web_find_similar_exa",
-        "web_answer_exa",
-        "web_research_exa",
-      ],
+      enabledTools: hostToolNames,
       apiKey: "offline-fixture-key",
     }),
   );
@@ -197,11 +198,23 @@ describe("Pi standalone and cycle discovery availability", () => {
 describe("Pi cycle commands and tools", () => {
   it("adds complete assistant cycle guidance only to opted-in Pi tool registration without dispatch", async () => {
     const plain = await host(false);
-    expect(plain.tools.get("exa_research_step")?.promptGuidelines?.join("\n")).not.toContain("Integrated Pi cycle");
     const pi = await host();
-    for (const name of ["exa_research_step", "exa_research_status", "exa_research_summary", "web_research_exa"]) {
-      const guidance = pi.tools.get(name)?.promptGuidelines?.join("\n") ?? "";
+    expect([...plain.tools.keys()].sort()).toEqual([...hostToolNames].sort());
+    expect([...pi.tools.keys()].sort()).toEqual([...hostToolNames].sort());
+    for (const name of hostToolNames) {
+      const original = plain.tools.get(name)?.promptGuidelines ?? [];
+      expect(original.join("\n")).not.toContain("Integrated Pi cycle");
+      const integrated = pi.tools.get(name)?.promptGuidelines ?? [];
+      expect(integrated.slice(0, original.length)).toEqual(original);
+      expect(integrated.length).toBeGreaterThan(original.length);
+      const guidance = integrated.join("\n");
       expect(guidance).toContain("Integrated Pi cycle");
+      expect(guidance).toMatch(/cycle-attributed work only/i);
+      expect(guidance).toMatch(/standalone web tools remain available without a cycle/i);
+      expect(guidance).toMatch(/unrelated requests use researchMode=standalone.*omit cycle references/i);
+      expect(guidance).toMatch(/local exa_research_\* planning tools never call Exa/i);
+      expect(guidance).toMatch(/cycle-attributed web_\* retrievals.*during planning/i);
+      expect(guidance).toMatch(/cycle-attributed paid work requires operator approvals/i);
       expect(guidance).toMatch(/clarify.*goals.*constraints.*output contract/i);
       expect(guidance).toMatch(/candidate.*not trusted.*select/i);
       expect(guidance).toMatch(/readiness.*judgment.*not.*permission/i);
@@ -211,9 +224,14 @@ describe("Pi cycle commands and tools", () => {
       expect(guidance).toMatch(/no automatic.*gap-closing/i);
       expect(guidance).toMatch(/explicit.*resume.*never.*spending/i);
     }
+    for (const name of ["exa_research_step", "web_search_exa"]) {
+      expect(plain.tools.get(name)?.promptGuidelines?.length).toBeGreaterThan(0);
+    }
     expect(offlineCreate).not.toHaveBeenCalled();
     expect(offlineSearch).not.toHaveBeenCalled();
     expect(offlineGet).not.toHaveBeenCalled();
+    expect(offlineCancel).not.toHaveBeenCalled();
+    for (const endpoint of Object.values(offlineEndpoints)) expect(endpoint).not.toHaveBeenCalled();
   });
 
   it("documents single-GET recovery in opted-in Agent tool guidance without changing default descriptions", async () => {
