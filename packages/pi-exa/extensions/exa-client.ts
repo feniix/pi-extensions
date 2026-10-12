@@ -26,14 +26,26 @@ export async function observeExaRequest<T>(
   return response;
 }
 
+/**
+ * Optional Exa API base URL override (`EXA_BASE_URL`), for self-hosted proxies
+ * and controllable endpoint mocks in qualification smoke tests. Unset means the
+ * SDK default (https://api.exa.ai).
+ */
+export function resolveExaBaseUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const value = env.EXA_BASE_URL?.trim();
+  return value ? value.replace(/\/+$/, "") : undefined;
+}
+
 export function getExaClient(apiKey: string): Exa {
-  const existing = exaClients.get(apiKey);
+  const baseUrl = resolveExaBaseUrl();
+  const key = baseUrl ? `${baseUrl}\u0000${apiKey}` : apiKey;
+  const existing = exaClients.get(key);
   if (existing) {
     return existing;
   }
 
-  const client = new Exa(apiKey);
-  exaClients.set(apiKey, client);
+  const client = baseUrl ? new Exa(apiKey, baseUrl) : new Exa(apiKey);
+  exaClients.set(key, client);
   return client;
 }
 

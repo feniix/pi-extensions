@@ -85,6 +85,12 @@ Then run pi with:
 pi -e npm:@feniix/pi-exa -- --exa-config-file ~/.config/pi/exa.json
 ```
 
+### Optional API base URL
+
+Set `EXA_BASE_URL` to point the Exa SDK at a self-hosted proxy or a controllable
+endpoint mock (the repository's qualification smoke uses one). Unset means the
+SDK default `https://api.exa.ai`. The value is never written to cycle records.
+
 ### Shared non-secret settings
 
 Supports standard pi settings locations:
