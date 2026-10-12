@@ -1,0 +1,75 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4RK6R72Q9CXNS9N90RSBWVP",
+  "session_id": "90caff9b-07c1-45ca-be6f-308aff547939",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-12T17:40:15.760069Z",
+  "branch": "pi-exa-guided/qualification",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "packages/pi-exa/__tests__/fixtures/guided-smoke/pi-entry.ts",
+    "packages/pi-exa/__tests__/guided-smoke.rpc.test.ts"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-fable-5-1",
+  "turn_id": "e4e8102f376e",
+  "checkpoint_transcript_start": 2545,
+  "transcript_lines_at_start": 2545,
+  "compact_transcript_start": 172,
+  "token_usage": {
+    "input_tokens": 32,
+    "cache_creation_tokens": 1397,
+    "cache_read_tokens": 687619,
+    "output_tokens": 1049,
+    "api_call_count": 1
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01S2dCbHERfcZtnxC1DhE34A",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "gh-stack"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "0b1207e3e62c",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 56,
+        "end": 57,
+        "entry_ids": [
+          "5851068d-e68a-492c-9b6e-6d4b8c2f51d7"
+        ],
+        "tool_use_id": "toolu_01S2dCbHERfcZtnxC1DhE34A"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01S2dCbHERfcZtnxC1DhE34A"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: gh-stack",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-12T17:40:15.681699Z",
+    "agent_lines": 58,
+    "agent_removed": 8,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 58,
+    "total_lines_changed": 66,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
