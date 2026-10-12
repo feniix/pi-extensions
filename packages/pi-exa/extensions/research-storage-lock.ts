@@ -47,7 +47,6 @@ function dead(pid: number) {
 
 export async function withResearchStorageLock<T>(directory: string, action: () => Promise<T>): Promise<T> {
   const path = join(directory, ".lock");
-  const deadline = performance.now() + 1000;
   const candidate = join(directory, `.lock-owner-${randomUUID()}.tmp`);
   const owner = { kind: "research-storage-lock-v1", pid: process.pid, token: randomUUID() };
   const file = await open(candidate, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
@@ -64,6 +63,7 @@ export async function withResearchStorageLock<T>(directory: string, action: () =
     await unlink(candidate);
     throw error;
   }
+  const deadline = performance.now() + 1000;
   const unavailable = (target: string) =>
     new Error(
       `Research cycle storage is locked or unavailable at ${target}; no state changed. Unknown/legacy owners require explicit offline repair; never remove a live process lock.`,
@@ -122,11 +122,16 @@ export async function withResearchStorageLock<T>(directory: string, action: () =
   try {
     const release = await acquire(path);
     try {
+      // Keep the candidate while recursive acquisition may still need it,
+      // but not throughout the protected action (which may be interrupted).
+      await unlink(candidate);
       return await action();
     } finally {
       await release();
     }
   } finally {
-    await unlink(candidate);
+    await unlink(candidate).catch((error: unknown) => {
+      if (errorCode(error) !== "ENOENT") throw error;
+    });
   }
 }

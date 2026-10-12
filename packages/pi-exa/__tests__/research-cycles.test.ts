@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createResearchCycles, researchProjectId } from "../extensions/research-cycles.js";
+import { withResearchStorageLock } from "../extensions/research-storage-lock.js";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof fs>();
@@ -21,6 +22,45 @@ afterEach(async () => {
 });
 
 describe("durable research cycles", () => {
+  it("does not spend its contention deadline preparing an uncontended lock", async () => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    let elapsed = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => elapsed);
+    const original = await vi.importActual<typeof fs>("node:fs/promises");
+    vi.mocked(fs.open).mockImplementation(async (...args) => {
+      const file = await original.open(...args);
+      if (String(args[0]).includes(".lock-owner-")) {
+        const sync = file.sync.bind(file);
+        vi.spyOn(file, "sync").mockImplementation(async () => {
+          elapsed += 1100;
+          await sync();
+        });
+      }
+      return file;
+    });
+    const action = vi.fn(async () => "uncontended");
+    await expect(withResearchStorageLock(root, action)).resolves.toBe("uncontended");
+    expect(action).toHaveBeenCalledOnce();
+    expect(await fs.readdir(root)).toEqual([]);
+  });
+
+  it.each([
+    false,
+    true,
+  ])("removes candidate links before the protected action, including failure=%s", async (failure) => {
+    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+    roots.push(root);
+    const action = withResearchStorageLock(root, async () => {
+      expect(await fs.readdir(root)).toEqual([".lock"]);
+      if (failure) throw new Error("protected action failed");
+      return "success";
+    });
+    if (failure) await expect(action).rejects.toThrow("protected action failed");
+    else await expect(action).resolves.toBe("success");
+    expect(await fs.readdir(root)).toEqual([]);
+  });
+
   it("recovers a proven dead transaction lock without dropping records", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
     roots.push(root);
