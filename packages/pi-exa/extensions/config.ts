@@ -177,15 +177,21 @@ export function loadConfig(configPath?: string): ExaConfig | null {
 // Config Flag Helpers
 // =============================================================================
 
+let warnedLegacyConfigFlag = false;
+
 function getConfigOverrideFlag(pi: ExtensionAPI): string | undefined {
-  const configFileFlag = normalizeString(pi.getFlag("--exa-config-file"));
+  const configFileFlag = normalizeString(pi.getFlag("exa-config-file"));
   if (configFileFlag) {
     return configFileFlag;
   }
 
-  const legacyConfigFlag = normalizeString(pi.getFlag("--exa-config"));
+  const legacyConfigFlag = normalizeString(pi.getFlag("exa-config"));
   if (legacyConfigFlag) {
-    console.warn("[pi-exa] --exa-config is deprecated; use --exa-config-file.");
+    // Config is resolved on every tool call; warn once per process, not over the TUI each time.
+    if (!warnedLegacyConfigFlag) {
+      warnedLegacyConfigFlag = true;
+      console.warn("[pi-exa] --exa-config is deprecated; use --exa-config-file.");
+    }
     return legacyConfigFlag;
   }
 
@@ -201,7 +207,7 @@ export function getResolvedConfig(pi: ExtensionAPI): ExaConfig | null {
 // =============================================================================
 
 export function resolveAuth(pi: ExtensionAPI): AuthResolution {
-  const apiKeyFlag = normalizeString(pi.getFlag("--exa-api-key"));
+  const apiKeyFlag = normalizeString(pi.getFlag("exa-api-key"));
   if (apiKeyFlag) {
     return { apiKey: apiKeyFlag, source: "CLI flag" };
   }
@@ -231,7 +237,7 @@ export function getAuthStatusMessage(pi: ExtensionAPI): string {
 // =============================================================================
 
 function isAdvancedToolEnabled(pi: ExtensionAPI, config: ExaConfig | null): boolean {
-  const advancedFlag = pi.getFlag("--exa-enable-advanced");
+  const advancedFlag = pi.getFlag("exa-enable-advanced");
   if (typeof advancedFlag === "boolean") {
     return advancedFlag;
   }
@@ -239,7 +245,7 @@ function isAdvancedToolEnabled(pi: ExtensionAPI, config: ExaConfig | null): bool
 }
 
 function isResearchToolEnabled(pi: ExtensionAPI, config: ExaConfig | null): boolean {
-  const researchFlag = pi.getFlag("--exa-enable-research");
+  const researchFlag = pi.getFlag("exa-enable-research");
   if (typeof researchFlag === "boolean") {
     return researchFlag;
   }

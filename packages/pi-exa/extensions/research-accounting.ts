@@ -17,7 +17,7 @@ export const spendingGrantSchema = Type.Object(
     cycleId: Type.String({ minLength: 1 }),
     projectId: Type.String({ minLength: 1 }),
     issuerSessionId: Type.String({ minLength: 1 }),
-    source: Type.Literal("command"),
+    source: Type.Union([Type.Literal("command"), Type.Literal("dialog")]),
     issuedAt: Type.String({ minLength: 1 }),
     ceilingMicros: micros,
     tools: Type.Array(
@@ -45,7 +45,7 @@ export const uncertaintyPermissionSchema = Type.Object(
     cycleId: Type.String({ minLength: 1 }),
     projectId: Type.String({ minLength: 1 }),
     issuerSessionId: Type.String({ minLength: 1 }),
-    source: Type.Literal("command"),
+    source: Type.Union([Type.Literal("command"), Type.Literal("dialog")]),
     issuedAt: Type.String({ minLength: 1 }),
     targetType: Type.Union([Type.Literal("request"), Type.Literal("liability")]),
     subjectId: Type.String({ minLength: 1 }),

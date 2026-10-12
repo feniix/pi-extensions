@@ -10,6 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
+import { ownProcessStartTime, processAlive } from "./process-identity.js";
 import {
   assessExploration,
   ExplorationApprovalError,
@@ -19,6 +20,7 @@ import {
   moneyMicros,
   type SpendingGrant,
   spendingGrantSchema,
+  summarizeAccounting,
   uncertaintyPermissionSchema,
   validateAccountingRecords,
 } from "./research-accounting.js";
@@ -44,6 +46,7 @@ import {
   curateAgentRun,
   validateAgentAttempts,
 } from "./research-execution.js";
+import { type MonitorRecord, monitorRecordSchema } from "./research-monitor.js";
 import { createResearchPlanner, type ResearchPlannerSnapshot } from "./research-planner.js";
 import type { ResearchSummaryParams } from "./research-planner-types.js";
 import {
@@ -117,7 +120,16 @@ const snapshotSchema = Type.Object(
   },
   strict,
 );
-const ownerSchema = Type.Object({ sessionId: Type.String(), token: Type.String(), pid: count }, strict);
+const ownerSchema = Type.Object(
+  {
+    sessionId: Type.String(),
+    token: Type.String(),
+    pid: count,
+    /** Process start time of `pid`, so a reused pid is not mistaken for the original owner. */
+    processStart: Type.Optional(Type.String({ minLength: 1 })),
+  },
+  strict,
+);
 // Known versioned operational records are validated by their policy modules.
 // Opaque legacy records remain inspectable, never inferred as consent or no liability.
 const objects = Type.Array(Type.Object({}, { additionalProperties: true }));
@@ -139,6 +151,7 @@ const recordSchema = Type.Object(
     plan: snapshotSchema,
     executionPlan: Type.Optional(executionPlanSchema),
     candidates: Type.Optional(Type.Array(candidateSchema)),
+    monitors: Type.Optional(Type.Array(monitorRecordSchema)),
     attempts: objects,
     ledger: objects,
     grants: objects,
@@ -235,11 +248,44 @@ export function projectResearchSummary(record: ResearchCycle, params?: ResearchS
   };
 }
 
+/**
+ * Liveness of a recorded cycle owner process. Only a proven-dead process (ESRCH)
+ * is stale; any other probe result, including EPERM, means a live process elsewhere.
+ * Age alone never authorizes takeover.
+ */
+export function ownerAlive(owner: { pid: number; processStart?: string } | undefined): boolean {
+  return owner ? processAlive(owner.pid, owner.processStart) : false;
+}
+
+/**
+ * Why a trusted-dialog approval must not be offered for this cycle: overspend,
+ * unresolved or conflicting liabilities stay on explicit operator commands.
+ */
+export function dialogApprovalBlocker(record: ResearchCycle): string | undefined {
+  const accounting = summarizeAccounting(record.grants, record.ledger, {
+    cycleId: record.id,
+    projectId: record.projectId,
+  });
+  if (accounting.conflictingOperationIds.length)
+    return "Conflicting API receipts must be investigated before any further approval.";
+  if (accounting.blockedOperationIds.length)
+    return `Unresolved liabilities (${accounting.blockedOperationIds.join(", ")}) need an explicit operator approve-liability assessment first.`;
+  if (accounting.reportedDollars > accounting.ceilingDollars)
+    return `Reported spend $${accounting.reportedDollars} already exceeds the $${accounting.ceilingDollars} lifetime ceiling; the operator must raise it explicitly with /exa-research approve.`;
+  return undefined;
+}
+
 export async function createResearchCycles(options: ResearchCycleOptions) {
   const projectId = await researchProjectId(options.cwd);
   const directory = join(options.root, projectId);
   let completionScope: string | undefined;
-  const owner = { sessionId: options.sessionId, token: randomUUID(), pid: process.pid };
+  const ownProcessStart = ownProcessStartTime();
+  const owner = {
+    sessionId: options.sessionId,
+    token: randomUUID(),
+    pid: process.pid,
+    ...(ownProcessStart === undefined ? {} : { processStart: ownProcessStart }),
+  };
   let activeId: string | undefined;
   let leasedId: string | undefined;
   let generation = 0;
@@ -531,6 +577,113 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     });
   }
 
+  /**
+   * Freeze and reserve one Agent attempt on an owned record in memory. The caller writes the
+   * record once, so callers can combine the reservation with other changes atomically.
+   */
+  const prepareAgentReservation = (
+    record: ResearchCycle,
+    reference: ArtifactAssertions,
+    transitionMode?: "retry" | "replace",
+  ) => {
+    assertAccountingAvailable(record.id);
+    const artifact = draftArtifact(record, reference);
+    if (record.attempts.length && !transitionMode)
+      throw new Error("AGENT_ATTEMPT_EXISTS: inspect/recover the existing attempt; replacement is gated.");
+    const requestHash = agentRequestHash(artifact.request);
+    const attemptFacts = transitionMode
+      ? retryAttemptFacts(record.attempts, record.ledger, { cycleId: record.id, projectId })
+      : [];
+    const retryHistory = transitionMode
+      ? assessRetryHistory(attemptFacts, record.grants, { cycleId: record.id, projectId }, requestHash, transitionMode)
+      : undefined;
+    if (retryHistory && !retryHistory.eligible) throw new Error(retryHistory.reason);
+    for (const id of retryHistory?.replacementPermissionIds ?? []) {
+      const permission = record.grants.find((entry) => "id" in entry && entry.id === id);
+      if (!Value.Check(replacementPermissionSchema, permission)) throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
+      const latest = [...record.grants]
+        .reverse()
+        .find(
+          (entry) =>
+            Value.Check(uncertaintyPermissionSchema, entry) &&
+            entry.targetType === "liability" &&
+            entry.subjectId === permission.operationId,
+        );
+      const source = record.attempts.find((entry) => "id" in entry && entry.id === permission.attemptId);
+      const sourceFact = attemptFacts.find(
+        (fact) => fact.id === permission.attemptId && fact.operationId === permission.operationId,
+      );
+      if (!Value.Check(agentAttemptSchema, source) || sourceFact?.knownLiabilityMicros === undefined)
+        throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
+      if (
+        !Value.Check(uncertaintyPermissionSchema, latest) ||
+        latest.id !== permission.liabilityPermissionId ||
+        permission.originalAllowanceMicros < sourceFact.knownLiabilityMicros
+      )
+        throw new Error("REPLACEMENT_LIABILITY_CHANGED");
+    }
+    const assessment = assessAgent(record.grants, record.ledger, artifact.request, {
+      cycleId: record.id,
+      projectId,
+    });
+    if (!assessment.canDispatch)
+      throw new ExplorationApprovalError(record.id, "web_research_exa", requestHash, artifact.request, assessment);
+    if (assessment.proposedMicros === null || !assessment.requestPermissionId)
+      throw new Error("UNCERTAINTY_APPROVAL_REQUIRED");
+    const createdAt = nextAuthorizationTime(record.grants, record.attempts, record.ledger);
+    const operation: ExplorationOperation = {
+      kind: "exa-exploration-v1",
+      id: randomUUID(),
+      cycleId: record.id,
+      revision: record.revision,
+      tool: "web_research_exa",
+      requestHash,
+      estimateMicros: assessment.proposedMicros,
+      basis: `${assessment.rateProfile.version}; full exact-request operator assessment, not a vendor cap.`,
+      requestPermissionId: assessment.requestPermissionId,
+      status: "reserved",
+      createdAt,
+    };
+    const attempt = {
+      kind: "exa-agent-attempt-v1",
+      id: randomUUID(),
+      cycleId: record.id,
+      projectId,
+      operationId: operation.id,
+      revision: record.revision,
+      requestHash,
+      artifact,
+      assessment: retryHistory ? { ...assessment, retryHistory } : assessment,
+      ...(transitionMode && retryHistory
+        ? {
+            transitionMode,
+            sourceAttemptIds: retryHistory.sourceAttemptIds,
+            replacementPermissionIds: retryHistory.replacementPermissionIds,
+            retryAuthorization: freezeRetryAuthorization(record.grants, record.attempts, record.ledger, {
+              cycleId: record.id,
+              projectId,
+            }),
+          }
+        : {}),
+      status: "intent",
+      createdAt,
+    };
+    if (!Value.Check(agentAttemptSchema, attempt)) throw new Error("Invalid prepared Agent intent.");
+    record.ledger.push(operation);
+    record.attempts.push(attempt);
+    record.status = "running";
+    return { attempt: structuredClone(attempt), artifact: structuredClone(artifact), assessment };
+  };
+  /** The latest grant wins, so a dialog grant keeps any wider ceiling or scope recorded meanwhile. */
+  const mergeWithLatestGrant = (record: ResearchCycle, ceilingMicros: number, tools: readonly string[]) => {
+    const latest = record.grants
+      .filter((grant): grant is SpendingGrant => Value.Check(spendingGrantSchema, grant))
+      .at(-1);
+    return {
+      ceilingMicros: Math.max(ceilingMicros, latest?.ceilingMicros ?? 0),
+      scope: [...new Set([...(latest?.tools ?? []), ...tools])],
+    };
+  };
   const assertDraft = (record: ResearchCycle) => {
     if (record.archived || !["planning", "failed", "unknown"].includes(record.status))
       throw new Error("CYCLE_NOT_EXECUTABLE: No editable planning or historical retry draft.");
@@ -686,14 +839,8 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           const record = await read(id);
           assertArtifactTarget(record, { ...assertions, cycleId: assertions.cycleId ?? id });
           if (!owns(record)) orphanExplorations(record);
-          if (record.owner && !owns(record)) {
-            try {
-              process.kill(record.owner.pid, 0);
-              throw new Error("Research cycle is owned by another live session/runtime.");
-            } catch (error) {
-              if (code(error) !== "ESRCH") throw error;
-            }
-          }
+          if (record.owner && !owns(record) && ownerAlive(record.owner))
+            throw new Error("Research cycle is owned by another live session/runtime.");
           record.owner = { ...owner };
           record.archived = false;
           leasedId = id;
@@ -724,27 +871,113 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     async preview(assertions: ArtifactAssertions = {}) {
       return transaction(async () => draftArtifact(await owned(), assertions));
     },
-    async grantBudget(cycleId: string, dollars: number, tools: string[] = ["web_search_exa"]) {
+    async grantBudget(
+      cycleId: string,
+      dollars: number,
+      tools: string[] = ["web_search_exa"],
+      source: "command" | "dialog" = "command",
+    ) {
       return ordered(() =>
         transaction(async () => {
           const record = await owned();
           assertArtifactTarget(record, { cycleId });
           assertDraft(record);
+          let ceilingMicros = moneyMicros(dollars, true);
+          let scope = [...tools];
+          if (source === "dialog") {
+            // A dialog widens, never narrows: merge with the grant current at write time.
+            const blocker = dialogApprovalBlocker(record);
+            if (blocker) throw new Error(`DIALOG_APPROVAL_BLOCKED: ${blocker} No grant was recorded.`);
+            ({ ceilingMicros, scope } = mergeWithLatestGrant(record, ceilingMicros, scope));
+          }
           const grant = {
             kind: "exa-grant-v1",
             id: randomUUID(),
             cycleId: record.id,
             projectId,
             issuerSessionId: owner.sessionId,
-            source: "command",
+            source,
             issuedAt: nextAuthorizationTime(record.grants, record.attempts, record.ledger),
-            ceilingMicros: moneyMicros(dollars, true),
-            tools: [...tools],
+            ceilingMicros,
+            tools: scope,
           };
           if (!Value.Check(spendingGrantSchema, grant)) throw new Error("Invalid spending scope or amount.");
           record.grants.push(grant as SpendingGrant);
           await write(record);
           return record;
+        }),
+      );
+    },
+    /**
+     * Record one trusted-dialog approval and reserve the approved Agent attempt in a single
+     * durable write: the lifetime ceiling/scope, the one-use exact-request permission and the
+     * frozen attempt. If the reservation cannot be made, nothing is written, so an approval is
+     * never recorded without its attempt.
+     */
+    async approveAndReserveAgent(
+      cycleId: string,
+      approval: {
+        requestHash: string;
+        expectedRevision?: number;
+        artifactHash?: string;
+        allowanceDollars: number;
+        ceilingDollars: number;
+        tools: string[];
+      },
+    ) {
+      return activate((assertCurrent) =>
+        transaction(async () => {
+          const record = await owned();
+          assertCurrent();
+          // Rechecked inside the write: a concurrent submission or retry may have created an
+          // attempt while the dialog was open. No approval is recorded for a refused submission.
+          if (record.attempts.length)
+            throw new Error(
+              "AGENT_ATTEMPT_EXISTS: another submission created an Agent attempt while the dialog was open; no approval was recorded.",
+            );
+          assertArtifactTarget(record, { cycleId, expectedRevision: approval.expectedRevision });
+          if (approval.artifactHash !== undefined && draftArtifact(record, {}).hash !== approval.artifactHash)
+            throw new Error("PROPOSAL_STALE: the plan changed after the proposal was shown; propose again.");
+          assertDraft(record);
+          const blocker = dialogApprovalBlocker(record);
+          if (blocker) throw new Error(`DIALOG_APPROVAL_BLOCKED: ${blocker} No approval was recorded.`);
+          if (!/^[a-f0-9]{64}$/.test(approval.requestHash)) throw new Error("An exact request hash is required.");
+          const issuedAt = nextAuthorizationTime(record.grants, record.attempts, record.ledger);
+          const merged = mergeWithLatestGrant(record, moneyMicros(approval.ceilingDollars, true), approval.tools);
+          const grant = {
+            kind: "exa-grant-v1",
+            id: randomUUID(),
+            cycleId: record.id,
+            projectId,
+            issuerSessionId: owner.sessionId,
+            source: "dialog",
+            issuedAt,
+            ceilingMicros: merged.ceilingMicros,
+            tools: merged.scope,
+          };
+          const permission = {
+            kind: "exa-uncertainty-v1",
+            id: randomUUID(),
+            cycleId: record.id,
+            projectId,
+            issuerSessionId: owner.sessionId,
+            source: "dialog",
+            issuedAt,
+            targetType: "request",
+            subjectId: approval.requestHash,
+            allowanceMicros: moneyMicros(approval.allowanceDollars, true),
+          };
+          if (!Value.Check(spendingGrantSchema, grant) || !Value.Check(uncertaintyPermissionSchema, permission))
+            throw new Error("Invalid dialog approval scope or amount.");
+          record.grants.push(grant as SpendingGrant, permission);
+          const reserved = prepareAgentReservation(record, {
+            cycleId,
+            expectedRevision: approval.expectedRevision,
+            artifactHash: approval.artifactHash,
+          });
+          await write(record, assertCurrent);
+          assertCurrent();
+          return reserved;
         }),
       );
     },
@@ -754,107 +987,10 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         transaction(async () => {
           const record = await owned();
           assertCurrent();
-          assertAccountingAvailable(record.id);
-          const artifact = draftArtifact(record, reference);
-          if (record.attempts.length && !transitionMode)
-            throw new Error("AGENT_ATTEMPT_EXISTS: inspect/recover the existing attempt; replacement is gated.");
-          const requestHash = agentRequestHash(artifact.request);
-          const attemptFacts = transitionMode
-            ? retryAttemptFacts(record.attempts, record.ledger, { cycleId: record.id, projectId })
-            : [];
-          const retryHistory = transitionMode
-            ? assessRetryHistory(
-                attemptFacts,
-                record.grants,
-                { cycleId: record.id, projectId },
-                requestHash,
-                transitionMode,
-              )
-            : undefined;
-          if (retryHistory && !retryHistory.eligible) throw new Error(retryHistory.reason);
-          for (const id of retryHistory?.replacementPermissionIds ?? []) {
-            const permission = record.grants.find((entry) => "id" in entry && entry.id === id);
-            if (!Value.Check(replacementPermissionSchema, permission)) throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
-            const latest = [...record.grants]
-              .reverse()
-              .find(
-                (entry) =>
-                  Value.Check(uncertaintyPermissionSchema, entry) &&
-                  entry.targetType === "liability" &&
-                  entry.subjectId === permission.operationId,
-              );
-            const source = record.attempts.find((entry) => "id" in entry && entry.id === permission.attemptId);
-            const sourceFact = attemptFacts.find(
-              (fact) => fact.id === permission.attemptId && fact.operationId === permission.operationId,
-            );
-            if (!Value.Check(agentAttemptSchema, source) || sourceFact?.knownLiabilityMicros === undefined)
-              throw new Error("REPLACEMENT_APPROVAL_REQUIRED");
-            if (
-              !Value.Check(uncertaintyPermissionSchema, latest) ||
-              latest.id !== permission.liabilityPermissionId ||
-              permission.originalAllowanceMicros < sourceFact.knownLiabilityMicros
-            )
-              throw new Error("REPLACEMENT_LIABILITY_CHANGED");
-          }
-          const assessment = assessAgent(record.grants, record.ledger, artifact.request, {
-            cycleId: record.id,
-            projectId,
-          });
-          if (!assessment.canDispatch)
-            throw new ExplorationApprovalError(
-              record.id,
-              "web_research_exa",
-              requestHash,
-              artifact.request,
-              assessment,
-            );
-          if (assessment.proposedMicros === null || !assessment.requestPermissionId)
-            throw new Error("UNCERTAINTY_APPROVAL_REQUIRED");
-          const createdAt = nextAuthorizationTime(record.grants, record.attempts, record.ledger);
-          const operation: ExplorationOperation = {
-            kind: "exa-exploration-v1",
-            id: randomUUID(),
-            cycleId: record.id,
-            revision: record.revision,
-            tool: "web_research_exa",
-            requestHash,
-            estimateMicros: assessment.proposedMicros,
-            basis: `${assessment.rateProfile.version}; full exact-request operator assessment, not a vendor cap.`,
-            requestPermissionId: assessment.requestPermissionId,
-            status: "reserved",
-            createdAt,
-          };
-          const attempt = {
-            kind: "exa-agent-attempt-v1",
-            id: randomUUID(),
-            cycleId: record.id,
-            projectId,
-            operationId: operation.id,
-            revision: record.revision,
-            requestHash,
-            artifact,
-            assessment: retryHistory ? { ...assessment, retryHistory } : assessment,
-            ...(transitionMode && retryHistory
-              ? {
-                  transitionMode,
-                  sourceAttemptIds: retryHistory.sourceAttemptIds,
-                  replacementPermissionIds: retryHistory.replacementPermissionIds,
-                  retryAuthorization: freezeRetryAuthorization(record.grants, record.attempts, record.ledger, {
-                    cycleId: record.id,
-                    projectId,
-                  }),
-                }
-              : {}),
-            status: "intent",
-            createdAt,
-          };
-          if (!Value.Check(agentAttemptSchema, attempt)) throw new Error("Invalid prepared Agent intent.");
-          record.ledger.push(operation);
-          record.attempts.push(attempt);
-          record.status = "running";
+          const reserved = prepareAgentReservation(record, reference, transitionMode);
           await write(record, assertCurrent);
           assertCurrent();
-          return { attempt: structuredClone(attempt), artifact: structuredClone(artifact), assessment };
+          return reserved;
         }),
       );
     },
@@ -1531,6 +1667,89 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         }
         return { ...result, cycle: record };
       });
+    },
+    /**
+     * Register host-owned background monitoring for an acknowledged attempt in the
+     * owning session. Monitoring has no create/retry/replace/cancel authority.
+     */
+    async registerMonitor(cycleId: string, attemptId: string, options: { terminal?: boolean } = {}) {
+      return ordered(() =>
+        transaction(async () => {
+          const record = await owned();
+          assertArtifactTarget(record, { cycleId });
+          const attempt = record.attempts.find((entry) => "id" in entry && entry.id === attemptId);
+          if (!Value.Check(agentAttemptSchema, attempt) || !attempt.result?.remoteId)
+            throw new Error("MONITOR_UNAVAILABLE: no acknowledged remote run ID to observe.");
+          record.monitors ??= [];
+          const existing = record.monitors.find((entry) => entry.attemptId === attemptId);
+          if (attempt.result.terminal) {
+            // A terminal attempt gets no observation, only a stopped record that can hold its notice.
+            if (!options.terminal) throw new Error("MONITOR_UNAVAILABLE: the attempt is already terminal.");
+            if (existing) return { monitor: structuredClone(existing), created: false };
+            const stopped: MonitorRecord = {
+              kind: "exa-monitor-v1",
+              attemptId,
+              runId: attempt.result.remoteId,
+              originSessionId: owner.sessionId,
+              state: "stopped",
+              gets: 0,
+              consecutiveTransientErrors: 0,
+              startedAt: new Date().toISOString(),
+            };
+            record.monitors.push(stopped);
+            await write(record);
+            return { monitor: structuredClone(stopped), created: true };
+          }
+          if (existing && (existing.state === "registered" || existing.state === "running")) {
+            // The owning runtime takes the monitor over: delivery targets this session and the
+            // lifetime restarts, so a dead owner's leftover origin cannot strand the notice.
+            if (existing.originSessionId !== owner.sessionId) {
+              existing.originSessionId = owner.sessionId;
+              existing.startedAt = new Date().toISOString();
+              await write(record);
+            }
+            return { monitor: structuredClone(existing), created: false };
+          }
+          const monitor: MonitorRecord = existing ?? {
+            kind: "exa-monitor-v1",
+            attemptId,
+            runId: attempt.result.remoteId,
+            originSessionId: owner.sessionId,
+            state: "registered",
+            gets: 0,
+            consecutiveTransientErrors: 0,
+            startedAt: new Date().toISOString(),
+          };
+          monitor.state = "registered";
+          delete monitor.reason;
+          monitor.originSessionId = owner.sessionId;
+          monitor.startedAt = new Date().toISOString();
+          monitor.consecutiveTransientErrors = 0;
+          delete monitor.nextDelayMs;
+          if (!existing) record.monitors.push(monitor);
+          if (!Value.Check(monitorRecordSchema, monitor)) throw new Error("Invalid monitor record.");
+          await write(record);
+          return { monitor: structuredClone(monitor), created: !existing };
+        }),
+      );
+    },
+    /**
+     * Operation-bound monitor fact update: reads the record directly, never
+     * acquires or replaces ownership, never touches plan, grants or attempts.
+     */
+    async updateMonitor(cycleId: string, attemptId: string, mutate: (monitor: MonitorRecord) => void) {
+      return ordered(() =>
+        transaction(async () => {
+          const record = await read(cycleId);
+          const monitor = record.monitors?.find((entry) => entry.attemptId === attemptId);
+          if (!monitor) throw new Error("MONITOR_UNKNOWN: no monitor is recorded for this attempt.");
+          const before = JSON.stringify(monitor);
+          mutate(monitor);
+          if (!Value.Check(monitorRecordSchema, monitor)) throw new Error("Invalid monitor record update.");
+          if (before !== JSON.stringify(monitor)) await write(record);
+          return structuredClone(monitor);
+        }),
+      );
     },
     async archive(id = activeId) {
       if (!id) throw new Error("No active research cycle to archive.");

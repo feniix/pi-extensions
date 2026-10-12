@@ -85,6 +85,13 @@ Then run pi with:
 pi -e npm:@feniix/pi-exa -- --exa-config-file ~/.config/pi/exa.json
 ```
 
+### Optional API base URL
+
+Set `EXA_BASE_URL` to point the Exa SDK at a self-hosted proxy or a controllable
+endpoint mock (the repository's qualification smoke uses one). It must be an absolute
+`http(s)` URL; the API key is sent to that host. Unset means the SDK default
+`https://api.exa.ai`. The value is never written to cycle records.
+
 ### Shared non-secret settings
 
 Supports standard pi settings locations:
@@ -124,6 +131,11 @@ Example:
 - `--exa-config <path>` (deprecated alias for `--exa-config-file`).
 - `--exa-timeout-ms <ms>`: default per-call timeout for Exa-backed tools (built-in 60000).
 - `--exa-research-timeout-ms <ms>`: override for `web_research_exa` Agent runs (built-in 180000).
+- `--exa-submit-timeout-ms <ms>`: bounded wait for the Exa create acknowledgement in guided cycle
+  submission (`researchMode: "submit"`, built-in 30000). Expiry leaves the attempt unknown; it never
+  cancels or resubmits, and a genuine late acknowledgement is saved on the original attempt.
+- `--exa-monitor-interval-ms <ms>`: delay before the first background check of an approved run
+  (built-in 5000). Later checks back off ×1.5 up to 60 s with ±20 % jitter.
 
 > For ordinary Exa SDK calls, the timeout bounds the JS-side wait because `exa-js` does not yet accept `AbortSignal` ([exa-labs/exa-js#158](https://github.com/exa-labs/exa-js/issues/158)). `web_research_exa` owns the Agent run lifecycle and calls Exa's cancel endpoint on host abort or timeout once Exa has returned a run ID.
 
@@ -131,7 +143,89 @@ Example:
 
 ### Opt-in durable Pi planning
 
-Start Pi with `--exa-enable-cycles` to use durable research planning:
+Start Pi with `--exa-enable-cycles` to use durable research planning.
+
+#### Guided research (6.1.0)
+
+The normal path needs no slash commands, copied hashes or hand-written schemas.
+Say what you want researched; the assistant drives the cycle and you make the
+material decisions through Pi's own confirmation dialog:
+
+1. **Draft.** The assistant starts a non-spending cycle with
+   `exa_research_status` `action: "start"` and records the goal, scope, criteria,
+   labeled assumptions and task schema with `exa_research_step`, asking only
+   materially useful questions.
+2. **Proposal.** `exa_research_summary` `mode: "proposal"` renders the readable
+   scope/cost proposal: question, scope and exclusions, criteria, assumptions,
+   source strategy, deliverable, effort, providers, input/exclusion rows,
+   estimated cost and basis, lifetime allowance and existing liabilities. It
+   returns a `proposalId` bound to that exact compiled request and revision.
+3. **Approval.** `web_research_exa` `researchMode: "submit"` with the active
+   `cycleId` and `proposalId` opens a trusted host confirmation dialog (TUI or
+   RPC; ten-minute timeout). Only its real answer records the lifetime scope/
+   ceiling and the one-use exact-request permission, in one durable write.
+   Requests with Exa Connect providers have no package estimate: the operator
+   assesses the exact request with `/exa-research approve` and `approve-request`,
+   and the dialog then confirms that funding. The dialog is not offered while
+   overspend, conflicting receipts or unassessed unknown liabilities exist
+   (`DIALOG_APPROVAL_BLOCKED`).
+   Decline, dismissal, timeout or a headless mode submits nothing
+   (`APPROVAL_NOT_GRANTED` / `APPROVAL_UNAVAILABLE`); a plan edit after the
+   proposal fails as `PROPOSAL_STALE`; metered `auto` effort without
+   `budget.maxCostDollars` fails as `ESTIMATE_UNAVAILABLE`. Assistant-written
+   flags, amounts or prose never count as consent.
+4. **Submission.** After approval the extension freezes the attempt, performs one
+   bounded create and returns the saved Exa run ID with the cycle/attempt
+   reference while the job is still pending. Interrupting the conversation does
+   not cancel the remote run. If no acknowledgement arrives in time the attempt
+   stays `unknown` (`SUBMISSION_UNKNOWN`): nothing is invented or resubmitted and
+   a late genuine run ID is saved on that attempt.
+5. **Background monitoring.** The extension registers a host-owned monitor for
+   the saved run and returns control. It performs bounded, non-overlapping GETs
+   on that run only (first after 5 s, then ×1.5 backoff capped at 60 s), while
+   you keep chatting. Monitoring has no create, retry, replace or cancel
+   authority. Transient errors back off; eight consecutive failures or ten
+   minutes of silence pause it (`TRANSIENT_EXHAUSTED`); authentication and
+   not-found errors pause it immediately (`AUTH`, `NOT_FOUND`); three hours of
+   observation pause it (`MONITOR_LIFETIME`). A paused monitor is not a failed run:
+   the remote work and its liability continue. If registration itself fails after
+   the create, the result still carries the saved run ID with `monitoring: "paused"`.
+6. **Completion.** On a terminal observation the extension persists the remote
+   facts, classified usage and local validation outcome first, then records one
+   completion notice per attempt and delivers it to the originating session with
+   Pi's message queue: an idle session wakes the assistant immediately, an active
+   response is finished first. The notice names the attempt and asks the assistant
+   to report with `exa_research_status` (final report, recorded gaps, usage) and
+   `exa_research_summary` `mode: "brief"` or `"source_pack"`; the reporting turn
+   performs no paid research. Invalid local output after remote success is
+   reported as a processing failure with same-run `researchMode: "recover"`
+   guidance. Repeated terminal observations never create a second notice.
+7. **Lifecycle fences.** Session switch, fork, tree navigation, reload and
+   shutdown stop local timers and mark monitors `SHUTDOWN`; archive marks them
+   `ARCHIVED` and warns that remote work may continue. On the next start, stale
+   monitors become `RESTART` and pending notices are listed, never delivered into
+   a different session or resumed implicitly. A notice that was sent but whose
+   session entry is missing after a restart is marked `uncertain`; Pi offers no
+   delivery acknowledgement API, so acknowledgement comes from observing the
+   persisted `exa-research-completion` entry and exactly-once delivery across
+   crashes is not claimed.
+8. **Recovery.** Explicit resume (`exa_research_status` `action: "resume"`, or
+   `/exa-research resume`) reacquires ownership, re-registers eligible paused
+   monitors for the existing saved run (no create, no reservation), creates the
+   missing notice for a terminal attempt whose notice scheduling crashed, and
+   delivers pending or uncertain notices into the resuming session. A re-sent
+   uncertain notice is labeled as a possible duplicate of the same single run.
+   A live owner in another runtime refuses the resume; only ownerless or
+   proven-dead owners' monitors are treated as stale on start. Local interruption
+   keeps an attempt `unknown` while its saved run ID, frozen artifact, grants and
+   liability survive; late original facts settle after archive without
+   reactivating monitoring or delivering into the archived context. Resume never
+   infers spending consent.
+
+Optional exploratory retrieval during planning (for example `web_search_exa`
+with the active `cycleId`) is disclosed through the same dialog when no lifetime
+grant covers it yet; approving it never authorizes Agent research. The slash
+commands below remain available as an advanced interface.
 
 - `/exa-research start <topic>` creates an isolated cycle without paid work.
 - `/exa-research list` lists readable saved cycles and coarse unreadable cycle IDs
@@ -304,8 +398,14 @@ dispatchability; Agent still needs its exact-request approval.
 
 #### Compiled Agent attempts
 
-With cycles enabled, an active `web_research_exa` call executes the exact current
-artifact after **both** operator permissions:
+With cycles enabled, the guided `researchMode: "submit"` path above obtains both
+permissions through the confirmation dialog and is the only normal dispatch.
+Blocking cycle execution (`researchMode: "active"`, or no mode with an active
+cycle) is not available: it reports structured conflicts or stale references
+first, then returns `GUIDED_SUBMISSION_REQUIRED` without dispatching. The
+explicitly funded `retry` / `replace` paths dispatch the same non-blocking way,
+with background monitoring, after **both** operator permissions are recorded by
+command:
 
 1. `/exa-research approve <cycle-id> <total-dollar-ceiling> web_research_exa`
    explicitly includes Agent in the lifetime tool scope (include other desired

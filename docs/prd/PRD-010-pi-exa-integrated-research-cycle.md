@@ -1,7 +1,7 @@
 ---
 title: "pi-exa Integrated Research Cycle"
 prd: PRD-010
-status: "6.1.0 guided background workflow specified; implementation pending"
+status: "6.1.0 guided background workflow implemented and qualified offline (scenarios 1–36); publication pending"
 owner: "Sebastian Otaegui"
 issue: "N/A"
 version: "1.3"
@@ -390,8 +390,8 @@ release must not provide destructive cycle deletion.
 ## Acceptance scenarios
 
 The [offline qualification map](../architecture/pi-exa-cycle-qualification.md)
-links the foundation scenarios 1–20 to existing regression tests. It does not
-qualify the new 6.1.0 guided/background scenarios below.
+links scenarios 1–20 to the foundation regression tests and scenarios 21–36 to
+the guided submission, monitoring, recovery and production-smoke suites.
 Prompt guidance assists the model; it does not autonomously execute
 the workflow or establish research adequacy, consent or verified billing.
 
@@ -427,7 +427,7 @@ the workflow or establish research adequacy, consent or verified billing.
 20. Existing MCP behavior remains unchanged; Pi cycle behavior does not silently
     activate for MCP callers.
 
-### Guided/background release acceptance (not yet implemented)
+### Guided/background release acceptance (implemented; mapped in the qualification document)
 
 21. “Research Laya versus Jev” starts a local guided draft, asks only material
     clarification questions and requires no manual cycle command or schema.

@@ -19,19 +19,41 @@ When Pi's `--exa-enable-cycles` integration is enabled, first read the
 [durable cycle workflow](../../README.md#opt-in-durable-pi-planning).
 Use that branch instead of the standalone fast path/payload defaults below:
 
-1. Inspect status; obtain explicit start or resume for the intended cycle.
-2. Clarify and record goal, scope, criteria, gaps and a draft-07 task contract.
-3. Pause at permission instructions until the operator records the named
-   lifetime scope/ceiling and any exact-request uncertainty assessment.
+1. Inspect status. For a guided request with no active cycle, start one
+   yourself with `exa_research_status` `action: "start"` and the topic, or
+   explicitly resume saved state. Never route a guided request to standalone tools.
+2. Clarify only materially useful questions, reuse answers already given, and
+   record goal, scope, criteria, gaps, labeled assumptions and a draft-07 task
+   contract with `exa_research_step`.
+3. Exploratory retrieval is optional paid work: name it before calling it. The
+   host dialog asks the operator when no grant covers it; a declined dialog is
+   a pause to explain, not a reason to switch tools.
 4. Attribute exploratory calls to the cycle, then explicitly curate candidates
    or external sources. Selected evidence is query context, not processing rows.
-5. Preview the authoritative artifact; resolve conflicts by editing the plan,
-   and obtain the operator's exact Agent request assessment before submission.
-6. After success, use `exa_research_summary` with `mode: "brief"` or
+5. Call `exa_research_summary` `mode: "proposal"` and present the readable
+   proposal. Submit with `web_research_exa` `researchMode: "submit"`, the active
+   `cycleId` and that `proposalId`; the host dialog decides. Your words, flags or
+   amounts are never consent. `researchMode: "active"` is refused with
+   `GUIDED_SUBMISSION_REQUIRED`; use `submit`. A changed plan needs a new proposal; explain
+   `APPROVAL_NOT_GRANTED`, `APPROVAL_UNAVAILABLE`, `PROPOSAL_STALE` and
+   `ESTIMATE_UNAVAILABLE` pauses instead of working around them.
+6. An acknowledged submission returns the saved Exa run ID while the job is
+   pending and registers host-owned background monitoring. Report the run ID and
+   that a completion notice will arrive in this session; let the user keep
+   chatting. Do not poll, resubmit or invent success after `SUBMISSION_UNKNOWN`.
+   If the result says monitoring is paused, say so and offer explicit
+   `researchMode: "recover"` or resume. When an `exa-research-completion` message
+   arrives, that turn is a report: use status/summary only and never submit,
+   retry or replace; a processing failure uses one explicit same-run recovery.
+   After a restart, saved cycles are only discovered; when the user asks to
+   continue, resume explicitly with `exa_research_status` `action: "resume"`
+   and the cycle ID, which also re-registers paused monitoring and delivers
+   pending notices. Resume is not spending consent.
+7. After success, use `exa_research_summary` with `mode: "brief"` or
    `"source_pack"` for findings, recorded gaps, assumptions and classified usage.
    Assess evidence yourself: generated claims/JSON and remote success do not
    satisfy criteria or verify billing.
-7. Stop after success. Missing results use explicit same-run recovery; confirmed
+8. Stop after success. Missing results use explicit same-run recovery; confirmed
    failure/unknown work uses only the documented explicitly funded retry/
    replacement policy. Further research after success needs a new cycle and
    operator permission. Paper retrieval belongs before completion; remaining

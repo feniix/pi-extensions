@@ -26,14 +26,44 @@ export async function observeExaRequest<T>(
   return response;
 }
 
+/** A local configuration problem; retrying cannot fix it. */
+export class ExaConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExaConfigurationError";
+  }
+}
+
+/**
+ * Optional Exa API base URL override (`EXA_BASE_URL`), for self-hosted proxies
+ * and controllable endpoint mocks in qualification smoke tests. Unset means the
+ * SDK default (https://api.exa.ai).
+ */
+export function resolveExaBaseUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const value = env.EXA_BASE_URL?.trim();
+  if (!value) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    // Never echo the value: a URL can carry credentials.
+    throw new ExaConfigurationError("EXA_BASE_URL must be an absolute http(s) URL such as https://api.exa.ai.");
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:")
+    throw new ExaConfigurationError("EXA_BASE_URL must use http or https.");
+  return value.replace(/\/+$/, "");
+}
+
 export function getExaClient(apiKey: string): Exa {
-  const existing = exaClients.get(apiKey);
+  const baseUrl = resolveExaBaseUrl();
+  const key = baseUrl ? `${baseUrl}\u0000${apiKey}` : apiKey;
+  const existing = exaClients.get(key);
   if (existing) {
     return existing;
   }
 
-  const client = new Exa(apiKey);
-  exaClients.set(apiKey, client);
+  const client = baseUrl ? new Exa(apiKey, baseUrl) : new Exa(apiKey);
+  exaClients.set(key, client);
   return client;
 }
 

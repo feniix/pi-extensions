@@ -99,6 +99,37 @@ Completion does not establish criterion coverage or independently verified cost.
 
 *Avoid:* verified answer (completion and evidence quality are separate).
 
+## Research proposal
+
+The readable, non-spending rendering of a cycle's compiled execution artifact
+(question, scope, criteria, assumptions, source strategy, deliverable, effort,
+providers, estimate and basis, allowance and liabilities) together with a
+`proposalId` derived from the exact artifact hash, plan revision and estimate
+basis. The guided path submits only against a current proposal; a plan edit makes
+it stale. Presenting a proposal grants nothing.
+
+*Avoid:* approval or spending grant (only the host dialog's answer records those).
+
+## Background monitor
+
+Host-owned observation of one acknowledged Agent run while Pi is open: bounded,
+non-overlapping GETs with backoff, persisted as a monitor record on the cycle
+(state, pause reason, counters). It has no create, retry, replace or cancel
+authority; a paused monitor is not a failed run, and the remote work and its
+liability continue regardless.
+
+*Avoid:* polling loop in the assistant, or remote cancellation.
+
+## Completion notice
+
+The one durable record per attempt and terminal outcome that schedules the
+originating session's wakeup (`exa-research-completion` custom message). Its state
+is `pending`, `sent`, `acknowledged` (the persisted session entry was observed) or
+`uncertain` (sent but unconfirmed after a restart). A re-sent notice is labeled a
+possible duplicate; exactly-once delivery across crashes is not claimed.
+
+*Avoid:* report (the notice tells the assistant to report; it is not the report).
+
 ## Spending grant
 
 Operator-issued permission for a cycle's budget and scope, including specifically

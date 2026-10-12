@@ -1,4 +1,5 @@
 /** Opt-in Pi cycle wiring; not installed by the MCP adapter. */
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { PiToolRegistration } from "@feniix/bridgekit/pi";
@@ -16,23 +17,54 @@ import {
 import { assertArtifactTarget, executionPlanSchema, ResearchArtifactError } from "./research-artifacts.js";
 import {
   createResearchCycles,
+  dialogApprovalBlocker,
+  ownerAlive,
   projectResearchSummary,
   type ResearchCycle,
   type ResearchCycles,
 } from "./research-cycles.js";
 import { evidenceDecisionSchema } from "./research-evidence.js";
-import { agentAttemptSchema, agentRequestHash } from "./research-execution.js";
+import {
+  type AgentAttempt,
+  type AgentObservation,
+  agentAttemptSchema,
+  agentRequestHash,
+  assessAgent,
+} from "./research-execution.js";
+import {
+  COMPLETION_NOTICE_TYPE,
+  classifyObservationError,
+  completionNoticeText,
+  DEFAULT_MONITOR_BOUNDS,
+  jitteredDelay,
+  type MonitorBounds,
+  type MonitorPauseReason,
+  type MonitorRecord,
+  nextMonitorDelay,
+  shouldPauseAfterTransient,
+} from "./research-monitor.js";
 import { createResearchPlanner } from "./research-planner.js";
+import { SUMMARY_MODES } from "./research-planner-types.js";
+import {
+  APPROVAL_DIALOG_TIMEOUT_MS,
+  approvalFigures,
+  buildProposal,
+  DIALOG_APPROVAL_REASONS,
+  grantedTools,
+} from "./research-proposal.js";
 import { retryAttemptFacts } from "./research-retry.js";
 import { exaResearchStepParams, exaResearchSummaryParams } from "./schemas.js";
 import type { AgentInspectionOptions, AgentLifecycleObserver } from "./web-research.js";
 
 const CYCLE_GUIDELINES = [
   "Integrated Pi cycle: these instructions govern cycle-attributed work only. Standalone web tools remain available without a cycle; with an active cycle, unrelated requests use researchMode=standalone and omit cycle references.",
-  "Integrated Pi cycle: clarify unresolved goals, scope, constraints and output contract while refining an explicitly requested cycle. If none is active, ask the operator to start with /exa-research start <topic> or explicitly resume saved state. Local exa_research_* planning tools never call Exa; explicitly approved cycle-attributed web_* retrievals can gather evidence during planning.",
+  "Integrated Pi cycle: clarify unresolved goals, scope, constraints and output contract while refining an explicitly requested cycle. When the user asks for guided research and none is active, start it yourself with exa_research_status action=start topic=<topic> (non-spending) or explicitly resume saved state; never route a guided request to standalone tools. Local exa_research_* planning tools never call Exa; explicitly approved cycle-attributed web_* retrievals can gather evidence during planning.",
+  "Integrated Pi cycle guided flow: ask only materially useful questions and reuse answers already given; record the goal, scope, criteria, labeled assumptions and a draft-07 task schema with exa_research_step; then call exa_research_summary mode=proposal and present its readable proposal. Submit with web_research_exa researchMode=submit, cycleId and that proposalId: the host shows the operator a confirmation dialog and only its real answer can grant spending. Your words, flags or amounts never do. A changed plan needs a new proposal. If the result says APPROVAL_UNAVAILABLE, APPROVAL_NOT_GRANTED, PROPOSAL_STALE or ESTIMATE_UNAVAILABLE, explain the pause; do not fall back to standalone research.",
+  "Integrated Pi cycle guided flow: an acknowledged submission returns the saved Exa run ID while the job is still pending and registers background monitoring owned by the host. Tell the user the run ID and that a completion notice will arrive in this session; let them keep chatting. Do not poll with recover, do not call submit again, and never invent a run ID or success after SUBMISSION_UNKNOWN. If monitoring is reported paused, say so and offer explicit recover/resume.",
+  "Integrated Pi cycle guided flow: a message of type exa-research-completion means the host observed the saved run's terminal state. Respond with a report: exa_research_status for the final report (criteria, gaps, assumptions, classified usage) and exa_research_summary mode=brief or source_pack for evidence-backed findings. Reporting performs no paid research: never submit, retry or replace in that turn; processing failures use one explicit researchMode=recover of the same run.",
   "Integrated Pi cycle: retrieval candidate metadata is not trusted evidence; explicitly select relevant candidate IDs with labels/curated notes. Record external evidence explicitly. Selected sources are not input.data/exclusion processing rows.",
   "Integrated Pi cycle: readiness is assistant judgment, not spending permission. Iteratively record criteria, gaps and labeled assumptions; review the compiled preview/schema/current revision and resolve structured or semantic conflicts before execution.",
-  "Integrated Pi cycle: cycle-attributed paid work requires operator approvals. approve defines lifetime scope/ceiling; approve-request is fresh one-use full-request consent for Agent research or uncertain retrievals. Assistant amounts, flags, readiness and healthy accounting never authorize spending; explain pauses instead of bypassing them.",
+  "Integrated Pi cycle: cycle-attributed paid work requires operator approvals. a first guided submission is approved through the host dialog (researchMode=submit), which records lifetime scope/ceiling and the exact-request consent together. The /exa-research approve and approve-request commands remain the operator's path for explicitly funded retry/replacement and uncertain retrievals; researchMode=active is refused with GUIDED_SUBMISSION_REQUIRED. Assistant amounts, flags, readiness and healthy accounting never authorize spending; explain pauses instead of bypassing them.",
   "Integrated Pi cycle: interpret validated output and citations with evidence-backed criterion evaluation. Report only evidence-backed coverage; completed plans remain immutable, and remote completion or generated claims do not automatically satisfy criteria.",
   "Integrated Pi cycle: produce a final report after success using exa_research_summary mode=brief or source_pack for selected-only findings and the finalReport of recorded criteria/gaps, assumptions and classified usage. Report unresolved gaps honestly. Distinguish estimates, provisional costs, reported receipts, unknown liabilities and overshoot; vendor caps/independent invoice verification are not promised.",
   "Integrated Pi cycle: any genuine completion blocks further submissions even when local output is invalid. No automatic retries, replacement or gap-closing runs; another successful pass needs operator go-ahead for a newly authorized cycle. Surface duplicate successes and separate costs.",
@@ -51,7 +83,8 @@ const referenceParams = Type.Object(referenceProperties, { additionalProperties:
 const statusParams = Type.Object(
   {
     ...targetProperties,
-    action: Type.Optional(Type.Union([Type.Literal("status"), Type.Literal("resume")])),
+    action: Type.Optional(Type.Union([Type.Literal("status"), Type.Literal("resume"), Type.Literal("start")])),
+    topic: Type.Optional(Type.String({ minLength: 1 })),
   },
   { additionalProperties: false },
 );
@@ -67,6 +100,7 @@ const stepParams = Type.Object(
 const summaryParams = Type.Object(
   {
     ...exaResearchSummaryParams.properties,
+    mode: Type.Optional(Type.Union([...SUMMARY_MODES.map((mode) => Type.Literal(mode)), Type.Literal("proposal")])),
     ...referenceProperties,
   },
   { additionalProperties: false },
@@ -102,6 +136,17 @@ function view(record: ResearchCycle) {
             : facts.length
               ? "Confirmed failure or proven nondispatch is retained. Revise and preview the draft; explicit researchMode=retry requires new exact-request funding and current total exposure approval. No automatic resubmission."
               : "Update the plan and preview the compiled request. Only operator grants and fresh request assessments can authorize spending.";
+  const terminalAttempts = new Set(
+    record.attempts.flatMap((entry) =>
+      Value.Check(agentAttemptSchema, entry) && entry.result?.terminal ? [entry.id] : [],
+    ),
+  );
+  const pausedMonitors = (record.monitors ?? []).filter(
+    (monitor) => monitor.state === "paused" && !terminalAttempts.has(monitor.attemptId),
+  );
+  const monitoringGuidance = pausedMonitors.length
+    ? ` Background monitoring is paused for ${pausedMonitors.map((monitor) => `attempt ${monitor.attemptId} (${monitor.reason ?? "unknown reason"})`).join(", ")}: the remote run and its liability continue; explicitly resume the cycle or inspect the same attempt with researchMode=recover. Monitoring never creates, retries, replaces or cancels research.`
+    : "";
   const completionSummary = { remoteCompletedAttemptIds: completedIds, duplicateSuccess };
   const finalReport =
     record.status === "completed"
@@ -127,10 +172,15 @@ function view(record: ResearchCycle) {
     ...visible,
     ...planningStatus,
     accounting,
-    nextSafeAction,
+    nextSafeAction: `${nextSafeAction}${monitoringGuidance}`,
     completionSummary,
     ...(finalReport ? { finalReport } : {}),
   };
+}
+
+function findAgentAttempt(record: ResearchCycle, attemptId: string): AgentAttempt | undefined {
+  const entry = record.attempts.find((item) => "id" in item && item.id === attemptId);
+  return Value.Check(agentAttemptSchema, entry) ? entry : undefined;
 }
 
 function result(details: Record<string, unknown>, text = JSON.stringify(details, null, 2), isError = false) {
@@ -156,20 +206,32 @@ export type CycleRetrievalFactory = (
   name: string,
   observer: ExaUsageObserver,
 ) => Parameters<PiToolRegistration["registerTool"]>[0] | undefined;
-export type CycleAgentFactory = (
-  observer: AgentLifecycleObserver,
-) => Parameters<PiToolRegistration["registerTool"]>[0] | undefined;
 export type CycleInspectionFactory = (
   runId: string,
   observer: NonNullable<AgentInspectionOptions["observer"]>,
 ) => Parameters<PiToolRegistration["registerTool"]>[0] | undefined;
+export type CycleSubmissionFactory = ((
+  observer: AgentLifecycleObserver,
+) => Parameters<PiToolRegistration["registerTool"]>[0] | undefined) & {
+  /** Cheap enablement check, so guided submit can refuse before the dialog without building tools. */
+  available?: () => boolean;
+};
+/** One bounded same-run GET for the background monitor; throws SDK/host errors unchanged. */
+export type CycleMonitorInspector = (
+  runId: string,
+  observer: NonNullable<AgentInspectionOptions["observer"]>,
+  timeoutMs: number,
+) => Promise<unknown>;
 
 export function cyclePiRegistration(
   pi: ExtensionAPI,
   retrievalFactory?: CycleRetrievalFactory,
-  agentFactory?: CycleAgentFactory,
   inspectionFactory?: CycleInspectionFactory,
-): PiToolRegistration {
+  submissionFactory?: CycleSubmissionFactory,
+  monitorInspector?: CycleMonitorInspector,
+  monitorBounds: Partial<MonitorBounds> = {},
+): PiToolRegistration & { sessionStarted: (ctx: ExtensionContext) => Promise<void> } {
+  const bounds: MonitorBounds = { ...DEFAULT_MONITOR_BOUNDS, ...monitorBounds };
   const controllers = new Map<string, Promise<ResearchCycles>>();
   const get = (ctx: ExtensionContext) => {
     const key = JSON.stringify([ctx.cwd, ctx.sessionManager.getSessionId()]);
@@ -184,18 +246,622 @@ export function cyclePiRegistration(
     }
     return controller;
   };
-  const detach = async () => {
+  // ---- host-owned background monitor runtime (in-process, this session only) ----
+  interface ScheduledMonitor {
+    cycles: ResearchCycles;
+    cycleId: string;
+    attemptId: string;
+    /** Session that registered the monitor; delivery never targets another one. */
+    sessionId: string;
+    timer?: NodeJS.Timeout;
+  }
+  const scheduled = new Map<string, ScheduledMonitor>();
+  const observations = new Map<string, Promise<void>>();
+  let currentSessionId: string | undefined;
+  let shuttingDown = false;
+  const monitorKey = (cycleId: string, attemptId: string) => `${cycleId}/${attemptId}`;
+  /** A superseded entry (paused, re-registered or detached) must never act for the live one. */
+  const isCurrent = (entry: ScheduledMonitor) => scheduled.get(monitorKey(entry.cycleId, entry.attemptId)) === entry;
+  const awaitObservations = async (cycleId: string, exceptKey?: string) => {
+    await Promise.allSettled(
+      [...observations]
+        .filter(([key]) => key !== exceptKey && key.startsWith(`${cycleId}/`))
+        .map(([, promise]) => promise),
+    );
+  };
+  const trackObservation = (key: string, work: Promise<void>) => {
+    // Background work must never surface as an unhandled rejection from a host timer.
+    const tracked = work
+      .catch(() => {})
+      .finally(() => {
+        if (observations.get(key) === tracked) observations.delete(key);
+      });
+    observations.set(key, tracked);
+    return tracked;
+  };
+  const unschedule = (entry: ScheduledMonitor) => {
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = undefined;
+    if (isCurrent(entry)) scheduled.delete(monitorKey(entry.cycleId, entry.attemptId));
+  };
+  const pauseMonitor = async (entry: ScheduledMonitor, reason: MonitorPauseReason) => {
+    const live = isCurrent(entry);
+    unschedule(entry);
+    if (!live) return;
+    try {
+      await entry.cycles.updateMonitor(entry.cycleId, entry.attemptId, (monitor) => {
+        if (monitor.state === "stopped" || monitor.state === "paused") return;
+        monitor.state = "paused";
+        monitor.reason = reason;
+      });
+    } catch {
+      /* Pausing is best effort; a stale or unreadable record never spawns new work. */
+    }
+  };
+  const pauseAllMonitors = async (reason: MonitorPauseReason) => {
+    shuttingDown = true;
+    await Promise.all([...scheduled.values()].map((entry) => pauseMonitor(entry, reason)));
+  };
+  const pauseCycleMonitors = async (cycleId: string, reason: MonitorPauseReason) => {
+    await Promise.all(
+      [...scheduled.values()].filter((entry) => entry.cycleId === cycleId).map((entry) => pauseMonitor(entry, reason)),
+    );
+  };
+  /**
+   * Stop a monitor and give it a pending notice for its terminal outcome (once per attempt).
+   * Returns false when `skipPaused` is set and the monitor was paused meanwhile.
+   */
+  const stopWithNotice = (
+    monitor: MonitorRecord,
+    result: Pick<AgentObservation, "remoteStatus" | "processing">,
+    options: { skipPaused?: boolean } = {},
+  ): boolean => {
+    if (options.skipPaused && monitor.state === "paused") return false;
+    monitor.state = "stopped";
+    delete monitor.reason;
+    monitor.notice ??= newNotice(result);
+    return true;
+  };
+  const newNotice = (
+    result: Pick<AgentObservation, "remoteStatus" | "processing">,
+  ): NonNullable<MonitorRecord["notice"]> => ({
+    id: randomUUID(),
+    outcome:
+      result.remoteStatus === "completed" ? "completed" : result.remoteStatus === "cancelled" ? "cancelled" : "failed",
+    processing: result.processing,
+    state: "pending",
+    createdAt: new Date().toISOString(),
+  });
+  /**
+   * Claim-then-send. The claim (pending → sent) is a serialized controller write, so a tick
+   * and a resume that race on the same notice cannot both send it. A failed send reverts the
+   * claim and keeps the notice pending for reconciliation.
+   */
+  const deliverNotice = async (entry: ScheduledMonitor): Promise<boolean> => {
+    if (shuttingDown) return false;
+    const holder: { claimed?: NonNullable<MonitorRecord["notice"]> & { runId: string } } = {};
+    await entry.cycles.updateMonitor(entry.cycleId, entry.attemptId, (current) => {
+      const notice = current.notice;
+      // Deliver only into the originating session; foreign/detached origins keep the pending notice.
+      if (!notice || notice.state !== "pending" || current.originSessionId !== entry.sessionId) return;
+      notice.state = "sent";
+      notice.sentAt = new Date().toISOString();
+      notice.channel = "session-entry";
+      delete notice.deliveryError;
+      holder.claimed = { ...notice, runId: current.runId };
+    });
+    const claimed = holder.claimed;
+    if (!claimed) return false;
+    try {
+      pi.sendMessage(
+        {
+          customType: COMPLETION_NOTICE_TYPE,
+          content: `${completionNoticeText({
+            cycleId: entry.cycleId,
+            attemptId: entry.attemptId,
+            runId: claimed.runId,
+            outcome: claimed.outcome,
+            processing: claimed.processing,
+          })}${claimed.possibleDuplicate ? " This notice was re-sent after an explicit resume because its earlier delivery could not be confirmed; it may duplicate an earlier report and still describes the same single run." : ""}`,
+          display: true,
+          details: {
+            noticeId: claimed.id,
+            cycleId: entry.cycleId,
+            attemptId: entry.attemptId,
+            runId: claimed.runId,
+            outcome: claimed.outcome,
+            processing: claimed.processing,
+            ...(claimed.possibleDuplicate ? { possibleDuplicate: true } : {}),
+          },
+        },
+        { triggerTurn: true, deliverAs: "followUp" },
+      );
+      return true;
+    } catch (error) {
+      // A stale runtime throws here: release the claim and keep the notice pending.
+      await entry.cycles
+        .updateMonitor(entry.cycleId, entry.attemptId, (current) => {
+          if (current.notice?.id !== claimed.id || current.notice.state !== "sent") return;
+          current.notice.state = "pending";
+          delete current.notice.sentAt;
+          current.notice.deliveryError = error instanceof Error ? error.message : String(error);
+        })
+        .catch(() => {});
+      return false;
+    }
+  };
+  const scheduleMonitor = (entry: ScheduledMonitor, delayMs: number) => {
+    if (shuttingDown) return;
+    const key = monitorKey(entry.cycleId, entry.attemptId);
+    const previous = scheduled.get(key);
+    if (previous?.timer) clearTimeout(previous.timer);
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = setTimeout(
+      () => {
+        entry.timer = undefined;
+        void trackObservation(key, observeMonitor(entry));
+      },
+      jitteredDelay(delayMs, bounds),
+    );
+    scheduled.set(key, entry);
+  };
+  /** Any local storage failure pauses observation; the remote run and its liability continue. */
+  const observeMonitor = async (entry: ScheduledMonitor): Promise<void> => {
+    try {
+      await observeOnce(entry);
+    } catch {
+      if (isCurrent(entry)) await pauseMonitor(entry, "STORAGE");
+    }
+  };
+  const observeOnce = async (entry: ScheduledMonitor): Promise<void> => {
+    if (shuttingDown || !isCurrent(entry)) return;
+    const key = monitorKey(entry.cycleId, entry.attemptId);
+    const { cycles, cycleId, attemptId } = entry;
+    // Non-overlapping in both directions: wait for an explicit recovery GET of this cycle.
+    await awaitObservations(cycleId, key);
+    if (shuttingDown || !isCurrent(entry)) return;
+    try {
+      const record = await cycles.inspect(cycleId);
+      const found = record.monitors?.find((candidate) => candidate.attemptId === attemptId);
+      if (!found || found.state === "paused" || found.state === "stopped") {
+        unschedule(entry);
+        return;
+      }
+      if (Date.now() - Date.parse(found.startedAt) >= bounds.maxMonitorMs) {
+        await pauseMonitor(entry, "MONITOR_LIFETIME");
+        return;
+      }
+      if (found.state !== "running")
+        await cycles.updateMonitor(cycleId, attemptId, (monitor) => {
+          // Never overwrite a stop or pause that landed after the read above.
+          if (monitor.state === "registered") monitor.state = "running";
+        });
+    } catch {
+      await pauseMonitor(entry, "DETACHED");
+      return;
+    }
+    if (!monitorInspector) {
+      await pauseMonitor(entry, "REGISTRATION_FAILED");
+      return;
+    }
+    try {
+      const prepared = await cycles.prepareAgentRecovery({ cycleId, attemptId });
+      await monitorInspector(prepared.runId, prepared.observer, bounds.getDeadlineMs);
+    } catch (error) {
+      if (shuttingDown || !isCurrent(entry)) return;
+      const failure = classifyObservationError(error);
+      if (failure.pause) {
+        await cycles
+          .updateMonitor(cycleId, attemptId, (monitor) => {
+            monitor.lastErrorKind = failure.kind;
+          })
+          .catch(() => {});
+        await pauseMonitor(entry, failure.pause);
+        return;
+      }
+      const updated = await cycles.updateMonitor(cycleId, attemptId, (monitor) => {
+        monitor.consecutiveTransientErrors += 1;
+        monitor.lastErrorKind = failure.kind;
+        monitor.nextDelayMs = nextMonitorDelay(monitor.nextDelayMs, bounds);
+      });
+      if (shouldPauseAfterTransient(updated, Date.now(), bounds)) {
+        await pauseMonitor(entry, "TRANSIENT_EXHAUSTED");
+        return;
+      }
+      scheduleMonitor(entry, updated.nextDelayMs ?? bounds.initialDelayMs);
+      return;
+    }
+    // The lifecycle observer already persisted the remote facts, results and accounting.
+    // A monitor paused, archived or superseded while the GET was in flight records nothing
+    // further: late original facts are kept, but no notice is scheduled for that context.
+    if (shuttingDown || !isCurrent(entry)) return;
+    const result = findAgentAttempt(await cycles.inspect(cycleId), attemptId)?.result;
+    const updated = await cycles.updateMonitor(cycleId, attemptId, (monitor) => {
+      monitor.gets += 1;
+      monitor.consecutiveTransientErrors = 0;
+      monitor.lastSuccessAt = new Date().toISOString();
+      delete monitor.lastErrorKind;
+      if (!result?.terminal) monitor.nextDelayMs = nextMonitorDelay(monitor.nextDelayMs, bounds);
+    });
+    if (!result?.terminal) {
+      if (isCurrent(entry)) scheduleMonitor(entry, updated.nextDelayMs ?? bounds.initialDelayMs);
+      return;
+    }
+    // Terminal facts are durable; schedule exactly one notice per attempt, then deliver.
+    // The entry stays current until the write lands, so a failed write still pauses (STORAGE).
+    const holder = { stopped: false };
+    await cycles.updateMonitor(cycleId, attemptId, (monitor) => {
+      // Archived or detached meanwhile: no notice.
+      holder.stopped = stopWithNotice(monitor, result, { skipPaused: true });
+    });
+    unschedule(entry);
+    if (holder.stopped) await deliverNotice(entry);
+  };
+  const registerMonitoring = async (cycles: ResearchCycles, cycleId: string, attemptId: string, sessionId: string) => {
+    const { monitor, created } = await cycles.registerMonitor(cycleId, attemptId);
+    // A live registration proves this runtime owns the cycle: lift any earlier detach latch.
+    shuttingDown = false;
+    // An already scheduled live monitor is never duplicated by a repeated resume.
+    if (!created && scheduled.has(monitorKey(cycleId, attemptId))) return monitor;
+    const entry: ScheduledMonitor = { cycles, cycleId, attemptId, sessionId };
+    scheduleMonitor(entry, bounds.initialDelayMs);
+    return monitor;
+  };
+  /**
+   * A create acknowledgement that arrived after the submission returned SUBMISSION_UNKNOWN
+   * (including an unknown original after a replacement): observe it like any acknowledged
+   * run, or notify its already terminal outcome. Never creates or resubmits research.
+   */
+  const adoptLateAcknowledgement = async (
+    cycles: ResearchCycles,
+    cycleId: string,
+    attemptId: string,
+    sessionId: string,
+  ) => {
+    const result = findAgentAttempt(await cycles.inspect(cycleId), attemptId)?.result;
+    if (!result?.remoteId) return;
+    if (!result.terminal) {
+      await registerMonitoring(cycles, cycleId, attemptId, sessionId);
+      return;
+    }
+    await cycles.registerMonitor(cycleId, attemptId, { terminal: true });
+    await cycles.updateMonitor(cycleId, attemptId, (monitor) => {
+      stopWithNotice(monitor, result);
+    });
+    // A detached runtime leaves the notice pending for an explicit resume.
+    await deliverNotice({ cycles, cycleId, attemptId, sessionId });
+  };
+  /**
+   * A terminal outcome returned to the assistant in a foreground tool result (explicit recover)
+   * is already reported: stop any background monitor and acknowledge its notice so a later
+   * resume never reports the same run again.
+   */
+  const recordForegroundReport = async (cycles: ResearchCycles, cycleId: string, attemptId: string) => {
+    const result = findAgentAttempt(await cycles.inspect(cycleId), attemptId)?.result;
+    if (!result?.terminal) return;
+    const live = scheduled.get(monitorKey(cycleId, attemptId));
+    if (live) unschedule(live);
+    // Every reported terminal attempt gets a monitor record, so "no record" always means
+    // "never reported" and resume can notify it.
+    await cycles.registerMonitor(cycleId, attemptId, { terminal: true });
+    await cycles.updateMonitor(cycleId, attemptId, (monitor) => {
+      stopWithNotice(monitor, result);
+      if (monitor.notice && (monitor.notice.state === "pending" || monitor.notice.state === "uncertain")) {
+        monitor.notice.state = "acknowledged";
+        monitor.notice.channel = "tool-result";
+      }
+    });
+  };
+  /** Notice IDs carried by this session's persisted completion messages, when the host exposes entries. */
+  const deliveredNoticeIds = (ctx: ExtensionContext): Map<string, string> => {
+    const seen = new Map<string, string>();
+    if (typeof ctx.sessionManager.getEntries !== "function") return seen;
+    for (const entry of ctx.sessionManager.getEntries()) {
+      if (entry.type !== "custom_message" || entry.customType !== COMPLETION_NOTICE_TYPE) continue;
+      const noticeId = (entry as { details?: { noticeId?: string } }).details?.noticeId;
+      if (noticeId) seen.set(noticeId, entry.id);
+    }
+    return seen;
+  };
+  /**
+   * Explicit resume: the user asked for this cycle again, so re-register eligible paused
+   * monitors, create the notice missing for a background-owned terminal attempt whose
+   * scheduling crashed, and deliver pending/uncertain notices into this session. Terminal
+   * attempts without a monitor record were reported in the foreground and are not reported
+   * again. Each attempt is isolated; nothing here creates, retries, replaces or cancels
+   * research or grants consent.
+   */
+  const resumeMonitoring = async (cycles: ResearchCycles, cycleId: string, sessionId: string) => {
+    // A successful cycles.resume proved this runtime owns the cycle live. Resume does not wait
+    // for an in-flight tick: the claim-then-send write in deliverNotice already serializes them.
+    shuttingDown = false;
+    const record = await cycles.inspect(cycleId);
+    const resumed: Array<{ attemptId: string; action: string }> = [];
+    for (const item of record.attempts) {
+      if (!Value.Check(agentAttemptSchema, item)) continue;
+      const result = item.result;
+      if (!result?.remoteId) continue;
+      const attemptId = item.id;
+      try {
+        const existing = record.monitors?.find((monitor) => monitor.attemptId === attemptId);
+        if (result.terminal) {
+          // Foreground reports always leave a monitor record, so a terminal attempt without one
+          // was never reported (for example a late acknowledgement that arrived after detach).
+          if (!existing) await cycles.registerMonitor(cycleId, attemptId, { terminal: true });
+          const holder = { deliver: false, possibleDuplicate: false };
+          await cycles.updateMonitor(cycleId, attemptId, (current) => {
+            stopWithNotice(current, result);
+            if (current.notice?.state === "uncertain") {
+              current.notice.state = "pending";
+              current.notice.possibleDuplicate = true;
+              delete current.notice.deliveryError;
+            }
+            // Only an undelivered notice moves to this session; sent/acknowledged ones keep their origin.
+            if (current.notice?.state === "pending") {
+              current.originSessionId = sessionId;
+              holder.deliver = true;
+              holder.possibleDuplicate = current.notice.possibleDuplicate === true;
+            }
+          });
+          if (holder.deliver) {
+            const sent = await deliverNotice({ cycles, cycleId, attemptId, sessionId });
+            resumed.push({
+              attemptId,
+              action: sent ? (holder.possibleDuplicate ? "notice re-sent" : "notice delivered") : "notice pending",
+            });
+          }
+          continue;
+        }
+        if (existing?.state === "stopped") continue;
+        await registerMonitoring(cycles, cycleId, attemptId, sessionId);
+        resumed.push({ attemptId, action: "monitoring resumed" });
+      } catch (error) {
+        resumed.push({ attemptId, action: `failed: ${error instanceof Error ? error.message : String(error)}` });
+      }
+    }
+    return resumed;
+  };
+  const acknowledgedNoticeIds = new Set<string>();
+  const acknowledgeNotices = async (ctx: ExtensionContext) => {
+    const seen = deliveredNoticeIds(ctx);
+    if (![...seen.keys()].some((id) => !acknowledgedNoticeIds.has(id))) return;
+    const cycles = await get(ctx);
+    const found = await cycles.discover();
+    for (const record of found.cycles) {
+      for (const monitor of record.monitors ?? []) {
+        const notice = monitor.notice;
+        if (!notice) continue;
+        if (notice.state === "acknowledged") {
+          acknowledgedNoticeIds.add(notice.id);
+          continue;
+        }
+        const entryId = seen.get(notice.id);
+        if (!entryId) continue;
+        await cycles
+          .updateMonitor(record.id, monitor.attemptId, (current) => {
+            if (current.notice && current.notice.id === notice.id) {
+              current.notice.state = "acknowledged";
+              current.notice.acknowledgedEntryId = entryId;
+              current.notice.channel = "session-entry";
+            }
+          })
+          .then(() => acknowledgedNoticeIds.add(notice.id))
+          .catch(() => {});
+      }
+    }
+  };
+
+  const detach = async (reason: MonitorPauseReason = "SHUTDOWN") => {
+    await pauseAllMonitors(reason);
     const pending = [...controllers.values()];
     controllers.clear();
     const outcomes = await Promise.allSettled(pending.map(async (controller) => (await controller).detach()));
     const errors = outcomes.flatMap((outcome) => (outcome.status === "rejected" ? [outcome.reason] : []));
     if (errors.length) throw new AggregateError(errors, "Cycle detached locally; ownership release failed.");
   };
-  pi.on("session_start", detach);
-  pi.on("session_before_switch", detach);
-  pi.on("session_before_fork", detach);
-  pi.on("session_tree", detach);
-  pi.on("session_shutdown", detach);
+  // Detach only on events that cannot be cancelled: session_shutdown fires for quit, reload,
+  // new, resume and fork once the replacement is committed; a vetoed switch or fork keeps
+  // this session's cycle and monitors running.
+  pi.on("session_tree", () => detach("DETACHED"));
+  pi.on("session_shutdown", () => detach("SHUTDOWN"));
+  const sessionStarted = async (ctx: ExtensionContext) => {
+    await detach("RESTART");
+    // Discovery only: dead owners' monitors pause, this session's delivered notices are
+    // acknowledged, sent notices without a session entry become uncertain, and this session's
+    // undelivered notices surface. Nothing resumes and nothing is redirected.
+    currentSessionId = ctx.sessionManager.getSessionId();
+    shuttingDown = false;
+    let cycles: ResearchCycles;
+    try {
+      cycles = await get(ctx);
+    } catch {
+      return;
+    }
+    await acknowledgeNotices(ctx).catch(() => {});
+    const found = await cycles.discover().catch(() => ({ cycles: [] as ResearchCycle[], unreadableCycleIds: [] }));
+    const entryIds = new Set(deliveredNoticeIds(ctx).keys());
+    const foreignUndelivered = new Set<string>();
+    for (const record of found.cycles) {
+      // A live owner elsewhere keeps observing and delivering its own monitors.
+      if (ownerAlive(record.owner)) continue;
+      for (const monitor of record.monitors ?? []) {
+        const stale = monitor.state === "registered" || monitor.state === "running";
+        const notice = monitor.notice;
+        const ownNotice = monitor.originSessionId === currentSessionId;
+        const sentWithoutEntry = notice?.state === "sent" && ownNotice && !entryIds.has(notice.id);
+        if (stale || sentWithoutEntry) {
+          await cycles
+            .updateMonitor(record.id, monitor.attemptId, (current) => {
+              if (current.state === "registered" || current.state === "running") {
+                current.state = "paused";
+                current.reason = "RESTART";
+              }
+              if (sentWithoutEntry && current.notice?.state === "sent") current.notice.state = "uncertain";
+            })
+            .catch(() => {});
+        }
+        if (notice && !ownNotice && (notice.state === "pending" || notice.state === "uncertain"))
+          foreignUndelivered.add(record.id);
+        if (!notice || !ownNotice || !ctx.hasUI) continue;
+        if (notice.state === "acknowledged" || (notice.state === "sent" && entryIds.has(notice.id))) continue;
+        const state = sentWithoutEntry ? "uncertain" : notice.state;
+        ctx.ui.notify(
+          `Exa completion notice for cycle ${record.id} attempt ${monitor.attemptId} is ${state} in this session. Explicitly resume the cycle to report it.`,
+          "warning",
+        );
+      }
+    }
+    // Other sessions' undelivered notices are not redirected here, but one summary line keeps
+    // a charged, completed result from going unnoticed when the origin session never returns.
+    if (foreignUndelivered.size && ctx.hasUI)
+      ctx.ui.notify(
+        `Undelivered Exa completion notices from other sessions exist for cycle(s) ${[...foreignUndelivered].join(", ")}. Explicitly resume a cycle here to report it in this session.`,
+        "warning",
+      );
+  };
+  // The registration is installed during Pi's own session_start dispatch, so the
+  // entry point invokes sessionStarted for the current session explicitly.
+  pi.on("session_start", (_event, ctx) => sessionStarted(ctx));
+  pi.on("agent_settled", async (_event, ctx) => {
+    await acknowledgeNotices(ctx).catch(() => {});
+  });
+
+  /**
+   * Shared non-blocking dispatch for guided submit and explicitly funded retry/replacement:
+   * one bounded create, acknowledgement decided from the persisted attempt, monitor
+   * registration, immediate return.
+   */
+  const dispatchAcknowledged = async (
+    cycles: ResearchCycles,
+    prepared: Awaited<ReturnType<ResearchCycles["reserveAgent"]>>,
+    context: { cycleId: string; proposalId?: string; artifactHash: string; transition?: "retry" | "replace" },
+    call: {
+      id: string;
+      signal: AbortSignal | undefined;
+      onUpdate: Parameters<Parameters<PiToolRegistration["registerTool"]>[0]["execute"]>[3];
+      ctx: ExtensionContext;
+    },
+  ) => {
+    const { cycleId, proposalId, artifactHash: dispatchedArtifactHash, transition } = context;
+    const { attempt, assessment } = prepared;
+    const sessionId = call.ctx.sessionManager.getSessionId();
+    const observer = cycles.agentLifecycleObserver(attempt.cycleId, attempt.id, attempt.requestHash);
+    const adoption = { unacknowledged: false, started: false };
+    const adopt = () => {
+      if (adoption.started) return;
+      adoption.started = true;
+      void trackObservation(
+        `${cycleId}/late-${attempt.id}`,
+        adoptLateAcknowledgement(cycles, cycleId, attempt.id, sessionId),
+      );
+    };
+    let failure: unknown;
+    try {
+      const submitter = submissionFactory?.({
+        beforeCreate: observer.beforeCreate,
+        raw: async (phase, reply) => {
+          await observer.raw(phase, reply);
+          if (phase === "create" && adoption.unacknowledged) adopt();
+        },
+      });
+      if (!submitter) throw new Error("Agent submission is not enabled; no SDK request was dispatched.");
+      const response = await submitter.execute(
+        call.id,
+        prepared.artifact.request,
+        call.signal,
+        call.onUpdate,
+        call.ctx,
+      );
+      if (response.isError) failure = new Error(response.content.map((entry) => entry.text).join("\n"));
+    } catch (error) {
+      failure = error;
+    }
+    // Decide from the persisted attempt, not from the tool text.
+    const afterDispatch = await cycles.inspect(cycleId);
+    const acknowledged = findAgentAttempt(afterDispatch, attempt.id);
+    const runId = acknowledged?.result?.remoteId;
+    const prefix = {
+      cycleId,
+      attemptId: attempt.id,
+      ...(proposalId === undefined ? {} : { proposalId }),
+      ...(transition ? { transitionMode: transition } : {}),
+      requestHash: attempt.requestHash,
+    };
+    if (runId === undefined) {
+      // Nothing acknowledged: close the local wait (unknown if dispatched, not-dispatched otherwise).
+      adoption.unacknowledged = true;
+      await observer.finish();
+      const closed = await cycles.inspect(cycleId);
+      const execution = findAgentAttempt(closed, attempt.id);
+      // A genuine acknowledgement that landed while the wait was closing is adopted too.
+      if (execution?.result?.remoteId) adopt();
+      const state = execution?.status ?? "unknown";
+      const detail = failure instanceof Error ? failure.message : String(failure ?? "");
+      const closedView = view(closed);
+      return result(
+        {
+          ...prefix,
+          runId: null,
+          state,
+          execution,
+          accounting: closedView.accounting,
+          status: closed.status,
+          nextSafeAction: closedView.nextSafeAction,
+        },
+        state === "not-dispatched"
+          ? `SUBMISSION_NOT_DISPATCHED: the approved request was not sent to Exa (${detail}). No charge was incurred and the reservation was released. The cycle keeps this not-dispatched attempt, so guided submit cannot be repeated: the operator funds an explicit researchMode=retry with /exa-research approve-request ${cycleId} ${attempt.requestHash} <dollars> (and /exa-research approve for the ceiling if needed).`
+          : `SUBMISSION_UNKNOWN: Exa did not acknowledge attempt ${attempt.id} (${detail}). The request may have reached Exa; its liability is retained, no run ID was invented, and a genuine late acknowledgement will be saved on this attempt and monitored in the background. Inspect with researchMode=recover; never resubmit automatically.`,
+        true,
+      );
+    }
+    const ackResult = acknowledged?.result;
+    // An acknowledgement that is already terminal is reported in this result; no monitor.
+    // Otherwise submission and monitor registration fail independently: a saved ID with
+    // paused monitoring is still an acknowledged submission.
+    let monitoring: "registered" | "paused" | "terminal" = "paused";
+    let monitoringDetail = "";
+    if (ackResult?.terminal) {
+      monitoring = "terminal";
+      // Reported in this result: record it so a later resume never notifies it again.
+      await recordForegroundReport(cycles, cycleId, attempt.id).catch(() => {});
+    } else {
+      try {
+        await registerMonitoring(cycles, cycleId, attempt.id, sessionId);
+        monitoring = "registered";
+      } catch (error) {
+        monitoringDetail = error instanceof Error ? error.message : String(error);
+      }
+    }
+    const current = await cycles.inspect(cycleId);
+    const currentView = view(current);
+    const execution = findAgentAttempt(current, attempt.id);
+    const terminalProblem =
+      monitoring === "terminal" && (ackResult?.remoteStatus !== "completed" || ackResult.processing !== "validated");
+    return result(
+      {
+        tool: "web_research_exa",
+        ...prefix,
+        artifactHash: dispatchedArtifactHash,
+        runId,
+        remoteStatus: ackResult?.remoteStatus ?? "running",
+        assessment,
+        monitoring,
+        ...(monitoringDetail ? { monitoringDetail } : {}),
+        execution,
+        accounting: currentView.accounting,
+        status: currentView.status,
+        completionSummary: currentView.completionSummary,
+        nextSafeAction: currentView.nextSafeAction,
+        ...(currentView.finalReport ? { finalReport: currentView.finalReport } : {}),
+      },
+      monitoring === "terminal"
+        ? `Exa cycle ${cycleId}; Agent attempt ${attempt.id}; run ${runId} was already ${ackResult?.remoteStatus} when acknowledged; status ${current.status}.\n${JSON.stringify(execution, null, 2)}\nUsage classification: ${JSON.stringify(currentView.accounting)}\n${currentView.finalReport ? `Final report (recorded gaps and criteria, not automatic verification): ${JSON.stringify(currentView.finalReport)}\n` : ""}${currentView.nextSafeAction}\nNo automatic retry, replacement or gap closing. Estimates are not vendor caps; API-reported costs are not independently verified invoices.`
+        : monitoring === "registered"
+          ? `Research started: Exa run ${runId} (cycle ${cycleId}, attempt ${attempt.id}). Background monitoring is registered; a completion notice will arrive in this session when the run finishes, and the user can keep chatting meanwhile. No polling, cancellation or further submission is needed. Estimates are not vendor caps; API-reported costs are not verified invoices.`
+          : `Research started: Exa run ${runId} (cycle ${cycleId}, attempt ${attempt.id}), but background monitoring is PAUSED (${monitoringDetail}). The run continues remotely; inspect the same attempt later with researchMode=recover or explicitly resume the cycle. Nothing was cancelled or resubmitted.`,
+      terminalProblem,
+    );
+  };
 
   pi.registerCommand("exa-research", {
     description:
@@ -221,12 +887,15 @@ export function cyclePiRegistration(
             break;
           }
           case "resume": {
-            const record = await cycles.resume(value);
-            text = JSON.stringify(view(record), null, 2) + warning(record);
+            await cycles.resume(value);
+            const resumedMonitoring = await resumeMonitoring(cycles, value, ctx.sessionManager.getSessionId());
+            const record = await cycles.inspect(value);
+            text = JSON.stringify({ ...view(record), resumedMonitoring }, null, 2) + warning(record);
             break;
           }
           case "archive": {
             const record = await cycles.archive(value || undefined);
+            await pauseCycleMonitors(record.id, "ARCHIVED");
             text = `Archived ${record.id}.${warning(record)}`;
             break;
           }
@@ -283,6 +952,7 @@ export function cyclePiRegistration(
   });
 
   return {
+    sessionStarted,
     registerTool(tool) {
       const paid = tool.name.startsWith("web_");
       pi.registerTool({
@@ -292,14 +962,14 @@ export function cyclePiRegistration(
           : {}),
         ...(tool.name === "web_research_exa"
           ? {
-              description: `${tool.description} Pi cycles: active mode executes only the approved compiled request. Explicit researchMode=retry after confirmed failure/nondispatch or researchMode=replace for unknown originals requires cycleId, fresh exact funding and total exposure approval. Replacement additionally requires an unused operator approve-replacement for EVERY unknown original; assistant risk flags/amounts never grant consent. No automatic retry, replacement or gap closing; any success blocks new submissions and duplicate successes remain visible. researchMode=recover performs one existing-run GET with explicit cycleId and optional attemptId; request overrides are forbidden and recovery never creates, polls or cancels. Explicitly resume saved state with exa_research_status action=resume first. previousRunId means new paid continuation, never recovery. Resume and inspection grant no spending permission.`,
+              description: `${tool.description} Pi cycles guided flow: researchMode=submit with cycleId and the proposalId from exa_research_summary mode=proposal asks the operator through the host confirmation dialog, then submits exactly one compiled request, registers host-owned background monitoring and returns the saved run ID while the job is pending; a completion notice wakes this session when the run finishes. Assistant-supplied approvals never count. Pi cycles: blocking researchMode=active execution is not available; with an active cycle use submit. Explicit researchMode=retry after confirmed failure/nondispatch or researchMode=replace for unknown originals requires cycleId, fresh exact funding and total exposure approval and is dispatched the same non-blocking way with background monitoring. Replacement additionally requires an unused operator approve-replacement for EVERY unknown original; assistant risk flags/amounts never grant consent. No automatic retry, replacement or gap closing; any success blocks new submissions and duplicate successes remain visible. researchMode=recover performs one existing-run GET with explicit cycleId and optional attemptId; request overrides are forbidden and recovery never creates, polls or cancels. Explicitly resume saved state with exa_research_status action=resume first. previousRunId means new paid continuation, never recovery. Resume and inspection grant no spending permission.`,
             }
           : {}),
         ...(tool.name === "exa_research_status"
           ? {
               parameters: statusParams,
               description:
-                "Inspect active cycle or discover saved cycle summaries without activating them. action=resume with explicit cycleId acquires exclusive saved-cycle ownership; it never grants spending permission. Recover an existing Agent attempt with web_research_exa researchMode=recover, never previousRunId continuation.",
+                "Inspect active cycle or discover saved cycle summaries without activating them. action=start with topic creates a new non-spending guided cycle. action=resume with explicit cycleId acquires exclusive saved-cycle ownership; it never grants spending permission. Recover an existing Agent attempt with web_research_exa researchMode=recover, never previousRunId continuation.",
             }
           : {}),
         ...(tool.name === "exa_research_step"
@@ -313,7 +983,7 @@ export function cyclePiRegistration(
           ? {
               parameters: summaryParams,
               description:
-                "Preview the versioned compiled research request with mode execution_plan or payload; brief/source_pack inspect curated planner facts. Compile errors name fields to fix. Artifacts do not authorize paid work.",
+                "Preview the versioned compiled research request with mode execution_plan or payload; mode=proposal renders the readable scope/cost proposal and its proposalId for guided submission; brief/source_pack inspect curated planner facts. Compile errors name fields to fix. Artifacts and proposals do not authorize paid work.",
             }
           : {}),
         ...(tool.name === "exa_research_reset"
@@ -333,7 +1003,12 @@ export function cyclePiRegistration(
                         Type.Literal("active"),
                         Type.Literal("standalone"),
                         ...(tool.name === "web_research_exa"
-                          ? [Type.Literal("recover"), Type.Literal("retry"), Type.Literal("replace")]
+                          ? [
+                              Type.Literal("submit"),
+                              Type.Literal("recover"),
+                              Type.Literal("retry"),
+                              Type.Literal("replace"),
+                            ]
                           : []),
                       ]),
                     ),
@@ -343,6 +1018,7 @@ export function cyclePiRegistration(
                           query: Type.Optional(Type.String({ minLength: 1 })),
                           artifactHash: Type.Optional(Type.String()),
                           attemptId: Type.Optional(Type.String()),
+                          proposalId: Type.Optional(Type.String({ minLength: 1 })),
                         }
                       : {}),
                   }),
@@ -359,11 +1035,29 @@ export function cyclePiRegistration(
             const cycles = await get(ctx);
             if (tool.name === "exa_research_status") {
               if (!Value.Check(statusParams, statusInput)) throw new Error("Invalid cycle status action.");
+              if (statusInput.action === "start") {
+                if (!statusInput.topic) throw new Error("A topic is required to start a guided research cycle.");
+                const started = await cycles.start(statusInput.topic);
+                return result({
+                  ...view(started),
+                  spending: false,
+                  nextSafeAction:
+                    "Guided draft created without spending. Clarify only material questions, record goal/scope/criteria/assumptions and a task schema with exa_research_step, then preview exa_research_summary mode=proposal.",
+                });
+              }
               if (statusInput.action === "resume") {
                 if (!statusInput.cycleId) throw new Error("Explicit cycleId is required to resume a saved cycle.");
-                return result(
-                  view(await cycles.resume(statusInput.cycleId, { expectedRevision: statusInput.expectedRevision })),
+                await cycles.resume(statusInput.cycleId, { expectedRevision: statusInput.expectedRevision });
+                const resumedMonitoring = await resumeMonitoring(
+                  cycles,
+                  statusInput.cycleId,
+                  ctx.sessionManager.getSessionId(),
                 );
+                return result({
+                  ...view(await cycles.inspect(statusInput.cycleId)),
+                  resumedMonitoring,
+                  spending: false,
+                });
               }
               const active = await cycles.status(statusInput);
               if (active) return result(view(active));
@@ -389,12 +1083,13 @@ export function cyclePiRegistration(
             const record = explicitStandalone ? undefined : await cycles.status();
             if (paid) {
               if (typeof paidInput !== "object" || paidInput === null) throw new Error("Invalid tool arguments.");
-              const { researchMode, cycleId, expectedRevision, artifactHash, attemptId, ...standalone } =
+              const { researchMode, cycleId, expectedRevision, artifactHash, attemptId, proposalId, ...standalone } =
                 paidInput as Record<string, unknown>;
               if (
                 researchMode !== undefined &&
                 researchMode !== "active" &&
                 researchMode !== "standalone" &&
+                researchMode !== "submit" &&
                 researchMode !== "recover" &&
                 researchMode !== "retry" &&
                 researchMode !== "replace"
@@ -421,7 +1116,22 @@ export function cyclePiRegistration(
                   );
                 if (!inspectionFactory)
                   throw new Error("Existing-run inspection is not enabled; no SDK request was dispatched.");
-                const prepared = await cycles.prepareAgentRecovery({ ...reference, attemptId });
+                // Explicit recovery shares observation coordination with the monitor: never overlap GETs.
+                await awaitObservations(cycleId);
+                let releaseRecovery: () => void = () => {};
+                void trackObservation(
+                  `${cycleId}/recover-${randomUUID()}`,
+                  new Promise<void>((resolve) => {
+                    releaseRecovery = resolve;
+                  }),
+                );
+                let prepared: Awaited<ReturnType<typeof cycles.prepareAgentRecovery>>;
+                try {
+                  prepared = await cycles.prepareAgentRecovery({ ...reference, attemptId });
+                } catch (error) {
+                  releaseRecovery();
+                  throw error;
+                }
                 let unavailable = false;
                 try {
                   const inspector = inspectionFactory(prepared.runId, prepared.observer);
@@ -437,15 +1147,18 @@ export function cyclePiRegistration(
                 } catch {
                   unavailable = true;
                 }
-                if (unavailable) await prepared.onUnavailable();
+                try {
+                  if (unavailable) await prepared.onUnavailable();
+                  // A terminal outcome returned in this result is reported: never notify it again later.
+                  // Recorded before the observation is released, so a waiting tick sees the stop.
+                  else await recordForegroundReport(cycles, cycleId, prepared.attempt.id).catch(() => {});
+                } finally {
+                  releaseRecovery();
+                }
                 const current = await cycles.inspect(cycleId);
-                const execution = current.attempts.find(
-                  (entry) => Value.Check(agentAttemptSchema, entry) && entry.id === prepared.attempt.id,
-                );
+                const execution = findAgentAttempt(current, prepared.attempt.id);
                 const invalid =
-                  !Value.Check(agentAttemptSchema, execution) ||
-                  execution.result?.processing === "failed" ||
-                  execution.status === "failed";
+                  !execution || execution.result?.processing === "failed" || execution.status === "failed";
                 return result(
                   {
                     cycleId,
@@ -463,6 +1176,8 @@ export function cyclePiRegistration(
                 );
               }
               if (attemptId !== undefined) throw new Error("attemptId is only valid in explicit recovery mode.");
+              if (proposalId !== undefined && researchMode !== "submit")
+                throw new Error("proposalId is only valid with researchMode=submit.");
               if (
                 researchMode === "standalone" &&
                 (cycleId !== undefined || expectedRevision !== undefined || artifactHash !== undefined)
@@ -472,77 +1187,143 @@ export function cyclePiRegistration(
                 );
               if (!record && (cycleId !== undefined || expectedRevision !== undefined))
                 throw new Error("No active research cycle.");
-              if (researchMode === "active" && !record) throw new Error("No active research cycle.");
+              if ((researchMode === "active" || researchMode === "submit") && !record)
+                throw new Error(
+                  "No active research cycle. Guided research starts one with exa_research_status action=start; nothing was dispatched.",
+                );
               if (record && researchMode !== "standalone") {
-                if (tool.name === "web_research_exa") {
-                  if (!agentFactory) {
-                    await cycles.preview({ ...reference, executionFields: standalone });
+                const call = { id, signal, onUpdate, ctx };
+                if (tool.name === "web_research_exa" && researchMode === "submit") {
+                  if (typeof cycleId !== "string" || !cycleId)
+                    throw new Error("Guided submission requires the active cycleId; it never targets another cycle.");
+                  // The caller's cycle must be the active one before anything else is reported about it.
+                  assertArtifactTarget(record, { cycleId });
+                  if (typeof proposalId !== "string" || !proposalId)
                     throw new Error(
-                      "Integrated paid research is not available in this slice; no request was dispatched.",
+                      "PROPOSAL_REQUIRED: call exa_research_summary mode=proposal and submit its proposalId.",
+                    );
+                  if (Object.keys(standalone).length)
+                    throw new Error(
+                      "EXECUTION_CONFLICT: Guided submission executes the approved compiled request only; update the plan instead of passing request fields.",
+                    );
+                  // Refuse before the dialog when no submitter can exist, so no approval is recorded for nothing.
+                  if (
+                    !submissionFactory ||
+                    !(submissionFactory.available
+                      ? submissionFactory.available()
+                      : submissionFactory({ beforeCreate: async () => () => {}, raw: async () => {} }))
+                  )
+                    throw new Error(
+                      "Guided submission is not enabled; no approval was requested and nothing was dispatched.",
+                    );
+                  if (record.attempts.length)
+                    return result(
+                      { cycleId, proposalId, submitted: false },
+                      "AGENT_ATTEMPT_EXISTS: this cycle already has a saved Agent attempt, so guided submission cannot create another; nothing was approved or dispatched. Inspect or recover the existing attempt, or use the explicitly funded researchMode=retry / researchMode=replace paths.",
+                      true,
+                    );
+                  const artifact = await cycles.preview(reference);
+                  const proposal = buildProposal(record, artifact);
+                  if (proposal.id !== proposalId)
+                    return result(
+                      {
+                        cycleId,
+                        proposalId,
+                        currentProposalId: proposal.id,
+                        revision: artifact.revision,
+                        submitted: false,
+                      },
+                      `PROPOSAL_STALE: proposal ${proposalId} no longer matches the current compiled request (revision ${artifact.revision}, proposal ${proposal.id}). Present the current proposal again; nothing was submitted.`,
+                      true,
+                    );
+                  const blocker = dialogApprovalBlocker(record);
+                  if (blocker)
+                    return result(
+                      { cycleId, proposalId, submitted: false },
+                      `DIALOG_APPROVAL_BLOCKED: ${blocker} The dialog was not shown; nothing was approved or submitted.`,
+                      true,
+                    );
+                  // Without a package estimate (provider add-ons, metered effort) the operator assesses
+                  // the exact request by command; the dialog then confirms that existing funding.
+                  const operatorFunded =
+                    !proposal.approval &&
+                    assessAgent(record.grants, record.ledger, artifact.request, {
+                      cycleId: record.id,
+                      projectId: record.projectId,
+                    }).canDispatch;
+                  if (!proposal.approval && !operatorFunded)
+                    return result(
+                      {
+                        cycleId,
+                        proposalId,
+                        estimate: proposal.estimate,
+                        requestHash: proposal.requestHash,
+                        submitted: false,
+                      },
+                      `ESTIMATE_UNAVAILABLE: ${proposal.estimate.basis} Request hash: ${proposal.requestHash}. Operator commands that keep the existing scope: /exa-research approve ${cycleId} <ceiling> ${[...new Set([...grantedTools(record), "web_research_exa"])].join(",")} and /exa-research approve-request ${cycleId} ${proposal.requestHash} <dollars>. Nothing was submitted.`,
+                      true,
+                    );
+                  if (!ctx.hasUI)
+                    return result(
+                      { cycleId, proposalId, submitted: false },
+                      "APPROVAL_UNAVAILABLE: no trusted confirmation surface is available in this mode, so the proposal is paused and nothing was submitted. Re-run in interactive or RPC Pi to approve it; assistant text cannot grant consent.",
+                      true,
+                    );
+                  const approved = await ctx.ui.confirm(
+                    "Approve Exa research spending?",
+                    operatorFunded
+                      ? `${proposal.dialog}\nFunding: the operator-assessed exact-request permission already recorded for this request.`
+                      : proposal.dialog,
+                    { timeout: APPROVAL_DIALOG_TIMEOUT_MS, ...(signal ? { signal } : {}) },
+                  );
+                  if (!approved)
+                    return result(
+                      { cycleId, proposalId, submitted: false },
+                      "APPROVAL_NOT_GRANTED: the confirmation dialog was declined, dismissed, aborted or timed out. Nothing was submitted and no grant was recorded; the proposal stays open for a later explicit approval.",
+                      true,
+                    );
+                  // Approval and reservation land in one write: never an approval without its attempt.
+                  const prepared = proposal.approval
+                    ? await cycles.approveAndReserveAgent(cycleId, {
+                        requestHash: proposal.requestHash,
+                        expectedRevision: artifact.revision,
+                        artifactHash: artifact.hash,
+                        allowanceDollars: proposal.approval.allowanceDollars,
+                        ceilingDollars: proposal.approval.ceilingDollars,
+                        tools: proposal.approval.tools,
+                      })
+                    : await cycles.reserveAgent({
+                        cycleId,
+                        expectedRevision: artifact.revision,
+                        artifactHash: artifact.hash,
+                      });
+                  return dispatchAcknowledged(
+                    cycles,
+                    prepared,
+                    { cycleId, proposalId, artifactHash: artifact.hash },
+                    call,
+                  );
+                }
+                if (tool.name === "web_research_exa") {
+                  if (!transition) {
+                    // Surface structured conflicts and stale references first; then refuse the
+                    // removed blocking execution path and point at guided submission.
+                    await cycles.preview({ ...reference, executionFields: standalone });
+                    return result(
+                      { cycleId: record.id, submitted: false, researchMode: researchMode ?? "active" },
+                      "GUIDED_SUBMISSION_REQUIRED: blocking cycle execution (researchMode=active) is no longer available. Present exa_research_summary mode=proposal and submit with researchMode=submit, cycleId and that proposalId; the host dialog asks the operator and the run is monitored in the background. Nothing was dispatched. Unrelated standalone research must use researchMode=standalone without cycle references.",
+                      true,
                     );
                   }
+                  if (!submissionFactory)
+                    throw new Error("Agent submission is not enabled; no SDK request was dispatched.");
+                  // Explicitly funded retry/replacement: command-based consent, same non-blocking dispatch.
                   const prepared = await cycles.reserveAgent({ ...reference, executionFields: standalone }, transition);
-                  const { attempt, artifact, assessment } = prepared;
-                  const observer = cycles.agentLifecycleObserver(attempt.cycleId, attempt.id, attempt.requestHash);
-                  const callObserver: AgentLifecycleObserver = {
-                    beforeCreate: observer.beforeCreate,
-                    raw: async (phase, reply) => {
-                      const remoteId = reply.id;
-                      const remoteStatus = reply.status;
-                      await observer.raw(phase, reply);
-                      try {
-                        const completionSummary = view(await cycles.inspect(attempt.cycleId)).completionSummary;
-                        onUpdate?.(
-                          result(
-                            {
-                              cycleId: attempt.cycleId,
-                              attemptId: attempt.id,
-                              phase,
-                              remoteId,
-                              remoteStatus,
-                              completionSummary,
-                            },
-                            `Exa Agent ${remoteId}: ${remoteStatus}. ${completionSummary.duplicateSuccess ? "Duplicate successes are retained with separate costs; no further submission is permitted. " : ""}Progress is not final billing or criterion verification.`,
-                          ),
-                        );
-                      } catch {
-                        /* Display failure never authorizes replacement research. */
-                      }
-                    },
-                  };
-                  let response: Awaited<ReturnType<typeof tool.execute>>;
-                  try {
-                    const agent = agentFactory(callObserver);
-                    if (!agent) throw new Error("Agent research is not enabled; no SDK request was dispatched.");
-                    response = await agent.execute(id, artifact.request, signal, onUpdate, ctx);
-                  } finally {
-                    await observer.finish();
-                  }
-                  const current = await cycles.inspect(attempt.cycleId);
-                  const execution = current.attempts.find(
-                    (entry) => Value.Check(agentAttemptSchema, entry) && entry.id === attempt.id,
-                  );
-                  const currentView = view(current);
-                  const accounting = currentView.accounting;
-                  const incompleteOrInvalid =
-                    !Value.Check(agentAttemptSchema, execution) || execution.result?.processing !== "validated";
-                  return result(
-                    {
-                      tool: "web_research_exa",
-                      cycleId: attempt.cycleId,
-                      attemptId: attempt.id,
-                      artifactHash: artifact.hash,
-                      requestHash: attempt.requestHash,
-                      assessment,
-                      execution,
-                      accounting,
-                      status: current.status,
-                      completionSummary: currentView.completionSummary,
-                      nextSafeAction: currentView.nextSafeAction,
-                      ...(currentView.finalReport ? { finalReport: currentView.finalReport } : {}),
-                    },
-                    `Exa cycle ${attempt.cycleId}; Agent attempt ${attempt.id}; status ${current.status}.\n${JSON.stringify(execution, null, 2)}\nUsage classification: ${JSON.stringify(accounting)}\n${currentView.finalReport ? `Final report (recorded gaps and criteria, not automatic verification): ${JSON.stringify(currentView.finalReport)}\n` : ""}${currentView.nextSafeAction}\nNo automatic retry, replacement or gap closing. Estimates are not vendor caps; API-reported costs are not independently verified invoices.`,
-                    response.isError || incompleteOrInvalid,
+                  return dispatchAcknowledged(
+                    cycles,
+                    prepared,
+                    { cycleId: record.id, artifactHash: prepared.artifact.hash, transition },
+                    call,
                   );
                 }
                 if (!retrievalFactory || !EXPLORATION_TOOLS.some((name) => name === tool.name))
@@ -554,7 +1335,42 @@ export function cyclePiRegistration(
                 if (artifactHash !== undefined)
                   throw new Error("Artifact hashes apply to synthesis previews, not exploration.");
                 if (!Value.Check(tool.parameters, standalone)) throw new Error("Invalid exploratory tool arguments.");
-                const { operation, assessment } = await cycles.reserveExploration(tool.name, standalone, reference);
+                let reservation: Awaited<ReturnType<typeof cycles.reserveExploration>>;
+                try {
+                  reservation = await cycles.reserveExploration(tool.name, standalone, reference);
+                } catch (error) {
+                  // Trusted-dialog approval for the simple lifetime scope/ceiling cases only;
+                  // unknown liabilities and uncertain requests keep their operator commands.
+                  // Overspend and conflicting or unresolved liabilities stay on operator commands even
+                  // when a higher-priority reason (scope) is what the assessment reports.
+                  const dialogReason =
+                    error instanceof ExplorationApprovalError &&
+                    DIALOG_APPROVAL_REASONS.some((reason) => reason === error.assessment.reason) &&
+                    error.assessment.proposedDollars !== null &&
+                    !dialogApprovalBlocker(record);
+                  if (!dialogReason || !ctx.hasUI) throw error;
+                  const assessed = error.assessment;
+                  const proposedDollars = assessed.proposedDollars ?? 0;
+                  const { exposure, ceilingDollars } = approvalFigures(assessed, proposedDollars);
+                  const tools = [...new Set([...grantedTools(record), tool.name])];
+                  const approved = await ctx.ui.confirm(
+                    "Approve exploratory Exa retrieval?",
+                    [
+                      `${tool.name} for cycle ${error.cycleId} (${record.plan.topic})`,
+                      `Estimated $${proposedDollars.toFixed(2)} (published rate; not a cap). Lifetime ceiling becomes $${ceilingDollars.toFixed(2)}; scope ${tools.join(", ")}.`,
+                      `Existing liabilities: $${exposure.toFixed(2)} assessed, ${assessed.unresolvedOperationIds.length} unresolved.`,
+                      "Approving dispatches this one retrieval and does not authorize Agent research.",
+                    ].join("\n"),
+                    { timeout: APPROVAL_DIALOG_TIMEOUT_MS, ...(signal ? { signal } : {}) },
+                  );
+                  if (!approved)
+                    throw new Error(
+                      "APPROVAL_NOT_GRANTED: the exploratory retrieval dialog was declined, dismissed, aborted or timed out; nothing was dispatched and no grant was recorded.",
+                    );
+                  await cycles.grantBudget(error.cycleId, ceilingDollars, tools, "dialog");
+                  reservation = await cycles.reserveExploration(tool.name, standalone, reference);
+                }
+                const { operation, assessment } = reservation;
                 const { cycleId: savedCycle, id: operationId, requestHash } = operation;
                 const capture = cycles.explorationEvidenceObserver(savedCycle, operationId, requestHash);
                 let started = false;
@@ -707,6 +1523,29 @@ export function cyclePiRegistration(
                 }
               case "exa_research_summary":
                 if (!Value.Check(summaryParams, params)) throw new Error("Invalid research summary arguments.");
+                if (params.mode === "proposal") {
+                  const { mode: _mode, ...reference } = params;
+                  const artifact = await cycles.preview(reference);
+                  const proposal = buildProposal(record, artifact);
+                  return result(
+                    {
+                      proposalId: proposal.id,
+                      cycleId: record.id,
+                      revision: proposal.revision,
+                      artifactHash: proposal.artifactHash,
+                      requestHash: proposal.requestHash,
+                      estimate: proposal.estimate,
+                      approval: proposal.approval,
+                      accounting: proposal.accounting,
+                      proposal: proposal.text,
+                      spending: false,
+                      nextSafeAction: proposal.approval
+                        ? "Present this proposal to the user. To submit, call web_research_exa with researchMode=submit, this cycleId and proposalId; the host dialog asks the operator. Any plan change requires a new proposal."
+                        : `ESTIMATE_UNAVAILABLE: ${proposal.estimate.basis}`,
+                    },
+                    `${proposal.text}\n\nNothing was submitted or approved. Approval happens only through the host dialog on researchMode=submit.`,
+                  );
+                }
                 if (params.mode === undefined || params.mode === "payload" || params.mode === "execution_plan") {
                   const artifact = await cycles.preview(params);
                   return result({
@@ -727,6 +1566,7 @@ export function cyclePiRegistration(
                 }
               case "exa_research_reset": {
                 const archived = await cycles.archive();
+                await pauseCycleMonitors(archived.id, "ARCHIVED");
                 return result(view(archived), `Archived ${archived.id}.${warning(archived)}`);
               }
               default:

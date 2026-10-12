@@ -5,12 +5,15 @@ import { link, open, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import { ownProcessStartTime, processAlive } from "./process-identity.js";
 
 const ownerSchema = Type.Object(
   {
     kind: Type.Literal("research-storage-lock-v1"),
     pid: Type.Integer({ minimum: 1, maximum: 2147483647 }),
     token: Type.String({ pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }),
+    /** Start time of `pid`; a mismatch proves the pid was reused by another process. */
+    processStart: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   },
   { additionalProperties: false },
 );
@@ -36,19 +39,20 @@ async function snapshot(path: string) {
   }
 }
 
-function dead(pid: number) {
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return errorCode(error) === "ESRCH";
-  }
+function dead(owner: { pid: number; processStart?: string }) {
+  return !processAlive(owner.pid, owner.processStart);
 }
 
 export async function withResearchStorageLock<T>(directory: string, action: () => Promise<T>): Promise<T> {
   const path = join(directory, ".lock");
   const candidate = join(directory, `.lock-owner-${randomUUID()}.tmp`);
-  const owner = { kind: "research-storage-lock-v1", pid: process.pid, token: randomUUID() };
+  const processStart = ownProcessStartTime();
+  const owner = {
+    kind: "research-storage-lock-v1",
+    pid: process.pid,
+    token: randomUUID(),
+    ...(processStart === undefined ? {} : { processStart }),
+  };
   const file = await open(candidate, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
   try {
     try {
@@ -89,7 +93,7 @@ export async function withResearchStorageLock<T>(directory: string, action: () =
         if (errorCode(error) === "ENOENT") continue;
         throw unavailable(target);
       }
-      if (dead(previous.owner.pid)) {
+      if (dead(previous.owner)) {
         // One reclaimer per immutable dead-owner token. Other reclaimers
         // cannot unlink a replacement acquired after the old lock disappears.
         // A crashed reclaimer is recovered by the same protocol; recursion is
@@ -106,7 +110,7 @@ export async function withResearchStorageLock<T>(directory: string, action: () =
             current.owner.pid === previous.owner.pid &&
             current.info.dev === previous.info.dev &&
             current.info.ino === previous.info.ino &&
-            dead(current.owner.pid)
+            dead(current.owner)
           )
             await unlink(target);
         } finally {

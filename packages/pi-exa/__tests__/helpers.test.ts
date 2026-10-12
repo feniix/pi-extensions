@@ -351,7 +351,7 @@ describe("pi-exa auth helpers", () => {
   it("prefers CLI flag over config and environment", () => {
     const pi = {
       getFlag(flag: string) {
-        if (flag === "--exa-api-key") {
+        if (flag === "exa-api-key") {
           return " cli-key ";
         }
         return undefined;
@@ -369,7 +369,7 @@ describe("pi-exa auth helpers", () => {
 
     const pi = {
       getFlag(flag: string) {
-        if (flag === "--exa-config-file") {
+        if (flag === "exa-config-file") {
           return configPath;
         }
         return undefined;
@@ -401,7 +401,7 @@ describe("pi-exa tool enablement helpers", () => {
   it("respects advanced tool flag override", () => {
     const pi = {
       getFlag(flag: string) {
-        return flag === "--exa-enable-advanced" ? true : undefined;
+        return flag === "exa-enable-advanced" ? true : undefined;
       },
     } as { getFlag: (flag: string) => unknown };
     const config = { advancedEnabled: false };
@@ -933,5 +933,38 @@ describe("pi-exa formatSearchResults entity properties", () => {
       expect(result).toContain("Freelancer at Unknown company");
       expect(result).not.toContain("Employers:");
     });
+  });
+});
+
+describe("Exa client base URL and legacy config flag", () => {
+  it("validates EXA_BASE_URL and names the variable in the error", async () => {
+    const { resolveExaBaseUrl } = await import("../extensions/exa-client.js");
+    expect(resolveExaBaseUrl({})).toBeUndefined();
+    expect(resolveExaBaseUrl({ EXA_BASE_URL: "http://127.0.0.1:9/" })).toBe("http://127.0.0.1:9");
+    expect(() => resolveExaBaseUrl({ EXA_BASE_URL: "api.exa.ai" })).toThrow(/EXA_BASE_URL must be an absolute/);
+    expect(() => resolveExaBaseUrl({ EXA_BASE_URL: "ftp://user:secret@api.exa.ai" })).toThrow(/http or https/);
+    // The value is never echoed: a URL can carry credentials.
+    expect(() => resolveExaBaseUrl({ EXA_BASE_URL: "not a url secret-token" })).not.toThrow(/secret-token/);
+    const { classifyObservationError } = await import("../extensions/research-monitor.js");
+    let configError: unknown;
+    try {
+      resolveExaBaseUrl({ EXA_BASE_URL: "api.exa.ai" });
+    } catch (error) {
+      configError = error;
+    }
+    expect(classifyObservationError(configError)).toEqual({ kind: "configuration", pause: "CONFIGURATION" });
+  });
+
+  it("warns about the deprecated --exa-config flag once per process", async () => {
+    const { getResolvedConfig } = await import("../extensions/config.js");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const pi = { getFlag: (name: string) => (name === "exa-config" ? "/nonexistent/exa.json" : undefined) };
+    getResolvedConfig(pi as never);
+    getResolvedConfig(pi as never);
+    getResolvedConfig(pi as never);
+    expect(warn.mock.calls.filter(([message]) => String(message).includes("--exa-config is deprecated"))).toHaveLength(
+      1,
+    );
+    warn.mockRestore();
   });
 });
