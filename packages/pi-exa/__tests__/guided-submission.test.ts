@@ -396,7 +396,7 @@ describe("guided research from request through approved submission", () => {
   });
 
   it("keeps an unacknowledged create unknown, saves a genuine late run ID on the original attempt and never resubmits", async () => {
-    const pi = await host({ submitTimeoutMs: 100 });
+    const pi = await host({ submitTimeoutMs: 1_500 });
     const { cycleId, projectId } = await readyCycle(pi);
     const proposal = await propose(pi, cycleId);
     let releaseCreate: ((run: AgentRun) => void) | undefined;

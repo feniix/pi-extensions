@@ -531,7 +531,7 @@ describe("recovering monitoring and notifications across interruptions", () => {
   });
 
   it("adopts a genuine late create acknowledgement: monitors it and delivers one notice without resubmitting", async () => {
-    const pi = await host({ submitTimeoutMs: 100 });
+    const pi = await host({ submitTimeoutMs: 1_500 });
     let releaseCreate: ((run: AgentRun) => void) | undefined;
     offlineCreate.mockImplementationOnce(
       () =>
@@ -624,7 +624,7 @@ describe("recovering monitoring and notifications across interruptions", () => {
   });
 
   it("notifies on resume a terminal late acknowledgement that arrived after the cycle detached", async () => {
-    const pi = await host({ submitTimeoutMs: 100 });
+    const pi = await host({ submitTimeoutMs: 1_500 });
     let releaseCreate: ((run: AgentRun) => void) | undefined;
     offlineCreate.mockImplementationOnce(
       () =>
