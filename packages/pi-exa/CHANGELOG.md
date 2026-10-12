@@ -29,6 +29,7 @@ publication version mismatches are called out explicitly.
 
 ### Fixed
 
+- **Replacement liability guards reuse the complete shared attempt floor**, including known receipt conflicts and the immutable fixed-effort base, instead of re-deriving a partial floor. Stale replacement consent is rejected before reservation without consuming permissions or changing saved history.
 - **Exact conservative decimal micro-USD conversion** avoids binary floating-point boundary errors when flooring permission or ceiling exposure. Equivalent known terminal SDK receipts retain legitimate historical rounding without creating false conflicts; genuinely changed receipts remain auditable.
 - **Storage and ownership availability:** atomically published PID/token transaction locks recover only proven-dead owners, use monotonic bounded contention waits and clean candidate links. Unverifiable/live locks are retained with actionable repair paths. Archiving unrelated history no longer revokes the active cycle, and readable discovery survives corrupt records while continuation attribution stays fail-closed.
 - **Standalone isolation and selected-only summaries:** explicit unrelated standalone retrieval bypasses owned-cycle status failures without bypassing saved-run attribution. Shared summary projection prevents drift, and final-report diagnostics match the evidence visible in each view without changing saved criteria or exposing unselected source notes.
