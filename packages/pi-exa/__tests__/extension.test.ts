@@ -144,6 +144,25 @@ describe("pi-exa extension", () => {
     expect(flagNames).toHaveLength(10);
   });
 
+  it("registers tools enabled only through CLI flags once session_start makes flag values available", async () => {
+    const mockPi = createMockPi();
+    let flagsApplied = false;
+    mockPi.getFlag.mockImplementation((name: string) =>
+      flagsApplied && name === "exa-enable-research" ? true : undefined,
+    );
+    exaExtension(mockPi as unknown as ExtensionAPI);
+    const before = mockPi.registerTool.mock.calls.map(([tool]) => tool.name);
+    expect(before).not.toContain("web_research_exa");
+    flagsApplied = true;
+    const handler = mockPi.on.mock.calls.find(([event]) => event === "session_start")?.[1] as
+      | ((event: unknown, ctx: unknown) => Promise<void>)
+      | undefined;
+    await handler?.({}, { sessionManager: { getSessionId: () => "s" }, cwd: process.cwd() });
+    const after = mockPi.registerTool.mock.calls.map(([tool]) => tool.name);
+    expect(after).toContain("web_research_exa");
+    expect(after.filter((name) => name === "web_search_exa")).toHaveLength(1);
+  });
+
   it("registers default tools by default", () => {
     const mockPi = createMockPi();
     exaExtension(mockPi as unknown as ExtensionAPI);

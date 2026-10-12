@@ -111,32 +111,46 @@ function resolvePiTimeouts(pi: ExtensionAPI): ExaToolTimeouts | undefined {
 export default function exaExtension(pi: ExtensionAPI) {
   registerFlags(pi);
 
-  const resolvedConfig = getResolvedConfig(pi);
-  const tools = createExaTools({
-    resolveApiKey: () => resolveAuth(pi).apiKey || undefined,
-    isToolEnabled: (toolName) => isToolEnabledForConfig(pi, resolvedConfig, toolName),
-    timeouts: resolvePiTimeouts(pi),
-  }).map((tool) => {
-    const renderers = getExaRenderers(tool.name);
-    if (!renderers.renderCall && !renderers.renderResult) {
-      return tool;
-    }
-    return {
-      ...tool,
-      hostExtras: {
-        ...tool.hostExtras,
-        pi: {
-          ...tool.hostExtras?.pi,
-          ...renderers,
+  // Pi applies CLI flag values after extension factories run, so enablement
+  // decided here sees only environment and settings files. session_start
+  // re-resolves the config with flags and registers any newly enabled tools.
+  let resolvedConfig = getResolvedConfig(pi);
+  const registered = new Set<string>();
+  const buildTools = () =>
+    createExaTools({
+      resolveApiKey: () => resolveAuth(pi).apiKey || undefined,
+      isToolEnabled: (toolName) => isToolEnabledForConfig(pi, resolvedConfig, toolName),
+      timeouts: resolvePiTimeouts(pi),
+    }).map((tool) => {
+      const renderers = getExaRenderers(tool.name);
+      if (!renderers.renderCall && !renderers.renderResult) {
+        return tool;
+      }
+      return {
+        ...tool,
+        hostExtras: {
+          ...tool.hostExtras,
+          pi: {
+            ...tool.hostExtras?.pi,
+            ...renderers,
+          },
         },
-      },
-    };
-  });
-  registerPiTools(pi, tools);
+      };
+    });
+  const registerMissing = (candidates: ReturnType<typeof buildTools>) => {
+    const fresh = candidates.filter((tool) => !registered.has(tool.name));
+    if (!fresh.length) return;
+    registerPiTools(pi, fresh);
+    for (const tool of fresh) registered.add(tool.name);
+  };
+  let tools = buildTools();
+  registerMissing(tools);
   let cyclesInstalled = false;
-  // Pi applies CLI flags after factories load. Registration is refreshable once
-  // bound, and session_start also runs for a fresh runtime after reload.
   pi.on("session_start", async (_event, ctx) => {
+    // Flags are available now: refresh enablement and register newly enabled tools.
+    resolvedConfig = getResolvedConfig(pi);
+    tools = buildTools();
+    registerMissing(tools);
     if (!cyclesInstalled && pi.getFlag("exa-enable-cycles") === true) {
       const retrievalFactory: CycleRetrievalFactory = (name, usageObserver) => {
         let selected: ReturnType<CycleRetrievalFactory>;
