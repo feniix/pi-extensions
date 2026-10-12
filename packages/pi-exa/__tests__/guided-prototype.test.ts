@@ -311,7 +311,7 @@ describe("guided background research prototype (Pi 1.x SDK session, mocked Exa)"
     expect(h.exa.counters.create).toBe(0);
   });
 
-  it("queues a completion that lands during an active response until the turn settles, and deduplicates repeated terminal observations", async () => {
+  it("queues a completion that lands during an active response until the turn settles", async () => {
     let releaseSlowTurn: (() => void) | undefined;
     const slowTurn = new Promise<void>((resolve) => {
       releaseSlowTurn = resolve;
@@ -407,8 +407,11 @@ describe("guided background research prototype (Pi 1.x SDK session, mocked Exa)"
     expect(store.attempts[0].notice).toBeUndefined();
     expect(h.prototype.activeTimers()).toBe(0);
     expect(h.exa.counters.create).toBe(1);
-    const delays = h.events().filter((event) => event.startsWith("get_"));
-    expect(delays.length).toBeGreaterThanOrEqual(8);
+    // Gaps between checks grow (x1.5 up to the 60 ms test cap) instead of polling at a fixed rate.
+    const checks = h.prototype.observed.filter((entry) => entry.event.startsWith("get_")).map((entry) => entry.at);
+    expect(checks.length).toBeGreaterThanOrEqual(8);
+    const gaps = checks.slice(1).map((at, index) => at - checks[index]);
+    expect(Math.max(...gaps.slice(-3))).toBeGreaterThan(Math.min(...gaps.slice(0, 2)));
   });
 
   it("pauses immediately on authentication and not-found errors", async () => {

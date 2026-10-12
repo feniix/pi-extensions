@@ -12,6 +12,8 @@ import { createInterface } from "node:readline";
 
 export const repoRoot = resolve(import.meta.dirname, "../../../..");
 
+const delay = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
+
 export type RpcRecord = { type: string; id?: string; [key: string]: unknown };
 
 export interface RpcPiOptions {
@@ -90,6 +92,12 @@ export class RpcPi {
     const id = record.id ?? `req-${++this.requestCount}`;
     this.child.stdin.write(`${JSON.stringify({ ...record, id })}\n`);
     return id;
+  }
+
+  /** Wait for a record that arrives after this call; earlier matching records are ignored. */
+  waitForNext(predicate: (record: RpcRecord) => boolean, ms = 15_000): Promise<RpcRecord> {
+    const seen = new Set(this.records);
+    return this.waitFor((record) => !seen.has(record) && predicate(record), ms);
   }
 
   waitFor(predicate: (record: RpcRecord) => boolean, ms = 15_000): Promise<RpcRecord> {
@@ -183,17 +191,21 @@ export class RpcPi {
   }
 
   async stop(): Promise<void> {
+    const exited =
+      this.child.exitCode !== null || this.child.signalCode !== null
+        ? Promise.resolve()
+        : new Promise<void>((done) => this.child.once("exit", () => done()));
     this.child.stdin.end();
-    await new Promise<void>((done) => {
-      const timer = setTimeout(() => {
-        this.child.kill();
-        done();
-      }, 3_000);
-      this.child.once("exit", () => {
-        clearTimeout(timer);
-        done();
-      });
-    });
-    await rm(this.scratch, { recursive: true, force: true });
+    const graceful = await Promise.race([exited.then(() => true), delay(3_000).then(() => false)]);
+    if (!graceful) {
+      // Escalate, and still wait for the process to exit before removing its files.
+      this.child.kill("SIGTERM");
+      const terminated = await Promise.race([exited.then(() => true), delay(3_000).then(() => false)]);
+      if (!terminated) {
+        this.child.kill("SIGKILL");
+        await exited;
+      }
+    }
+    await rm(this.scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }

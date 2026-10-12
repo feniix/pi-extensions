@@ -50,7 +50,13 @@ export async function startMockExaServer() {
   const server: Server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://mock");
     const text = await readBody(request);
-    const body = text ? (JSON.parse(text) as unknown) : undefined;
+    let body: unknown;
+    try {
+      body = text ? (JSON.parse(text) as unknown) : undefined;
+    } catch {
+      json(response, 400, { statusCode: 400, message: "Malformed JSON body", path: url.pathname });
+      return;
+    }
     const apiKey = request.headers["x-api-key"];
     requests.push({
       method: request.method ?? "",
@@ -121,12 +127,13 @@ export async function startMockExaServer() {
       failNextGets.set(id, [...(failNextGets.get(id) ?? []), ...statusCodes]);
     },
     counts() {
+      const isCreate = (entry: RecordedRequest) => entry.method === "POST" && entry.path === "/agent/runs";
+      // Only same-run GETs count as monitoring; any other GET path is unexpected traffic.
+      const isRunGet = (entry: RecordedRequest) => entry.method === "GET" && /^\/agent\/runs\/[^/]+$/.test(entry.path);
       return {
-        creates: requests.filter((entry) => entry.method === "POST" && entry.path === "/agent/runs").length,
-        gets: requests.filter((entry) => entry.method === "GET").length,
-        other: requests.filter(
-          (entry) => !(entry.method === "GET" || (entry.method === "POST" && entry.path === "/agent/runs")),
-        ).length,
+        creates: requests.filter(isCreate).length,
+        gets: requests.filter(isRunGet).length,
+        other: requests.filter((entry) => !isCreate(entry) && !isRunGet(entry)).length,
       };
     },
     async close() {

@@ -144,8 +144,10 @@ describe("guided background research smoke on the production extension (real pi 
     expect(server.counts().creates).toBe(1);
     // Start a long streamed reply, then complete the run while it is still streaming.
     const settledBefore = pi.settledCount();
+    const streaming = pi.waitForNext((record) => record.type === "message_update", 15_000);
     pi.send({ type: "prompt", message: "tell me something long while it runs" });
-    await pi.waitFor((record) => record.type === "message_update", 15_000);
+    // Complete the run only once the long reply is actually streaming.
+    await streaming;
     server.complete("smoke_run_1");
     await vi.waitFor(() => expect(server.counts().gets).toBeGreaterThanOrEqual(1), { timeout: 10_000, interval: 50 });
     // The notice is queued as a follow-up: it lands only after the streamed answer, then the report turn runs.
