@@ -109,11 +109,17 @@ describe("Pi standalone and cycle discovery availability", () => {
     const status = (await pi.call("exa_research_status")).details;
     const directory = join(pi.context.cwd, "agent", "research-cycles", String(status.projectId));
     const broken = "00000000-0000-4000-8000-000000000003";
+    await pi.command?.handler("list", pi.context);
+    expect(JSON.parse(pi.notify.mock.lastCall?.[0] ?? "null")).toEqual([expect.objectContaining({ id: status.id })]);
     await writeFile(join(directory, `${broken}.json`), "{SECRET_UNREADABLE_RECORD", { mode: 0o600 });
     await pi.command?.handler("list", pi.context);
     expect(pi.notify).toHaveBeenLastCalledWith(expect.stringContaining(broken), "info");
     expect(pi.notify).toHaveBeenLastCalledWith(expect.stringContaining(String(status.id)), "info");
     expect(JSON.stringify(pi.notify.mock.calls.at(-1))).not.toContain("SECRET_UNREADABLE_RECORD");
+    expect(JSON.parse(pi.notify.mock.lastCall?.[0] ?? "null")).toEqual([
+      expect.objectContaining({ id: status.id }),
+      { id: broken, unreadable: true },
+    ]);
   });
 });
 

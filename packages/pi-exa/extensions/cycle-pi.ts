@@ -72,7 +72,7 @@ export function cyclePiRegistration(pi: ExtensionAPI): PiToolRegistration {
           case "list": {
             const found = await cycles.discover();
             text = JSON.stringify(
-              { cycles: found.cycles.map(view), unreadableCycleIds: found.unreadableCycleIds },
+              [...found.cycles.map(view), ...found.unreadableCycleIds.map((id) => ({ id, unreadable: true }))],
               null,
               2,
             );
