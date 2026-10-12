@@ -1,0 +1,75 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4RGVYDGTJ0PPJ78CBZH1CYR",
+  "session_id": "90caff9b-07c1-45ca-be6f-308aff547939",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-12T16:59:24.314254Z",
+  "branch": "pi-exa-guided/recovery",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "packages/pi-exa/__tests__/guided-recovery.test.ts",
+    "packages/pi-exa/extensions/cycle-pi.ts"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-fable-5-1",
+  "turn_id": "e4e8102f376e",
+  "checkpoint_transcript_start": 1874,
+  "transcript_lines_at_start": 1874,
+  "compact_transcript_start": 129,
+  "token_usage": {
+    "input_tokens": 192,
+    "cache_creation_tokens": 23606,
+    "cache_read_tokens": 3371512,
+    "output_tokens": 19757,
+    "api_call_count": 6
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01S2dCbHERfcZtnxC1DhE34A",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "gh-stack"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "0b1207e3e62c",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 56,
+        "end": 57,
+        "entry_ids": [
+          "5851068d-e68a-492c-9b6e-6d4b8c2f51d7"
+        ],
+        "tool_use_id": "toolu_01S2dCbHERfcZtnxC1DhE34A"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01S2dCbHERfcZtnxC1DhE34A"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: gh-stack",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-12T16:59:24.246958Z",
+    "agent_lines": 509,
+    "agent_removed": 8,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 509,
+    "total_lines_changed": 517,
+    "agent_percentage": 100,
+    "metric_version": 2
+  }
+}
