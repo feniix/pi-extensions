@@ -211,12 +211,13 @@ liability continue; no cancel request is issued.
    and the local processing outcome on the attempt.
 2. Persist one notice per attempt/terminal outcome with state `pending`. Repeated
    terminal observations of the same attempt create no second notice.
-3. Deliver with `pi.sendMessage({ customType: "exa-research-completion", content:
+3. Claim the notice with a serialized `pending → sent` write, then deliver with
+   `pi.sendMessage({ customType: "exa-research-completion", content:
    <attempt reference and read-only instruction>, display: true, details:
    { noticeId, cycleId, attemptId, runId, status } }, { triggerTurn: true,
    deliverAs: "followUp" })`. Idle origin → wakes now; streaming origin → after
    pending work; never `steer`. Content is a reference, never vendor output.
-   Mark the notice `sent`.
+   A failed send releases the claim back to `pending` (see "Review hardening").
 4. Acknowledge by observation: on `agent_settled` or `session_start`, find the
    `custom_message` entry carrying `details.noticeId` in the session and mark the
    notice `acknowledged` with the entry ID. A `sent` notice without an entry after
@@ -246,6 +247,16 @@ liability continue; no cancel request is issued.
   request by command and the dialog confirms that existing funding.
 - Monitors detach only on non-cancellable events (`session_shutdown`, `session_tree`); a
   vetoed switch or fork keeps observing. Ticks act only for the live entry of their key.
+
+Accepted residuals (not fixed):
+
+- The approval write and the attempt reservation are two serialized transactions. The
+  recheck inside the approval write closes the dialog-open window; a retry landing between
+  the grant and the reservation can still leave a recorded approval without an attempt.
+- A late terminal acknowledgement that arrives after its cycle detached cannot register a
+  monitor record, so resume treats it as foreground-reported. The outcome is retained and
+  shown by status; no completion notice is sent.
+- Owner liveness is pid-based; pid reuse after a crash is the foundation's existing limit.
 
 ### Lifecycle fences
 
