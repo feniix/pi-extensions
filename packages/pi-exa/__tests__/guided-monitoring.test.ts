@@ -12,9 +12,16 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import type { PiToolRegistration } from "@feniix/bridgekit/pi";
 import type { AgentRun } from "exa-js";
+import { Value } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import exaExtension from "../extensions/index.js";
-import { COMPLETION_NOTICE_TYPE } from "../extensions/research-monitor.js";
+import {
+  COMPLETION_NOTICE_TYPE,
+  DEFAULT_MONITOR_BOUNDS,
+  monitorPauseReasons,
+  monitorRecordSchema,
+  nextMonitorDelay,
+} from "../extensions/research-monitor.js";
 
 // Real filesystem controllers plus timer-driven monitors need headroom on loaded CI runners.
 vi.setConfig({ testTimeout: 30_000 });
@@ -439,8 +446,10 @@ describe("background monitoring and completion delivery", () => {
     const record = await pi.record(cycleId, projectId);
     expect(record.status).toBe("completed");
     expect(pi.sent).toHaveLength(0);
+    // The run itself finished, so no "monitoring paused" guidance is shown for a terminal attempt.
     const status = await pi.call("exa_research_status", { cycleId });
-    expect(String(status.details.nextSafeAction)).toContain("Background monitoring is paused");
+    expect(String(status.details.nextSafeAction)).not.toContain("Background monitoring is paused");
+    expect(String(status.details.nextSafeAction)).toContain("Completion blocks further submissions");
     expect(offlineCreate).toHaveBeenCalledTimes(1);
 
     // Tree navigation detaches this cycle; a fresh cycle afterwards must still be monitored.
@@ -532,5 +541,31 @@ describe("background monitoring and completion delivery", () => {
     expect(records.map((record) => record.grants.length)).toEqual([2, 2]);
     expect(offlineCreate).toHaveBeenCalledTimes(2);
     expect(offlineCancel).not.toHaveBeenCalled();
+  });
+});
+
+describe("monitor policy", () => {
+  it("backs off from the first check: 5 s, then 7.5 s, capped at 60 s and never below the first delay", () => {
+    expect(nextMonitorDelay(undefined, DEFAULT_MONITOR_BOUNDS)).toBe(7_500);
+    expect(nextMonitorDelay(7_500, DEFAULT_MONITOR_BOUNDS)).toBe(11_250);
+    expect(nextMonitorDelay(50_000, DEFAULT_MONITOR_BOUNDS)).toBe(60_000);
+    expect(nextMonitorDelay(undefined, { ...DEFAULT_MONITOR_BOUNDS, initialDelayMs: 90_000 })).toBe(90_000);
+  });
+
+  it("accepts every declared pause reason in the persisted monitor schema", () => {
+    for (const reason of monitorPauseReasons) {
+      const record = {
+        kind: "exa-monitor-v1",
+        attemptId: "a",
+        runId: "r",
+        originSessionId: "s",
+        state: "paused",
+        reason,
+        gets: 0,
+        consecutiveTransientErrors: 0,
+        startedAt: new Date().toISOString(),
+      };
+      expect(Value.Check(monitorRecordSchema, record), reason).toBe(true);
+    }
   });
 });

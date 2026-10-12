@@ -525,3 +525,157 @@ describe("guided research from request through approved submission", () => {
     expect(offlineCreate).not.toHaveBeenCalled();
   });
 });
+
+describe("guided submission review fixes", () => {
+  it("refuses submit without an active cycle instead of falling back to a standalone paid run", async () => {
+    const pi = await host();
+    const refused = await pi.call("web_research_exa", { researchMode: "submit", proposalId: "abc", query: "x" });
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toContain("No active research cycle");
+    expect(pi.confirm).not.toHaveBeenCalled();
+    expect(offlineCreate).not.toHaveBeenCalled();
+  });
+
+  it("reports a cycle mismatch before anything about the active cycle", async () => {
+    const pi = await host();
+    await readyCycle(pi);
+    const mismatch = await pi.call("web_research_exa", {
+      researchMode: "submit",
+      cycleId: "00000000-0000-4000-8000-000000000009",
+      proposalId: "abc",
+    });
+    expect(mismatch.isError).toBe(true);
+    expect(mismatch.content[0].text).not.toContain("AGENT_ATTEMPT_EXISTS");
+    expect(pi.confirm).not.toHaveBeenCalled();
+  });
+
+  it("does not offer the dialog while an unresolved liability needs an operator assessment", async () => {
+    const pi = await host();
+    const { cycleId, projectId } = await readyCycle(pi);
+    expect((await pi.call("web_search_exa", { query: "pricing", cycleId })).isError).not.toBe(true);
+    const path = await pi.recordPath(cycleId, projectId);
+    const record = JSON.parse(await readFile(path, "utf8"));
+    record.ledger[0].status = "unknown";
+    delete record.ledger[0].reportedMicros;
+    await writeFile(path, JSON.stringify(record), { mode: 0o600 });
+    const proposal = await propose(pi, cycleId);
+    const confirms = pi.confirm.mock.calls.length;
+    const blocked = await pi.call("web_research_exa", {
+      researchMode: "submit",
+      cycleId,
+      proposalId: proposal.proposalId,
+    });
+    expect(blocked.isError).toBe(true);
+    expect(blocked.content[0].text).toContain("DIALOG_APPROVAL_BLOCKED");
+    expect(blocked.content[0].text).toContain("approve-liability");
+    expect(pi.confirm).toHaveBeenCalledTimes(confirms);
+    expect(offlineCreate).not.toHaveBeenCalled();
+  });
+
+  it("never lowers a wider ceiling or scope the operator recorded before the dialog write", async () => {
+    const pi = await host();
+    const { cycleId, projectId } = await readyCycle(pi);
+    await pi.commands.get("exa-research")?.handler(`approve ${cycleId} 1 web_search_exa`, pi.context);
+    const proposal = await propose(pi, cycleId);
+    const submitted = await pi.call("web_research_exa", {
+      researchMode: "submit",
+      cycleId,
+      proposalId: proposal.proposalId,
+    });
+    expect(submitted.isError).toBe(false);
+    const record = JSON.parse(await readFile(await pi.recordPath(cycleId, projectId), "utf8"));
+    const latest = record.grants.filter((grant: { kind: string }) => grant.kind === "exa-grant-v1").at(-1);
+    expect(latest).toMatchObject({ source: "dialog", ceilingMicros: 1_000_000 });
+    expect(latest.tools.sort()).toEqual(["web_research_exa", "web_search_exa"]);
+  });
+
+  it("records no approval when another submission creates an attempt while the dialog is open", async () => {
+    const pi = await host();
+    const { cycleId, projectId } = await readyCycle(pi);
+    const proposal = await propose(pi, cycleId);
+    let nested = false;
+    pi.confirm.mockImplementation(async (title: string, message: string, options?: { timeout?: number }) => {
+      pi.confirms.push({ title, message, options });
+      if (!nested) {
+        nested = true;
+        // A concurrent submission wins while this dialog is still open.
+        const inner = await pi.call("web_research_exa", {
+          researchMode: "submit",
+          cycleId,
+          proposalId: proposal.proposalId,
+        });
+        expect(inner.isError).toBe(false);
+      }
+      return true;
+    });
+    const outer = await pi.call("web_research_exa", {
+      researchMode: "submit",
+      cycleId,
+      proposalId: proposal.proposalId,
+    });
+    expect(outer.isError).toBe(true);
+    expect(outer.content[0].text).toContain("AGENT_ATTEMPT_EXISTS");
+    const record = JSON.parse(await readFile(await pi.recordPath(cycleId, projectId), "utf8"));
+    expect(record.grants).toHaveLength(2);
+    expect(record.attempts).toHaveLength(1);
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("prices provider requests as operator-assessed: no dialog funding until the operator assesses the exact request", async () => {
+    const pi = await host();
+    const { cycleId, projectId } = await readyCycle(pi);
+    await pi.call("exa_research_step", {
+      topic: "Laya versus Jev",
+      stage: "framing",
+      note: "use a provider",
+      thought_number: 2,
+      total_thoughts: 2,
+      next_step_needed: false,
+      executionPlan: { controls: { effort: "medium", dataSources: [{ provider: "crunchbase" }] } },
+    });
+    const proposal = await propose(pi, cycleId);
+    expect(proposal.estimate.dollars).toBeNull();
+    expect(proposal.approval).toBeUndefined();
+    const unpriced = await pi.call("web_research_exa", {
+      researchMode: "submit",
+      cycleId,
+      proposalId: proposal.proposalId,
+    });
+    expect(unpriced.content[0].text).toContain("ESTIMATE_UNAVAILABLE");
+    expect(unpriced.content[0].text).toContain(proposal.requestHash);
+    expect(pi.confirm).not.toHaveBeenCalled();
+    const command = pi.commands.get("exa-research");
+    await command?.handler(`approve ${cycleId} 2 web_research_exa`, pi.context);
+    await command?.handler(`approve-request ${cycleId} ${proposal.requestHash} 1.5`, pi.context);
+    const funded = await pi.call("web_research_exa", {
+      researchMode: "submit",
+      cycleId,
+      proposalId: proposal.proposalId,
+    });
+    expect(funded.isError).toBe(false);
+    expect(pi.confirms.at(-1)?.message).toContain("operator-assessed exact-request permission");
+    const record = JSON.parse(await readFile(await pi.recordPath(cycleId, projectId), "utf8"));
+    expect(record.grants.every((grant: { source: string }) => grant.source === "command")).toBe(true);
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    expect(offlineCreate).toHaveBeenCalledWith(expect.objectContaining({ dataSources: [{ provider: "crunchbase" }] }));
+  });
+
+  it("reports an expired wait before dispatch as not dispatched, with the retry path and no create", async () => {
+    const pi = await host({ submitTimeoutMs: 1 });
+    const { cycleId, projectId } = await readyCycle(pi);
+    const proposal = await propose(pi, cycleId);
+    const submitted = await pi.call("web_research_exa", {
+      researchMode: "submit",
+      cycleId,
+      proposalId: proposal.proposalId,
+    });
+    expect(submitted.isError).toBe(true);
+    expect(submitted.content[0].text).toContain("SUBMISSION_NOT_DISPATCHED");
+    expect(submitted.content[0].text).toContain("No charge was incurred");
+    expect(submitted.content[0].text).toContain("researchMode=retry");
+    expect(submitted.content[0].text).not.toContain("outcome is unknown");
+    expect(offlineCreate).not.toHaveBeenCalled();
+    const record = JSON.parse(await readFile(await pi.recordPath(cycleId, projectId), "utf8"));
+    expect(record.attempts[0].status).toBe("not-dispatched");
+  });
+});

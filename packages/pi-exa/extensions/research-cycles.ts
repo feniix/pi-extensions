@@ -19,6 +19,7 @@ import {
   moneyMicros,
   type SpendingGrant,
   spendingGrantSchema,
+  summarizeAccounting,
   uncertaintyPermissionSchema,
   validateAccountingRecords,
 } from "./research-accounting.js";
@@ -235,6 +236,39 @@ export function projectResearchSummary(record: ResearchCycle, params?: ResearchS
     selectedEvidence,
     text: `Cycle: ${record.id}\nRevision: ${record.revision}\nStatus: ${record.status}\n${createResearchPlanner(summaryRecord.plan).getSummary(params)}\nSelected evidence (untrusted context): ${JSON.stringify(selectedEvidence)}`,
   };
+}
+
+/**
+ * Liveness of a recorded cycle owner process. Only a proven-dead process (ESRCH)
+ * is stale; any other probe result, including EPERM, means a live process elsewhere.
+ * Age alone never authorizes takeover.
+ */
+export function ownerAlive(owner: { pid: number } | undefined): boolean {
+  if (!owner) return false;
+  try {
+    process.kill(owner.pid, 0);
+    return true;
+  } catch (error) {
+    return code(error) !== "ESRCH";
+  }
+}
+
+/**
+ * Why a trusted-dialog approval must not be offered for this cycle: overspend,
+ * unresolved or conflicting liabilities stay on explicit operator commands.
+ */
+export function dialogApprovalBlocker(record: ResearchCycle): string | undefined {
+  const accounting = summarizeAccounting(record.grants, record.ledger, {
+    cycleId: record.id,
+    projectId: record.projectId,
+  });
+  if (accounting.conflictingOperationIds.length)
+    return "Conflicting API receipts must be investigated before any further approval.";
+  if (accounting.blockedOperationIds.length)
+    return `Unresolved liabilities (${accounting.blockedOperationIds.join(", ")}) need an explicit operator approve-liability assessment first.`;
+  if (accounting.reportedDollars > accounting.ceilingDollars)
+    return `Reported spend $${accounting.reportedDollars} already exceeds the $${accounting.ceilingDollars} lifetime ceiling; the operator must raise it explicitly with /exa-research approve.`;
+  return undefined;
 }
 
 export async function createResearchCycles(options: ResearchCycleOptions) {
@@ -533,6 +567,16 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     });
   }
 
+  /** The latest grant wins, so a dialog grant keeps any wider ceiling or scope recorded meanwhile. */
+  const mergeWithLatestGrant = (record: ResearchCycle, ceilingMicros: number, tools: readonly string[]) => {
+    const latest = record.grants
+      .filter((grant): grant is SpendingGrant => Value.Check(spendingGrantSchema, grant))
+      .at(-1);
+    return {
+      ceilingMicros: Math.max(ceilingMicros, latest?.ceilingMicros ?? 0),
+      scope: [...new Set([...(latest?.tools ?? []), ...tools])],
+    };
+  };
   const assertDraft = (record: ResearchCycle) => {
     if (record.archived || !["planning", "failed", "unknown"].includes(record.status))
       throw new Error("CYCLE_NOT_EXECUTABLE: No editable planning or historical retry draft.");
@@ -688,14 +732,8 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           const record = await read(id);
           assertArtifactTarget(record, { ...assertions, cycleId: assertions.cycleId ?? id });
           if (!owns(record)) orphanExplorations(record);
-          if (record.owner && !owns(record)) {
-            try {
-              process.kill(record.owner.pid, 0);
-              throw new Error("Research cycle is owned by another live session/runtime.");
-            } catch (error) {
-              if (code(error) !== "ESRCH") throw error;
-            }
-          }
+          if (record.owner && !owns(record) && ownerAlive(record.owner))
+            throw new Error("Research cycle is owned by another live session/runtime.");
           record.owner = { ...owner };
           record.archived = false;
           leasedId = id;
@@ -737,6 +775,14 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           const record = await owned();
           assertArtifactTarget(record, { cycleId });
           assertDraft(record);
+          let ceilingMicros = moneyMicros(dollars, true);
+          let scope = [...tools];
+          if (source === "dialog") {
+            // A dialog widens, never narrows: merge with the grant current at write time.
+            const blocker = dialogApprovalBlocker(record);
+            if (blocker) throw new Error(`DIALOG_APPROVAL_BLOCKED: ${blocker} No grant was recorded.`);
+            ({ ceilingMicros, scope } = mergeWithLatestGrant(record, ceilingMicros, scope));
+          }
           const grant = {
             kind: "exa-grant-v1",
             id: randomUUID(),
@@ -745,8 +791,8 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             issuerSessionId: owner.sessionId,
             source,
             issuedAt: nextAuthorizationTime(record.grants, record.attempts, record.ledger),
-            ceilingMicros: moneyMicros(dollars, true),
-            tools: [...tools],
+            ceilingMicros,
+            tools: scope,
           };
           if (!Value.Check(spendingGrantSchema, grant)) throw new Error("Invalid spending scope or amount.");
           record.grants.push(grant as SpendingGrant);
@@ -775,12 +821,21 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
         transaction(async () => {
           const record = await owned();
           assertCurrent();
+          // Rechecked inside the write: a concurrent submission or retry may have created an
+          // attempt while the dialog was open. No approval is recorded for a refused submission.
+          if (record.attempts.length)
+            throw new Error(
+              "AGENT_ATTEMPT_EXISTS: another submission created an Agent attempt while the dialog was open; no approval was recorded.",
+            );
           assertArtifactTarget(record, { cycleId, expectedRevision: approval.expectedRevision });
           if (approval.artifactHash !== undefined && draftArtifact(record, {}).hash !== approval.artifactHash)
             throw new Error("PROPOSAL_STALE: the plan changed after the proposal was shown; propose again.");
           assertDraft(record);
+          const blocker = dialogApprovalBlocker(record);
+          if (blocker) throw new Error(`DIALOG_APPROVAL_BLOCKED: ${blocker} No approval was recorded.`);
           if (!/^[a-f0-9]{64}$/.test(approval.requestHash)) throw new Error("An exact request hash is required.");
           const issuedAt = nextAuthorizationTime(record.grants, record.attempts, record.ledger);
+          const merged = mergeWithLatestGrant(record, moneyMicros(approval.ceilingDollars, true), approval.tools);
           const grant = {
             kind: "exa-grant-v1",
             id: randomUUID(),
@@ -789,8 +844,8 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             issuerSessionId: owner.sessionId,
             source: "dialog",
             issuedAt,
-            ceilingMicros: moneyMicros(approval.ceilingDollars, true),
-            tools: [...new Set(approval.tools)],
+            ceilingMicros: merged.ceilingMicros,
+            tools: merged.scope,
           };
           const permission = {
             kind: "exa-uncertainty-v1",
@@ -1629,8 +1684,16 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             await write(record);
             return { monitor: structuredClone(stopped), created: true };
           }
-          if (existing && (existing.state === "registered" || existing.state === "running"))
+          if (existing && (existing.state === "registered" || existing.state === "running")) {
+            // The owning runtime takes the monitor over: delivery targets this session and the
+            // lifetime restarts, so a dead owner's leftover origin cannot strand the notice.
+            if (existing.originSessionId !== owner.sessionId) {
+              existing.originSessionId = owner.sessionId;
+              existing.startedAt = new Date().toISOString();
+              await write(record);
+            }
             return { monitor: structuredClone(existing), created: false };
+          }
           const monitor: MonitorRecord = existing ?? {
             kind: "exa-monitor-v1",
             attemptId,

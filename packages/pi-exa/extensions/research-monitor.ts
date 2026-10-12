@@ -72,6 +72,10 @@ export const completionNoticeSchema = Type.Object(
     acknowledgedEntryId: Type.Optional(Type.String({ minLength: 1 })),
     /** Package-owned delivery diagnostic, never vendor prose. */
     deliveryError: Type.Optional(Type.String({ minLength: 1 })),
+    /** Re-sent after an uncertain delivery; the label survives a failed re-send. */
+    possibleDuplicate: Type.Optional(Type.Boolean()),
+    /** How the outcome reached the assistant: the background notice entry or a foreground tool result. */
+    channel: Type.Optional(Type.Union([Type.Literal("session-entry"), Type.Literal("tool-result")])),
   },
   { additionalProperties: false },
 );
@@ -146,9 +150,15 @@ export function classifyObservationError(error: unknown): ObservationFailure {
   return { kind: "transient" };
 }
 
+/**
+ * Delay before the next check. The first check runs after `initialDelayMs`, so the
+ * delay after it is already one backoff step longer (5 s, then 7.5 s, 11.25 s, …).
+ * The cap never drops below the initial delay.
+ */
 export function nextMonitorDelay(previousMs: number | undefined, bounds: MonitorBounds): number {
-  const base = previousMs === undefined ? bounds.initialDelayMs : previousMs * bounds.backoffFactor;
-  return Math.min(bounds.maxDelayMs, Math.max(1, Math.round(base)));
+  const base = (previousMs ?? bounds.initialDelayMs) * bounds.backoffFactor;
+  const cap = Math.max(bounds.maxDelayMs, bounds.initialDelayMs);
+  return Math.min(cap, Math.max(1, Math.round(base)));
 }
 
 export function jitteredDelay(delayMs: number, bounds: MonitorBounds, random: () => number = Math.random): number {

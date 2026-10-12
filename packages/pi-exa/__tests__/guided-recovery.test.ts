@@ -70,6 +70,7 @@ interface HostOptions {
   sessionId?: string;
   directory?: string;
   hasUI?: boolean;
+  submitTimeoutMs?: number;
 }
 
 interface Entry {
@@ -135,7 +136,9 @@ async function host(options: HostOptions = {}) {
           ? config
           : name === "exa-monitor-interval-ms"
             ? "20"
-            : undefined,
+            : name === "exa-submit-timeout-ms" && options.submitTimeoutMs !== undefined
+              ? String(options.submitTimeoutMs)
+              : undefined,
     registerTool: (tool: Parameters<PiToolRegistration["registerTool"]>[0]) => tools.set(tool.name, tool),
     registerCommand: (name: string, command: { handler: (args: string, context: ExtensionContext) => Promise<void> }) =>
       commands.set(name, command),
@@ -525,5 +528,98 @@ describe("recovering monitoring and notifications across interruptions", () => {
     const forged = await restarted.call("web_research_exa", { researchMode: "active", cycleId: second.cycleId });
     expect(forged.isError).toBe(true);
     expect(offlineCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("adopts a genuine late create acknowledgement: monitors it and delivers one notice without resubmitting", async () => {
+    const pi = await host({ submitTimeoutMs: 100 });
+    let releaseCreate: ((run: AgentRun) => void) | undefined;
+    offlineCreate.mockImplementationOnce(
+      () =>
+        new Promise<AgentRun>((resolve) => {
+          releaseCreate = resolve;
+        }),
+    );
+    const { cycleId, projectId, result, attemptId } = await submitted(pi);
+    expect(result.content[0].text).toContain("SUBMISSION_UNKNOWN");
+    expect(result.content[0].text).toContain("monitored in the background");
+    offlineGet.mockResolvedValue(completedRun("agent_run_late"));
+    (releaseCreate as (run: AgentRun) => void)({ id: "agent_run_late", status: "running" });
+    await vi.waitFor(() => expect(pi.sent).toHaveLength(1), { timeout: 4_000 });
+    expect(pi.sent[0].message.details).toMatchObject({ attemptId, runId: "agent_run_late", outcome: "completed" });
+    const record = await pi.record(cycleId, projectId);
+    expect(record.attempts).toHaveLength(1);
+    expect(record.attempts[0].result).toMatchObject({ remoteId: "agent_run_late", terminal: true });
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("acknowledges a terminal outcome reported by an explicit recover so a later resume never reports it again", async () => {
+    const pi = await host();
+    offlineGet.mockRejectedValueOnce(Object.assign(new Error("404"), { statusCode: 404 }));
+    const { cycleId, projectId, attemptId } = await submitted(pi);
+    await vi.waitFor(
+      async () =>
+        expect(monitorOf(await pi.record(cycleId, projectId), attemptId)).toMatchObject({ reason: "NOT_FOUND" }),
+      { timeout: 3_000 },
+    );
+    offlineGet.mockResolvedValue(completedRun("agent_run_pending"));
+    const recovered = await pi.call("web_research_exa", { researchMode: "recover", cycleId, attemptId });
+    expect(recovered.details.inspectionOnly).toBe(true);
+    expect(monitorOf(await pi.record(cycleId, projectId), attemptId)).toMatchObject({
+      state: "stopped",
+      notice: { state: "acknowledged", channel: "tool-result" },
+    });
+    const status = await pi.call("exa_research_status", { cycleId });
+    expect(String(status.details.nextSafeAction)).not.toContain("Background monitoring is paused");
+    const resumed = await pi.call("exa_research_status", { action: "resume", cycleId });
+    expect(resumed.details.resumedMonitoring).toEqual([]);
+    expect(pi.sent).toHaveLength(0);
+  });
+
+  it("does not notify on resume for a run that was already terminal when acknowledged", async () => {
+    const pi = await host();
+    offlineCreate.mockResolvedValueOnce(completedRun("agent_run_fast"));
+    const { cycleId, result } = await submitted(pi);
+    expect(result.details).toMatchObject({ monitoring: "terminal", remoteStatus: "completed" });
+    await pi.emit("session_shutdown", { reason: "quit" });
+    const restarted = await host({ directory: pi.directory, sessionId: "session-one" });
+    const resumed = await restarted.call("exa_research_status", { action: "resume", cycleId });
+    expect(resumed.details.resumedMonitoring).toEqual([]);
+    expect(restarted.sent).toHaveLength(0);
+  });
+
+  it("keeps the possible-duplicate label on an uncertain notice when the first re-send fails", async () => {
+    const pi = await host();
+    offlineGet.mockResolvedValue(completedRun("agent_run_pending"));
+    const { cycleId, projectId, attemptId } = await submitted(pi);
+    await vi.waitFor(() => expect(pi.sent).toHaveLength(1), { timeout: 3_000 });
+    await vi.waitFor(async () =>
+      expect(monitorOf(await pi.record(cycleId, projectId), attemptId)?.notice).toMatchObject({ state: "sent" }),
+    );
+    pi.entries.splice(0);
+    await pi.emit("session_shutdown", { reason: "quit" });
+    const restarted = await host({ directory: pi.directory, sessionId: "session-one" });
+    restarted.sendMessage.mockImplementationOnce(() => {
+      throw new Error("This extension ctx is stale after session replacement or reload.");
+    });
+    const first = await restarted.call("exa_research_status", { action: "resume", cycleId });
+    expect(first.details.resumedMonitoring).toEqual([{ attemptId, action: "notice pending" }]);
+    expect(monitorOf(await restarted.record(cycleId, projectId), attemptId)?.notice).toMatchObject({
+      state: "pending",
+      possibleDuplicate: true,
+    });
+    const second = await restarted.call("exa_research_status", { action: "resume", cycleId });
+    expect(second.details.resumedMonitoring).toEqual([{ attemptId, action: "notice re-sent" }]);
+    expect(restarted.sent.at(-1)?.message.details).toMatchObject({ possibleDuplicate: true });
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps monitoring through a vetoed session switch", async () => {
+    const pi = await host();
+    offlineGet.mockResolvedValue(completedRun("agent_run_pending"));
+    const { cycleId, projectId, attemptId } = await submitted(pi);
+    // Another extension cancels the switch: no detach event follows, so monitoring continues.
+    await pi.emit("session_before_switch", { reason: "resume" });
+    await vi.waitFor(() => expect(pi.sent).toHaveLength(1), { timeout: 3_000 });
+    expect(monitorOf(await pi.record(cycleId, projectId), attemptId)).toMatchObject({ state: "stopped" });
   });
 });

@@ -43,6 +43,16 @@ export function grantedTools(record: ResearchCycle): string[] {
 
 export function estimateAgentRequest(request: Record<string, unknown>): AgentEstimate {
   const effort = typeof request.effort === "string" ? request.effort : "medium";
+  const providers = Array.isArray(request.dataSources) ? request.dataSources.length : 0;
+  if (providers > 0) {
+    // Provider/contact add-ons are not priced by the package; a dialog allowance equal to the
+    // base price would under-fund the run, so the operator assesses the exact request instead.
+    return {
+      dollars: null,
+      effort,
+      basis: `${providers} Exa Connect provider(s) requested; their add-on charges are not priced by the package. The operator assesses this exact request with /exa-research approve <cycle-id> <ceiling> web_research_exa and /exa-research approve-request <cycle-id> <request-hash> <dollars>, then the dialog confirms it.`,
+    };
+  }
   const fixed = Object.entries(AGENT_RATE_PROFILE.fixed).find(([name]) => name === effort)?.[1];
   if (fixed !== undefined) {
     return {
@@ -75,6 +85,25 @@ export function proposalIdFor(artifactHash: string, revision: number, estimate: 
     .slice(0, 16);
 }
 
+export interface AccountingFigures {
+  ceilingDollars: number;
+  reportedDollars: number;
+  pendingEstimatedDollars: number;
+  assessedUnknownDollars: number;
+}
+
+/**
+ * Shared approval arithmetic for every trusted dialog: current exposure, and the lifetime
+ * ceiling that covers exposure plus the proposed call without ever lowering an existing one.
+ */
+export function approvalFigures(accounting: AccountingFigures, proposedDollars: number) {
+  const exposure = accounting.reportedDollars + accounting.pendingEstimatedDollars + accounting.assessedUnknownDollars;
+  return {
+    exposure,
+    ceilingDollars: roundUpCents(Math.max(accounting.ceilingDollars, exposure + proposedDollars)),
+  };
+}
+
 export interface ProposalApproval {
   /** One-use exact-request allowance written on approval. */
   allowanceDollars: number;
@@ -94,13 +123,13 @@ export function buildProposal(record: ResearchCycle, artifact: ResearchArtifact)
     cycleId: record.id,
     projectId: record.projectId,
   });
-  const exposure = accounting.reportedDollars + accounting.pendingEstimatedDollars + accounting.assessedUnknownDollars;
+  const { exposure } = approvalFigures(accounting, 0);
   const approval: ProposalApproval | undefined =
     estimate.dollars === null
       ? undefined
       : {
           allowanceDollars: estimate.dollars,
-          ceilingDollars: roundUpCents(Math.max(accounting.ceilingDollars, exposure + estimate.dollars)),
+          ceilingDollars: approvalFigures(accounting, estimate.dollars).ceilingDollars,
           tools: [...new Set([...grantedTools(record), "web_research_exa"])],
         };
   const id = proposalIdFor(artifact.hash, artifact.revision, estimate);

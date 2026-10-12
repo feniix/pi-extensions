@@ -627,9 +627,11 @@ describe("Pi cycle commands and tools", () => {
       costDollars: { total: 0.1 },
       output: { structured: { answer: "done" } },
     });
+    views.mockClear();
     const response = await pi.submit(artifact.cycleId);
     expect(response.isError).toBe(false);
-    expect(views).toHaveBeenCalled();
+    // A completed-on-acknowledgement submission builds exactly one status projection.
+    expect(views).toHaveBeenCalledTimes(1);
     expect(response.details).toMatchObject({
       status: "completed",
       completionSummary: { remoteCompletedAttemptIds: [response.details.attemptId], duplicateSuccess: false },
@@ -916,6 +918,43 @@ describe("Pi cycle commands and tools", () => {
     });
     expect(offlineGet).toHaveBeenCalledTimes(1);
     expect(offlineCreate).toHaveBeenCalledTimes(1);
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+  });
+
+  it("keeps an interrupted submission unknown and its liability unresolved when a pending GET comes back", async () => {
+    const { pi, artifact } = await readyAgentHost();
+    let enter!: () => void;
+    let resolveCreate!: (run: AgentRun) => void;
+    const entered = new Promise<void>((done) => {
+      enter = done;
+    });
+    offlineCreate.mockImplementationOnce(() => {
+      enter();
+      return new Promise((done) => {
+        resolveCreate = done;
+      });
+    });
+    offlineGet.mockResolvedValue({ id: "agent_run_interrupted", status: "running", costDollars: { total: 0.05 } });
+    const interruption = new AbortController();
+    const call = pi.submit(artifact.cycleId, interruption.signal);
+    await entered;
+    interruption.abort();
+    expect((await call).content[0].text).toContain("SUBMISSION_UNKNOWN");
+    // The genuine create acknowledgement arrives after the local wait ended.
+    resolveCreate({ id: "agent_run_interrupted", status: "running" });
+    await vi.waitFor(async () =>
+      expect((await pi.call("exa_research_status")).details.attempts).toMatchObject([
+        { result: { remoteId: "agent_run_interrupted" } },
+      ]),
+    );
+    const response = await pi.call("web_research_exa", { researchMode: "recover", cycleId: artifact.cycleId });
+    expect(response.details).toMatchObject({
+      status: "unknown",
+      execution: { status: "unknown", result: { remoteStatus: "running", processing: "pending" } },
+      accounting: { reason: "UNKNOWN_LIABILITY" },
+    });
+    expect(offlineCreate).toHaveBeenCalledTimes(1);
+    expect(offlineCancel).not.toHaveBeenCalled();
     await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
   });
 
