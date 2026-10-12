@@ -90,7 +90,7 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-async function host(enabled = true, timeoutMs?: number) {
+async function host(enabled = true, timeoutMs?: number, enabledTools: readonly string[] = hostToolNames) {
   const directory = await mkdtemp(join(tmpdir(), "exa-cycle-host-"));
   directories.push(directory);
   vi.stubEnv("PI_CODING_AGENT_DIR", join(directory, "agent"));
@@ -98,7 +98,7 @@ async function host(enabled = true, timeoutMs?: number) {
   await writeFile(
     config,
     JSON.stringify({
-      enabledTools: hostToolNames,
+      enabledTools,
       apiKey: "offline-fixture-key",
     }),
   );
@@ -182,6 +182,43 @@ async function host(enabled = true, timeoutMs?: number) {
     },
   };
 }
+
+describe("Pi guided research availability", () => {
+  it("warns at session start when cycles are enabled but Agent research is not, and only then", async () => {
+    const withoutResearch = await host(
+      true,
+      undefined,
+      hostToolNames.filter((name) => name !== "web_research_exa"),
+    );
+    expect(withoutResearch.notify).toHaveBeenCalledWith(expect.stringMatching(/--exa-enable-research/), "warning");
+    expect(withoutResearch.notify).toHaveBeenCalledWith(expect.stringMatching(/guided.*unavailable/i), "warning");
+    const withResearch = await host();
+    expect(withResearch.notify).not.toHaveBeenCalledWith(expect.stringMatching(/--exa-enable-research/), "warning");
+    const plain = await host(
+      false,
+      undefined,
+      hostToolNames.filter((name) => name !== "web_research_exa"),
+    );
+    expect(plain.notify).not.toHaveBeenCalledWith(expect.stringMatching(/--exa-enable-research/), "warning");
+  });
+});
+
+describe("Pi cycles with an explicit enabledTools list", () => {
+  it("keeps the local planner tools available when cycles are enabled, even if the list omits them", async () => {
+    const webOnly = hostToolNames.filter((name) => name.startsWith("web_"));
+    const pi = await host(true, undefined, webOnly);
+    for (const name of ["exa_research_step", "exa_research_status", "exa_research_summary", "exa_research_reset"]) {
+      const tool = pi.tools.get(name) as { exposure?: string } | undefined;
+      expect(tool, name).toBeDefined();
+      expect(tool?.exposure, name).not.toBe("hidden");
+    }
+    const started = await pi.call("exa_research_status", { action: "start", topic: "Laya versus Jev" });
+    expect(started.isError).not.toBe(true);
+    expect(offlineSearch).not.toHaveBeenCalled();
+    const plain = await host(false, undefined, webOnly);
+    expect(plain.tools.has("exa_research_status")).toBe(false);
+  });
+});
 
 describe("Pi standalone and cycle discovery availability", () => {
   it("keeps explicit standalone search available despite lost cycle ownership or a blocked store", async () => {
@@ -419,7 +456,11 @@ describe("Pi cycle commands and tools", () => {
       const guidance = integrated.join("\n");
       expect(guidance).toContain("Integrated Pi cycle");
       expect(guidance).toMatch(/cycle-attributed work only/i);
-      expect(guidance).toMatch(/standalone web tools remain available without a cycle/i);
+      expect(guidance).toMatch(/asks you to research.*no cycle is active.*before searching.*offer/i);
+      expect(guidance).toMatch(/quick answer.*standalone/i);
+      expect(guidance).toMatch(/guided.*proposal.*dialog.*background/i);
+      expect(guidance).toMatch(/wait for.*choice/i);
+      expect(guidance).toMatch(/skip the offer.*already chose/i);
       expect(guidance).toMatch(/unrelated requests use researchMode=standalone.*omit cycle references/i);
       expect(guidance).toMatch(/local exa_research_\* planning tools never call Exa/i);
       expect(guidance).toMatch(/cycle-attributed web_\* retrievals.*during planning/i);

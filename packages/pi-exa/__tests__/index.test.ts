@@ -128,6 +128,15 @@ describe("pi-exa", () => {
       expect(skill).toContain("web_research_exa");
     });
 
+    it("exa-research-planner detects Pi cycles from the tools and offers quick versus guided research", () => {
+      const skill = readFileSync(join(__dirname, "../skills/exa-research-planner/SKILL.md"), "utf-8");
+      const branch = skill.slice(skill.indexOf("## Pi cycle branch"));
+      expect(branch).toMatch(/exa_research_status.*accepts.*action: "start"/s);
+      expect(branch).not.toMatch(/When Pi's `--exa-enable-cycles` integration is enabled/);
+      expect(branch).toMatch(/before searching.*offer.*quick answer.*guided/is);
+      expect(branch).toMatch(/wait for the user's choice/i);
+    });
+
     it("exa-research-planner requires paper retrieval for white paper sources", () => {
       const skill = readFileSync(join(__dirname, "../skills/exa-research-planner/SKILL.md"), "utf-8");
 
