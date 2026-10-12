@@ -465,6 +465,45 @@ describe("background monitoring and completion delivery", () => {
     expect(offlineCreate).toHaveBeenCalledTimes(1);
   });
 
+  it("dispatches an explicitly funded retry non-blockingly and monitors it to one completion notice", async () => {
+    const pi = await host();
+    offlineCreate
+      .mockResolvedValueOnce({
+        id: "agent_run_failed",
+        status: "failed",
+        stopReason: "error",
+        costDollars: { total: 0.01 },
+      } as AgentRun)
+      .mockResolvedValueOnce({ id: "agent_run_retry", status: "running" });
+    const { cycleId, projectId, result } = await submitted(pi);
+    expect(result.isError).toBe(true);
+    expect(result.details).toMatchObject({ remoteStatus: "failed", monitoring: "terminal" });
+    let record = await pi.record(cycleId, projectId);
+    expect(record.status).toBe("failed");
+    expect(record.monitors ?? []).toHaveLength(0);
+    // Operator funding by command: lifetime ceiling plus exact-request consent for the retry.
+    const command = pi.commands.get("exa-research");
+    await command?.handler(`approve ${cycleId} 1 web_research_exa`, pi.context);
+    await command?.handler(`approve-request ${cycleId} ${String(result.details.requestHash)} 0.2`, pi.context);
+    const retried = await pi.call("web_research_exa", { researchMode: "retry", cycleId });
+    expect(retried.isError).toBe(false);
+    expect(retried.details).toMatchObject({
+      runId: "agent_run_retry",
+      transitionMode: "retry",
+      monitoring: "registered",
+    });
+    expect(retried.content[0].text).toContain("Background monitoring is registered");
+    offlineGet.mockResolvedValue(completedRun("agent_run_retry"));
+    await vi.waitFor(() => expect(pi.sent).toHaveLength(1), { timeout: 4_000 });
+    expect(pi.sent[0].message.details).toMatchObject({ runId: "agent_run_retry", outcome: "completed" });
+    record = await pi.record(cycleId, projectId);
+    expect(record.attempts).toHaveLength(2);
+    expect(record.attempts[1]).toMatchObject({ transitionMode: "retry", status: "completed" });
+    expect(record.status).toBe("completed");
+    expect(offlineCreate).toHaveBeenCalledTimes(2);
+    expect(offlineCancel).not.toHaveBeenCalled();
+  });
+
   it("keeps two approved cycles in different sessions isolated: distinct runs, monitors, results and notices", async () => {
     const one = await host({ sessionId: "session-one" });
     const two = await host({ directory: one.directory, sessionId: "session-two" });
