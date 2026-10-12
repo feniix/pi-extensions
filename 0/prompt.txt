@@ -1,0 +1,1 @@
+hmm I think the changelog should contain all the changes we did since 6.0.2
