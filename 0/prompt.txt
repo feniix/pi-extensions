@@ -1,0 +1,17 @@
+Inspect subagent updates above. Answer pending supervisor requests within your authority. For completed work, read saved results and resume the already-authorized parent task, or report completion. If approval is required, explicitly ask the user. Do not silently yield, rerun completed work, or infer new authorization.
+
+---
+
+is the pr pushed?
+
+---
+
+did you push the last layer?
+
+---
+
+go for it
+
+---
+
+check the reviews/comments in each of the stacked prs https://github.com/feniix/pi-extensions/pull/170
