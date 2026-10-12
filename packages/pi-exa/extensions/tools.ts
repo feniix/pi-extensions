@@ -47,8 +47,6 @@ import { performAdvancedSearch } from "./web-search-advanced.js";
 export interface ExaToolsOptions {
   /** Optional operation-bound raw/late retrieval hooks. Never installed by MCP. */
   usageObserver?: ExaUsageObserver;
-  /** Optional original-attempt-bound create/get/cancel observations; Pi cycles only. */
-  agentObserver?: AgentLifecycleObserver;
   /** Internal original-attempt GET mode; only the opted-in Pi recovery factory sets it. */
   agentInspection?: { runId: string; observer: NonNullable<AgentInspectionOptions["observer"]> };
   /** Guided submit-only Agent lifecycle: one bounded create, then return. Absent in standalone/MCP. */
@@ -69,7 +67,11 @@ export interface ExaToolsOptions {
    * `web_research_exa` owns its lifecycle and cancels its remote Agent run
    * when the host aborts or its timeout expires after a run ID is known.
    */
-  timeouts?: ExaToolTimeouts;
+  /**
+   * Per-tool timeouts, or a resolver read at call time. Pi applies CLI flags only after
+   * extension factories run, so hosts pass a resolver to honor flags on early-built tools.
+   */
+  timeouts?: ExaToolTimeouts | (() => ExaToolTimeouts | undefined);
 }
 
 /** Per-tool timeout overrides; all entries are optional positive integers (ms). */
@@ -336,7 +338,8 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
   const resolveApiKey = opts.resolveApiKey ?? (() => undefined);
   const isEnabled = opts.isToolEnabled ?? (() => true);
   const planner = opts.planner ?? createResearchPlanner();
-  const timeoutFor = (toolName: string) => () => resolveExaToolTimeoutMs(toolName, opts.timeouts);
+  const timeoutFor = (toolName: string) => () =>
+    resolveExaToolTimeoutMs(toolName, typeof opts.timeouts === "function" ? opts.timeouts() : opts.timeouts);
 
   const tools: PortableTool<TObject>[] = [];
 
@@ -636,47 +639,31 @@ export function createExaTools(opts: ExaToolsOptions = {}): readonly PortableToo
             },
             mcp: { annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: true } },
           },
-          perform: (apiKey, args, context) =>
-            opts.agentInspection
-              ? inspectResearchRun(apiKey, opts.agentInspection.runId, {
-                  ...context,
-                  observer: opts.agentInspection.observer,
-                })
-              : opts.agentSubmission
-                ? submitResearchRun(
-                    apiKey,
-                    {
-                      query: args.query,
-                      systemPrompt: args.systemPrompt,
-                      outputSchema: args.outputSchema,
-                      effort: args.effort,
-                      input: args.input as Parameters<typeof performResearch>[1]["input"],
-                      previousRunId: args.previousRunId,
-                      metadata: args.metadata as Parameters<typeof performResearch>[1]["metadata"],
-                      dataSources: args.dataSources,
-                      budget: args.budget,
-                    },
-                    {
-                      signal: context.signal,
-                      observer: opts.agentSubmission.observer,
-                      createWaitMs: opts.agentSubmission.createWaitMs,
-                    },
-                  )
-                : performResearch(
-                    apiKey,
-                    {
-                      query: args.query,
-                      systemPrompt: args.systemPrompt,
-                      outputSchema: args.outputSchema,
-                      effort: args.effort,
-                      input: args.input as Parameters<typeof performResearch>[1]["input"],
-                      previousRunId: args.previousRunId,
-                      metadata: args.metadata as Parameters<typeof performResearch>[1]["metadata"],
-                      dataSources: args.dataSources,
-                      budget: args.budget,
-                    },
-                    { ...context, ...(opts.agentObserver ? { observer: opts.agentObserver } : {}) },
-                  ),
+          perform: (apiKey, args, context) => {
+            const researchParams: Parameters<typeof performResearch>[1] = {
+              query: args.query,
+              systemPrompt: args.systemPrompt,
+              outputSchema: args.outputSchema,
+              effort: args.effort,
+              input: args.input as Parameters<typeof performResearch>[1]["input"],
+              previousRunId: args.previousRunId,
+              metadata: args.metadata as Parameters<typeof performResearch>[1]["metadata"],
+              dataSources: args.dataSources,
+              budget: args.budget,
+            };
+            if (opts.agentInspection)
+              return inspectResearchRun(apiKey, opts.agentInspection.runId, {
+                ...context,
+                observer: opts.agentInspection.observer,
+              });
+            if (opts.agentSubmission)
+              return submitResearchRun(apiKey, researchParams, {
+                signal: context.signal,
+                observer: opts.agentSubmission.observer,
+                createWaitMs: opts.agentSubmission.createWaitMs,
+              });
+            return performResearch(apiKey, researchParams, context);
+          },
         },
         resolveApiKey,
         timeoutFor("web_research_exa"),
