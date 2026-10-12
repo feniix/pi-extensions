@@ -202,6 +202,52 @@ describe("durable research cycles", () => {
     return { controller, cycle, artifact, hash };
   }
 
+  it("coalesces repeated Agent observations without losing progress, output or conflicting receipts", async () => {
+    const { controller, cycle, hash } = await readyAgent();
+    const { attempt } = await controller.reserveAgent();
+    const observer = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+    (await observer.beforeCreate())();
+    vi.mocked(fs.rename).mockClear();
+    const pending = { id: "agent_dedup", status: "running", usage: { searches: 1 } } satisfies Parameters<
+      typeof observer.raw
+    >[1];
+    await observer.raw("create", pending);
+    expect(fs.rename).toHaveBeenCalledTimes(1);
+    await observer.raw("get", structuredClone(pending));
+    expect(fs.rename).toHaveBeenCalledTimes(1);
+    await observer.raw("get", { ...pending, usage: { searches: 2 } });
+    expect(fs.rename).toHaveBeenCalledTimes(2);
+    const completed = {
+      id: pending.id,
+      status: "completed",
+      usage: { searches: 2 },
+      output: { structured: { answer: "original" } },
+      costDollars: { total: 0.1 },
+    } satisfies Parameters<typeof observer.raw>[1];
+    await observer.raw("get", completed);
+    expect(fs.rename).toHaveBeenCalledTimes(3);
+    await observer.raw("get", completed);
+    const ignoredUsage = { searches: 2, ignoredCounter: 99 };
+    await observer.raw("get", { ...completed, usage: ignoredUsage });
+    await controller.agentLifecycleObserver(cycle.id, attempt.id, hash).raw("get", completed);
+    expect(fs.rename).toHaveBeenCalledTimes(3);
+    await observer.raw("get", { ...completed, output: { structured: { answer: "updated" } } });
+    expect(fs.rename).toHaveBeenCalledTimes(4);
+    await observer.raw("get", {
+      ...completed,
+      output: { structured: { answer: "updated" } },
+      costDollars: { total: 0.100001 },
+    });
+    expect(fs.rename).toHaveBeenCalledTimes(5);
+    expect(await controller.inspect(cycle.id)).toMatchObject({
+      status: "completed",
+      attempts: [{ result: { taskOutput: { answer: "updated" }, usage: { searches: 2 } } }],
+      ledger: [{ reportedMicros: 100000, conflictingMicros: [100001] }],
+    });
+    await observer.finish();
+    await controller.detach();
+  });
+
   it("serializes competing Agent intents and competing dispatch claims without granting a second SDK capability", async () => {
     const { controller, cycle, hash } = await readyAgent();
     const attempts = await Promise.allSettled([controller.reserveAgent(), controller.reserveAgent()]);

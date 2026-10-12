@@ -666,6 +666,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
       let dispatched = false;
       let claimed = false;
       let closed = false;
+      let lastPersistedSnapshotHash: string | undefined;
       const assertCurrent = () => {
         if (captured !== generation || activeId !== cycleId) throw new Error("Agent dispatch capability was detached.");
       };
@@ -735,6 +736,16 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
               ? { structured: reply.output.structured, grounding: reply.output.grounding }
               : undefined,
           });
+          // In-memory digest only: never retain raw/invalid generated output in
+          // durable state. Unserializable input follows the normal curation path.
+          let snapshotHash: string | undefined;
+          try {
+            snapshotHash = createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+          } catch {
+            /* Do not change curation behavior for unsupported SDK values. */
+          }
+          if (snapshotHash !== undefined && snapshotHash === lastPersistedSnapshotHash && !failedReceiptWrites.size)
+            return;
           let receiptWriteFailed = false;
           const persist = () =>
             ordered(() =>
@@ -743,6 +754,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                 const record = await read(cycleId);
                 const attempt = savedAgent(record, attemptId, requestHash);
                 const operation = agentOperation(record, attempt);
+                const before = canonicalResearchJson({ attempt, operation, status: record.status });
                 if (attempt.status === "not-dispatched" || operation.status === "not-dispatched")
                   throw new Error("Agent was not dispatched.");
                 const providers: unknown = Reflect.get(attempt.artifact.request, "dataSources");
@@ -794,6 +806,11 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
                     operation.status = "reported";
                   } else if (operation.reportedMicros === undefined) operation.status = "unknown";
                 }
+                if (
+                  before === canonicalResearchJson({ attempt, operation, status: record.status }) &&
+                  !failedReceiptWrites.has(`${record.id}/${operation.id}`)
+                )
+                  return;
                 try {
                   await writeReceipt(record, operation.id);
                 } catch (error) {
@@ -809,6 +826,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             // Retry only the same original fact snapshot, never another SDK call.
             await persist();
           }
+          lastPersistedSnapshotHash = snapshotHash;
         },
         finish: async () => {
           closed = true;
