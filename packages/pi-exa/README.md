@@ -144,8 +144,9 @@ Start Pi with `--exa-enable-cycles` to use durable research planning:
   resume/archive; assistant approval fields do not establish consent.
   The optional comma-separated scope replaces the whole allowlist. Default scope:
   `web_search_exa`, `web_fetch_exa`, `web_find_similar_exa`, `web_search_advanced_exa`.
-  `web_answer_exa` requires an explicit scope amendment. Agent/Connect/contact tools
-  cannot be added to this exploratory grant.
+  `web_answer_exa` and `web_research_exa` require explicit scope amendments.
+  Agent additionally requires the exact-request assessment below; including it
+  in the lifetime scope alone never authorizes a submission or Connect/contact work.
 - `/exa-research approve-request <cycle-id> <request-hash> <assessed-dollars>`
   approves one attempt of that exact uncertain request, after inspecting the
   denied tool call's request and SHA-256 hash. Changed arguments require new permission.
@@ -182,9 +183,9 @@ inspection diagnostics are recomputed from retained facts.
 Unknown execution remains unknown after
 resume; completed records cannot be edited back into executable planning.
 
-The current implementation includes local persistence, request compilation and
-exploratory accounting. **Agent execution remains unavailable** until its safety
-slice lands. Attributed retrieval requires a recorded operator grant and an
+The opted-in implementation includes durable planning, request compilation,
+exploratory accounting, compiled Agent execution, explicit recovery and funded
+retry/replacement. Attributed retrieval requires a recorded operator grant and an
 atomic pre-call assessment. Include the active `cycleId` (and optionally
 `expectedRevision`) on each exploratory tool call:
 
@@ -352,6 +353,37 @@ it or mutate another cycle's plan/ownership.
 Standalone/default-opt-out and MCP remain unchanged. Recorded cycle run IDs
 cannot be continued through an unrelated standalone override. This is the
 explicitly opted-in cycle workflow; it never buys automatic gap-closing runs.
+
+#### Completed-cycle reporting
+
+After remote success, the final Agent response and read-only status expose
+`finalReport`: recorded criteria, criteria requiring review, recorded gaps and
+assumptions, completion/duplicate-success facts, and classified Exa usage.
+`automaticCriterionSatisfaction` is false. Recorded `supported` or `excluded`
+criteria without evidence-reference diagnostics are distinguished from those still needing review; recorded support
+is not independent proof. A gap's `resolution` is a proposed disposition
+(for example `carry_assumption`), not proof that missing evidence was obtained.
+Even `stopReason: "budget_reached"` with remote status `completed` closes the
+cycle without filling gaps or approving follow-up work.
+
+Use `exa_research_summary` with `{ "mode": "brief" }` or
+`{ "mode": "source_pack" }` for the selected-only final evidence/report view.
+Default/payload/execution-plan summary modes remain compiler previews, not a way
+to reopen completed work. `/exa-research list` retains reports for archived
+cycles. Recovery reports remain visible through status/summary after the
+explicit existing-run GET.
+
+Report findings, remaining gaps, scope exclusions and assumptions honestly.
+Show API-reported costs separately from pending estimates, unknown operation
+IDs, operator-assessed liabilities and overspend. `billingVerified` stays false;
+other-provider costs remain outside this Exa ledger. Generated claims, valid
+JSON, healthy accounting and completion do not establish criterion coverage,
+verified invoices or spending consent. Further research requires a new cycle
+and fresh operator permission; no automatic gap closing occurs.
+
+The [offline qualification and acceptance map](../../docs/architecture/pi-exa-cycle-qualification.md)
+records the tested public seams and verification limits. Cycles remain Pi-only,
+off by default; standalone/default-opt-out/MCP behavior and tool enablement are unchanged.
 
 #### Explicit funded retry and unknown-work replacement
 

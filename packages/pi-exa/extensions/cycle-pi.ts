@@ -33,8 +33,8 @@ const CYCLE_GUIDELINES = [
   "Integrated Pi cycle: retrieval candidate metadata is not trusted evidence; explicitly select relevant candidate IDs with labels/curated notes. Record external evidence explicitly. Selected sources are not input.data/exclusion processing rows.",
   "Integrated Pi cycle: readiness is assistant judgment, not spending permission. Iteratively record criteria, gaps and labeled assumptions; review the compiled preview/schema/current revision and resolve structured or semantic conflicts before execution.",
   "Integrated Pi cycle: cycle-attributed paid work requires operator approvals. approve defines lifetime scope/ceiling; approve-request is fresh one-use full-request consent for Agent research or uncertain retrievals. Assistant amounts, flags, readiness and healthy accounting never authorize spending; explain pauses instead of bypassing them.",
-  "Integrated Pi cycle: interpret validated output and citations with evidence-backed criterion evaluation. Record only supported coverage; remote completion or generated claims do not automatically satisfy criteria.",
-  "Integrated Pi cycle: produce a final report with findings, supported criteria, unresolved gaps, assumptions and usage. Distinguish estimates, provisional costs, reported receipts, unknown liabilities and overshoot; vendor caps/independent invoice verification are not promised.",
+  "Integrated Pi cycle: interpret validated output and citations with evidence-backed criterion evaluation. Report only evidence-backed coverage; completed plans remain immutable, and remote completion or generated claims do not automatically satisfy criteria.",
+  "Integrated Pi cycle: produce a final report after success using exa_research_summary mode=brief or source_pack for selected-only findings and the finalReport of recorded criteria/gaps, assumptions and classified usage. Report unresolved gaps honestly. Distinguish estimates, provisional costs, reported receipts, unknown liabilities and overshoot; vendor caps/independent invoice verification are not promised.",
   "Integrated Pi cycle: any genuine completion blocks further submissions even when local output is invalid. No automatic retries, replacement or gap-closing runs; another successful pass needs operator go-ahead for a newly authorized cycle. Surface duplicate successes and separate costs.",
   "Integrated Pi cycle: explicitly resume saved state; resume, inspection and archive never grant spending consent or cancel remote work. Recover an existing attempt with one GET. Explicit funded retry needs fresh consent; replacement additionally needs operator approve-replacement for every unknown original, acknowledging duplicate work/additional charges and preserving original liabilities.",
 ];
@@ -101,12 +101,34 @@ function view(record: ResearchCycle) {
             : facts.length
               ? "Confirmed failure or proven nondispatch is retained. Revise and preview the draft; explicit researchMode=retry requires new exact-request funding and current total exposure approval. No automatic resubmission."
               : "Update the plan and preview the compiled request. Only operator grants and fresh request assessments can authorize spending.";
+  const completionSummary = { remoteCompletedAttemptIds: completedIds, duplicateSuccess };
+  const finalReport =
+    record.status === "completed"
+      ? {
+          cycleId: record.id,
+          status: record.status,
+          completionSummary,
+          recordedCriteria: record.plan.criteria,
+          criteriaRequiringReview: record.plan.criteria.filter(
+            (criterion) =>
+              (criterion.status !== "supported" && criterion.status !== "excluded") ||
+              criterion.evidenceIssues.length > 0,
+          ),
+          recordedGaps: record.plan.gaps,
+          assumptions: record.plan.assumptions,
+          automaticCriterionSatisfaction: false,
+          usage: accounting,
+          nextSafeAction,
+          furtherResearchRequiresNewCycleAndOperatorPermission: true,
+        }
+      : undefined;
   return {
     ...visible,
     ...createResearchPlanner(record.plan).getStatus(),
     accounting,
     nextSafeAction,
-    completionSummary: { remoteCompletedAttemptIds: completedIds, duplicateSuccess },
+    completionSummary,
+    ...(finalReport ? { finalReport } : {}),
   };
 }
 
@@ -516,8 +538,9 @@ export function cyclePiRegistration(
                       status: current.status,
                       completionSummary: currentView.completionSummary,
                       nextSafeAction: currentView.nextSafeAction,
+                      ...(currentView.finalReport ? { finalReport: currentView.finalReport } : {}),
                     },
-                    `Exa cycle ${attempt.cycleId}; Agent attempt ${attempt.id}; status ${current.status}.\n${JSON.stringify(execution, null, 2)}\nUsage classification: ${JSON.stringify(accounting)}\n${currentView.nextSafeAction}\nNo automatic retry, replacement or gap closing. Estimates are not vendor caps; API-reported costs are not independently verified invoices.`,
+                    `Exa cycle ${attempt.cycleId}; Agent attempt ${attempt.id}; status ${current.status}.\n${JSON.stringify(execution, null, 2)}\nUsage classification: ${JSON.stringify(accounting)}\n${currentView.finalReport ? `Final report (recorded gaps and criteria, not automatic verification): ${JSON.stringify(currentView.finalReport)}\n` : ""}${currentView.nextSafeAction}\nNo automatic retry, replacement or gap closing. Estimates are not vendor caps; API-reported costs are not independently verified invoices.`,
                     response.isError || incompleteOrInvalid,
                   );
                 }
@@ -695,7 +718,11 @@ export function cyclePiRegistration(
                   const current = await cycles.status(params);
                   if (!current) throw new Error("No active research cycle. Use /exa-research start or resume.");
                   const summary = projectResearchSummary(current, params);
-                  return result({ ...view(summary.record), selectedEvidence: summary.selectedEvidence }, summary.text);
+                  const summaryView = view(summary.record);
+                  return result(
+                    { ...summaryView, selectedEvidence: summary.selectedEvidence },
+                    `${summary.text}${summaryView.finalReport ? `\nFinal report (recorded gaps and criteria, not automatic verification): ${JSON.stringify(summaryView.finalReport)}` : ""}`,
+                  );
                 }
               case "exa_research_reset": {
                 const archived = await cycles.archive();

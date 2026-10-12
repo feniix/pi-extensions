@@ -1,7 +1,7 @@
 ---
 title: "pi-exa Integrated Research Cycle"
 prd: PRD-010
-status: "Contract settled; implementation pending"
+status: "Implemented; offline qualification; merge pending"
 owner: "Sebastian Otaegui"
 issue: "N/A"
 version: "1.2"
@@ -11,16 +11,17 @@ version: "1.2"
 
 ## Context and scope
 
-The current `exa_research_step`, `exa_research_status`, `exa_research_summary`,
+The standalone/default-opt-out/MCP `exa_research_step`, `exa_research_status`, `exa_research_summary`,
 and `exa_research_reset` tools maintain local planning state.
 `web_research_exa` independently submits and polls an Exa Agent run.
 The assistant must manually bridge them; planner state does not automatically
 enrich execution or receive its results.
 
-This proposal connects those tools through package-enforced integration while
+This contract connects those tools through package-enforced opt-in Pi integration while
 leaving judgment and orchestration with the calling assistant.
 The operator agreed to the behavior below through a design interview.
-This document is a proposed contract, not a description of shipped behavior.
+Implementation is offline-qualified in the current stack; merge/release and
+live paid qualification are not claimed.
 
 Related documents:
 
@@ -254,6 +255,11 @@ release must not provide destructive cycle deletion.
 
 ## Acceptance scenarios
 
+The [offline qualification map](../architecture/pi-exa-cycle-qualification.md)
+links each scenario to current regression tests and states the verification
+boundary. Prompt guidance assists the model; it does not autonomously execute
+the workflow or establish research adequacy, consent or verified billing.
+
 1. With an active plan, the actual Agent request includes its curated goals,
    criteria, constraints, selected evidence, and structured output contract.
 2. Without a plan, existing standalone research requests still work.
@@ -286,11 +292,11 @@ release must not provide destructive cycle deletion.
 20. Existing MCP behavior remains unchanged; Pi cycle behavior does not silently
     activate for MCP callers.
 
-Use test-first implementation once the remaining contracts are agreed.
-Test the Pi lifecycle and session isolation contracts and regress existing MCP
-behavior; cross-host integrated-cycle parity is outside this release.
+Keep changes regression-first. The qualification map covers Pi lifecycle,
+session isolation and existing MCP regressions; cross-host integrated-cycle
+parity remains outside this rollout.
 
-## Feasibility outcome and remaining implementation verification
+## Feasibility outcome and revalidation
 
 Issue #152's linked research/contract settle gating interface decisions.
 Operator choices were retained; Jev selected remaining bounded design options
@@ -299,7 +305,8 @@ Rollout is Pi-only opt-in; retrieval API costs remain classified as estimates,
 not invoices. Initial cycle efforts are fixed efforts plus auto; cycle max/ultra
 are deferred without changing standalone/MCP behavior.
 
-During dependent implementation, verify against source and current primary API docs:
+The qualification map records current implementation evidence and limits.
+When changing these boundaries, revalidate source and current primary API docs:
 
 - Exa Agent support for row inputs, exclusions, structured outputs, and existing
    source context; do not assume a local source pack maps directly to `input.data`.

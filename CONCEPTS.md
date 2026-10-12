@@ -8,7 +8,7 @@ A tool definition that runs in multiple agent host environments (Pi, MCP) via br
 
 *Avoid:* extension, plugin (those mean different things in this project).
 
-The Pi host surfaces `hostExtras.pi.*` fields — `promptSnippet`, `promptGuidelines`, `pendingMessage` — that the MCP host does not consume. Tool behavior is identical across hosts because both run the same `perform` function. Source-of-truth is the `createExaTools` factory in `packages/pi-exa/extensions/tools.ts`; per-host adapters (`extensions/index.ts` for Pi, `extensions/mcp-server.ts` for MCP) just register the returned tools.
+The Pi host surfaces `hostExtras.pi.*` fields — `promptSnippet`, `promptGuidelines`, `pendingMessage` — that the MCP host does not consume. Standalone behavior shares the portable implementation. Opt-in Pi research cycles add durable ownership, request compilation and spending guards at the host boundary; MCP does not acquire cycle semantics.
 
 ## Synthesis
 
@@ -32,7 +32,7 @@ A synchronous Exa `/search` request using `deep-lite`, `deep`, or `deep-reasonin
 
 ## Research plan
 
-The in-memory state accumulated by `exa_research_step` calls — topic, criteria, sources, gaps, assumptions, branches, and warnings — that `exa_research_summary.mode === "payload"` translates into a suggested `web_research_exa` invocation. The plan belongs to a planner instance built by `createResearchPlanner()`; resetting is explicit via `exa_research_reset`.
+The curated objective, criteria, sources, gaps, assumptions and planning progress accumulated by explicit planning updates. Standalone/default-opt-out/MCP plans are local to a planner instance; an opted-in Pi cycle persists its plan and compiles a versioned execution artifact.
 
 *Avoid:* research project, research task.
 
@@ -46,7 +46,24 @@ retrying a confirmed failure does not start a new cycle.
 
 *Avoid:* Agent run (one remote execution, not the planning and approval history).
 
-Proposed domain concept in PRD-010; not yet shipped.
+Its scope and consent are separate from the remote job's lifecycle.
+
+## Recorded gap
+
+A missing-evidence, ambiguity, conflict or scope-boundary record. Its resolution
+names a proposed disposition, not a resolved-state flag. Carrying an assumption
+or excluding work does not establish the missing fact.
+
+*Avoid:* completed criterion (remote success does not resolve recorded gaps).
+
+## Final cycle report
+
+A read-only projection of recorded criteria, gaps, assumptions, completion facts
+and classified usage after remote completion. It distinguishes criteria still
+requiring review from recorded support/exclusion without independently verifying
+either evidence or billing.
+
+*Avoid:* spending authorization (reporting cannot reopen a completed cycle).
 
 ## Evidence candidate
 

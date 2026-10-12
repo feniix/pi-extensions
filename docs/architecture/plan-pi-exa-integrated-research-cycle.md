@@ -2,7 +2,7 @@
 title: "Pi-first integrated Exa research-cycle contract"
 prd: PRD-010
 issue: 152
-status: "Contract settled; implementation pending"
+status: "Implemented; offline qualification; merge pending"
 ---
 
 # Pi-first integrated research-cycle contract
@@ -10,16 +10,22 @@ status: "Contract settled; implementation pending"
 Sources: [PRD-010](../prd/PRD-010-pi-exa-integrated-research-cycle.md),
 [feasibility and Jev evidence](../research/pi-exa-integrated-cycle-feasibility.md),
 [issue #152](https://github.com/feniix/pi-extensions/issues/152).
-Operator choices and delegated Jev selections below are not shipped code.
+Current source implements the opted-in contract, with an
+[offline qualification/acceptance map](pi-exa-cycle-qualification.md).
+Operator choices and delegated Jev selections are design evidence, not runtime
+consent. Merge/release and live paid smoke are not claimed. Numbered slice notes
+below are historical milestones, not current availability gates.
 
 ## Activation and host separation
 
 Pi-only `--exa-enable-cycles` is initially disabled by default. When enabled,
-an explicitly started/resumed cycle integrates automatically. Each incomplete
-execution/recovery/replacement path fails closed rather than silently falling
-back to standalone. #157 exposes only independently safe one-attempt execution;
-recovery/replacement remain gated until their safety layers. Existing
-standalone/MCP defaults remain unchanged; #160 delivers the complete workflow.
+an explicitly started/resumed cycle integrates automatically. Planning,
+compilation, scoped accounting, one-use submission, explicit existing-run
+recovery and funded retry/replacement are active under that opt-in. Unsupported
+paths fail closed rather than silently falling back to standalone.
+Completed-cycle views report recorded gaps/criteria and classified usage without
+automatic satisfaction, verified billing or follow-up spending. Existing
+standalone/MCP defaults and tool enablement remain unchanged.
 
 Use a thin Pi registration/execution decorator to capture host context.
 Inject optional host-neutral per-call raw-response/lifecycle observers into shared

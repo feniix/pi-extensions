@@ -196,6 +196,179 @@ describe("Pi standalone and cycle discovery availability", () => {
 });
 
 describe("Pi cycle commands and tools", () => {
+  it("qualifies a complete offline Pi cycle through curation, final gaps, restart and archival inspection", async () => {
+    const pi = await host();
+    await pi.command?.handler("start US pricing", pi.context);
+    const initial = (await pi.call("exa_research_status")).details;
+    const cycleId = initial.id;
+    await pi.call("exa_research_step", {
+      topic: "US pricing",
+      stage: "framing",
+      note: "PRIVATE_PLANNING_CHATTER",
+      thought_number: 1,
+      total_thoughts: 3,
+      next_step_needed: true,
+      criteria: [
+        { id: "C1", label: "Regional caveats", status: "proposed" },
+        { id: "C2", label: "Unsupported recorded claim", status: "supported" },
+      ],
+      gaps: [
+        {
+          id: "G1",
+          description: "EU pricing remains outside the evidence",
+          severity: "important",
+          resolution: "carry_assumption",
+        },
+      ],
+      assumptions: ["Prices may vary by region"],
+      executionPlan: {
+        goal: "Compare public US pricing",
+        scope: ["US"],
+        constraints: ["Primary sources"],
+        taskSchema: {
+          type: "object",
+          required: ["summary", "claimsCriterionSatisfied"],
+          properties: { summary: { type: "string" }, claimsCriterionSatisfied: { type: "boolean" } },
+          additionalProperties: false,
+        },
+        input: { data: [{ region: "US" }], exclusion: [{ region: "EU" }] },
+      },
+    });
+    const deniedSearch = await pi.call("web_search_exa", { query: "official US pricing", cycleId });
+    expect(deniedSearch.isError).toBe(true);
+    expect(offlineSearch).not.toHaveBeenCalled();
+    await pi.command?.handler(`approve ${cycleId} 1 web_search_exa,web_research_exa`, pi.context);
+    offlineSearch.mockResolvedValueOnce({
+      requestId: "offline_discovery",
+      costDollars: { total: 0.007 },
+      results: [
+        { id: "one", url: "https://example.com/pricing", title: "Official pricing", text: "RAW_PAGE_BODY_NOT_CURATED" },
+        { id: "two", url: "https://example.com/unselected", title: "UNSELECTED_CANDIDATE" },
+      ],
+    });
+    const searched = await pi.call("web_search_exa", { query: "official US pricing", cycleId });
+    expect(searched.isError).not.toBe(true);
+    const candidates = searched.details.candidates;
+    if (!Array.isArray(candidates)) throw new Error("Missing captured candidates");
+    const chosen = candidates.find((candidate) => candidate.url === "https://example.com/pricing");
+    if (!chosen) throw new Error("Missing selected candidate");
+    const uncurated = await pi.call("exa_research_summary");
+    expect(JSON.stringify(uncurated.details)).not.toContain("https://example.com/pricing");
+    const curated = await pi.call("exa_research_step", {
+      topic: "US pricing",
+      stage: "synthesis_plan",
+      note: "PRIVATE_SECOND_STEP",
+      thought_number: 2,
+      total_thoughts: 3,
+      next_step_needed: true,
+      evidence: [
+        { candidateId: chosen.id, decision: "select", label: "Official pricing", notes: "Curated regional table" },
+      ],
+      sources: [{ id: "external", title: "Explicit external observation", contentNotes: "External curated caveat" }],
+    });
+    expect(curated.isError, JSON.stringify(curated.content)).not.toBe(true);
+    expect(
+      (
+        await pi.call("exa_research_step", {
+          topic: "US pricing",
+          stage: "synthesis_plan",
+          note: "Keep source evidence separate from rows",
+          thought_number: 3,
+          total_thoughts: 3,
+          next_step_needed: false,
+          executionPlan: {
+            selectedEvidence: [
+              { sourceId: chosen.id, label: "Official pricing", notes: "Curated regional table" },
+              { sourceId: "external", label: "External context" },
+            ],
+          },
+        })
+      ).isError,
+    ).not.toBe(true);
+    const preview = await pi.call("exa_research_summary");
+    const artifact = preview.details.artifact;
+    if (!artifact || typeof artifact !== "object" || !("hash" in artifact) || !("request" in artifact))
+      throw new Error("Missing compiled preview");
+    expect(JSON.stringify(artifact)).toContain("Curated regional table");
+    expect(JSON.stringify(artifact)).toContain("External curated caveat");
+    expect(JSON.stringify(artifact)).not.toMatch(
+      /PRIVATE_PLANNING_CHATTER|PRIVATE_SECOND_STEP|RAW_PAGE_BODY_NOT_CURATED|UNSELECTED_CANDIDATE/,
+    );
+    const conflict = await pi.call("web_research_exa", { cycleId, query: "unapproved override" });
+    expect(conflict.isError).toBe(true);
+    const deniedAgent = await pi.call("web_research_exa", { cycleId });
+    expect(deniedAgent.isError).toBe(true);
+    expect(offlineCreate).not.toHaveBeenCalled();
+    await pi.command?.handler(`approve-request ${cycleId} ${deniedAgent.details.requestHash} 0.2`, pi.context);
+    const completedReply = {
+      id: "offline_full_cycle",
+      status: "completed",
+      stopReason: "budget_reached",
+      costDollars: { total: 0.1 },
+      usage: { searches: 2 },
+      output: {
+        structured: { summary: "US findings with unresolved regional caveats", claimsCriterionSatisfied: true },
+      },
+    } satisfies AgentRun;
+    offlineCreate.mockResolvedValueOnce(completedReply);
+    const completed = await pi.call("web_research_exa", { cycleId, artifactHash: artifact.hash });
+    expect(completed.isError).toBe(false);
+    expect(offlineCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: { data: [{ region: "US" }], exclusion: [{ region: "EU" }] },
+        query: expect.stringContaining("Compare public US pricing"),
+      }),
+    );
+    expect(completed.details.finalReport).toMatchObject({
+      cycleId,
+      status: "completed",
+      automaticCriterionSatisfaction: false,
+      criteriaRequiringReview: [
+        expect.objectContaining({ id: "C1", status: "proposed" }),
+        expect.objectContaining({
+          id: "C2",
+          status: "supported",
+          evidenceIssues: ["Supported criterion has no evidence refs."],
+        }),
+      ],
+      recordedGaps: [expect.objectContaining({ id: "G1", description: "EU pricing remains outside the evidence" })],
+      usage: { reportedDollars: 0.107, pendingEstimatedDollars: 0, billingVerified: false },
+      furtherResearchRequiresNewCycleAndOperatorPermission: true,
+    });
+    const report = await pi.call("exa_research_summary", { mode: "brief" });
+    expect(report.details.finalReport).toEqual(completed.details.finalReport);
+    expect(report.content[0]).toMatchObject({ text: expect.stringContaining("0.107") });
+    const preserved = (await pi.call("exa_research_status")).details;
+    expect(preserved.plan).toMatchObject({
+      criteria: expect.arrayContaining([expect.objectContaining({ id: "C1", status: "proposed" })]),
+    });
+    expect((await pi.call("web_research_exa", { cycleId })).isError).toBe(true);
+    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+    await pi.handlers.get("session_start")?.({} as never, pi.context);
+    const discovery = await pi.call("exa_research_status");
+    expect(discovery.details).toMatchObject({
+      active: false,
+      savedCycles: [expect.objectContaining({ id: cycleId, status: "completed" })],
+    });
+    await pi.command?.handler(`resume ${cycleId}`, pi.context);
+    offlineGet.mockResolvedValueOnce(completedReply);
+    expect((await pi.call("web_research_exa", { researchMode: "recover", cycleId })).isError).toBe(false);
+    const archived = await pi.call("exa_research_reset");
+    expect(archived.details).toMatchObject({ id: cycleId, archived: true, status: "completed" });
+    await pi.command?.handler("list", pi.context);
+    expect(JSON.parse(pi.notify.mock.lastCall?.[0] ?? "[]")).toEqual([
+      expect.objectContaining({
+        id: cycleId,
+        archived: true,
+        finalReport: expect.objectContaining({ recordedGaps: [expect.objectContaining({ id: "G1" })] }),
+      }),
+    ]);
+    expect(offlineSearch).toHaveBeenCalledOnce();
+    expect(offlineCreate).toHaveBeenCalledOnce();
+    expect(offlineGet).toHaveBeenCalledExactlyOnceWith(completedReply.id);
+    expect(offlineCancel).not.toHaveBeenCalled();
+  }, 20000);
+
   it("adds complete assistant cycle guidance only to opted-in Pi tool registration without dispatch", async () => {
     const plain = await host(false);
     const pi = await host();
