@@ -177,6 +177,8 @@ export function loadConfig(configPath?: string): ExaConfig | null {
 // Config Flag Helpers
 // =============================================================================
 
+let warnedLegacyConfigFlag = false;
+
 function getConfigOverrideFlag(pi: ExtensionAPI): string | undefined {
   const configFileFlag = normalizeString(pi.getFlag("exa-config-file"));
   if (configFileFlag) {
@@ -185,7 +187,11 @@ function getConfigOverrideFlag(pi: ExtensionAPI): string | undefined {
 
   const legacyConfigFlag = normalizeString(pi.getFlag("exa-config"));
   if (legacyConfigFlag) {
-    console.warn("[pi-exa] --exa-config is deprecated; use --exa-config-file.");
+    // Config is resolved on every tool call; warn once per process, not over the TUI each time.
+    if (!warnedLegacyConfigFlag) {
+      warnedLegacyConfigFlag = true;
+      console.warn("[pi-exa] --exa-config is deprecated; use --exa-config-file.");
+    }
     return legacyConfigFlag;
   }
 

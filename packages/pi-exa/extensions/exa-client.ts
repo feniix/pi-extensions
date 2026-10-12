@@ -33,7 +33,16 @@ export async function observeExaRequest<T>(
  */
 export function resolveExaBaseUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const value = env.EXA_BASE_URL?.trim();
-  return value ? value.replace(/\/+$/, "") : undefined;
+  if (!value) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`EXA_BASE_URL must be an absolute http(s) URL such as https://api.exa.ai; got "${value}".`);
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:")
+    throw new Error(`EXA_BASE_URL must use http or https; got "${parsed.protocol}".`);
+  return value.replace(/\/+$/, "");
 }
 
 export function getExaClient(apiKey: string): Exa {

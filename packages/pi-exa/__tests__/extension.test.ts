@@ -3,6 +3,7 @@
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -161,6 +162,45 @@ describe("pi-exa extension", () => {
     const after = mockPi.registerTool.mock.calls.map(([tool]) => tool.name);
     expect(after).toContain("web_research_exa");
     expect(after.filter((name) => name === "web_search_exa")).toHaveLength(1);
+  });
+
+  it("applies --exa-timeout-ms to tools registered before Pi applied the flag", async () => {
+    mockSearch.mockReturnValue(new Promise(() => {}));
+    const mockPi = createMockPi();
+    let flagsApplied = false;
+    mockPi.getFlag.mockImplementation((name: string) =>
+      name === "exa-api-key" ? "flag-key" : flagsApplied && name === "exa-timeout-ms" ? "75" : undefined,
+    );
+    exaExtension(mockPi as unknown as ExtensionAPI);
+    flagsApplied = true;
+    const tool = getRegisteredTool(mockPi, "web_search_exa");
+    const result = await tool.execute("call", { query: "test" }, undefined, undefined, undefined as never);
+    expect(result.content[0].text).toContain("timed out after 75ms");
+  });
+
+  it("withdraws a factory-registered tool that a late --exa-config-file disables", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "exa-late-config-"));
+    const config = join(directory, "exa.json");
+    await writeFile(config, JSON.stringify({ enabledTools: ["web_search_exa"] }));
+    const mockPi = createMockPi();
+    let flagsApplied = false;
+    mockPi.getFlag.mockImplementation((name: string) =>
+      flagsApplied && name === "exa-config-file" ? config : undefined,
+    );
+    exaExtension(mockPi as unknown as ExtensionAPI);
+    expect(getRegisteredTool(mockPi, "web_fetch_exa")).toBeDefined();
+    flagsApplied = true;
+    const handler = mockPi.on.mock.calls.find(([event]) => event === "session_start")?.[1] as
+      | ((event: unknown, ctx: unknown) => Promise<void>)
+      | undefined;
+    await handler?.({}, { sessionManager: { getSessionId: () => "s" }, cwd: directory });
+    const hidden = mockPi.registerTool.mock.calls
+      .map(([tool]) => tool as { name: string; exposure?: string })
+      .filter((tool) => tool.exposure === "hidden")
+      .map((tool) => tool.name);
+    expect(hidden).toContain("web_fetch_exa");
+    expect(hidden).not.toContain("web_search_exa");
+    await rm(directory, { recursive: true, force: true });
   });
 
   it("registers default tools by default", () => {

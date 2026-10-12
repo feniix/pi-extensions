@@ -935,3 +935,26 @@ describe("pi-exa formatSearchResults entity properties", () => {
     });
   });
 });
+
+describe("Exa client base URL and legacy config flag", () => {
+  it("validates EXA_BASE_URL and names the variable in the error", async () => {
+    const { resolveExaBaseUrl } = await import("../extensions/exa-client.js");
+    expect(resolveExaBaseUrl({})).toBeUndefined();
+    expect(resolveExaBaseUrl({ EXA_BASE_URL: "http://127.0.0.1:9/" })).toBe("http://127.0.0.1:9");
+    expect(() => resolveExaBaseUrl({ EXA_BASE_URL: "api.exa.ai" })).toThrow(/EXA_BASE_URL must be an absolute/);
+    expect(() => resolveExaBaseUrl({ EXA_BASE_URL: "ftp://api.exa.ai" })).toThrow(/http or https/);
+  });
+
+  it("warns about the deprecated --exa-config flag once per process", async () => {
+    const { getResolvedConfig } = await import("../extensions/config.js");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const pi = { getFlag: (name: string) => (name === "exa-config" ? "/nonexistent/exa.json" : undefined) };
+    getResolvedConfig(pi as never);
+    getResolvedConfig(pi as never);
+    getResolvedConfig(pi as never);
+    expect(warn.mock.calls.filter(([message]) => String(message).includes("--exa-config is deprecated"))).toHaveLength(
+      1,
+    );
+    warn.mockRestore();
+  });
+});
