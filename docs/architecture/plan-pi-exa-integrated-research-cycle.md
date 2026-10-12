@@ -252,12 +252,13 @@ liability continue; no cancel request is issued.
 - Monitors detach only on non-cancellable events (`session_shutdown`, `session_tree`); a
   vetoed switch or fork keeps observing. Ticks act only for the live entry of their key.
 
-Accepted residuals (not fixed):
+Former residuals, now fixed:
 
-- The approval write and the attempt reservation are two serialized transactions. The
-  recheck inside the approval write closes the dialog-open window; a retry landing between
-  the grant and the reservation can still leave a recorded approval without an attempt.
-- Owner liveness is pid-based; pid reuse after a crash is the foundation's existing limit.
+- A dialog approval and its Agent reservation are written in one transaction
+  (`approveAndReserveAgent`), so an approval is never recorded without its attempt.
+- Cycle owners and storage locks record their process start time; a live pid whose start
+  time differs is a reused pid and the original owner is treated as dead. Records without a
+  start time (legacy data, or platforms without `ps`) keep the conservative pid-only rule.
 
 ### Lifecycle fences
 

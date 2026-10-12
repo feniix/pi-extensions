@@ -89,27 +89,26 @@ pi -e packages/pi-exa/__tests__/fixtures/guided-prototype/pi-entry.ts
 # ask for research, approve the dialog, then: /exa-proto complete run_1
 ```
 
-## Known prototype simplifications
+## Prototype review fixes
 
-The prototype is design evidence for host capabilities, not a model of the production
-store. A 2026-10-12 review recorded these deliberate gaps; the production implementation
-(#172–#174) addresses each of them and the prototype is not maintained further:
+A 2026-10-12 review of the prototype found store and race gaps. They are fixed in the
+prototype as well, so the experiments do not rely on unsafe shortcuts:
 
-- The prototype store is one JSON file rewritten whole without a lock or merge, and its
-  attempt IDs are counter-based; an unreadable file is replaced by an empty store.
-  Production uses the private, locked, validated per-cycle controller.
-- Proposal consumption is checked before the dialog only, so parallel submits of one
-  proposal could each create. Production rechecks inside the approval write and refuses
-  a second attempt.
-- A GET in flight across `session_shutdown` can finish its tick, and timer callbacks do
-  not catch storage errors. Production fences ticks by monitor identity and pauses on
-  storage failure.
-- Every create rejection is classified unknown, and a late acknowledgement racing the
-  deadline can be left unmonitored. Production keeps the conservative unknown rule but
-  adopts genuine late acknowledgements into background monitoring.
-- Acknowledgement is observed only on `agent_settled`, with no `uncertain` state.
-  Production also acknowledges at session start and marks sent-but-unconfirmed notices
-  uncertain.
+- The store is written under a short exclusive lock with read-merge-write, so runtimes
+  sharing it never erase each other's records; an unreadable store is moved aside to
+  `state.json.corrupt-<time>` instead of being overwritten.
+- Proposal consumption is rechecked after the dialog, so parallel submits of one proposal
+  create at most one run.
+- A GET in flight across shutdown or a pause records nothing; a failing tick pauses with
+  `STORAGE` instead of an unhandled rejection.
+- A definitive create refusal (4xx other than 408/429) is `rejected` with no liability and
+  reopens the proposal; a genuine acknowledgement racing the deadline is recorded as a late
+  acknowledgement instead of unknown.
+- Acknowledgement by observation also runs at session start, sent-but-unconfirmed notices
+  become `uncertain`, and an explicit `resume` action delivers this session's pending or
+  uncertain notices.
+- `agent_settled` skips the session scan when no notice is in flight, and pending GETs
+  persist only on material changes.
 
 ## Unsupported guarantees (explicit)
 
