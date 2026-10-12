@@ -171,6 +171,14 @@ standalone mock Exa HTTP server. No paid call was made. Observed:
 7. Repeating the request opened a fresh dialog; pressing Escape produced
    `APPROVAL_NOT_GRANTED` with no second create.
 
+**Re-run on `pi-exa-guided/review-fixes` (same day, after the review hardening):** the same
+setup with a fresh agent directory reproduced steps 1–5: the dialog rendered with the
+same fields and countdown, Enter approved, the run ID returned while pending (one create),
+an unrelated message was answered during polling, completing the mock run woke the
+assistant for the report, and the record showed cycle `completed`, attempt
+`completed`/`validated`, dialog-sourced grants, monitor `stopped` after 5 GETs and the
+notice `acknowledged` with `channel: "session-entry"`.
+
 The run is recorded evidence, not an automated gate: the TUI transcript was read
 through Herdr's pane reader and the authoritative session JSONL and cycle record.
 Layout, colors and scrolling were not evaluated beyond what is listed.
