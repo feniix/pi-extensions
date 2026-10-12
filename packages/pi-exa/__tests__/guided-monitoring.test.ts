@@ -16,6 +16,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import exaExtension from "../extensions/index.js";
 import { COMPLETION_NOTICE_TYPE } from "../extensions/research-monitor.js";
 
+// Real filesystem controllers plus timer-driven monitors need headroom on loaded CI runners.
+vi.setConfig({ testTimeout: 30_000 });
+
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof fs>();
   return { ...original, rename: vi.fn(original.rename) };
