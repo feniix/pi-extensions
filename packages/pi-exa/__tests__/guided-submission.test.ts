@@ -238,13 +238,13 @@ describe("guided research from request through approved submission", () => {
       proposalId: proposal.proposalId,
       runId: "agent_run_pending",
       remoteStatus: "running",
-      monitoring: "unavailable",
+      monitoring: "registered",
       status: "running",
       requestHash: proposal.requestHash,
       artifactHash: proposal.artifactHash,
     });
     expect(submitted.content[0].text).toContain("Research started: Exa run agent_run_pending");
-    expect(submitted.content[0].text).toContain("monitoring is not available in this version");
+    expect(submitted.content[0].text).toContain("Background monitoring is registered");
 
     const record = JSON.parse(await readFile(await pi.recordPath(cycleId, projectId), "utf8"));
     expect(record.grants).toEqual([

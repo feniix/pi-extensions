@@ -140,7 +140,8 @@ describe("pi-exa extension", () => {
     );
     expect(flagNames).toContain("exa-enable-cycles");
     expect(flagNames).toContain("--exa-submit-timeout-ms");
-    expect(flagNames).toHaveLength(9);
+    expect(flagNames).toContain("--exa-monitor-interval-ms");
+    expect(flagNames).toHaveLength(10);
   });
 
   it("registers default tools by default", () => {

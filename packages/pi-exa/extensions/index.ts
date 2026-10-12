@@ -20,12 +20,14 @@ import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config
 import {
   type CycleAgentFactory,
   type CycleInspectionFactory,
+  type CycleMonitorInspector,
   type CycleRetrievalFactory,
   type CycleSubmissionFactory,
   cyclePiRegistration,
 } from "./cycle-pi.js";
 import { createExaTools, type ExaToolsOptions, type ExaToolTimeouts } from "./tools.js";
 import { getExaRenderers } from "./tui-renderers.js";
+import { inspectResearchRun } from "./web-research.js";
 
 export {
   getAuthStatusMessage,
@@ -71,6 +73,11 @@ function registerFlags(pi: ExtensionAPI): void {
   });
   pi.registerFlag("--exa-research-timeout-ms", {
     description: "Per-call timeout in ms for web_research_exa Agent runs. Overrides the built-in 180000 default.",
+    type: "string",
+  });
+  pi.registerFlag("--exa-monitor-interval-ms", {
+    description:
+      "First background check delay in ms for guided cycle monitoring; later checks back off x1.5 up to 60000. Built-in default 5000.",
     type: "string",
   });
   pi.registerFlag("--exa-submit-timeout-ms", {
@@ -129,7 +136,7 @@ export default function exaExtension(pi: ExtensionAPI) {
   let cyclesInstalled = false;
   // Pi applies CLI flags after factories load. Registration is refreshable once
   // bound, and session_start also runs for a fresh runtime after reload.
-  pi.on("session_start", () => {
+  pi.on("session_start", async (_event, ctx) => {
     if (!cyclesInstalled && pi.getFlag("exa-enable-cycles") === true) {
       const retrievalFactory: CycleRetrievalFactory = (name, usageObserver) => {
         let selected: ReturnType<CycleRetrievalFactory>;
@@ -174,11 +181,25 @@ export default function exaExtension(pi: ExtensionAPI) {
         researchFactory({
           agentSubmission: { observer, createWaitMs: parsePositiveIntFlag(pi.getFlag("--exa-submit-timeout-ms")) },
         });
-      registerPiTools(
-        cyclePiRegistration(pi, retrievalFactory, agentFactory, inspectionFactory, submissionFactory),
-        tools,
+      const monitorInspector: CycleMonitorInspector = (runId, observer, timeoutMs) => {
+        const apiKey = resolveAuth(pi).apiKey;
+        if (!apiKey) throw Object.assign(new Error("Exa API key is not configured."), { statusCode: 401 });
+        return inspectResearchRun(apiKey, runId, { observer, timeoutMs });
+      };
+      const monitorInterval = parsePositiveIntFlag(pi.getFlag("--exa-monitor-interval-ms"));
+      const registration = cyclePiRegistration(
+        pi,
+        retrievalFactory,
+        agentFactory,
+        inspectionFactory,
+        submissionFactory,
+        monitorInspector,
+        monitorInterval === undefined ? {} : { initialDelayMs: monitorInterval },
       );
+      registerPiTools(registration, tools);
       cyclesInstalled = true;
+      // This registration was created inside the current session_start dispatch.
+      await registration.sessionStarted(ctx);
     }
   });
 }
