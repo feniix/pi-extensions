@@ -2,29 +2,36 @@
 title: "Pi integrated Exa cycle: offline qualification"
 prd: PRD-010
 issue: 160
-status: "Merged v1.2 foundation; #171 prototype evidence recorded; 6.1.0 guided/background qualification pending"
+status: "6.1.0 guided/background workflow qualified offline (scenarios 1–36 mapped); publication pending"
 ---
 
 # Qualification boundary
 
-**Historical foundation evidence, not 6.1.0 release qualification.** PRD-010 v1.3
-adds conversational setup/approval, immediate submission acknowledgement,
-background monitoring and safe completion delivery (scenarios 21–36).
-Those behaviors are not implemented or verified by the evidence below.
-The v1.2 foundation is merged; 6.1.0 remains unpublished pending the new gates.
+**6.1.0 offline qualification.** PRD-010 v1.3 adds conversational setup/approval,
+immediate submission acknowledgement, background monitoring, safe completion
+delivery and recovery across interruptions (scenarios 21–36). This document maps
+every scenario, 1–36, to regression evidence: the foundation suites below, the
+guided suites added by #172–#174, and the #175 smoke that drives the production
+extension in a real `pi --mode rpc` process against a controllable mock Exa HTTP
+server. All evidence is mocked and offline; no paid Exa, Connect or model call was
+made, and publication/release remain separate operator decisions.
 
-**#171 prototype evidence (design gates, not release qualification).** The
-[Pi 1.1.0 host capability research](../research/2026-10-12-pi-guided-background-host-capabilities.md)
-and the runnable prototype in `packages/pi-exa/__tests__/fixtures/guided-prototype/`
-settle the approval surface, background lifecycle, wakeup, acknowledgement and
-bounds for scenarios 21–36. Experiments: `guided-prototype.test.ts` (in-process
-Pi SDK session, scripted model, mocked Exa job: approval, headless/declined/stale
-refusal, pending-job responsiveness, active-turn delivery, abort without cancel,
-transient/auth/not-found pauses, unknown create with late ID, stale-runtime
-delivery fence) and `guided-prototype.rpc.test.ts` (real `pi --mode rpc` process
-with the forwarded confirm dialog, `get_entries` notice verification, session
-replacement and a cancelled dialog). They exercise prototype code, not the
-production cycle controller; scenarios 21–36 stay unqualified until #172–#175.
+**Evidence classes.** Keep these distinct when citing this document:
+
+- *Mocked interactive smoke* (`guided-smoke.rpc.test.ts`): the real extension in a
+  real Pi RPC process with the real `exa-js` SDK pointed at a mock HTTP server
+  through `EXA_BASE_URL`; the RPC client is the trusted confirmation surface. It
+  exercises the host protocol, not terminal rendering.
+- *Registered-host regressions* (`guided-submission`, `guided-monitoring`,
+  `guided-recovery`, `cycle-extension`): the real extension loaded through its
+  entry point with a fake `ExtensionAPI`, the real private filesystem controller
+  and a mocked `exa-js` module; restarts are simulated by `session_shutdown` plus a
+  fresh runtime over the same store.
+- *Host capability experiments* (`guided-prototype.test.ts`,
+  `guided-prototype.rpc.test.ts`): the #171 prototype against Pi 1.1.0 SDK sessions
+  and a real RPC process; design evidence, not production code.
+- *Controller/policy units* (`research-cycles`, `research-artifacts`,
+  `research-accounting`, `research-retry`, `agent-lifecycle`, `portable-tools`).
 
 The opt-in Pi workflow is implemented behind `--exa-enable-cycles`, off by
 default. Registered tools retain their original enablement and standalone
@@ -97,6 +104,39 @@ Test suites:
 - [SDK lifecycle](../../packages/pi-exa/__tests__/agent-lifecycle.test.ts),
   [portable tools](../../packages/pi-exa/__tests__/portable-tools.test.ts)
 
+## Guided/background acceptance map (6.1.0)
+
+Numbers match PRD-010 scenarios 21–36. Test names are searchable substrings.
+
+| # | Regression evidence |
+|---|---|
+| 21 | Smoke “runs the whole journey without slash commands, schemas or hashes typed by the user”: the assistant drives `exa_research_status action=start`, `exa_research_step`, `mode=proposal` and `researchMode=submit` from a plain request; user prompts contain no slash command, schema or hash. Submission “creates a non-spending draft, renders a readable proposal”. |
+| 22 | Submission “approves through the host dialog and returns the pending run ID” (dialog body carries topic, estimate, 10-minute timeout; dialog-sourced grants persisted) and “grants nothing when the dialog is declined or no trusted surface exists, and rejects forged approval inputs” (`APPROVAL_NOT_GRANTED`, `APPROVAL_UNAVAILABLE`, `EXECUTION_CONFLICT`, zero creates). Smoke “a cancelled dialog in the same journey submits nothing” over the real RPC protocol. Exploratory dialog: submission “discloses and approves optional exploratory retrieval through the dialog before dispatch”. |
+| 23 | Submission “refuses a stale proposal after a plan edit before any dialog or create” (`PROPOSAL_STALE`, new proposalId after the edit). Controller `grantDialogApproval` asserts the artifact hash. |
+| 24 | Submission normal path returns `runId` while the mocked run is `running` with zero GETs; smoke shows the second user prompt answered while HTTP GETs continue; monitoring “returns control with a registered monitor, observes with bounded GETs”. |
+| 25 | Monitoring normal path: terminal GET → persisted outcome → one `exa-research-completion` notice sent with `triggerTurn` + `followUp` → `agent_settled` acknowledgement by the persisted entry → report; smoke shows the real wakeup turn calling `exa_research_status` and reporting after `server.complete`. No user prompt, one create, zero cancels. |
+| 26 | Prototype SDK experiment “queues a completion that lands during an active response until the turn settles, and deduplicates repeated terminal observations” (host queue semantics, Pi 1.1.0). Monitoring normal path: explicit recover after completion creates no second notice. |
+| 27 | Monitoring “pauses on local storage failure after a successful GET without an unhandled rejection”; recovery “recovers a terminal attempt whose notice scheduling crashed” and “keeps a remote-ID publication crash unknown”; recovery “re-sends an uncertain notice only on explicit resume, labeled as a possible duplicate, instead of claiming exactly-once”. Fault injection is in-process filesystem rename failure. |
+| 28 | Submission “keeps an unacknowledged create unknown, saves a genuine late run ID on the original attempt and never resubmits” (`SUBMISSION_UNKNOWN`, `--exa-submit-timeout-ms`); recovery remote-ID crash (`RECOVERY_UNAVAILABLE` names the missing ID). |
+| 29 | Monitoring “backs off transient GET errors, pauses when they are exhausted and pauses immediately on auth or not-found without fabricating remote failure” (`TRANSIENT_EXHAUSTED`, `AUTH`, `NOT_FOUND`; attempt stays `running`, no notice, no cancel). |
+| 30 | Recovery “preserves state across shutdown, discovers without resuming, then an explicit conversational resume re-registers monitoring and delivers once” and “resumes monitoring for a saved run whose registration failed after the create”. |
+| 31 | Recovery “refuses a competing live runtime and never duplicates an active monitor”, “pauses monitors of a proven-dead owner on start and lets the next session resume them”, “never duplicates ticks on repeated resume, and resume after tree navigation delivers a pending notice honestly”, “lets late original facts settle after archive without reactivating monitoring or delivering into the archived context”; monitoring “fences shutdown, restart and archive”. Prototype experiment “fences delivery after the runtime is invalidated and never redirects a pending notice to another session”. |
+| 32 | Prototype SDK experiment “aborting the chat turn neither cancels the saved run nor lets the monitor create anything”; monitoring/recovery archive paths assert the outstanding-work warning and zero cancel calls; the mock HTTP server records no non-GET/create request in the smoke. |
+| 33 | Monitoring “keeps two approved cycles in different sessions isolated: distinct runs, monitors, results and notices”. |
+| 34 | Monitoring “delivers failure and local-invalid completion notices with recovery guidance and no further research”; recovery “keeps local-invalid results recoverable within the frozen contract, and resume grants no consent” (same-run recover revalidates; one attempt). |
+| 35 | Submission “fails actionably instead of falling back to standalone when guided setup is missing” (`No active research cycle`, `PROPOSAL_REQUIRED`, missing cycleId, explicit standalone still available) and “requires a derivable estimate before proposing metered auto effort” (`ESTIMATE_UNAVAILABLE`). |
+| 36 | Smoke `guided-smoke.rpc.test.ts`: real `pi --mode rpc` process, production extension, real `exa-js` against the controllable mock HTTP server (`EXA_BASE_URL`), scripted model, RPC client as the trusted dialog. Interactive TUI rendering is not covered; paid smoke requires separate operator authorization. |
+
+Guided suites:
+
+- [Guided submission](../../packages/pi-exa/__tests__/guided-submission.test.ts)
+- [Background monitoring](../../packages/pi-exa/__tests__/guided-monitoring.test.ts)
+- [Recovery](../../packages/pi-exa/__tests__/guided-recovery.test.ts)
+- [Production smoke](../../packages/pi-exa/__tests__/guided-smoke.rpc.test.ts) with its
+  [mock Exa server](../../packages/pi-exa/__tests__/fixtures/guided-smoke/mock-exa-server.ts)
+- [Host capability experiments](../../packages/pi-exa/__tests__/guided-prototype.test.ts) and the
+  [capability research](../research/2026-10-12-pi-guided-background-host-capabilities.md)
+
 ## Safety and verification limits
 
 - No live paid Agent/Connect/contact call, remote cancellation, autonomous retry,
@@ -126,6 +166,13 @@ Test suites:
   work remains available. Offline repair must preserve history and live owners.
 - Cycle `max`/`ultra`, MCP cycle parity, automatic billing verification and
   production/live paid smoke remain outside this rollout.
+- Guided/background limits: Pi offers no delivery acknowledgement API, so notices
+  are acknowledged by observing the persisted session entry and exactly-once
+  delivery across crashes is not claimed; delivery never targets another session;
+  monitoring runs only while Pi is open; crash points are in-process filesystem
+  fault injection; the interactive smoke is RPC-protocol, not terminal rendering;
+  `researchMode=active` remains the foundation's blocking path (operator decision
+  pending) while guided requests route to `submit`.
 
 ## Revalidation
 

@@ -2,7 +2,7 @@
 title: "Pi-first integrated Exa research-cycle contract"
 prd: PRD-010
 issue: 152
-status: "6.1.0 guided background redesign; #171 implementation contract settled, #172–#175 pending"
+status: "6.1.0 guided background workflow implemented (#171–#175); qualified offline, publication pending"
 ---
 
 # Pi-first integrated research-cycle contract
