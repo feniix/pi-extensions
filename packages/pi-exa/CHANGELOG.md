@@ -10,6 +10,35 @@ publication version mismatches are called out explicitly.
 
 ## [Unreleased]
 
+### Added
+
+- **Opt-in integrated Pi research cycles** behind `--exa-enable-cycles`, disabled by default. Explicit start/resume connects planning, curated evidence, request previews, approved research, results and accounting. `/exa-research` manages project-isolated durable cycles; session navigation/reload detaches ownership, and reset archives history rather than deleting it or cancelling remote work.
+- **Versioned, immutable Agent request artifacts** compiled from curated goals, criteria, scope, constraints, selected evidence and a draft-07 structured task contract. Preview and execution share the authoritative request; stale references, conflicting overrides and unsupported schemas fail closed. Explicit input/exclusion rows remain separate from selected source context.
+- **Operator-issued lifetime ceilings and scoped, one-use permissions.** Exploratory calls reserve exposure before dispatch; Agent research additionally requires an exact full-request assessment. Unknown liabilities, pending estimates, API-reported receipts and overspend are classified separately. Assistant flags, readiness, healthy accounting and supplied amounts never establish spending consent.
+- **Metadata-first evidence candidates** from cycle-attributed retrievals, with stable URL identities, retrieval state and operation provenance. Selection/rejection and candidate/external-source curation are explicit; only selected source context enters compiled requests and brief/source-pack summaries. Discovery never automatically selects evidence or satisfies criteria.
+- **Durable Agent submission intent and one-use dispatch claims**, with final ownership, generation, request, history and funding checks before SDK create. Curated results retain validated task output, safe citation metadata, usage and package-owned diagnostics. Genuine late outcomes reconcile their original attempts, including after archival; remote success closes the cycle even when local processing fails.
+- **Explicit saved-cycle resume and existing-run recovery** through status `action: "resume"` and Agent `researchMode: "recover"`. Recovery performs one bounded GET against the saved run and original frozen contract, without a new submission, reservation, polling loop or remote cancellation. Missing IDs and unavailable inspection preserve unknown work.
+- **Explicitly funded retry and replacement** through Agent `researchMode: "retry"` / `"replace"`. Each new attempt needs fresh exact-request funding; every unknown original additionally needs operator `approve-replacement` acknowledging duplicate work and possible additional charges. Historical contracts, consumed permissions and liabilities remain intact; genuine completion blocks further submissions and duplicate successes remain visible.
+- **Read-only final cycle reports** with recorded criteria, evidence-reference diagnostics, gaps, assumptions, completion facts and classified usage. Integrated tool guidance and the planner skill describe the Pi workflow; the offline qualification document maps all 20 PRD-010 acceptance scenarios.
+
+### Changed
+
+- **Coalesce unchanged Agent observations and reuse status projections**, avoiding redundant record rewrites and repeated storage-hierarchy synchronization while preserving changed/late usage, results, conflicting receipts and durability repair.
+- Add `ajv` and `ajv-formats` for synchronous local draft-07 task/result validation; validation does not fetch remote schemas.
+- Standalone/default-opt-out/MCP behavior and existing tool enablement remain unchanged. Cycle `max`/`ultra` and MCP cycle parity remain outside this rollout. SDK receipts are not independently verified invoices; estimates and lifetime ceilings are not vendor billing caps.
+
+### Fixed
+
+- **Replacement liability guards reuse the complete shared attempt floor**, including known receipt conflicts and the immutable fixed-effort base, instead of re-deriving a partial floor. Stale replacement consent is rejected before reservation without consuming permissions or changing saved history.
+- **Exact conservative decimal micro-USD conversion** avoids binary floating-point boundary errors when flooring permission or ceiling exposure. Equivalent known terminal SDK receipts retain legitimate historical rounding without creating false conflicts; genuinely changed receipts remain auditable.
+- **Storage and ownership availability:** atomically published PID/token transaction locks recover only proven-dead owners, use monotonic bounded contention waits and clean candidate links. Unverifiable/live locks are retained with actionable repair paths. Archiving unrelated history no longer revokes the active cycle, and readable discovery survives corrupt records while continuation attribution stays fail-closed.
+- **Standalone isolation and selected-only summaries:** explicit unrelated standalone retrieval bypasses owned-cycle status failures without bypassing saved-run attribution. Shared summary projection prevents drift, and final-report diagnostics match the evidence visible in each view without changing saved criteria or exposing unselected source notes.
+
+### Security
+
+- Keep durable cycle state private and outside git. Automatic retention excludes raw source bodies, full SDK responses, invalid generated output and arbitrary vendor error prose; credential-bearing/signed URLs and Agent path dot segments are rejected. Explicit curated notes/rows and requested structured task outputs must remain nonsecret.
+- Patch shared transitive dependencies through workspace overrides: `proxy-addr` 2.0.8, `source-map-js` 1.2.2 and `@modelcontextprotocol/sdk` 1.31.0. This clears the recorded dependency advisories without changing the frozen Pi, Exa or bridgekit versions.
+
 ## [6.0.2] - 2026-10-06
 
 ### Changed

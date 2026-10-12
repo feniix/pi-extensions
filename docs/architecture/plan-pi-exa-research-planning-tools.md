@@ -8,6 +8,13 @@ status: Implemented
 
 # Plan: pi-exa Research Planning Tools
 
+> **Superseded in part for opt-in Pi cycles:** the
+> [integrated contract](plan-pi-exa-integrated-research-cycle.md) replaces
+> in-memory-only state, manual payload transfer and destructive reset with durable
+> cycles, request/result wiring, grants/accounting and archival reset.
+> This implemented plan remains historical and applies to standalone/MCP behavior.
+> The replacement contract is not yet shipped; planning never hides paid calls.
+
 ## Source
 
 - **Package**: `packages/pi-exa`

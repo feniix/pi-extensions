@@ -8,7 +8,7 @@ A tool definition that runs in multiple agent host environments (Pi, MCP) via br
 
 *Avoid:* extension, plugin (those mean different things in this project).
 
-The Pi host surfaces `hostExtras.pi.*` fields — `promptSnippet`, `promptGuidelines`, `pendingMessage` — that the MCP host does not consume. Tool behavior is identical across hosts because both run the same `perform` function. Source-of-truth is the `createExaTools` factory in `packages/pi-exa/extensions/tools.ts`; per-host adapters (`extensions/index.ts` for Pi, `extensions/mcp-server.ts` for MCP) just register the returned tools.
+The Pi host surfaces `hostExtras.pi.*` fields — `promptSnippet`, `promptGuidelines`, `pendingMessage` — that the MCP host does not consume. Standalone behavior shares the portable implementation. Opt-in Pi research cycles add durable ownership, request compilation and spending guards at the host boundary; MCP does not acquire cycle semantics.
 
 ## Synthesis
 
@@ -32,11 +32,79 @@ A synchronous Exa `/search` request using `deep-lite`, `deep`, or `deep-reasonin
 
 ## Research plan
 
-The in-memory state accumulated by `exa_research_step` calls — topic, criteria, sources, gaps, assumptions, branches, and warnings — that `exa_research_summary.mode === "payload"` translates into a suggested `web_research_exa` invocation. The plan is a per-process singleton built by `createResearchPlanner()`; resetting is explicit via `exa_research_reset`.
+The curated objective, criteria, sources, gaps, assumptions and planning progress accumulated by explicit planning updates. Standalone/default-opt-out/MCP plans are local to a planner instance; an opted-in Pi cycle persists its plan and compiles a versioned execution artifact.
 
 *Avoid:* research project, research task.
 
 The planner never calls Exa network APIs internally — it only tracks and summarizes planning state, leaving the actual retrieval to an explicit later call (typically `web_research_exa` with the suggested payload, which produces a synthesis).
+
+## Research cycle
+
+A research plan together with curated evidence, spending authorization, execution
+attempts, results, and liabilities. A cycle targets one successful Agent run;
+retrying a confirmed failure does not start a new cycle.
+
+*Avoid:* Agent run (one remote execution, not the planning and approval history).
+
+Its scope and consent are separate from the remote job's lifecycle.
+
+## Recorded gap
+
+A missing-evidence, ambiguity, conflict or scope-boundary record. Its resolution
+names a proposed disposition, not a resolved-state flag. Carrying an assumption
+or excluding work does not establish the missing fact.
+
+*Avoid:* completed criterion (remote success does not resolve recorded gaps).
+
+## Final cycle report
+
+A read-only projection of recorded criteria, gaps, assumptions, completion facts
+and classified usage after remote completion. It distinguishes criteria still
+requiring review from recorded support/exclusion without independently verifying
+either evidence or billing.
+
+*Avoid:* spending authorization (reporting cannot reopen a completed cycle).
+
+## Evidence candidate
+
+Metadata from a cycle-attributed exploratory retrieval, identified by normalized
+source URL and carrying operation-bound provenance and retrieval state. A
+candidate is not selected evidence, a processing row, or proof of criterion
+coverage. Its durable record does not automatically retain source excerpts.
+
+*Avoid:* verified source (selection and independent verification are separate).
+
+## Selected evidence
+
+A source deliberately chosen for the research brief, with a label and explicit
+curated notes. For captured candidates, provenance is frozen at selection;
+later candidate discovery does not silently refresh the compiled source context.
+
+*Avoid:* input record (processing rows require explicit `input.data`).
+
+## Execution attempt
+
+A recorded submission intent for an Agent run and its remote or unknown outcome.
+An unknown attempt may have incurred spending even without a known run ID.
+Remote outcome and local result-processing outcome are separate facts. A local
+validation or persistence error does not prove that remote research failed.
+
+*Avoid:* retry (another attempt does not erase the earlier one).
+
+## Completed cycle
+
+A cycle whose Agent run has confirmed remote completion. It stops further
+automatic research even when the result leaves gaps or fails local validation.
+Completion does not establish criterion coverage or independently verified cost.
+
+*Avoid:* verified answer (completion and evidence quality are separate).
+
+## Spending grant
+
+Operator-issued permission for a cycle's budget and scope, including specifically
+named uncertainty or replacement exceptions. Cost evidence is not permission.
+
+*Avoid:* budget argument (an assistant-supplied number is not verified consent).
 
 ## Agent work journal
 

@@ -35,6 +35,34 @@ export interface ResearchParams {
 export interface ResearchExecutionOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Call-local host hooks; absent in standalone/MCP. Never an authorization boolean. */
+  observer?: AgentLifecycleObserver;
+}
+
+export interface AgentLifecycleObserver {
+  beforeCreate: () => Promise<() => void>;
+  raw: (phase: "create" | "get" | "cancel", run: AgentRun) => Promise<void>;
+}
+
+export interface AgentInspectionOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  observer?: {
+    beforeGet: () => Promise<() => void>;
+    raw: AgentLifecycleObserver["raw"];
+  };
+}
+
+export class AgentInspectionInterruptedError extends Error {
+  constructor(
+    readonly runId: string,
+    readonly reason: "timeout" | "aborted",
+  ) {
+    super(
+      `Inspection of Agent run ${runId} stopped locally (${reason}); no remote cancellation or new submission was requested. Inspect the same existing attempt.`,
+    );
+    this.name = "AgentInspectionInterruptedError";
+  }
 }
 
 export class AgentResearchCancelledError extends Error {
@@ -69,6 +97,14 @@ export class AgentResearchTimeoutError extends Error {
 
 class AgentLifecycleAbortError extends Error {}
 class AgentLifecycleDeadlineError extends Error {}
+export class AgentLifecycleObservationError extends Error {
+  constructor(readonly runId: string) {
+    super(
+      `Agent run ${runId} was observed, but its local durable observation failed. Recover the existing run; do not resubmit.`,
+    );
+    this.name = "AgentLifecycleObservationError";
+  }
+}
 
 function parseOutputSchema(outputSchema: Record<string, unknown> | undefined): DeepOutputSchema {
   if (!outputSchema || !Object.hasOwn(outputSchema, "type")) {
@@ -201,6 +237,57 @@ function formatCompletedRun(run: AgentRun, outputSchema: DeepOutputSchema): Tool
   };
 }
 
+/**
+ * One explicit existing-run GET. Not continuation/create or an automatic
+ * poll/cancel lifecycle. The original-attempt observer owns result validation
+ * and accounting; this helper exposes no raw response/output archive.
+ */
+export async function inspectResearchRun(
+  apiKey: string,
+  runId: string,
+  options: AgentInspectionOptions = {},
+): Promise<ToolPerformResult> {
+  // The pinned SDK interpolates IDs without encoding; URL dot segments are
+  // routing syntax, not an opaque run identifier.
+  if (runId === "." || runId === ".." || !/^[A-Za-z0-9_.:-]{1,200}$/.test(runId))
+    throw new Error("Invalid Agent run ID.");
+  const deadline = Date.now() + (options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS);
+  const assertWait = () => {
+    if (options.signal?.aborted) throw new AgentInspectionInterruptedError(runId, "aborted");
+    if (Date.now() >= deadline) throw new AgentInspectionInterruptedError(runId, "timeout");
+  };
+  assertWait();
+  const exa = getExaClient(apiKey);
+  const guard = await options.observer?.beforeGet();
+  assertWait();
+  // No await between the ownership/generation fence and the single SDK GET.
+  guard?.();
+  const observed = exa.agent.runs.get(runId).then(async (reply) => {
+    if (reply.id !== runId) throw new Error("Agent inspection remote identity conflict.");
+    if (!["queued", "running", "completed", "failed", "cancelled"].includes(reply.status))
+      throw new Error("Invalid Agent inspection remote status.");
+    const metadata = { runId, remoteStatus: reply.status, inspectionOnly: true };
+    try {
+      await options.observer?.raw("get", reply);
+    } catch {
+      throw new AgentLifecycleObservationError(runId);
+    }
+    return metadata;
+  });
+  let metadata: { runId: string; remoteStatus: AgentRun["status"]; inspectionOnly: boolean };
+  try {
+    metadata = await withLifecycleBound(observed, deadline, options.signal);
+  } catch (error) {
+    if (error instanceof AgentLifecycleAbortError) throw new AgentInspectionInterruptedError(runId, "aborted");
+    if (error instanceof AgentLifecycleDeadlineError) throw new AgentInspectionInterruptedError(runId, "timeout");
+    throw error;
+  }
+  return {
+    text: `Existing Agent run ${runId}: ${metadata.remoteStatus}. This was one GET inspection, not replacement research or remote cancellation.`,
+    details: metadata,
+  };
+}
+
 export async function performResearch(
   apiKey: string,
   params: ResearchParams,
@@ -214,7 +301,7 @@ export async function performResearch(
   const exa = getExaClient(apiKey);
   const timeoutMs = execution.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
-  const createParams: CreateAgentRunParams = {
+  let createParams: CreateAgentRunParams = {
     query: params.query,
     effort,
     ...(params.systemPrompt === undefined ? {} : { systemPrompt: params.systemPrompt }),
@@ -226,31 +313,61 @@ export async function performResearch(
     ...(params.budget === undefined ? {} : { budget: params.budget }),
   };
 
-  const createPromise =
+  if (execution.observer) {
+    // Consent/intent must apply to the same nested request after host awaits.
+    createParams = structuredClone(createParams);
+    const guard = await execution.observer.beforeCreate();
+    if (execution.signal?.aborted) throw new AgentResearchCancelledError();
+    if (Date.now() >= deadline) throw new AgentResearchTimeoutError(undefined, timeoutMs);
+    // No await between the final host fence and actual SDK invocation.
+    guard();
+  }
+  let creationId: string | undefined;
+  const observe = (phase: "create" | "get" | "cancel", promise: Promise<AgentRun>) =>
+    execution.observer
+      ? promise.then(async (reply) => {
+          // This chain stays attached even when the local lifecycle wait ends.
+          if (phase === "create" && typeof reply.id === "string" && reply.id) creationId = reply.id;
+          try {
+            await execution.observer?.raw(phase, reply);
+          } catch {
+            throw new AgentLifecycleObservationError(reply.id);
+          }
+          return reply;
+        })
+      : promise;
+  const createPromise = observe(
+    "create",
     createParams.effort === "max"
       ? exa.beta.agent.runs.create({ ...createParams, betas: [MAX_EFFORT_BETA] })
-      : exa.agent.runs.create(createParams);
+      : exa.agent.runs.create(createParams),
+  );
   let run: AgentRun;
-  try {
-    run = await withLifecycleBound(createPromise, deadline, execution.signal);
-  } catch (error) {
-    if (error instanceof AgentLifecycleAbortError) throw new AgentResearchCancelledError();
-    if (error instanceof AgentLifecycleDeadlineError) throw new AgentResearchTimeoutError(undefined, timeoutMs);
-    throw error;
-  }
-
-  const cancelForInterruption = async (kind: "cancelled" | "timeout"): Promise<never> => {
+  const cancelForInterruption = async (kind: "cancelled" | "timeout", runId: string = run.id): Promise<never> => {
     let cancelError: string | undefined;
     try {
-      await withLifecycleBound(exa.agent.runs.cancel(run.id), Date.now() + AGENT_CANCEL_TIMEOUT_MS);
+      await withLifecycleBound(observe("cancel", exa.agent.runs.cancel(runId)), Date.now() + AGENT_CANCEL_TIMEOUT_MS);
     } catch (error) {
       cancelError = error instanceof Error ? error.message : String(error);
     }
     if (kind === "cancelled") {
-      throw new AgentResearchCancelledError(run.id, cancelError);
+      throw new AgentResearchCancelledError(runId, cancelError);
     }
-    throw new AgentResearchTimeoutError(run.id, timeoutMs, cancelError);
+    throw new AgentResearchTimeoutError(runId, timeoutMs, cancelError);
   };
+  try {
+    run = await withLifecycleBound(createPromise, deadline, execution.signal);
+  } catch (error) {
+    if (error instanceof AgentLifecycleAbortError) {
+      if (creationId) await cancelForInterruption("cancelled", creationId);
+      throw new AgentResearchCancelledError();
+    }
+    if (error instanceof AgentLifecycleDeadlineError) {
+      if (creationId) await cancelForInterruption("timeout", creationId);
+      throw new AgentResearchTimeoutError(undefined, timeoutMs);
+    }
+    throw error;
+  }
 
   if (execution.signal?.aborted) {
     await cancelForInterruption("cancelled");
@@ -268,8 +385,9 @@ export async function performResearch(
     }
 
     try {
-      run = await withLifecycleBound(exa.agent.runs.get(run.id), deadline, execution.signal);
+      run = await withLifecycleBound(observe("get", exa.agent.runs.get(run.id)), deadline, execution.signal);
     } catch (error) {
+      if (error instanceof AgentLifecycleObservationError) throw error;
       if (error instanceof AgentLifecycleAbortError) {
         await cancelForInterruption("cancelled");
       }

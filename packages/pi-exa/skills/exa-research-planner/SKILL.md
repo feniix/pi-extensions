@@ -13,7 +13,35 @@ This skill has two jobs:
 1. **Research planning** — sharpen the question, decide whether cheap discovery is useful, track criteria/source/gap state with the local `exa_research_*` planning tools, and draft a strong deep-research payload.
 2. **Explicit deep-research execution** — when the user directly asks for deep research or approves a draft, run `web_research_exa` and return a source-grounded synthesis.
 
-## Operating Modes
+## Pi cycle branch
+
+When Pi's `--exa-enable-cycles` integration is enabled, first read the
+[durable cycle workflow](../../README.md#opt-in-durable-pi-planning).
+Use that branch instead of the standalone fast path/payload defaults below:
+
+1. Inspect status; obtain explicit start or resume for the intended cycle.
+2. Clarify and record goal, scope, criteria, gaps and a draft-07 task contract.
+3. Pause at permission instructions until the operator records the named
+   lifetime scope/ceiling and any exact-request uncertainty assessment.
+4. Attribute exploratory calls to the cycle, then explicitly curate candidates
+   or external sources. Selected evidence is query context, not processing rows.
+5. Preview the authoritative artifact; resolve conflicts by editing the plan,
+   and obtain the operator's exact Agent request assessment before submission.
+6. After success, use `exa_research_summary` with `mode: "brief"` or
+   `"source_pack"` for findings, recorded gaps, assumptions and classified usage.
+   Assess evidence yourself: generated claims/JSON and remote success do not
+   satisfy criteria or verify billing.
+7. Stop after success. Missing results use explicit same-run recovery; confirmed
+   failure/unknown work uses only the documented explicitly funded retry/
+   replacement policy. Further research after success needs a new cycle and
+   operator permission. Paper retrieval belongs before completion; remaining
+   paper gaps are reported, not autonomously fetched afterward.
+
+A prose request, readiness or assistant-provided flags/amounts is not cycle
+spending permission. This branch leaves standalone/default-opt-out/MCP behavior
+unchanged. The remaining sections describe the standalone workflow.
+
+## Standalone Operating Modes
 
 Choose the mode from the user's request.
 

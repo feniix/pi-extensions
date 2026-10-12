@@ -9,6 +9,12 @@ decision: "Add stateful exa_research_* planning tools that recommend explicit Ex
 
 # ADR-0016: Stateful Exa Research Planning Tools
 
+> **Superseded in part:** [PRD-010](../prd/PRD-010-pi-exa-integrated-research-cycle.md)
+> and its [execution contract](../architecture/plan-pi-exa-integrated-research-cycle.md)
+> replace manual planner/executor bridging and non-durable state for opt-in Pi
+> cycles. Keeping planning inside pi-exa, explicit paid calls and standalone/MCP
+> behavior remain. The original decision is retained; replacement is not shipped.
+
 ## Status
 
 Proposed

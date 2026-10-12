@@ -17,7 +17,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPiTools } from "@feniix/bridgekit/pi";
 import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
-import { createExaTools, type ExaToolTimeouts } from "./tools.js";
+import {
+  type CycleAgentFactory,
+  type CycleInspectionFactory,
+  type CycleRetrievalFactory,
+  cyclePiRegistration,
+} from "./cycle-pi.js";
+import { createExaTools, type ExaToolsOptions, type ExaToolTimeouts } from "./tools.js";
 import { getExaRenderers } from "./tui-renderers.js";
 
 export {
@@ -33,6 +39,11 @@ export { DEFAULT_MAX_CHARACTERS } from "./web-fetch.js";
 export { DEFAULT_NUM_RESULTS } from "./web-search.js";
 
 function registerFlags(pi: ExtensionAPI): void {
+  pi.registerFlag("exa-enable-cycles", {
+    description:
+      "Opt in to durable Pi research cycles with operator-approved exploration, compiled Agent research, explicit existing-run GET recovery and explicit funded retry/replacement; unknown-work replacement requires operator duplicate-work/additional-charge consent.",
+    type: "boolean",
+  });
   pi.registerFlag("--exa-api-key", {
     description: "Exa AI API key for search operations",
     type: "string",
@@ -109,4 +120,50 @@ export default function exaExtension(pi: ExtensionAPI) {
     };
   });
   registerPiTools(pi, tools);
+  let cyclesInstalled = false;
+  // Pi applies CLI flags after factories load. Registration is refreshable once
+  // bound, and session_start also runs for a fresh runtime after reload.
+  pi.on("session_start", () => {
+    if (!cyclesInstalled && pi.getFlag("exa-enable-cycles") === true) {
+      const retrievalFactory: CycleRetrievalFactory = (name, usageObserver) => {
+        let selected: ReturnType<CycleRetrievalFactory>;
+        registerPiTools(
+          {
+            registerTool: (tool) => {
+              selected = tool;
+            },
+          },
+          createExaTools({
+            resolveApiKey: () => resolveAuth(pi).apiKey || undefined,
+            isToolEnabled: (toolName) => toolName === name && isToolEnabledForConfig(pi, resolvedConfig, toolName),
+            timeouts: resolvePiTimeouts(pi),
+            usageObserver,
+          }),
+        );
+        return selected;
+      };
+      const researchFactory = (options: Pick<ExaToolsOptions, "agentObserver" | "agentInspection">) => {
+        let selected: ReturnType<CycleAgentFactory>;
+        registerPiTools(
+          {
+            registerTool: (tool) => {
+              selected = tool;
+            },
+          },
+          createExaTools({
+            resolveApiKey: () => resolveAuth(pi).apiKey || undefined,
+            isToolEnabled: (name) => name === "web_research_exa" && isToolEnabledForConfig(pi, resolvedConfig, name),
+            timeouts: resolvePiTimeouts(pi),
+            ...options,
+          }),
+        );
+        return selected;
+      };
+      const agentFactory: CycleAgentFactory = (agentObserver) => researchFactory({ agentObserver });
+      const inspectionFactory: CycleInspectionFactory = (runId, observer) =>
+        researchFactory({ agentInspection: { runId, observer } });
+      registerPiTools(cyclePiRegistration(pi, retrievalFactory, agentFactory, inspectionFactory), tools);
+      cyclesInstalled = true;
+    }
+  });
 }

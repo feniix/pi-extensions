@@ -3,7 +3,7 @@
  */
 
 import type { HighlightsContentsOptions, SearchResult, TextContentsOptions } from "exa-js";
-import { getExaClient } from "./exa-client.js";
+import { type ExaUsageObserver, getExaClient, observeExaRequest } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatSearchResults, toMetadata } from "./formatters.js";
 
@@ -16,20 +16,27 @@ type SearchResultWithHighlight = SearchResult<{
   highlights: HighlightsContentsOptions;
 }>;
 
-export async function performWebSearch(apiKey: string, query: string, numResults: number): Promise<ToolPerformResult> {
+export async function performWebSearch(
+  apiKey: string,
+  query: string,
+  numResults: number,
+  observer?: ExaUsageObserver,
+): Promise<ToolPerformResult> {
   const exa = getExaClient(apiKey);
 
-  const result = await exa.search(query, {
-    type: "auto",
-    numResults,
-    contents: {
-      text: { maxCharacters: DEFAULT_MAX_CHARACTERS },
-      highlights: {
-        query,
-        numSentences: 3,
+  const result = await observeExaRequest(observer, () =>
+    exa.search(query, {
+      type: "auto",
+      numResults,
+      contents: {
+        text: { maxCharacters: DEFAULT_MAX_CHARACTERS },
+        highlights: {
+          query,
+          numSentences: 3,
+        },
       },
-    },
-  });
+    }),
+  );
 
   if (!result?.results || result.results.length === 0) {
     return {

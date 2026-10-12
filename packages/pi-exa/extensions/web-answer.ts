@@ -3,7 +3,7 @@
  */
 
 import type { AnswerResponse } from "exa-js";
-import { getExaClient } from "./exa-client.js";
+import { type ExaUsageObserver, getExaClient, observeExaRequest } from "./exa-client.js";
 import type { ToolPerformResult } from "./formatters.js";
 import { formatAnswerResult, toMetadata } from "./formatters.js";
 
@@ -14,14 +14,20 @@ interface AnswerParams {
   outputSchema?: Record<string, unknown>;
 }
 
-export async function performAnswer(apiKey: string, params: AnswerParams): Promise<ToolPerformResult> {
+export async function performAnswer(
+  apiKey: string,
+  params: AnswerParams,
+  observer?: ExaUsageObserver,
+): Promise<ToolPerformResult> {
   const exa = getExaClient(apiKey);
 
-  const result: AnswerResponse = await exa.answer(params.query, {
-    text: params.text,
-    systemPrompt: params.systemPrompt,
-    ...(params.outputSchema ? { outputSchema: params.outputSchema } : {}),
-  });
+  const result: AnswerResponse = await observeExaRequest(observer, () =>
+    exa.answer(params.query, {
+      text: params.text,
+      systemPrompt: params.systemPrompt,
+      ...(params.outputSchema ? { outputSchema: params.outputSchema } : {}),
+    }),
+  );
 
   const formatted = formatAnswerResult(result, params.outputSchema);
 
