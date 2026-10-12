@@ -51,7 +51,11 @@ afterEach(async () => {
   offlineGet.mockReset().mockImplementation(async (runId) => ({ id: runId, status: "running" }));
   offlineCancel.mockReset();
   vi.unstubAllEnvs();
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(
+    directories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })),
+  );
 });
 
 const completedRun = (id: string): AgentRun => ({
