@@ -106,9 +106,9 @@ async function host(options: HostOptions = {}) {
     getFlag: (name: string) =>
       name === "exa-enable-cycles"
         ? true
-        : name === "--exa-config-file"
+        : name === "exa-config-file"
           ? config
-          : name === "--exa-submit-timeout-ms" && options.submitTimeoutMs !== undefined
+          : name === "exa-submit-timeout-ms" && options.submitTimeoutMs !== undefined
             ? String(options.submitTimeoutMs)
             : undefined,
     registerTool: (tool: Parameters<PiToolRegistration["registerTool"]>[0]) => tools.set(tool.name, tool),

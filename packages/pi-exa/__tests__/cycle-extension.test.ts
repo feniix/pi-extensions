@@ -120,9 +120,9 @@ async function host(enabled = true, timeoutMs?: number) {
     getFlag: (name: string) =>
       name === "exa-enable-cycles"
         ? enabled
-        : name === "--exa-config-file"
+        : name === "exa-config-file"
           ? config
-          : name === "--exa-timeout-ms" && timeoutMs !== undefined
+          : name === "exa-timeout-ms" && timeoutMs !== undefined
             ? String(timeoutMs)
             : undefined,
     registerTool: (tool: Parameters<PiToolRegistration["registerTool"]>[0]) => tools.set(tool.name, tool),
@@ -1999,7 +1999,7 @@ describe("Pi cycle commands and tools", () => {
       const runtime = createExtensionRuntime();
       // Isolate tool selection from the operator's Exa config; only the cycle
       // flag deliberately arrives after factory loading.
-      runtime.flagValues.set("--exa-config-file", join(hostContext.context.cwd, "exa.json"));
+      runtime.flagValues.set("exa-config-file", join(hostContext.context.cwd, "exa.json"));
       const extension = await loadExtensionFromFactory(
         exaExtension,
         hostContext.context.cwd,

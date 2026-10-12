@@ -47,40 +47,40 @@ function registerFlags(pi: ExtensionAPI): void {
       "Opt in to durable Pi research cycles with operator-approved exploration, compiled Agent research, explicit existing-run GET recovery and explicit funded retry/replacement; unknown-work replacement requires operator duplicate-work/additional-charge consent.",
     type: "boolean",
   });
-  pi.registerFlag("--exa-api-key", {
+  pi.registerFlag("exa-api-key", {
     description: "Exa AI API key for search operations",
     type: "string",
   });
-  pi.registerFlag("--exa-enable-advanced", {
+  pi.registerFlag("exa-enable-advanced", {
     description: "Enable web_search_advanced_exa tool",
     type: "boolean",
   });
-  pi.registerFlag("--exa-enable-research", {
+  pi.registerFlag("exa-enable-research", {
     description: "Enable web_research_exa tool",
     type: "boolean",
   });
-  pi.registerFlag("--exa-config-file", {
+  pi.registerFlag("exa-config-file", {
     description: "Path to custom JSON config file for private overrides such as API keys.",
     type: "string",
   });
-  pi.registerFlag("--exa-config", {
+  pi.registerFlag("exa-config", {
     description: "Deprecated alias for --exa-config-file.",
     type: "string",
   });
-  pi.registerFlag("--exa-timeout-ms", {
+  pi.registerFlag("exa-timeout-ms", {
     description: "Default per-call timeout in ms for Exa-backed tools. Overrides the built-in 60000 default.",
     type: "string",
   });
-  pi.registerFlag("--exa-research-timeout-ms", {
+  pi.registerFlag("exa-research-timeout-ms", {
     description: "Per-call timeout in ms for web_research_exa Agent runs. Overrides the built-in 180000 default.",
     type: "string",
   });
-  pi.registerFlag("--exa-monitor-interval-ms", {
+  pi.registerFlag("exa-monitor-interval-ms", {
     description:
       "First background check delay in ms for guided cycle monitoring; later checks back off x1.5 up to 60000. Built-in default 5000.",
     type: "string",
   });
-  pi.registerFlag("--exa-submit-timeout-ms", {
+  pi.registerFlag("exa-submit-timeout-ms", {
     description:
       "Bounded wait in ms for the Exa create acknowledgement in guided cycle submission (researchMode=submit). Expiry leaves the attempt unknown; it never cancels or resubmits. Built-in default 30000.",
     type: "string",
@@ -95,8 +95,8 @@ function parsePositiveIntFlag(value: string | boolean | undefined): number | und
 }
 
 function resolvePiTimeouts(pi: ExtensionAPI): ExaToolTimeouts | undefined {
-  const def = parsePositiveIntFlag(pi.getFlag("--exa-timeout-ms"));
-  const research = parsePositiveIntFlag(pi.getFlag("--exa-research-timeout-ms"));
+  const def = parsePositiveIntFlag(pi.getFlag("exa-timeout-ms"));
+  const research = parsePositiveIntFlag(pi.getFlag("exa-research-timeout-ms"));
   if (def === undefined && research === undefined) return undefined;
   const out: ExaToolTimeouts = {};
   if (def !== undefined) out.default = def;
@@ -179,14 +179,14 @@ export default function exaExtension(pi: ExtensionAPI) {
         researchFactory({ agentInspection: { runId, observer } });
       const submissionFactory: CycleSubmissionFactory = (observer) =>
         researchFactory({
-          agentSubmission: { observer, createWaitMs: parsePositiveIntFlag(pi.getFlag("--exa-submit-timeout-ms")) },
+          agentSubmission: { observer, createWaitMs: parsePositiveIntFlag(pi.getFlag("exa-submit-timeout-ms")) },
         });
       const monitorInspector: CycleMonitorInspector = (runId, observer, timeoutMs) => {
         const apiKey = resolveAuth(pi).apiKey;
         if (!apiKey) throw Object.assign(new Error("Exa API key is not configured."), { statusCode: 401 });
         return inspectResearchRun(apiKey, runId, { observer, timeoutMs });
       };
-      const monitorInterval = parsePositiveIntFlag(pi.getFlag("--exa-monitor-interval-ms"));
+      const monitorInterval = parsePositiveIntFlag(pi.getFlag("exa-monitor-interval-ms"));
       const registration = cyclePiRegistration(
         pi,
         retrievalFactory,

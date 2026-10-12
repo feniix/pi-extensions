@@ -127,9 +127,9 @@ async function host(options: HostOptions = {}) {
     getFlag: (name: string) =>
       name === "exa-enable-cycles"
         ? true
-        : name === "--exa-config-file"
+        : name === "exa-config-file"
           ? config
-          : name === "--exa-monitor-interval-ms"
+          : name === "exa-monitor-interval-ms"
             ? "20"
             : undefined,
     registerTool: (tool: Parameters<PiToolRegistration["registerTool"]>[0]) => tools.set(tool.name, tool),

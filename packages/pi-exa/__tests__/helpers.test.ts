@@ -351,7 +351,7 @@ describe("pi-exa auth helpers", () => {
   it("prefers CLI flag over config and environment", () => {
     const pi = {
       getFlag(flag: string) {
-        if (flag === "--exa-api-key") {
+        if (flag === "exa-api-key") {
           return " cli-key ";
         }
         return undefined;
@@ -369,7 +369,7 @@ describe("pi-exa auth helpers", () => {
 
     const pi = {
       getFlag(flag: string) {
-        if (flag === "--exa-config-file") {
+        if (flag === "exa-config-file") {
           return configPath;
         }
         return undefined;
@@ -401,7 +401,7 @@ describe("pi-exa tool enablement helpers", () => {
   it("respects advanced tool flag override", () => {
     const pi = {
       getFlag(flag: string) {
-        return flag === "--exa-enable-advanced" ? true : undefined;
+        return flag === "exa-enable-advanced" ? true : undefined;
       },
     } as { getFlag: (flag: string) => unknown };
     const config = { advancedEnabled: false };
