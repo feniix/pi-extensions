@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4RGZ13DD7S6R83SZABG780R",
+  "strategy": "manual-commit",
+  "branch": "pi-exa-guided/recovery",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "packages/pi-exa/CHANGELOG.md",
+    "packages/pi-exa/README.md",
+    "packages/pi-exa/skills/exa-research-planner/SKILL.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  }
+}
