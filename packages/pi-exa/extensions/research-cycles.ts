@@ -724,7 +724,12 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
     async preview(assertions: ArtifactAssertions = {}) {
       return transaction(async () => draftArtifact(await owned(), assertions));
     },
-    async grantBudget(cycleId: string, dollars: number, tools: string[] = ["web_search_exa"]) {
+    async grantBudget(
+      cycleId: string,
+      dollars: number,
+      tools: string[] = ["web_search_exa"],
+      source: "command" | "dialog" = "command",
+    ) {
       return ordered(() =>
         transaction(async () => {
           const record = await owned();
@@ -736,7 +741,7 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
             cycleId: record.id,
             projectId,
             issuerSessionId: owner.sessionId,
-            source: "command",
+            source,
             issuedAt: nextAuthorizationTime(record.grants, record.attempts, record.ledger),
             ceilingMicros: moneyMicros(dollars, true),
             tools: [...tools],
@@ -744,6 +749,64 @@ export async function createResearchCycles(options: ResearchCycleOptions) {
           if (!Value.Check(spendingGrantSchema, grant)) throw new Error("Invalid spending scope or amount.");
           record.grants.push(grant as SpendingGrant);
           await write(record);
+          return record;
+        }),
+      );
+    },
+    /**
+     * Record one trusted-dialog approval as a single durable write: the lifetime
+     * ceiling/scope and the one-use exact-request permission for the proposal the
+     * operator actually saw. A write failure leaves no half-approval behind.
+     */
+    async grantDialogApproval(
+      cycleId: string,
+      approval: {
+        requestHash: string;
+        expectedRevision?: number;
+        artifactHash?: string;
+        allowanceDollars: number;
+        ceilingDollars: number;
+        tools: string[];
+      },
+    ) {
+      return activate((assertCurrent) =>
+        transaction(async () => {
+          const record = await owned();
+          assertCurrent();
+          assertArtifactTarget(record, { cycleId, expectedRevision: approval.expectedRevision });
+          if (approval.artifactHash !== undefined && draftArtifact(record, {}).hash !== approval.artifactHash)
+            throw new Error("PROPOSAL_STALE: the plan changed after the proposal was shown; propose again.");
+          assertDraft(record);
+          if (!/^[a-f0-9]{64}$/.test(approval.requestHash)) throw new Error("An exact request hash is required.");
+          const issuedAt = nextAuthorizationTime(record.grants, record.attempts, record.ledger);
+          const grant = {
+            kind: "exa-grant-v1",
+            id: randomUUID(),
+            cycleId: record.id,
+            projectId,
+            issuerSessionId: owner.sessionId,
+            source: "dialog",
+            issuedAt,
+            ceilingMicros: moneyMicros(approval.ceilingDollars, true),
+            tools: [...new Set(approval.tools)],
+          };
+          const permission = {
+            kind: "exa-uncertainty-v1",
+            id: randomUUID(),
+            cycleId: record.id,
+            projectId,
+            issuerSessionId: owner.sessionId,
+            source: "dialog",
+            issuedAt,
+            targetType: "request",
+            subjectId: approval.requestHash,
+            allowanceMicros: moneyMicros(approval.allowanceDollars, true),
+          };
+          if (!Value.Check(spendingGrantSchema, grant) || !Value.Check(uncertaintyPermissionSchema, permission))
+            throw new Error("Invalid dialog approval scope or amount.");
+          record.grants.push(grant as SpendingGrant, permission);
+          await write(record, assertCurrent);
+          assertCurrent();
           return record;
         }),
       );
