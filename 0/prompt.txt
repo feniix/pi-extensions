@@ -1,0 +1,1 @@
+we are running inside a herdr window, can you do the testing of the terminal interactions?
