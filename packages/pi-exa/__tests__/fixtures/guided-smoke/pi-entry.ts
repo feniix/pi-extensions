@@ -91,13 +91,22 @@ export function scriptedGuidedResponses(count = 60) {
     if (last?.role === "toolResult") {
       return fauxAssistantMessage(`The research tool reported a pause: ${text.slice(0, 200)}`);
     }
-    return fauxAssistantMessage("Sure, we can talk about something else while it runs.");
+    return fauxAssistantMessage(
+      process.env.EXA_SMOKE_LONG_REPLY === "1"
+        ? `Sure, we can talk about something else while it runs. ${"Here is a long digression that keeps the assistant streaming for a while. ".repeat(30)}`
+        : "Sure, we can talk about something else while it runs.",
+    );
   };
   return Array.from({ length: count }, () => step);
 }
 
 export default function guidedSmokeModel(pi: ExtensionAPI) {
-  const faux = fauxProvider({ provider: "exa-smoke", models: [{ id: "scripted" }] });
+  const tokensPerSecond = Number(process.env.EXA_SMOKE_TOKENS_PER_SECOND);
+  const faux = fauxProvider({
+    provider: "exa-smoke",
+    models: [{ id: "scripted" }],
+    ...(Number.isFinite(tokensPerSecond) && tokensPerSecond > 0 ? { tokensPerSecond } : {}),
+  });
   faux.setResponses(scriptedGuidedResponses() as never);
   pi.registerProvider(faux.provider);
 }

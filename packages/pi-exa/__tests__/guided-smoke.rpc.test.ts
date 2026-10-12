@@ -20,7 +20,7 @@ afterEach(async () => {
   for (const item of running.splice(0)) await item.stop().catch(() => {});
 });
 
-async function launch(server: MockExaServer) {
+async function launch(server: MockExaServer, env: Record<string, string> = {}) {
   const pi = await RpcPi.start({
     prepare: async (scratch) => {
       await writeFile(
@@ -38,11 +38,12 @@ async function launch(server: MockExaServer) {
         }),
       );
     },
-    env: {
-      EXA_BASE_URL: server.baseUrl,
-      EXA_CONFIG_FILE: join("..", "exa.json"),
-    },
+    env: { EXA_BASE_URL: server.baseUrl, ...env },
+    // The documented value-taking flag is exercised in the real process (the config path is only
+    // known after prepare(); the scratch layout puts it one level above the repo cwd).
     args: [
+      "--exa-config-file",
+      join("..", "exa.json"),
       "-e",
       join(repoRoot, "packages", "pi-exa", "extensions", "index.ts"),
       "-e",
@@ -67,7 +68,6 @@ describe("guided background research smoke on the production extension (real pi 
     const server = await startMockExaServer();
     running.push({ stop: () => server.close() });
     const pi = await launch(server);
-    // Config paths are resolved relative to the process cwd; point EXA_CONFIG_FILE at the scratch file.
     const dialog = pi.answerNextConfirm("confirmed");
     await pi.prompt("research Laya versus Jev for small structured decisions", 30_000);
     const approval = await dialog;
@@ -133,6 +133,47 @@ describe("guided background research smoke on the production extension (real pi 
     expect(userTexts.every((text) => !text.includes('"text":"/'))).toBe(true);
     expect(userTexts.join(" ")).not.toMatch(/[0-9a-f]{16}|draft-07/);
   }, 90_000);
+
+  it("queues a completion that lands during an active response until the turn settles, then delivers one notice (production path)", async () => {
+    const server = await startMockExaServer();
+    running.push({ stop: () => server.close() });
+    const pi = await launch(server, { EXA_SMOKE_LONG_REPLY: "1", EXA_SMOKE_TOKENS_PER_SECOND: "80" });
+    const dialog = pi.answerNextConfirm("confirmed");
+    await pi.prompt("research Laya versus Jev for small structured decisions", 30_000);
+    await dialog;
+    expect(server.counts().creates).toBe(1);
+    // Start a long streamed reply, then complete the run while it is still streaming.
+    const settledBefore = pi.settledCount();
+    pi.send({ type: "prompt", message: "tell me something long while it runs" });
+    await pi.waitFor((record) => record.type === "message_update", 15_000);
+    server.complete("smoke_run_1");
+    await vi.waitFor(() => expect(server.counts().gets).toBeGreaterThanOrEqual(1), { timeout: 10_000, interval: 50 });
+    // The notice is queued as a follow-up: it lands only after the streamed answer, then the report turn runs.
+    await pi.waitFor(
+      (record) => record.type === "message_end" && (record.message as { role?: string }).role === "custom",
+      60_000,
+    );
+    await pi.waitFor(
+      (record) =>
+        record.type === "message_end" &&
+        (record.message as { role?: string }).role === "assistant" &&
+        JSON.stringify((record.message as { content: unknown }).content).includes("Report: the research finished"),
+      60_000,
+    );
+    await pi.waitFor(() => pi.settledCount() > settledBefore, 30_000);
+    const entries = await pi.entries();
+    const kinds = entries.map((entry) =>
+      entry.type === "message" ? entry.message?.role : entry.type === "custom_message" ? entry.customType : entry.type,
+    );
+    const noticeIndex = kinds.indexOf("exa-research-completion");
+    expect(noticeIndex).toBeGreaterThan(-1);
+    const longAnswerIndex = kinds.lastIndexOf("assistant", noticeIndex);
+    const longAnswer = entries[longAnswerIndex] as { message?: { content: unknown } };
+    expect(JSON.stringify(longAnswer.message?.content)).toContain("long digression");
+    expect(entries.filter((entry) => entry.type === "custom_message")).toHaveLength(1);
+    expect(pi.lastAssistantText()).toContain("Report: the research finished");
+    expect(server.counts()).toMatchObject({ creates: 1, other: 0 });
+  }, 120_000);
 
   it("a cancelled dialog in the same journey submits nothing", async () => {
     const server = await startMockExaServer();
