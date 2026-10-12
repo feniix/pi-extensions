@@ -124,6 +124,9 @@ Example:
 - `--exa-config <path>` (deprecated alias for `--exa-config-file`).
 - `--exa-timeout-ms <ms>`: default per-call timeout for Exa-backed tools (built-in 60000).
 - `--exa-research-timeout-ms <ms>`: override for `web_research_exa` Agent runs (built-in 180000).
+- `--exa-submit-timeout-ms <ms>`: bounded wait for the Exa create acknowledgement in guided cycle
+  submission (`researchMode: "submit"`, built-in 30000). Expiry leaves the attempt unknown; it never
+  cancels or resubmits, and a genuine late acknowledgement is saved on the original attempt.
 
 > For ordinary Exa SDK calls, the timeout bounds the JS-side wait because `exa-js` does not yet accept `AbortSignal` ([exa-labs/exa-js#158](https://github.com/exa-labs/exa-js/issues/158)). `web_research_exa` owns the Agent run lifecycle and calls Exa's cancel endpoint on host abort or timeout once Exa has returned a run ID.
 
@@ -131,7 +134,47 @@ Example:
 
 ### Opt-in durable Pi planning
 
-Start Pi with `--exa-enable-cycles` to use durable research planning:
+Start Pi with `--exa-enable-cycles` to use durable research planning.
+
+#### Guided research (6.1.0)
+
+The normal path needs no slash commands, copied hashes or hand-written schemas.
+Say what you want researched; the assistant drives the cycle and you make the
+material decisions through Pi's own confirmation dialog:
+
+1. **Draft.** The assistant starts a non-spending cycle with
+   `exa_research_status` `action: "start"` and records the goal, scope, criteria,
+   labeled assumptions and task schema with `exa_research_step`, asking only
+   materially useful questions.
+2. **Proposal.** `exa_research_summary` `mode: "proposal"` renders the readable
+   scope/cost proposal: question, scope and exclusions, criteria, assumptions,
+   source strategy, deliverable, effort, providers, input/exclusion rows,
+   estimated cost and basis, lifetime allowance and existing liabilities. It
+   returns a `proposalId` bound to that exact compiled request and revision.
+3. **Approval.** `web_research_exa` `researchMode: "submit"` with the active
+   `cycleId` and `proposalId` opens a trusted host confirmation dialog (TUI or
+   RPC; ten-minute timeout). Only its real answer records the lifetime scope/
+   ceiling and the one-use exact-request permission, in one durable write.
+   Decline, dismissal, timeout or a headless mode submits nothing
+   (`APPROVAL_NOT_GRANTED` / `APPROVAL_UNAVAILABLE`); a plan edit after the
+   proposal fails as `PROPOSAL_STALE`; metered `auto` effort without
+   `budget.maxCostDollars` fails as `ESTIMATE_UNAVAILABLE`. Assistant-written
+   flags, amounts or prose never count as consent.
+4. **Submission.** After approval the extension freezes the attempt, performs one
+   bounded create and returns the saved Exa run ID with the cycle/attempt
+   reference while the job is still pending. Interrupting the conversation does
+   not cancel the remote run. If no acknowledgement arrives in time the attempt
+   stays `unknown` (`SUBMISSION_UNKNOWN`): nothing is invented or resubmitted and
+   a late genuine run ID is saved on that attempt.
+5. **Later.** Background monitoring and completion notification are not available
+   in this version; the tool result says so. Inspect the same saved run with
+   `researchMode: "recover"` and report findings with `exa_research_summary`
+   `mode: "brief"` or `"source_pack"`.
+
+Optional exploratory retrieval during planning (for example `web_search_exa`
+with the active `cycleId`) is disclosed through the same dialog when no lifetime
+grant covers it yet; approving it never authorizes Agent research. The slash
+commands below remain available as an advanced interface.
 
 - `/exa-research start <topic>` creates an isolated cycle without paid work.
 - `/exa-research list` lists readable saved cycles and coarse unreadable cycle IDs
@@ -304,8 +347,10 @@ dispatchability; Agent still needs its exact-request approval.
 
 #### Compiled Agent attempts
 
-With cycles enabled, an active `web_research_exa` call executes the exact current
-artifact after **both** operator permissions:
+With cycles enabled, the guided `researchMode: "submit"` path above obtains both
+permissions through the confirmation dialog. The advanced `researchMode: "active"`
+call keeps the foundation's blocking contract and executes the exact current
+artifact after **both** operator permissions are recorded by command:
 
 1. `/exa-research approve <cycle-id> <total-dollar-ceiling> web_research_exa`
    explicitly includes Agent in the lifetime tool scope (include other desired

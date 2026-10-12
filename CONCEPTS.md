@@ -99,6 +99,17 @@ Completion does not establish criterion coverage or independently verified cost.
 
 *Avoid:* verified answer (completion and evidence quality are separate).
 
+## Research proposal
+
+The readable, non-spending rendering of a cycle's compiled execution artifact
+(question, scope, criteria, assumptions, source strategy, deliverable, effort,
+providers, estimate and basis, allowance and liabilities) together with a
+`proposalId` derived from the exact artifact hash, plan revision and estimate
+basis. The guided path submits only against a current proposal; a plan edit makes
+it stale. Presenting a proposal grants nothing.
+
+*Avoid:* approval or spending grant (only the host dialog's answer records those).
+
 ## Spending grant
 
 Operator-issued permission for a cycle's budget and scope, including specifically
