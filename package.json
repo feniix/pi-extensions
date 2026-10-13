@@ -2,6 +2,7 @@
   "name": "pi-packages",
   "version": "2.2.1",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@12.8.1",
   "engines": {
     "node": ">=22.19.0"
