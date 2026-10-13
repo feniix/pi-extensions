@@ -183,6 +183,34 @@ The run is recorded evidence, not an automated gate: the TUI transcript was read
 through Herdr's pane reader and the authoritative session JSONL and cycle record.
 Layout, colors and scrolling were not evaluated beyond what is listed.
 
+## Real-model entry check (manual, 2026-10-12)
+
+The automated smokes use a scripted model that calls the cycle tools directly,
+so they prove the plumbing but not that a real model chooses the guided flow.
+A manual run checked that entry point with a real model (`gpt-6.1-sol`) and the
+command an operator would use, with `EXA_API_KEY` unset so no paid Exa call
+could happen:
+
+```
+pnpm exec pi --no-extensions -e ./packages/pi-exa/extensions/index.ts --exa-enable-cycles --exa-enable-research
+```
+
+Before the fix, the plain prompt "can you research the differences between laya
+and jev for decisions?" never reached a cycle, for two reasons. The project's
+`.pi/settings.json` had an older explicit `enabledTools` list without the
+`exa_research_*` tools, so they were not registered. The guidance also started
+a cycle only when the user asked for "guided research", so the model did
+standalone searches. After the fix, the same prompt:
+
+1. offered a quick answer or guided deep research and waited;
+2. on "2", started a non-spending cycle and asked one scoping question;
+3. recorded criteria, assumptions and the task schema and showed the readable
+   proposal (medium effort, $0.10 estimate);
+4. opened the "Approve Exa research spending?" dialog for that exact proposal;
+5. on decline, reported `APPROVAL_NOT_GRANTED` with nothing submitted.
+
+This remains a manual check: model choice is not an automated gate.
+
 ## Safety and verification limits
 
 - No live paid Agent/Connect/contact call, remote cancellation, autonomous retry,

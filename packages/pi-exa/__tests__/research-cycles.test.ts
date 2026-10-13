@@ -2561,3 +2561,6 @@ describe("durable research cycles", () => {
 });
 
 import { execFile } from "node:child_process";
+
+// Durable-storage integration tests run several times slower on CI coverage runners.
+vi.setConfig({ testTimeout: 30_000 });

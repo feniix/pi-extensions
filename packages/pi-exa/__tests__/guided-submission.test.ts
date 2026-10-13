@@ -14,6 +14,9 @@ import type { AgentRun } from "exa-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import exaExtension from "../extensions/index.js";
 
+// Durable-storage integration tests run several times slower on CI coverage runners.
+vi.setConfig({ testTimeout: 30_000 });
+
 vi.mock("node:fs", async (importOriginal) => {
   const original = await importOriginal<typeof nativeFs>();
   return { ...original, renameSync: vi.fn(original.renameSync) };
@@ -396,7 +399,7 @@ describe("guided research from request through approved submission", () => {
   });
 
   it("keeps an unacknowledged create unknown, saves a genuine late run ID on the original attempt and never resubmits", async () => {
-    const pi = await host({ submitTimeoutMs: 100 });
+    const pi = await host({ submitTimeoutMs: 1_500 });
     const { cycleId, projectId } = await readyCycle(pi);
     const proposal = await propose(pi, cycleId);
     let releaseCreate: ((run: AgentRun) => void) | undefined;

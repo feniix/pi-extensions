@@ -104,6 +104,14 @@ function resolvePiTimeouts(pi: ExtensionAPI): ExaToolTimeouts | undefined {
   return out;
 }
 
+/** Local, non-spending planner tools that research cycles need; they never call Exa. */
+const CYCLE_PLANNER_TOOLS = new Set([
+  "exa_research_step",
+  "exa_research_status",
+  "exa_research_summary",
+  "exa_research_reset",
+]);
+
 // =============================================================================
 // Extension Entry Point
 // =============================================================================
@@ -120,6 +128,11 @@ export default function exaExtension(pi: ExtensionAPI) {
   const planner = createResearchPlanner();
   // Timeouts are resolved when a call runs, so flags applied after the factory still count.
   const timeouts = () => resolvePiTimeouts(pi);
+  // --exa-enable-cycles is an explicit opt-in, so it keeps the local planner tools available even
+  // when an older explicit enabledTools list omits them; they never call Exa or spend.
+  const isEnabled = (toolName: string) =>
+    (CYCLE_PLANNER_TOOLS.has(toolName) && pi.getFlag("exa-enable-cycles") === true) ||
+    isToolEnabledForConfig(pi, resolvedConfig, toolName);
   const registered = new Map<string, Parameters<PiToolRegistration["registerTool"]>[0]>();
   const recorder: PiToolRegistration = {
     registerTool: (tool) => {
@@ -130,7 +143,7 @@ export default function exaExtension(pi: ExtensionAPI) {
   const buildTools = () =>
     createExaTools({
       resolveApiKey: () => resolveAuth(pi).apiKey || undefined,
-      isToolEnabled: (toolName) => isToolEnabledForConfig(pi, resolvedConfig, toolName),
+      isToolEnabled: isEnabled,
       timeouts,
       planner,
     }).map((tool) => {
@@ -234,6 +247,11 @@ export default function exaExtension(pi: ExtensionAPI) {
       cyclesInstalled = true;
       // This registration was created inside the current session_start dispatch.
       await registration.sessionStarted(ctx);
+      if (ctx.hasUI && !isToolEnabledForConfig(pi, resolvedConfig, "web_research_exa"))
+        ctx.ui.notify(
+          "Exa research cycles are enabled, but guided Agent research is unavailable because web_research_exa is disabled. Start Pi with --exa-enable-research (or enable web_research_exa in your Exa config) to submit approved research.",
+          "warning",
+        );
     }
   });
 }

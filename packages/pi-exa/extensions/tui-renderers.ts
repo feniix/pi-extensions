@@ -153,7 +153,15 @@ function renderResearchCall(toolName: string) {
     const query = sanitizeForDisplay(args.query ?? "");
     const type = sanitizeForDisplay(args.type ?? "");
     const typeStr = type ? ` [${type}]` : "";
-    text.setText(`${theme.fg("toolTitle", theme.bold(`${toolName} `))} "${query}"${typeStr}`);
+    const title = theme.fg("toolTitle", theme.bold(toolName));
+    if (!query && args.researchMode) {
+      // Guided cycle calls carry no query: show the mode and the proposal they act on.
+      const mode = sanitizeForDisplay(String(args.researchMode));
+      const proposal = args.proposalId ? ` proposal ${sanitizeForDisplay(String(args.proposalId))}` : "";
+      text.setText(`${title} ${mode}${proposal}`);
+      return text;
+    }
+    text.setText(`${title} "${query}"${typeStr}`);
     return text;
   };
 }

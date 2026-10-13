@@ -15,10 +15,17 @@ This skill has two jobs:
 
 ## Pi cycle branch
 
-When Pi's `--exa-enable-cycles` integration is enabled, first read the
-[durable cycle workflow](../../README.md#opt-in-durable-pi-planning).
-Use that branch instead of the standalone fast path/payload defaults below:
+Pi research cycles are enabled when `exa_research_status` accepts
+`action: "start"` (its description says so). Then read the
+[durable cycle workflow](../../README.md#opt-in-durable-pi-planning)
+and use this branch instead of the standalone fast path/payload defaults below:
 
+0. For a research request with no active cycle, before searching offer one
+   short choice: a quick answer now from a few standalone searches, or guided
+   deep research (plan together, readable scope/cost proposal, operator
+   approval in a host dialog, Exa Agent run in the background with a completion
+   notice). Offer guided research only when `web_research_exa` is available,
+   and wait for the user's choice. Skip the offer when the user already chose.
 1. Inspect status. For a guided request with no active cycle, start one
    yourself with `exa_research_status` `action: "start"` and the topic, or
    explicitly resume saved state. Never route a guided request to standalone tools.
