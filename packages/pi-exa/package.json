@@ -1,6 +1,6 @@
 {
   "name": "@feniix/pi-exa",
-  "version": "6.1.0",
+  "version": "7.0.0",
   "description": "Exa API extension for pi — web search, content fetching, and advanced search via Exa AI",
   "keywords": [
     "pi",
@@ -72,7 +72,7 @@
     "typebox": "*"
   },
   "dependencies": {
-    "@feniix/bridgekit": "^0.15.0",
+    "@feniix/bridgekit": "^0.19.1",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "exa-js": "^2.19.0"

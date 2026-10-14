@@ -765,6 +765,21 @@ Run with:
 npx pi-exa
 ```
 
+### Client compatibility
+
+The server speaks only MCP protocol revision `2026-07-28`. Clients that open with an older revision (`2025-11-25` and earlier) are rejected with JSON-RPC error `-32022`; there is no compatibility switch.
+
+| Client | Connects? |
+| ------ | --------- |
+| Claude Code | Yes, from v2.1.292 (stdio negotiates `2026-07-28` by default). Not with `MCP_PROTOCOL_NEGOTIATION=legacy`. |
+| `@modelcontextprotocol/client` v2 | Only with `versionNegotiation.mode` set to `{ pin: "2026-07-28" }` or `"auto"`. The default `"legacy"` mode is rejected. |
+| Python SDK v2 | Yes; the client negotiates the version automatically. |
+| TypeScript SDK 1.x (`@modelcontextprotocol/sdk`) | No. |
+| Cursor, VS Code Copilot | No, as of October 2026. |
+| Claude Desktop | Unconfirmed. |
+
+If your client cannot speak `2026-07-28` yet, pin the last release that also served legacy clients: `npx -y @feniix/pi-exa@6.1.0`.
+
 ### Environment configuration
 
 | Variable             | Effect                                                                                                                                                                          |
