@@ -26,7 +26,11 @@
  */
 
 import { readFileSync } from "node:fs";
-import { type CreateMcpServerOptions, runMcpStdioServer as defaultRunMcpStdioServer } from "@feniix/bridgekit/mcp";
+import {
+  type CreateMcpServerOptions,
+  runMcpStdioServer as defaultRunMcpStdioServer,
+  type McpStdioServerHandle,
+} from "@feniix/bridgekit/mcp";
 import { type ExaConfig, loadConfig, normalizeString } from "./config.js";
 import { CROSS_TOOL_GUIDELINES } from "./tool-guidance.js";
 import { createExaTools, type ExaToolTimeouts } from "./tools.js";
@@ -158,7 +162,7 @@ export function createMcpServerOptions(): CreateMcpServerOptions {
   };
 }
 
-type RunMcpStdioServer = (options: CreateMcpServerOptions) => Promise<void>;
+type RunMcpStdioServer = (options: CreateMcpServerOptions) => Promise<McpStdioServerHandle>;
 
 export async function runServer(runMcpStdioServer: RunMcpStdioServer = defaultRunMcpStdioServer): Promise<void> {
   await runMcpStdioServer(createMcpServerOptions());

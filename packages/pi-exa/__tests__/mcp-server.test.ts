@@ -12,7 +12,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMcpServer } from "@feniix/bridgekit/mcp";
+import { createMcpServerFactory } from "@feniix/bridgekit/mcp";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMcpServerOptions, createMcpTimeoutsFromEnv, runServer } from "../extensions/mcp-server.js";
 
@@ -144,7 +144,7 @@ describe("pi-exa MCP server", () => {
   });
 
   it("constructs a bridgekit MCP server from the options without throwing", () => {
-    const server = createMcpServer(createMcpServerOptions());
+    const server = createMcpServerFactory(createMcpServerOptions())();
 
     expect(server).toBeDefined();
   });
