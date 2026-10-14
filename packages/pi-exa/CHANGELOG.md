@@ -10,6 +10,10 @@ publication version mismatches are called out explicitly.
 
 ## [Unreleased]
 
+## [7.0.0] - 2026-10-14
+
+The MCP stdio server now serves only MCP protocol `2026-07-28`. Pi behavior is unchanged.
+
 ### Changed (breaking)
 
 - **The MCP stdio server serves only MCP protocol `2026-07-28`** (bridgekit 0.19). Clients that open with `2025-11-25` or earlier are rejected with `-32022`. Claude Code v2.1.292+ and Python SDK v2 connect; TypeScript SDK 1.x, `@modelcontextprotocol/client` v2 in its default `legacy` mode, Cursor and VS Code Copilot do not, and Claude Desktop is unconfirmed. Stay on 6.1.0 for legacy clients. See the README's MCP client compatibility table.
