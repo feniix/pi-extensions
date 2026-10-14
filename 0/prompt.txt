@@ -1,0 +1,136 @@
+/code-review high
+
+---
+
+<task-notification>
+<task-id>beee131jq</task-id>
+<tool-use-id>toolu_01S19ZcQikDE4qLZafrU7DUW</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-feniix-src-personal-pi-pi-extensions/c015d882-2744-41a4-b1fc-6be8d0631489/tasks/beee131jq.output</output-file>
+<status>completed</status>
+<summary>Background command "Watch CI run to completion" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>aa9ee81449c4f8812</task-id>
+<output-file>/private/tmp/claude-501/-Users-feniix-src-personal-pi-pi-extensions/c015d882-2744-41a4-b1fc-6be8d0631489/tasks/aa9ee81449c4f8812.output</output-file>
+<status>completed</status>
+<summary>Agent "/code-review high" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>This report includes every finding, as you chose last time with `--max-findings all`. Pass `--max-findings default` to go back to the usual limit.
+
+I reviewed `git diff main...HEAD` on `packages/pi-notion`. The working tree was clean, so only the committed changes are in scope. The pi-notion tests pass (176 of 176), but none of them cover the problems below.
+
+```json
+[
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 618,
+    "summary": "notion_mcp_status / notion_mcp_connect call checkConnection, which on a 401 sets state.connected=false; the next tool call then stops at the `!client.state.connected` guard in createRegisteredToolExecutor and never reaches the new refresh-and-retry path.",
+    "failure_scenario": "The access token expires mid-session and the agent calls notion_mcp_status. It gets a 401, so the client is marked disconnected. The next notion-search returns \"Not connected to Notion MCP. Run /notion to connect.\" even though a valid refresh token is saved, so the user has to step in. The executor's not-connected branch should try connectWithSavedConfig (or a refresh) before failing."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 867,
+    "summary": "retryToolAfterRefresh reports any error from the retried callTool as an auth failure. Its single catch also covers ordinary MCP errors raised after the refresh and reconnect have already worked.",
+    "failure_scenario": "The token expires, the refresh works and connect works, but the retried tool returns \"MCP Error: object not found\" (a bad page id). The result says \"Notion authentication failed and token refresh did not recover it. Run /notion or notion_mcp_connect to reconnect\" with authExpired: true. The agent or user reconnects for nothing and never sees the real tool error."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 849,
+    "summary": "Concurrent 401s share one refresh promise, but each caller then runs client.connect() on the shared client at the same time. Calls that start during the refresh window are also rejected outright, because connected is set to false at the top.",
+    "failure_scenario": "Two parallel Notion tool calls both get a 401. Both await the same refreshInFlight, then both call connect(). Each one clears sessionId and sends initialize, so whichever response arrives last overwrites the session id. The 'initialized' notification and the retried tools/call can go out on a session that the other connect replaced. A third parallel call made while the refresh is running gets \"Not connected\" instead of waiting."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 273,
+    "summary": "tokenResponseFromJson turns a missing access_token into an empty string instead of throwing. refreshSavedConfig then saves that empty token over the stored one.",
+    "failure_scenario": "The token endpoint returns 200 with a body that has no access_token (an error payload or a schema change). The config is saved with accessToken \"\" and expiresAt undefined. getHeaders skips Authorization because \"\" is falsy, so every request is unauthenticated and returns 401. The previously working access token in the auth file is lost. It should throw when access_token is not a non-empty string."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 692,
+    "summary": "FileTokenStorage.save writes the auth file, which now also holds a long-lived OAuth refresh token and the client secret, with the default mode (0644 under a typical umask). The same PR writes the far less sensitive auth URL file with mode 0600.",
+    "failure_scenario": "On a shared or multi-user SSH host (the headless use case this PR targets), another local user can read ~/.pi/agent/notion-mcp-auth.json and use refresh_token + client_id/client_secret to mint Notion access tokens indefinitely. It should be written with mode 0o600 and chmod'd, as announceAuthorizationUrl already does."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 692,
+    "summary": "storage.save swallows write errors (it only calls console.error), so after a refresh rotates the refresh token, a failed save silently loses the new token.",
+    "failure_scenario": "Notion rotates the refresh token on refresh, and the write fails (disk full, read-only or permissions problem on the NOTION_MCP_AUTH_FILE path). The current process keeps working in memory, but the file still holds the revoked refresh token. The next session's refresh fails with invalid_grant and forces a new browser consent, which is the exact problem this PR set out to fix. refreshSavedConfig should get the save failure back."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 849,
+    "summary": "retryToolAfterRefresh always refreshes again with whatever is in storage, even when the stored access token is already newer than the one that just failed. The in-process lock does not cover other pi processes that share the auth file.",
+    "failure_scenario": "Two pi sessions share ~/.pi/agent/notion-mcp-auth.json. Session A refreshes and rotates the tokens. Session B, still using the old access token in memory, gets a 401, loads A's new tokens, and refreshes again instead of just reconnecting with the stored access token. That rotates again and can invalidate A's tokens, so the two sessions keep invalidating each other. It should first compare the stored accessToken with the client's current one and reconnect without refreshing if they differ."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 917,
+    "summary": "When the token is within the 5-minute skew window and the proactive refresh fails, connectWithSavedConfig gives up without trying the access token, which is still valid.",
+    "failure_scenario": "The token expires in 3 minutes and the refresh request fails (network error, or a 5xx from mcp.notion.com). The throw skips client.connect with the still-valid token, the function returns false, and ensureConnected starts a full OAuth browser or headless flow when connecting with the existing token would have worked."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 598,
+    "summary": "checkConnection only treats a 401 as a dead session. An MCP session the server has expired comes back as HTTP 404 (per the MCP streamable-HTTP spec), so the changelog claim \"detect sessions the server no longer accepts\" only partly holds.",
+    "failure_scenario": "The Notion MCP server expires the session id and answers 404. notion_mcp_status still reports \"Connected: Yes\", checkConnection returns false without changing state, and every tool call keeps failing with \"Error: HTTP 404\" because only AuthenticationError triggers a reconnect."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 937,
+    "summary": "With storage.clear() removed, permanently dead credentials are never cleaned up. Every /notion run and every session start keeps trying them.",
+    "failure_scenario": "The refresh token is revoked (the user removed the integration in Notion). Each /notion tries the saved token (401), tries the refresh (400 invalid_grant), shows \"Connection failed: Token refresh failed...\" as an error, and only then starts OAuth. If OAuth is cancelled, the dead config stays, and index.ts session_start keeps printing \"[notion] MCP config found\". Credentials should still be cleared when the refresh is definitively rejected (invalid_grant / 400 / 401), while being kept on transient errors."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 169,
+    "summary": "parseManualOAuthCallbackInput calls new URL(trimmed) without a guard, and a pasted bare code skips the state check entirely.",
+    "failure_scenario": "A truncated or garbled paste such as \"http://127.0.0.1:3000/callback?code=abc def%\" or \"http://\" makes new URL throw TypeError: Invalid URL, which surfaces as an unhelpful \"Connection failed: Invalid URL\". Separately, a pasted value with no '=' is accepted as a code without verifying state, so the CSRF protection the state parameter provides is dropped for that input form (PKCE limits the impact)."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 966,
+    "summary": "The headless flow hard-codes redirect port 3000. On the machine where the user approves access, any dev server already listening on localhost:3000 receives the redirect, including the authorization code and state.",
+    "failure_scenario": "A developer approves on a laptop that is running a Next.js or Rails dev server on :3000. The redirect does not 'fail to load' as the instructions say: it reaches the dev server, which may redirect or rewrite the URL, so the user cannot copy the intended callback URL, and the code ends up in that server's logs. A rarely used port or an out-of-band redirect would avoid the collision."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 1164,
+    "summary": "notion_mcp_connect always uses the local callback flow, even over SSH, although execute receives a ctx with ui.input that could drive the headless flow.",
+    "failure_scenario": "Over SSH, the agent calls notion_mcp_connect after a token failure it could not refresh. openBrowser runs xdg-open, which fails silently, and the tool blocks for the full 5-minute callback timeout because nothing on the remote host ever receives the redirect. shouldUseManualOAuth(undefined) plus ctx.ui.input should be reused here instead of documenting the gap."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 448,
+    "summary": "connect() now clears this.sessionId but leaves state.sessionId alone and never sends DELETE for the old server session, so every refresh or reconnect leaves a server-side session behind and can show a stale session id.",
+    "failure_scenario": "After a 401 retry, if initialize fails, state.sessionId still shows the old session in status output. Each refresh opens a new MCP session without ending the previous one, so sessions build up on the server for long-lived agents."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 960,
+    "summary": "performManualOAuthConnection copies most of performOAuthConnection: state generation, client registration, PKCE, building the auth URL, announcing it, and resolveAccessToken. Only the way the callback result is obtained differs.",
+    "failure_scenario": "There are two copies of the OAuth bootstrap to keep in sync. A future change to registration or the PKCE parameters made in one place silently breaks the other. A single function that takes a 'get callback result' strategy (loopback server vs. pasted input) would remove the copy."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 298,
+    "summary": "refreshAccessToken and the near-expiry logic re-implement the refresh pattern already in packages/pi-notion/extensions/oauth.ts (refreshTokens / getValidAccessToken, which uses the same 5-minute threshold).",
+    "failure_scenario": "The package now has two separate refresh implementations with different failure semantics: oauth.ts clears tokens when a refresh fails, while mcp-client keeps them. Fixes and behavior drift apart. A shared token-refresh helper, parameterized by endpoint and client credentials, would keep them consistent."
+  },
+  {
+    "file": "packages/pi-notion/extensions/mcp-client.ts",
+    "line": 1153,
+    "summary": "notion_mcp_connect and notion_mcp_status now send a full tools/list request on every call just to check liveness, and then throw the result away.",
+    "failure_scenario": "Each status check costs a network round trip plus downloading the whole tool schema list. The result is never used to refresh _tools or re-register tools, so the work is wasted. Either reuse the result to update _tools, or use a cheaper ping."
+  }
+]
+```</result>
+<usage><subagent_tokens>85513</subagent_tokens><tool_uses>9</tool_uses><duration_ms>126464</duration_ms></usage>
+</task-notification>
+
+---
+
+address all

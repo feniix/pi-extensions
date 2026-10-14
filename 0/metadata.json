@@ -1,0 +1,96 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4Y3WFQMWAN7NEFZ70MY5S5M",
+  "session_id": "7d04e3cd-581e-443b-a41d-12a4931d99f6",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-14T21:07:55.452228Z",
+  "branch": "fix/pi-notion-token-refresh-headless-oauth",
+  "checkpoints_count": 3,
+  "save_step_count": 1,
+  "files_touched": [
+    "packages/pi-notion/__tests__/mcp-client.hardening.test.ts",
+    "packages/pi-notion/extensions/mcp-client.ts"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-5-5",
+  "turn_id": "9baf066f4251",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 106,
+    "cache_creation_tokens": 184033,
+    "cache_read_tokens": 7221079,
+    "output_tokens": 83441,
+    "api_call_count": 53
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_012t6eVZfRh8scxnybuJV481",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "pr"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "5539ae55c13e",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 576,
+        "end": 577,
+        "entry_ids": [
+          "7fbd6225-9c31-42f9-972e-4c73c0046af8"
+        ],
+        "tool_use_id": "toolu_012t6eVZfRh8scxnybuJV481"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_012t6eVZfRh8scxnybuJV481"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: pr",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "prompt-skill-claude-code-code-review-2026-10-14T20:57:56.149366Z",
+      "event_type": "prompt_invocation",
+      "skill": {
+        "name": "code-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "prompt_slash_command",
+        "confidence": "explicit"
+      },
+      "turn_id": "d3b57c53a964",
+      "timestamp": "2026-10-14T20:57:56.149366Z",
+      "native": {
+        "command": "/code-review"
+      },
+      "collapse": {
+        "target": "user_message",
+        "label": "/code-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-14T21:07:55.396018Z",
+    "agent_lines": 662,
+    "agent_removed": 147,
+    "human_added": 26,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 688,
+    "total_lines_changed": 867,
+    "agent_percentage": 93.31026528258363,
+    "metric_version": 2
+  }
+}
