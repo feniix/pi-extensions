@@ -10,6 +10,18 @@ publication version mismatches are called out explicitly.
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- **The MCP stdio server serves only MCP protocol `2026-07-28`** (bridgekit 0.19). Clients that open with `2025-11-25` or earlier are rejected with `-32022`. Claude Code v2.1.292+ and Python SDK v2 connect; TypeScript SDK 1.x, `@modelcontextprotocol/client` v2 in its default `legacy` mode, Cursor and VS Code Copilot do not, and Claude Desktop is unconfirmed. Stay on 6.1.0 for legacy clients. See the README's MCP client compatibility table.
+
+### Changed
+
+- Upgrade `@feniix/bridgekit` from 0.15 to 0.19. The Pi tool surface and behavior are unchanged.
+
+### Added
+
+- An MCP stdio test that spawns the real `pi-exa` bin and checks that modern clients connect and legacy clients are rejected.
+
 ## [6.1.0] - 2026-10-12
 
 Guided background research for Pi, built on new opt-in durable research cycles. Behind `--exa-enable-cycles`, a user can ask for research in plain language, approve a readable scope/cost proposal in Pi's own confirmation dialog, keep chatting while the Exa Agent run executes, and get a completion report when it finishes. Standalone, default-opt-out and MCP behavior are unchanged.
