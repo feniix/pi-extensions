@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4Y1KMESTMY44ZD51WTVYCH7",
+  "strategy": "manual-commit",
+  "branch": "chore/pi-exa-bridgekit-0.19.0",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "packages/pi-exa/CHANGELOG.md",
+    "packages/pi-exa/package.json"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 12,
+    "cache_creation_tokens": 2640,
+    "cache_read_tokens": 1050125,
+    "output_tokens": 1863,
+    "api_call_count": 6
+  }
+}

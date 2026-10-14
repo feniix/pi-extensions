@@ -1,0 +1,5 @@
+try the install again
+
+---
+
+bump to 7.0.0 and open the PR
