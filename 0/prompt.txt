@@ -1,0 +1,9 @@
+check https://github.com/paxtonhare/pi-notion
+
+---
+
+are there contributions we can pick?
+
+---
+
+yes, port 1 and 2 on a branch
