@@ -8,6 +8,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import axios from "axios";
 import { getPort as lookupPort } from "portfinder";
+import { isNearExpiry } from "./token-expiry.js";
 
 // =============================================================================
 // Types
@@ -491,11 +492,7 @@ export async function getValidAccessToken(config: OAuthConfig, storage: TokenSto
     return null;
   }
 
-  // Check if token needs refresh (refresh 5 minutes before expiry)
-  const refreshThreshold = 5 * 60 * 1000;
-  const needsRefresh = Date.now() > tokens.expiresAt - refreshThreshold;
-
-  if (!needsRefresh) {
+  if (!isNearExpiry(tokens.expiresAt)) {
     return tokens.accessToken;
   }
 
