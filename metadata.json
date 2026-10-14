@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4Y2XKAXF0Y421S4SX9CXDBJ",
+  "strategy": "manual-commit",
+  "branch": "fix/pi-notion-token-refresh-headless-oauth",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "packages/pi-notion/CHANGELOG.md",
+    "packages/pi-notion/README.md",
+    "packages/pi-notion/__tests__/mcp-client.headless.test.ts",
+    "packages/pi-notion/extensions/mcp-client.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 8,
+    "cache_creation_tokens": 12089,
+    "cache_read_tokens": 519703,
+    "output_tokens": 10923,
+    "api_call_count": 4
+  }
+}
