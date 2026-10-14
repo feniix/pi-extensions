@@ -213,7 +213,7 @@ describe("pi-notion mcp client runtime helpers", () => {
         { client_id: "client" },
         notify,
       ),
-    ).toBe("direct-token");
+    ).toEqual({ accessToken: "direct-token" });
 
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -230,7 +230,7 @@ describe("pi-notion mcp client runtime helpers", () => {
         { client_id: "client" },
         notify,
       ),
-    ).toBe("exchanged-token");
+    ).toMatchObject({ accessToken: "exchanged-token" });
     expect(notify).toHaveBeenCalledWith("Exchanging authorization code for token...");
 
     await expect(
@@ -399,11 +399,9 @@ describe("pi-notion mcp client runtime helpers", () => {
     const client = new NotionMCPClient();
     vi.spyOn(storage, "load").mockResolvedValueOnce({ mcpUrl: "https://mcp.notion.com/mcp", accessToken: "token" });
     vi.spyOn(client, "connect").mockRejectedValueOnce(new Error("bad auth"));
-    const clearSpy = vi.spyOn(storage, "clear").mockResolvedValueOnce();
 
     expect(await connectWithSavedConfig(client, notify)).toBe(false);
     expect(notify).toHaveBeenCalledWith("Connection failed: bad auth", "error");
-    expect(clearSpy).toHaveBeenCalled();
   });
 
   it("finalizes and ensures connections", async () => {
@@ -414,7 +412,7 @@ describe("pi-notion mcp client runtime helpers", () => {
     await finalizeConnection(
       client,
       { client_id: "client-1", client_secret: "secret-1" },
-      "token-123",
+      { accessToken: "token-123" },
       registerTools,
       vi.fn(),
     );

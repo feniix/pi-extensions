@@ -68,6 +68,8 @@ Use `notion_mcp_status` to list currently available tools.
 
 This package requires MCP OAuth (`/notion` or `notion_mcp_connect`) for tool connectivity.
 
+The auth file stores the OAuth refresh token and access-token expiry alongside the access token. Saved tokens are refreshed before reconnecting when they are within five minutes of expiry, and a Notion tool call rejected with HTTP 401 triggers one refresh-and-retry before reporting that you need to reconnect. A failed reconnect no longer deletes the saved credentials; run `notion_mcp_disconnect` to clear them.
+
 Session-start status checks for:
 
 1. MCP OAuth config (`~/.pi/agent/notion-mcp-auth.json`, or `NOTION_MCP_AUTH_FILE` / `--notion-mcp-auth-file` if explicitly set)

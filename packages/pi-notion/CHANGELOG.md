@@ -9,6 +9,11 @@ uncertain release boundaries are noted rather than inferred.
 
 ## [Unreleased]
 
+### Fixed
+
+- Refresh expired Notion MCP access tokens with the stored OAuth refresh token instead of forcing a new browser consent; tool calls rejected with HTTP 401 refresh once and retry. Ported from paxtonhare/pi-notion.
+- Keep saved MCP credentials when reconnecting with them fails, and have `notion_mcp_connect` / `notion_mcp_status` detect sessions the server no longer accepts.
+
 ## [3.0.5] - 2026-10-06
 
 ### Changed

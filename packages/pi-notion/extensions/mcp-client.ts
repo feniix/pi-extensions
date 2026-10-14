@@ -243,13 +243,67 @@ async function registerClient(redirectUri: string): Promise<ClientRegistration> 
 // Token Exchange
 // =============================================================================
 
+const NOTION_TOKEN_URL = "https://mcp.notion.com/token";
+
+interface TokenResponse {
+  accessToken: string;
+  refreshToken?: string;
+  /** Epoch ms; undefined when the server did not report a lifetime, so only a 401 triggers refresh. */
+  expiresAt?: number;
+}
+
+function tokenResponseFromJson(data: Record<string, unknown>): TokenResponse {
+  return {
+    accessToken: typeof data.access_token === "string" ? data.access_token : "",
+    refreshToken: typeof data.refresh_token === "string" ? data.refresh_token : undefined,
+    expiresAt: typeof data.expires_in === "number" ? Date.now() + data.expires_in * 1000 : undefined,
+  };
+}
+
+async function requestToken(params: Record<string, string>, failurePrefix: string): Promise<TokenResponse> {
+  const response = await fetch(NOTION_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams(params).toString(),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`${failurePrefix}: ${response.status} - ${error}`);
+  }
+
+  return tokenResponseFromJson((await response.json()) as Record<string, unknown>);
+}
+
+async function refreshAccessToken(
+  refreshToken: string,
+  clientId: string | undefined,
+  clientSecret?: string,
+): Promise<TokenResponse> {
+  if (!clientId) throw new Error("Cannot refresh Notion MCP token without a saved client id");
+
+  const params: Record<string, string> = {
+    grant_type: "refresh_token",
+    client_id: clientId,
+    refresh_token: refreshToken,
+  };
+  if (clientSecret) {
+    params.client_secret = clientSecret;
+  }
+
+  const refreshed = await requestToken(params, "Token refresh failed");
+  return { ...refreshed, refreshToken: refreshed.refreshToken ?? refreshToken };
+}
+
 async function exchangeCodeForToken(
   code: string,
   redirectUri: string,
   codeVerifier: string,
   clientId: string,
   clientSecret?: string,
-): Promise<{ accessToken: string }> {
+): Promise<TokenResponse> {
   const params: Record<string, string> = {
     grant_type: "authorization_code",
     client_id: clientId,
@@ -260,22 +314,7 @@ async function exchangeCodeForToken(
   if (clientSecret) {
     params.client_secret = clientSecret;
   }
-  const body = new URLSearchParams(params);
-  const response = await fetch("https://mcp.notion.com/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: body.toString(),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Token exchange failed: ${response.status} - ${error}`);
-  }
-
-  const data = (await response.json()) as { access_token: string };
-  return { accessToken: data.access_token };
+  return requestToken(params, "Token exchange failed");
 }
 
 function createPkceChallenge(): { codeVerifier: string; codeChallenge: string } {
@@ -307,13 +346,13 @@ async function resolveAccessToken(
   codeVerifier: string,
   registration: ClientRegistration,
   notify: NotifyFn,
-): Promise<string> {
+): Promise<TokenResponse> {
   if (callbackResult.error) {
     throw new Error(`Authorization failed: ${callbackResult.error}`);
   }
 
   if (callbackResult.accessToken) {
-    return callbackResult.accessToken;
+    return { accessToken: callbackResult.accessToken };
   }
 
   if (!callbackResult.code) {
@@ -321,14 +360,13 @@ async function resolveAccessToken(
   }
 
   notify("Exchanging authorization code for token...");
-  const tokenResult = await exchangeCodeForToken(
+  return exchangeCodeForToken(
     callbackResult.code,
     callbackUrl,
     codeVerifier,
     registration.client_id,
     registration.client_secret,
   );
-  return tokenResult.accessToken;
 }
 
 // =============================================================================
@@ -365,6 +403,13 @@ function coerceNumericProperties(obj: unknown): unknown {
   );
 }
 
+class AuthenticationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthenticationError";
+  }
+}
+
 class NotionMCPClient {
   state: MCPClientState = {
     connected: false,
@@ -380,6 +425,8 @@ class NotionMCPClient {
   private _tools: MCPTool[] = [];
 
   async connect(mcpUrl: string, accessToken: string): Promise<void> {
+    // A reconnect must not send the previous session's id with the new initialize request
+    this.sessionId = null;
     this._accessToken = accessToken;
     this.state.accessToken = accessToken;
     this.state.mcpUrl = mcpUrl;
@@ -458,6 +505,9 @@ class NotionMCPClient {
 
     if (!response.ok) {
       const errorText = await response.text();
+      if (response.status === 401) {
+        throw new AuthenticationError(`HTTP ${response.status}: ${errorText}`);
+      }
       throw new Error(`HTTP ${response.status}: ${errorText}`);
     }
 
@@ -528,6 +578,20 @@ class NotionMCPClient {
     return JSON.stringify(result);
   }
 
+  /** Pings the server; a 401 marks the client disconnected so callers reconnect. */
+  async checkConnection(mcpUrl: string): Promise<boolean> {
+    try {
+      await this.sendRequest(mcpUrl, "tools/list", {});
+      return true;
+    } catch (error) {
+      if (error instanceof AuthenticationError) {
+        this.state.connected = false;
+        this.state.authenticated = false;
+      }
+      return false;
+    }
+  }
+
   getTools(): MCPTool[] {
     return this._tools;
   }
@@ -540,6 +604,8 @@ class NotionMCPClient {
 interface StoredConfig {
   mcpUrl: string;
   accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
   clientId?: string;
   clientSecret?: string;
 }
@@ -722,14 +788,80 @@ function createRegisteredToolExecutor(
       return toolResult(tool.name, result || "", { tool: tool.name });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof AuthenticationError) {
+        return retryToolAfterRefresh(client, tool, params, message);
+      }
       return toolError(tool.name, `Error: ${message}`, { tool: tool.name, error: message });
     }
   };
 }
 
+async function retryToolAfterRefresh(
+  client: NotionMCPClient,
+  tool: MCPTool,
+  params: unknown,
+  authErrorMessage: string,
+): Promise<ToolExecutionResult> {
+  client.state.connected = false;
+  client.state.authenticated = false;
+
+  const savedConfig = await storage.load();
+  if (!savedConfig?.refreshToken) {
+    return toolError(
+      tool.name,
+      `Notion authentication expired or was rejected. Run /notion or notion_mcp_connect to reconnect. Original error: ${authErrorMessage}`,
+      { tool: tool.name, error: authErrorMessage, authExpired: true },
+    );
+  }
+
+  try {
+    const refreshedConfig = await refreshSavedConfig(savedConfig, () => {});
+    await client.connect(refreshedConfig.mcpUrl, refreshedConfig.accessToken);
+    const retried = await client.callTool(refreshedConfig.mcpUrl, tool.name, params as Record<string, unknown>);
+    return toolResult(tool.name, retried || "", { tool: tool.name, retriedAfterRefresh: true });
+  } catch (refreshError) {
+    const refreshMessage = refreshError instanceof Error ? refreshError.message : String(refreshError);
+    return toolError(
+      tool.name,
+      `Notion authentication failed and token refresh did not recover it. Run /notion or notion_mcp_connect to reconnect. Original error: ${authErrorMessage}. Refresh error: ${refreshMessage}`,
+      { tool: tool.name, error: authErrorMessage, refreshError: refreshMessage, authExpired: true },
+    );
+  }
+}
+
 interface OAuthConnectionData {
-  accessToken: string;
+  tokens: TokenResponse;
   registration: ClientRegistration;
+}
+
+const TOKEN_REFRESH_SKEW_MS = 5 * 60 * 1000;
+
+// Notion may rotate refresh tokens, so concurrent 401s must share one refresh instead of racing.
+let refreshInFlight: Promise<StoredConfig> | null = null;
+
+function isNearExpiry(config: StoredConfig): boolean {
+  return config.expiresAt !== undefined && config.expiresAt - TOKEN_REFRESH_SKEW_MS <= Date.now();
+}
+
+function refreshSavedConfig(savedConfig: StoredConfig, notify: NotifyFn): Promise<StoredConfig> {
+  const { refreshToken } = savedConfig;
+  if (!refreshToken) return Promise.reject(new Error("No saved Notion MCP refresh token"));
+
+  refreshInFlight ??= (async () => {
+    notify("Refreshing saved Notion MCP token...");
+    const refreshed = await refreshAccessToken(refreshToken, savedConfig.clientId, savedConfig.clientSecret);
+    const nextConfig: StoredConfig = {
+      ...savedConfig,
+      accessToken: refreshed.accessToken,
+      refreshToken: refreshed.refreshToken,
+      expiresAt: refreshed.expiresAt,
+    };
+    await storage.save(nextConfig);
+    return nextConfig;
+  })().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
 }
 
 async function connectWithSavedConfig(client: NotionMCPClient, notify: NotifyFn): Promise<boolean> {
@@ -738,12 +870,26 @@ async function connectWithSavedConfig(client: NotionMCPClient, notify: NotifyFn)
 
   notify("Connecting to saved Notion MCP...");
   try {
-    await client.connect(savedConfig.mcpUrl, savedConfig.accessToken);
+    let config = savedConfig;
+    let refreshed = false;
+    if (config.refreshToken && isNearExpiry(config)) {
+      config = await refreshSavedConfig(config, notify);
+      refreshed = true;
+    }
+
+    try {
+      await client.connect(config.mcpUrl, config.accessToken);
+    } catch (error) {
+      if (refreshed || !config.refreshToken || !(error instanceof AuthenticationError)) throw error;
+      config = await refreshSavedConfig(config, notify);
+      await client.connect(config.mcpUrl, config.accessToken);
+    }
     return true;
   } catch (error) {
+    // Keep saved credentials: a transient failure should not force a new OAuth consent,
+    // and a successful OAuth fallback overwrites them anyway.
     const message = error instanceof Error ? error.message : String(error);
     notify(`Connection failed: ${message}`, "error");
-    await storage.clear();
     return false;
   }
 }
@@ -763,22 +909,24 @@ async function performOAuthConnection(notify: NotifyFn): Promise<OAuthConnection
   notify("Waiting for authorization callback...");
 
   const callbackResult = await callbackServer.result;
-  const accessToken = await resolveAccessToken(callbackResult, callbackUrl, codeVerifier, registration, notify);
-  return { accessToken, registration };
+  const tokens = await resolveAccessToken(callbackResult, callbackUrl, codeVerifier, registration, notify);
+  return { tokens, registration };
 }
 
 async function finalizeConnection(
   client: NotionMCPClient,
   registration: ClientRegistration | null,
-  accessToken: string,
+  tokens: TokenResponse,
   registerMCPTools: () => void,
   notify: NotifyFn,
 ): Promise<void> {
   notify("Connecting to MCP server...");
-  await client.connect(NOTION_MCP_URL, accessToken);
+  await client.connect(NOTION_MCP_URL, tokens.accessToken);
   await storage.save({
     mcpUrl: NOTION_MCP_URL,
-    accessToken,
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    expiresAt: tokens.expiresAt,
     clientId: registration?.client_id,
     clientSecret: registration?.client_secret,
   });
@@ -796,8 +944,8 @@ async function ensureConnected(
     return { reusedSavedConfig: true };
   }
 
-  const { accessToken, registration } = await performOAuthConnection(notify);
-  await finalizeConnection(client, registration, accessToken, registerMCPTools, notify);
+  const { tokens, registration } = await performOAuthConnection(notify);
+  await finalizeConnection(client, registration, tokens, registerMCPTools, notify);
   return { reusedSavedConfig: false };
 }
 
@@ -807,6 +955,7 @@ async function disconnectClient(client: NotionMCPClient): Promise<void> {
 }
 
 export {
+  AuthenticationError,
   buildAuthorizationUrl,
   buildHtmlResponse,
   buildOAuthCallbackUrl,
@@ -827,6 +976,7 @@ export {
   isRecord,
   NotionMCPClient,
   openBrowser,
+  refreshAccessToken,
   resolveAccessToken,
   resolveCallbackResult,
   startOAuthCallbackServer,
@@ -921,12 +1071,14 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
         return toolError("notion_mcp_connect", "MCP client not initialized");
       }
 
-      if (mcpClient.state.connected) {
-        const tools = mcpClient.getTools();
-        return toolResult(
-          "notion_mcp_connect",
-          `Already connected to Notion MCP!\n\n${tools.length} tools available: ${tools.map((t) => t.name).join(", ")}`,
-        );
+      if (mcpClient.state.connected && mcpClient.state.mcpUrl) {
+        if (await mcpClient.checkConnection(mcpClient.state.mcpUrl)) {
+          const tools = mcpClient.getTools();
+          return toolResult(
+            "notion_mcp_connect",
+            `Already connected to Notion MCP!\n\n${tools.length} tools available: ${tools.map((t) => t.name).join(", ")}`,
+          );
+        }
       }
 
       try {
@@ -968,6 +1120,10 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
       if (!mcpClient) {
         return toolError("notion_mcp_status", "MCP client not initialized");
+      }
+
+      if (mcpClient.state.connected && mcpClient.state.mcpUrl) {
+        await mcpClient.checkConnection(mcpClient.state.mcpUrl);
       }
 
       const { connected, sessionId, mcpUrl } = mcpClient.state;
