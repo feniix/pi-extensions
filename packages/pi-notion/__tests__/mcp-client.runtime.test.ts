@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import notionMCPClientExtension, {
+  AuthenticationError,
   buildAuthorizationUrl,
   buildHtmlResponse,
   buildOAuthCallbackUrl,
@@ -25,6 +26,7 @@ import notionMCPClientExtension, {
   resolveCallbackResult,
   startOAuthCallbackServer,
   storage,
+  TokenRefreshRejectedError,
   toolError,
   toolResult,
 } from "../extensions/mcp-client.js";
@@ -403,6 +405,20 @@ describe("pi-notion mcp client runtime helpers", () => {
 
     await expect(connectWithSavedConfig(client, notify)).rejects.toThrow("bad auth");
     expect(notify).toHaveBeenCalledWith("Connection failed: bad auth", "error");
+  });
+
+  it.each([
+    new AuthenticationError("Notion rejected the saved access token and there is no refresh token"),
+    new TokenRefreshRejectedError("Token refresh failed: 400"),
+  ])("reports dead saved credentials as an expired login, not an error: $message", async (error) => {
+    const notify = vi.fn();
+    const client = new NotionMCPClient();
+    vi.spyOn(storage, "load").mockResolvedValueOnce({ mcpUrl: "https://mcp.notion.com/mcp", accessToken: "token" });
+    vi.spyOn(client, "open").mockRejectedValueOnce(error);
+
+    expect(await connectWithSavedConfig(client, notify)).toBe(false);
+    expect(notify).toHaveBeenCalledWith(`Saved Notion login expired (${error.message}). Signing in again...`, "info");
+    expect(notify).not.toHaveBeenCalledWith(expect.anything(), "error");
   });
 
   it("finalizes and ensures connections", async () => {

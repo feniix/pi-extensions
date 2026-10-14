@@ -91,7 +91,7 @@ The auth file stores the OAuth refresh token, client secret, and access-token ex
 - If the auth file already holds a newer token (another pi process refreshed it), that token is adopted instead of spending the refresh token again.
 - The session's credentials live in memory, so it keeps working if the auth file cannot be written. That failure is reported.
 - After a failed reconnect, Notion tools report the cause and fail fast for 15 seconds instead of retrying on every call.
-- A transient failure with saved credentials is reported instead of starting a new OAuth flow. Saved credentials are cleared only when Notion rejects them for good: the refresh token is refused (HTTP 400/401, e.g. `invalid_grant`), or a pre-3.1 auth file without a refresh token is rejected. A file another pi process has meanwhile updated is left alone. `notion_mcp_disconnect` also clears it.
+- A transient failure with saved credentials is reported instead of starting a new OAuth flow. Saved credentials are cleared only when Notion rejects them for good: the refresh token is refused (HTTP 400/401, e.g. `invalid_grant`), or a pre-3.1 auth file without a refresh token is rejected. pi then reports the saved login as expired and starts signing in again. A file another pi process has meanwhile updated is left alone. `notion_mcp_disconnect` also clears it.
 
 Session-start status checks for:
 

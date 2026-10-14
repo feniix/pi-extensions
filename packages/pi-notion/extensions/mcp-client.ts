@@ -1166,8 +1166,11 @@ async function connectWithSavedConfig(client: NotionMCPClient, notify: NotifyFn)
     await client.open(savedConfig, notify);
     return true;
   } catch (error) {
+    if (error instanceof AuthenticationError || error instanceof TokenRefreshRejectedError) {
+      notify(`Saved Notion login expired (${errorMessage(error)}). Signing in again...`, "info");
+      return false;
+    }
     notify(`Connection failed: ${errorMessage(error)}`, "error");
-    if (error instanceof AuthenticationError || error instanceof TokenRefreshRejectedError) return false;
     throw error;
   }
 }
