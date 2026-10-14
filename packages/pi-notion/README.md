@@ -52,7 +52,7 @@ The authorization URL is also saved to `~/.pi/agent/notion-oauth-url.txt` (mode 
 
 1. Copy the URL with `cat ~/.pi/agent/notion-oauth-url.txt` and open it in a browser on any machine.
 2. Approve access. The browser then redirects to `http://127.0.0.1:<random high port>/callback?...`, which fails to load; that is expected. The port is picked at random from 49152–65535 so it does not hit a dev server on a common port such as 3000.
-3. Paste that full redirect URL (or just its `?code=...&state=...` query string) into the pi prompt. A bare code is refused because it carries no state to check.
+3. Paste that full redirect URL (with or without `http://`, or just its `?code=...&state=...` query string) into the pi prompt. A bare code is refused because it carries no state to check.
 
 `notion_mcp_connect` uses the same rule when pi can prompt: the pasted-redirect flow over SSH, the local callback flow otherwise.
 
@@ -84,13 +84,14 @@ Use `notion_mcp_status` to list currently available tools.
 
 This package requires MCP OAuth (`/notion` or `notion_mcp_connect`) for tool connectivity.
 
-The auth file stores the OAuth refresh token, client secret, and access-token expiry alongside the access token, and is written with mode `0600`.
+The auth file stores the OAuth refresh token, client secret, and access-token expiry alongside the access token. It is replaced atomically and written with mode `0600`.
 
-- Saved tokens are refreshed before connecting when they are within five minutes of expiry. If that refresh fails transiently, the still-valid token is used.
-- A Notion tool call rejected with HTTP 401 triggers one refresh, reconnect, and retry; parallel calls share that single refresh. If the auth file already holds a newer token (another pi process refreshed it), that token is reused instead of refreshing again.
-- An MCP session the server has expired (HTTP 404) is reopened with the same token.
-- A dropped session is restored from the auth file on the next tool call.
-- Saved credentials are kept when a reconnect fails transiently and cleared only when Notion rejects the refresh token (HTTP 400/401, e.g. `invalid_grant`). `notion_mcp_disconnect` also clears them.
+- Saved tokens are refreshed before connecting when they are within five minutes of expiry. If that refresh fails, the still-valid token is used.
+- Every Notion request (tool calls, `notion_mcp_status`, `notion_mcp_connect`) recovers the same way. A rejected token (HTTP 401) is refreshed once and the request retried; an expired MCP session (HTTP 404) is reopened with the same token. Parallel requests share one recovery, and a request that fails on a session another request already replaced simply retries.
+- If the auth file already holds a newer token (another pi process refreshed it), that token is adopted instead of spending the refresh token again.
+- The session's credentials live in memory, so it keeps working if the auth file cannot be written. That failure is reported.
+- After a failed reconnect, Notion tools report the cause and fail fast for 15 seconds instead of retrying on every call.
+- A transient failure with saved credentials is reported instead of starting a new OAuth flow. Saved credentials are cleared only when Notion rejects them for good: the refresh token is refused (HTTP 400/401, e.g. `invalid_grant`), or a pre-3.1 auth file without a refresh token is rejected. A file another pi process has meanwhile updated is left alone. `notion_mcp_disconnect` also clears it.
 
 Session-start status checks for:
 

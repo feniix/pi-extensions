@@ -19,10 +19,12 @@ uncertain release boundaries are noted rather than inferred.
 ### Fixed
 
 - Refresh expired Notion MCP access tokens with the stored OAuth refresh token instead of forcing a new browser consent; tool calls rejected with HTTP 401 refresh once and retry. Ported from paxtonhare/pi-notion.
-- Parallel tool calls share one refresh and reconnect; a token another pi process already refreshed is reused rather than refreshed again; a dropped or server-expired (HTTP 404) MCP session is reopened on the next tool call.
-- Keep saved MCP credentials when reconnecting fails transiently, and clear them only when Notion rejects the refresh token.
-- `notion_mcp_connect` / `notion_mcp_status` detect sessions the server no longer accepts and refresh the cached tool list.
-- Write the MCP auth file with mode `0600`, report auth-file write failures, end the previous MCP session (`DELETE` with `MCP-Session-Id`) before reconnecting or disconnecting, and reject token responses without an `access_token`.
+- The MCP client recovers from rejected tokens (HTTP 401) and expired sessions (HTTP 404) on every request, from in-memory credentials. Parallel requests share one recovery, a request that failed on an already-replaced session just retries, a token another pi process already refreshed is adopted, and a disconnect during recovery cannot be undone by it.
+- Report a transient failure with saved credentials instead of starting a new OAuth flow. Clear saved credentials only when Notion rejects them for good (including pre-3.1 auth files without a refresh token), and only if no other pi process has updated the file meanwhile.
+- `notion_mcp_connect` / `notion_mcp_status` refresh expired tokens transparently and register newly listed tools; `notion_mcp_connect` shows its OAuth instructions in the pi UI.
+- Write the MCP auth file atomically with mode `0600`, report write failures, and honour `--notion-mcp-auth-file` for MCP token storage (the path was resolved before the flag was read).
+- End the previous MCP session (`DELETE` with `MCP-Session-Id`) before an explicit reconnect or disconnect, send the spec `notifications/initialized` notification, and reject token responses without an `access_token`.
+- Close the OAuth callback server when client registration fails, instead of leaving a timeout that rejects unhandled five minutes later.
 
 ## [3.0.5] - 2026-10-06
 

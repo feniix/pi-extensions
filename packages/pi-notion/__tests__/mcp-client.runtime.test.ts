@@ -392,7 +392,7 @@ describe("pi-notion mcp client runtime helpers", () => {
     logSpy.mockRestore();
   });
 
-  it("returns false when saved config is missing or invalid", async () => {
+  it("returns false without saved config and rethrows a transient connect failure", async () => {
     vi.spyOn(storage, "load").mockResolvedValueOnce(null);
     expect(await connectWithSavedConfig(new NotionMCPClient(), vi.fn())).toBe(false);
 
@@ -401,7 +401,7 @@ describe("pi-notion mcp client runtime helpers", () => {
     vi.spyOn(storage, "load").mockResolvedValueOnce({ mcpUrl: "https://mcp.notion.com/mcp", accessToken: "token" });
     vi.spyOn(client, "connect").mockRejectedValueOnce(new Error("bad auth"));
 
-    expect(await connectWithSavedConfig(client, notify)).toBe(false);
+    await expect(connectWithSavedConfig(client, notify)).rejects.toThrow("bad auth");
     expect(notify).toHaveBeenCalledWith("Connection failed: bad auth", "error");
   });
 

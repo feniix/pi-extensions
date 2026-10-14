@@ -100,7 +100,7 @@ describe("pi-notion MCP token refresh", () => {
     global.fetch = vi.fn().mockResolvedValue(jsonResponse({ error: "invalid_token" }, 401)) as typeof fetch;
     const client = new NotionMCPClient();
 
-    await expect(client.callTool(MCP_URL, "demo", {})).rejects.toBeInstanceOf(AuthenticationError);
+    await expect(client.connect(MCP_URL, "rejected")).rejects.toBeInstanceOf(AuthenticationError);
   });
 
   it("saves refresh token and expiry when finalizing a connection", async () => {
@@ -184,41 +184,16 @@ describe("pi-notion MCP token refresh", () => {
     expect(connectSpy).toHaveBeenLastCalledWith(MCP_URL, "fresh");
   });
 
-  it("keeps saved credentials when connecting with them fails", async () => {
+  it("keeps saved credentials and reports a transient failure instead of falling back to OAuth", async () => {
     vi.spyOn(storage, "load").mockResolvedValueOnce({ mcpUrl: MCP_URL, accessToken: "token" });
     const clearSpy = vi.spyOn(storage, "clear").mockResolvedValue();
     const notify = vi.fn();
     const client = new NotionMCPClient();
     vi.spyOn(client, "connect").mockRejectedValueOnce(new Error("network down"));
 
-    expect(await connectWithSavedConfig(client, notify)).toBe(false);
+    await expect(connectWithSavedConfig(client, notify)).rejects.toThrow("network down");
     expect(notify).toHaveBeenCalledWith("Connection failed: network down", "error");
     expect(clearSpy).not.toHaveBeenCalled();
-  });
-
-  it("refreshes, reconnects, and retries a tool call rejected with 401", async () => {
-    vi.spyOn(storage, "load").mockResolvedValue({
-      mcpUrl: MCP_URL,
-      accessToken: "expired",
-      refreshToken: "refresh-1",
-      clientId: "client",
-    });
-    vi.spyOn(storage, "save").mockResolvedValue();
-    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ access_token: "fresh" })) as typeof fetch;
-    const client = new NotionMCPClient();
-    client.state.connected = true;
-    client.state.accessToken = "expired";
-    const connectSpy = vi.spyOn(client, "connect").mockResolvedValue();
-    vi.spyOn(client, "callTool")
-      .mockRejectedValueOnce(new AuthenticationError("HTTP 401: invalid_token"))
-      .mockResolvedValueOnce("done");
-
-    const result = await runExecutor(client);
-
-    expect(result.isError).toBeUndefined();
-    expect(result.content[0]?.text).toBe("done");
-    expect(result.details).toMatchObject({ retriedAfterRefresh: true });
-    expect(connectSpy).toHaveBeenCalledWith(MCP_URL, "fresh");
   });
 
   it("asks the user to reconnect when a 401 cannot be refreshed", async () => {
@@ -233,27 +208,6 @@ describe("pi-notion MCP token refresh", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("Run /notion or notion_mcp_connect to reconnect");
     expect(result.details).toMatchObject({ authExpired: true });
-    expect(client.state.connected).toBe(false);
-  });
-
-  it("reports both errors when the refresh itself fails", async () => {
-    vi.spyOn(storage, "load").mockResolvedValue({
-      mcpUrl: MCP_URL,
-      accessToken: "expired",
-      refreshToken: "refresh-1",
-      clientId: "client",
-    });
-    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ error: "invalid_grant" }, 400)) as typeof fetch;
-    const client = new NotionMCPClient();
-    client.state.connected = true;
-    client.state.accessToken = "expired";
-    vi.spyOn(client, "callTool").mockRejectedValueOnce(new AuthenticationError("HTTP 401: invalid_token"));
-
-    const result = await runExecutor(client);
-
-    expect(result.isError).toBe(true);
-    expect(result.details).toMatchObject({ authExpired: true });
-    expect(String(result.details.refreshError)).toContain("Token refresh failed: 400");
   });
 
   it("marks the client disconnected when a liveness check is rejected with 401", async () => {
