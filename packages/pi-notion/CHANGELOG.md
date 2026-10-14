@@ -13,13 +13,16 @@ uncertain release boundaries are noted rather than inferred.
 
 ### Added
 
-- `/notion headless` completes OAuth by pasting the failed loopback redirect URL or code, for SSH sessions and hosts without a browser. It is the default when `SSH_CONNECTION` or `SSH_TTY` is set; `/notion browser` forces the local callback flow. Ported from paxtonhare/pi-notion.
+- `/notion headless` completes OAuth by pasting the failed loopback redirect URL, for SSH sessions and hosts without a browser. It is the default when `SSH_CONNECTION` or `SSH_TTY` is set; `/notion browser` forces the local callback flow, and `notion_mcp_connect` follows the same rule when pi can prompt. The redirect uses a random high port. Ported from paxtonhare/pi-notion.
 - Save the OAuth authorization URL to `~/.pi/agent/notion-oauth-url.txt` so it can be copied when the browser does not open.
 
 ### Fixed
 
 - Refresh expired Notion MCP access tokens with the stored OAuth refresh token instead of forcing a new browser consent; tool calls rejected with HTTP 401 refresh once and retry. Ported from paxtonhare/pi-notion.
-- Keep saved MCP credentials when reconnecting with them fails, and have `notion_mcp_connect` / `notion_mcp_status` detect sessions the server no longer accepts.
+- Parallel tool calls share one refresh and reconnect; a token another pi process already refreshed is reused rather than refreshed again; a dropped or server-expired (HTTP 404) MCP session is reopened on the next tool call.
+- Keep saved MCP credentials when reconnecting fails transiently, and clear them only when Notion rejects the refresh token.
+- `notion_mcp_connect` / `notion_mcp_status` detect sessions the server no longer accepts and refresh the cached tool list.
+- Write the MCP auth file with mode `0600`, report auth-file write failures, end the previous MCP session (`DELETE` with `MCP-Session-Id`) before reconnecting or disconnecting, and reject token responses without an `access_token`.
 
 ## [3.0.5] - 2026-10-06
 

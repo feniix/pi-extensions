@@ -239,6 +239,7 @@ describe("pi-notion mcp client runtime helpers", () => {
   });
 
   it("creates registered tool executors for connected and disconnected clients", async () => {
+    vi.spyOn(storage, "load").mockResolvedValue(null);
     const disconnectedClient = new NotionMCPClient();
     const disconnectedExecute = createRegisteredToolExecutor(disconnectedClient, "https://mcp.notion.com/mcp", {
       name: "notion-search",

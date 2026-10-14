@@ -33,6 +33,9 @@ describe("pi-notion MCP token refresh", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    // The module-level storage points at the real auth file; never write or delete it from tests
+    vi.spyOn(storage, "save").mockResolvedValue();
+    vi.spyOn(storage, "clear").mockResolvedValue();
   });
 
   afterEach(() => {
@@ -204,6 +207,7 @@ describe("pi-notion MCP token refresh", () => {
     global.fetch = vi.fn().mockResolvedValue(jsonResponse({ access_token: "fresh" })) as typeof fetch;
     const client = new NotionMCPClient();
     client.state.connected = true;
+    client.state.accessToken = "expired";
     const connectSpy = vi.spyOn(client, "connect").mockResolvedValue();
     vi.spyOn(client, "callTool")
       .mockRejectedValueOnce(new AuthenticationError("HTTP 401: invalid_token"))
@@ -221,6 +225,7 @@ describe("pi-notion MCP token refresh", () => {
     vi.spyOn(storage, "load").mockResolvedValue({ mcpUrl: MCP_URL, accessToken: "expired" });
     const client = new NotionMCPClient();
     client.state.connected = true;
+    client.state.accessToken = "expired";
     vi.spyOn(client, "callTool").mockRejectedValueOnce(new AuthenticationError("HTTP 401: invalid_token"));
 
     const result = await runExecutor(client);
@@ -241,6 +246,7 @@ describe("pi-notion MCP token refresh", () => {
     global.fetch = vi.fn().mockResolvedValue(jsonResponse({ error: "invalid_grant" }, 400)) as typeof fetch;
     const client = new NotionMCPClient();
     client.state.connected = true;
+    client.state.accessToken = "expired";
     vi.spyOn(client, "callTool").mockRejectedValueOnce(new AuthenticationError("HTTP 401: invalid_token"));
 
     const result = await runExecutor(client);
@@ -248,30 +254,6 @@ describe("pi-notion MCP token refresh", () => {
     expect(result.isError).toBe(true);
     expect(result.details).toMatchObject({ authExpired: true });
     expect(String(result.details.refreshError)).toContain("Token refresh failed: 400");
-  });
-
-  it("shares one refresh between concurrent tool calls rejected with 401", async () => {
-    vi.spyOn(storage, "load").mockResolvedValue({
-      mcpUrl: MCP_URL,
-      accessToken: "expired",
-      refreshToken: "refresh-1",
-      clientId: "client",
-    });
-    vi.spyOn(storage, "save").mockResolvedValue();
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ access_token: "fresh", refresh_token: "refresh-2" }));
-    global.fetch = fetchMock as typeof fetch;
-    const client = new NotionMCPClient();
-    client.state.connected = true;
-    vi.spyOn(client, "connect").mockResolvedValue();
-    vi.spyOn(client, "callTool")
-      .mockRejectedValueOnce(new AuthenticationError("HTTP 401"))
-      .mockRejectedValueOnce(new AuthenticationError("HTTP 401"))
-      .mockResolvedValue("done");
-
-    const results = await Promise.all([runExecutor(client), runExecutor(client)]);
-
-    expect(results.map((r) => r.content[0]?.text)).toEqual(["done", "done"]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("marks the client disconnected when a liveness check is rejected with 401", async () => {

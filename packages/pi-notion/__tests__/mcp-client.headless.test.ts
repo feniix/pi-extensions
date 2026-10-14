@@ -45,6 +45,8 @@ describe("pi-notion headless OAuth", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(storage, "save").mockResolvedValue();
+    vi.spyOn(storage, "clear").mockResolvedValue();
     home = mkdtempSync(join(tmpdir(), "pi-notion-headless-"));
     process.env.HOME = home;
     delete process.env.SSH_CONNECTION;
@@ -84,8 +86,8 @@ describe("pi-notion headless OAuth", () => {
       });
     });
 
-    it("treats anything else as a raw authorization code", () => {
-      expect(parseManualOAuthCallbackInput(" raw-code ", "s1")).toEqual({ code: "raw-code" });
+    it("refuses a bare code because it carries no state to check", () => {
+      expect(parseManualOAuthCallbackInput(" raw-code ", "s1").error).toMatch(/Paste the full redirect URL/);
     });
 
     it("rejects empty input", () => {
