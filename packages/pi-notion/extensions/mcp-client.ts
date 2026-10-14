@@ -10,7 +10,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -35,6 +35,7 @@ function getHomeDir(): string {
 
 type NotifyLevel = "info" | "error";
 type NotifyFn = (message: string, type?: NotifyLevel) => void;
+type OAuthInputFn = (prompt: string, placeholder?: string) => Promise<string | undefined>;
 
 type ToolExecutionResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -158,6 +159,22 @@ function resolveCallbackResult(
     },
     result: { error: "No code or token in callback" },
   };
+}
+
+/** Parses what a headless user pasted: the failed loopback redirect URL, its query string, or a raw code. */
+function parseManualOAuthCallbackInput(input: string, expectedState: string): OAuthCallbackResult {
+  const trimmed = input.trim();
+  if (!trimmed) return { error: "No authorization code provided" };
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return resolveCallbackResult(new URL(trimmed).searchParams, expectedState).result;
+  }
+
+  if (trimmed.includes("=")) {
+    return resolveCallbackResult(new URLSearchParams(trimmed.replace(/^\?/, "")), expectedState).result;
+  }
+
+  return { code: trimmed };
 }
 
 async function startOAuthCallbackServer(
@@ -720,6 +737,34 @@ async function openBrowser(url: string): Promise<void> {
   }
 }
 
+function getAuthorizationUrlFilePath(): string {
+  return join(getHomeDir(), ".pi", "agent", "notion-oauth-url.txt");
+}
+
+/**
+ * The authorization URL is too long to copy reliably from a TUI notification,
+ * so it is written to a file the user can `cat` (e.g. over SSH).
+ */
+function announceAuthorizationUrl(authUrl: string, notify: NotifyFn): string | null {
+  const path = getAuthorizationUrlFilePath();
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${authUrl}\n`, { encoding: "utf-8", mode: 0o600 });
+    chmodSync(path, 0o600);
+  } catch {
+    notify(`Open this Notion authorization URL if your browser did not open automatically:\n${authUrl}`);
+    return null;
+  }
+  notify(`Notion OAuth URL saved to ${path}\nCopy it with: cat "${path}"`);
+  return path;
+}
+
+function shouldUseManualOAuth(args: string | undefined): boolean {
+  if (/\bbrowser\b/i.test(args ?? "")) return false;
+  if (/\b(headless|manual)\b/i.test(args ?? "")) return true;
+  return Boolean(process.env.SSH_CONNECTION || process.env.SSH_TTY);
+}
+
 function createUiNotifier(pi: ExtensionAPI): NotifyFn {
   return (message, type = "info") => {
     try {
@@ -904,11 +949,35 @@ async function performOAuthConnection(notify: NotifyFn): Promise<OAuthConnection
   const { codeVerifier, codeChallenge } = createPkceChallenge();
   const authUrl = buildAuthorizationUrl(registration, callbackUrl, codeChallenge, state);
 
+  announceAuthorizationUrl(authUrl, notify);
   notify("Opening Notion authorization page...");
   await openBrowser(authUrl);
   notify("Waiting for authorization callback...");
 
   const callbackResult = await callbackServer.result;
+  const tokens = await resolveAccessToken(callbackResult, callbackUrl, codeVerifier, registration, notify);
+  return { tokens, registration };
+}
+
+/**
+ * OAuth for hosts without a reachable browser: the user approves on any machine,
+ * the loopback redirect fails there, and they paste that URL (or its code) back.
+ */
+async function performManualOAuthConnection(notify: NotifyFn, input: OAuthInputFn): Promise<OAuthConnectionData> {
+  const state = randomBytes(16).toString("hex");
+  const callbackUrl = buildOAuthCallbackUrl(3000);
+
+  notify("Registering OAuth client...");
+  const registration = await registerClient(callbackUrl);
+  const { codeVerifier, codeChallenge } = createPkceChallenge();
+  const authUrl = buildAuthorizationUrl(registration, callbackUrl, codeChallenge, state);
+
+  announceAuthorizationUrl(authUrl, notify);
+  notify(
+    "Open the saved Notion URL in a browser on any machine. After approving, the redirect page will fail to load; paste its full URL here (the raw code also works).",
+  );
+  const pasted = await input("Paste the Notion redirect URL or code", `${callbackUrl}?code=...&state=...`);
+  const callbackResult = parseManualOAuthCallbackInput(pasted ?? "", state);
   const tokens = await resolveAccessToken(callbackResult, callbackUrl, codeVerifier, registration, notify);
   return { tokens, registration };
 }
@@ -937,6 +1006,7 @@ async function ensureConnected(
   client: NotionMCPClient,
   registerMCPTools: () => void,
   notify: NotifyFn,
+  manualInput?: OAuthInputFn,
 ): Promise<{ reusedSavedConfig: boolean }> {
   const connectedFromSavedConfig = await connectWithSavedConfig(client, notify);
   if (connectedFromSavedConfig) {
@@ -944,7 +1014,9 @@ async function ensureConnected(
     return { reusedSavedConfig: true };
   }
 
-  const { tokens, registration } = await performOAuthConnection(notify);
+  const { tokens, registration } = manualInput
+    ? await performManualOAuthConnection(notify, manualInput)
+    : await performOAuthConnection(notify);
   await finalizeConnection(client, registration, tokens, registerMCPTools, notify);
   return { reusedSavedConfig: false };
 }
@@ -956,6 +1028,7 @@ async function disconnectClient(client: NotionMCPClient): Promise<void> {
 
 export {
   AuthenticationError,
+  announceAuthorizationUrl,
   buildAuthorizationUrl,
   buildHtmlResponse,
   buildOAuthCallbackUrl,
@@ -976,9 +1049,11 @@ export {
   isRecord,
   NotionMCPClient,
   openBrowser,
+  parseManualOAuthCallbackInput,
   refreshAccessToken,
   resolveAccessToken,
   resolveCallbackResult,
+  shouldUseManualOAuth,
   startOAuthCallbackServer,
   storage,
   toolError,
@@ -1033,8 +1108,9 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 
   // /notion command
   pi.registerCommand("notion", {
-    description: "Connect to Notion MCP, show status, or disconnect",
-    async handler(_args, ctx) {
+    description:
+      "Connect to Notion MCP, show status, or disconnect. Use /notion headless to paste the OAuth redirect (default over SSH), /notion browser to force the local callback.",
+    async handler(args, ctx) {
       if (!mcpClient) {
         ctx.ui.notify("Notion MCP not initialized", "error");
         return;
@@ -1042,8 +1118,11 @@ export default function notionMCPClientExtension(pi: ExtensionAPI) {
 
       if (!mcpClient.state.connected) {
         const uiNotify: NotifyFn = (message, type = "info") => ctx.ui.notify(message, type);
+        const manualInput: OAuthInputFn | undefined = shouldUseManualOAuth(args)
+          ? (prompt, placeholder) => ctx.ui.input(prompt, placeholder)
+          : undefined;
         try {
-          await ensureConnected(mcpClient, registerMCPTools, uiNotify);
+          await ensureConnected(mcpClient, registerMCPTools, uiNotify, manualInput);
           ctx.ui.notify(`Connected! Session: ${mcpClient.state.sessionId?.slice(0, 8)}...`, "info");
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

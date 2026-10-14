@@ -9,6 +9,11 @@ uncertain release boundaries are noted rather than inferred.
 
 ## [Unreleased]
 
+### Added
+
+- `/notion headless` completes OAuth by pasting the failed loopback redirect URL or code, for SSH sessions and hosts without a browser. It is the default when `SSH_CONNECTION` or `SSH_TTY` is set; `/notion browser` forces the local callback flow. Ported from paxtonhare/pi-notion.
+- Save the OAuth authorization URL to `~/.pi/agent/notion-oauth-url.txt` so it can be copied when the browser does not open.
+
 ### Fixed
 
 - Refresh expired Notion MCP access tokens with the stored OAuth refresh token instead of forcing a new browser consent; tool calls rejected with HTTP 401 refresh once and retry. Ported from paxtonhare/pi-notion.

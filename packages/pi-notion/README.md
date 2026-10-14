@@ -40,6 +40,22 @@ or call:
 
 - `notion_mcp_connect`
 
+The authorization URL is also saved to `~/.pi/agent/notion-oauth-url.txt` (mode `0600`) in case the browser does not open.
+
+### Connect over SSH or without a local browser
+
+```bash
+/notion headless
+```
+
+`/notion` uses this flow automatically when `SSH_CONNECTION` or `SSH_TTY` is set; run `/notion browser` to force the local callback flow instead (for example, when you forward the callback port).
+
+1. Copy the URL with `cat ~/.pi/agent/notion-oauth-url.txt` and open it in a browser on any machine.
+2. Approve access. The browser then redirects to `http://127.0.0.1:3000/callback?...`, which fails to load; that is expected.
+3. Paste that full redirect URL (or just the `code` value) into the pi prompt.
+
+`notion_mcp_connect` always uses the local callback flow.
+
 ### Check status
 
 - `notion_mcp_status`
