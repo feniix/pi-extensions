@@ -1,0 +1,37 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4Y1HHHW4D5PJ3NA27KZN479",
+  "strategy": "manual-commit",
+  "branch": "chore/pi-exa-bridgekit-0.19.0",
+  "checkpoints_count": 12,
+  "files_touched": [
+    "packages/pi-exa/__tests__/mcp-server.test.ts",
+    "packages/pi-exa/extensions/mcp-server.ts",
+    "packages/pi-exa/package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 206,
+    "cache_creation_tokens": 142702,
+    "cache_read_tokens": 12343637,
+    "output_tokens": 49044,
+    "api_call_count": 103,
+    "subagent_tokens": {
+      "input_tokens": 32,
+      "cache_creation_tokens": 66756,
+      "cache_read_tokens": 828787,
+      "output_tokens": 249,
+      "api_call_count": 16
+    }
+  }
+}

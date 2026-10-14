@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "toolu_01GxsU5vKxokoUS5zk8qrPSB",
+  "agent_id": "a5fd907ddfaba14e9",
+  "subagent_type": "general-purpose",
+  "task_description": "Research MCP host 2026-07-28 support",
+  "token_usage": {
+    "input_tokens": 32,
+    "cache_creation_tokens": 66756,
+    "cache_read_tokens": 828787,
+    "output_tokens": 249,
+    "api_call_count": 16
+  },
+  "started_at": "2026-10-14T17:08:29.263786-03:00",
+  "completed_at": "2026-10-14T17:10:20.719607-03:00"
+}
