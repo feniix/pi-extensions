@@ -9,6 +9,8 @@ uncertain release boundaries are noted rather than inferred.
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-14
+
 ### Added
 
 - `/notion headless` completes OAuth by pasting the failed loopback redirect URL or code, for SSH sessions and hosts without a browser. It is the default when `SSH_CONNECTION` or `SSH_TTY` is set; `/notion browser` forces the local callback flow. Ported from paxtonhare/pi-notion.
