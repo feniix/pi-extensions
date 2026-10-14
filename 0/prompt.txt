@@ -1,0 +1,19 @@
+<task-notification>
+<task-id>bafwwu92f</task-id>
+<tool-use-id>toolu_018FNiASnpexZrqiB3zg8QGu</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-feniix-src-personal-pi-pi-extensions/c015d882-2744-41a4-b1fc-6be8d0631489/tasks/bafwwu92f.output</output-file>
+<status>completed</status>
+<summary>Background command "Watch CI for the redesign commit" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+I have a herdr session named default running can you setup terminal session and start pi so I can test locally /notion headless ?
+
+---
+
+I got Error: Connection failed: Notion rejected the saved access token and there is no refresh token
+
+---
+
+yes, change the message
