@@ -1,0 +1,7 @@
+whats about 
+
+First 10 rows of a view     │ 24 / 2                     │ 20 / 1      │ 19 / 0
+
+---
+
+1
