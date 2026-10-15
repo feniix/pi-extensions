@@ -4,7 +4,7 @@
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| Only calendar events returned | Using default `ai_search` mode | Add `"content_search_mode": "workspace_search"` |
+| Results from Google Drive, Slack, or other connected sources | Default `ai_search` mode searches connected sources too | Add `"content_search_mode": "workspace_search"` for Notion pages only |
 | `object_not_found` on fetch | Passing a team ID instead of page/database ID | Team IDs can't be fetched — use search with `teamspace_id` filter |
 | `object_not_found` on fetch | Using raw `id` from search results | Use the `url` field from search results instead |
 | `must have required property 'filter'` | Missing filter in meeting notes | Use `{"filter": {"operator": "and", "filters": []}}` |
@@ -38,8 +38,8 @@
 ## Quick Tips
 
 ### Search
-- **Always use `content_search_mode: "workspace_search"`** to find pages and databases
-- **Always include `"filters": {}`** in search — it's required even when empty
+- Use `content_search_mode: "workspace_search"` to find a page or database by name; the default `ai_search` is better for questions about a topic
+- `"filters"` is optional; include it only to narrow by date or creator
 - Set `max_highlight_length: 0` to keep search responses small
 - Use `page_url` to scope search within a specific page and its children
 - Use `data_source_url` with `collection://` to search within a database's rows

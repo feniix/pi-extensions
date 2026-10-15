@@ -19,6 +19,7 @@ uncertain release boundaries are noted rather than inferred.
 - Guardrails match built-in MCP tool names under any server name, including calls made from `codemode` scripts.
 - Numeric property coercion runs on the `tool_call` event, so it also applies to calls made from `codemode` scripts.
 - The `workspace-explorer` skill explains the built-in tool names and how to load them.
+- Drop the `notion-search` guardrail. Tested against live Notion, the default `ai_search` returns workspace pages (plus connected sources such as Google Drive), not just calendar events, and `workspace_search` works without `filters`. The `workspace-explorer` skill now explains when to use each mode instead of always forcing `workspace_search` and `filters: {}`.
 
 ### Removed
 

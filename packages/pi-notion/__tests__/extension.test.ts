@@ -97,16 +97,15 @@ describe("notionToolName", () => {
 });
 
 describe("guardrails", () => {
-  it("warns for incorrect notion-search inputs", async () => {
+  it("does not warn about notion-search's default mode or a missing filters key", async () => {
+    // Live, the default ai_search returned workspace pages (plus connected sources), and
+    // workspace_search worked without filters, so neither is a mistake.
     const { call, notify } = load();
 
     await call("mcp__notion__notion_search", { query: "meeting notes" });
+    await call("mcp__notion__notion_search", { query: "roadmap", content_search_mode: "workspace_search" });
 
-    expect(notify).toHaveBeenCalledWith(
-      expect.stringContaining("content_search_mode is not 'workspace_search'"),
-      "warning",
-    );
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining("'filters' key is missing"), "warning");
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("warns for raw fetch ids and empty meeting note filters, including calls from codemode scripts", async () => {

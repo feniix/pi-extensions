@@ -41,22 +41,6 @@ function notionToolName(toolName: string): string | undefined {
 
 type CheckFn = (input: Record<string, unknown>) => string[];
 
-function checkNotionSearch(input: Record<string, unknown>): string[] {
-  const warnings: string[] = [];
-
-  if (input.content_search_mode !== "workspace_search") {
-    warnings.push(
-      "⚠ notion-search: content_search_mode is not 'workspace_search'. Default 'ai_search' returns calendar events. Use 'workspace_search' for workspace content.",
-    );
-  }
-
-  if (!("filters" in input)) {
-    warnings.push("⚠ notion-search: 'filters' key is missing. Add at minimum 'filters': {}.");
-  }
-
-  return warnings;
-}
-
 function checkNotionFetch(input: Record<string, unknown>): string[] {
   const warnings: string[] = [];
   const id = String(input.id ?? "");
@@ -92,7 +76,6 @@ function checkMeetingNotes(input: Record<string, unknown>): string[] {
 }
 
 const toolChecks: Record<string, CheckFn> = {
-  "notion-search": checkNotionSearch,
   "notion-fetch": checkNotionFetch,
   "notion-query-meeting-notes": checkMeetingNotes,
 };
