@@ -19,6 +19,8 @@ Notion's tools are named `mcp__notion__<tool>`, with `-` replaced by `_`: `notio
 
 If no Notion tools are found, or calls fail because Notion needs sign-in, ask the user to run `/mcp login notion`. Do not try to sign in yourself.
 
+A user with several Notion workspaces has one server per workspace, such as `mcp__notion__*` and `mcp__notion_work__*`. Use the server whose name or description matches the workspace the user means; if that is unclear, ask which workspace before calling. Pages and IDs from one workspace do not exist in another.
+
 ## Search (Critical: Get This Right)
 
 `notion-search` has two modes. Both return Notion pages; they rank differently and cover different sources. Pick the mode for the request:

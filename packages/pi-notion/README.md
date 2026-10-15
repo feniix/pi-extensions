@@ -56,6 +56,24 @@ The `notion` server uses `deferred` exposure. To change it, or to configure the 
 }
 ```
 
+## Multiple workspaces
+
+Each Notion sign-in grants access to one workspace. For another workspace, add a server under another name to `~/.pi/agent/mcp.json`, with the same URL:
+
+```json
+{
+  "mcpServers": {
+    "notion-work": {
+      "url": "https://mcp.notion.com/mcp",
+      "exposure": "deferred",
+      "description": "Notion: work workspace"
+    }
+  }
+}
+```
+
+Sign in with `/mcp login notion-work` and pick that workspace on Notion's consent screen. pi stores credentials per server name, so each server keeps its own sign-in. Its tools are named `mcp__notion_work__<tool>`. The description helps the model pick the right workspace.
+
 ## Upgrading from 3.x
 
 - Sign in again with `/mcp login notion`. The 3.x auth file is not read. Delete it once you have signed in: `~/.pi/agent/notion-mcp-auth.json` (or the path in `NOTION_MCP_AUTH_FILE`) and `~/.pi/agent/notion-oauth-url.txt` if present.

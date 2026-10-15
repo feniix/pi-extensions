@@ -17,6 +17,7 @@ uncertain release boundaries are noted rather than inferred.
 - **Breaking:** Notion tools are named `mcp__notion__notion_*` (for example `mcp__notion__notion_search`) and are declared to the model only after `tool_search` loads them.
 - **Breaking:** sign in with `/mcp login notion` or `pi mcp login notion`. The 3.x auth file is not read; `/notion` now prints the sign-in instructions.
 - The `workspace-explorer` skill explains the built-in tool names and how to load them.
+- Document using several Notion workspaces, one `mcp.json` server per workspace; the skill tells the model to pick the server for the workspace the user means.
 - The `workspace-explorer` skill explains when to use each `notion-search` mode instead of always forcing `workspace_search` and `filters: {}`, and that a `view://` fetch returns the view's definition, not its rows.
 
 ### Removed
