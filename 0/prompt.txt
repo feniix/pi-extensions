@@ -1,0 +1,15 @@
+I think it is in the wrong dir it should be in a different dir
+
+---
+
+<task-notification>
+<task-id>b84pqciue</task-id>
+<tool-use-id>toolu_01CPEzgZfm9dynjEwaR2vcgp</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-feniix-src-personal-pi-pi-extensions/c015d882-2744-41a4-b1fc-6be8d0631489/tasks/b84pqciue.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for the v4 sign-in to finish" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+test the things that were not tested live
