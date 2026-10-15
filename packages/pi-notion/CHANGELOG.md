@@ -9,6 +9,8 @@ uncertain release boundaries are noted rather than inferred.
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-10-15
+
 ### Fixed
 
 - The `workspace-explorer` skill named `notion-query-database-view`, which Notion's MCP server no longer offers, and taught search modes its `notion-search` no longer has. It now uses `notion-query-data-sources` (SQL, view, and rows modes, with every argument inside `data`), starts searches with just a query, sends meeting-note questions to `notion-query-meeting-notes`, and no longer tells the model to create a view to filter rows or that pages cannot be trashed.
