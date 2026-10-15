@@ -6,7 +6,7 @@ context: fork
 
 # Notion Workspace Explorer
 
-Explore and navigate Notion workspaces after connecting with the setup-oauth skill.
+Explore and navigate Notion workspaces through Notion's MCP server, which pi connects with its built-in MCP support.
 
 For detailed reference on specific operations, see:
 - `references/databases.md` — Database schemas, DDL types, views, queries, property formats
@@ -15,22 +15,22 @@ For detailed reference on specific operations, see:
 
 ## Prerequisites
 
-Ensure Notion MCP is connected:
-```
-notion_mcp_status
-```
-If not connected, use the **setup-oauth** skill first.
+Notion's tools are named `mcp__notion__<tool>`, with `-` replaced by `_`: `notion-search` is `mcp__notion__notion_search`. This skill uses Notion's own names. They are deferred: load the ones you need with `tool_search` (for example "notion search") before calling them, or call them from a `codemode` script.
+
+If no Notion tools are found, or calls fail because Notion needs sign-in, ask the user to run `/mcp login notion`. Do not try to sign in yourself.
+
+A user with several Notion workspaces has one server per workspace, such as `mcp__notion__*` and `mcp__notion_work__*`. Use the server whose name or description matches the workspace the user means; if that is unclear, ask which workspace before calling. Pages and IDs from one workspace do not exist in another.
 
 ## Search (Critical: Get This Right)
 
-`notion-search` has two modes. **Always specify `content_search_mode` explicitly.**
+`notion-search` has two modes. Both return Notion pages; they rank differently and cover different sources. Pick the mode for the request:
 
 | Mode | What it returns | Use for |
 |------|----------------|---------|
-| `workspace_search` | Pages and databases in your workspace | Finding content, discovering databases |
-| `ai_search` | Calendar events and connected sources (Slack, Google Drive) | Semantic queries across all integrations |
+| `workspace_search` | Notion pages and databases only, matched on titles and keywords | A page or database you can name ("the Estimation Platform Proposal page"), discovering databases |
+| `ai_search` (default) | Notion pages ranked by meaning, plus connected sources such as Google Drive and Slack | Questions about a topic, where the answer may sit in a sub-page or another tool |
 
-**Default is `ai_search`**, which mostly returns calendar events — almost never what you want. Always use `workspace_search` unless explicitly looking for calendar/integration data.
+When `ai_search` results include connected sources, each result's `type` says where it came from (for example `page` or `google-drive`). If the user wants Notion content only, use `workspace_search`.
 
 ### Search the workspace
 ```
@@ -44,7 +44,7 @@ notion-search: {
 }
 ```
 
-**Required:** `"filters": {}` must always be present, even when empty. Query must be at least 1 character.
+`filters` is optional; use it to narrow by date or creator (below). Query must be at least 1 character.
 
 ### Narrow search scope
 
@@ -67,7 +67,7 @@ Results are capped at `page_size` (max 25) with no pagination cursor.
 
 ## Fetching Content
 
-**Always use the `url` field from search results** — raw `id` values often fail.
+Pass the `url` field from search results, or the page's ID (with or without dashes). Both work.
 
 ```
 notion-fetch: { "id": "https://www.notion.so/<page-url-from-search>" }
@@ -79,7 +79,9 @@ Pages return Notion-flavored markdown with `<ancestor-path>` (parent hierarchy),
 - `"include_discussions": true` — include inline comment threads
 - `"include_transcript": true` — for meeting pages with audio/video
 
-**Cannot fetch:** Team/teamspace IDs (use `notion-get-teams` + search instead) or `view://` URLs (use `notion-query-database-view` instead).
+**Cannot fetch:** Team/teamspace IDs (use `notion-get-teams` + search instead).
+
+**`view://` URLs:** fetching one returns the view's definition (its `collection://` data source, displayed properties, and type), not its rows. Use `notion-query-database-view` for the rows.
 
 ## Working with Databases
 
@@ -168,9 +170,9 @@ See `references/write-operations.md` for the full API.
 
 Read `references/failure-modes.md` for a comprehensive error table. The most common mistakes:
 
-1. **Forgetting `content_search_mode: "workspace_search"`** — you'll only get calendar events
+1. **Expecting Notion-only results from the default mode** — `ai_search` also returns connected sources; use `workspace_search` for Notion pages only
 2. **Using `id` instead of `url` from search results** — `object_not_found`
 3. **SELECT values not in schema** — fetch schema first, add options with `notion-update-data-source`
 4. **Empty filter `{}` on meeting notes** — must have `operator` and `filters` keys
-5. **Trying to fetch `view://` URLs** — use `notion-query-database-view` instead
-6. **Token expired (401)** — run `/notion` to re-authenticate
+5. **Fetching a `view://` URL to read rows** — it returns the view's definition only; use `notion-query-database-view` for the rows
+6. **Sign-in expired (401 after pi's automatic refresh)** — ask the user to run `/mcp login notion`

@@ -9,6 +9,29 @@ uncertain release boundaries are noted rather than inferred.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-14
+
+### Changed
+
+- **Breaking:** serve Notion through pi's built-in MCP support. The extension registers `https://mcp.notion.com/mcp` as the `notion` server with `deferred` exposure, and pi handles sign-in, token refresh, reconnects, sign-in over SSH, and tool exposure. Requires pi 1.1.0 or later.
+- **Breaking:** Notion tools are named `mcp__notion__notion_*` (for example `mcp__notion__notion_search`) and are declared to the model only after `tool_search` loads them.
+- **Breaking:** sign in with `/mcp login notion` or `pi mcp login notion`. The 3.x auth file is not read; `/notion` now prints the sign-in instructions.
+- The `workspace-explorer` skill explains the built-in tool names and how to load them.
+- Document using several Notion workspaces, one `mcp.json` server per workspace; the skill tells the model to pick the server for the workspace the user means.
+- The `workspace-explorer` skill explains when to use each `notion-search` mode instead of always forcing `workspace_search` and `filters: {}`, and that a `view://` fetch returns the view's definition, not its rows.
+
+### Removed
+
+- The tool call guardrails. Tested against live Notion, their warnings were wrong or repeated an error the model already gets: the default `ai_search` returns workspace pages (plus connected sources such as Google Drive), `workspace_search` works without `filters`, raw page IDs and `view://` URLs fetch, and `notion-query-meeting-notes` works without a `filter`; pi's schema validation already rejects an empty `filter: {}` with an error the model sees. The warnings reached only the user, never the model.
+- **Breaking:** the `notionToolName` and `toolChecks` exports.
+- Numeric property coercion. It turned every numeric string under `properties` into a number, and Notion stores a number sent to a text property as an empty value without an error: tested against live Notion, `"PRD Number": "999"` was stored as `""`. 3.x has the same bug.
+- **Breaking:** the `coerceNumericProperties` export.
+- **Breaking:** the custom MCP client and the legacy OAuth module, with the `notion_mcp_connect`, `notion_mcp_disconnect`, and `notion_mcp_status` tools.
+- **Breaking:** the `setup-oauth` skill.
+- **Breaking:** `NOTION_MCP_AUTH_FILE`, `--notion-mcp-auth-file`, `NOTION_CONFIG_FILE`, `--notion-config-file`, their deprecated aliases, and the session-start auth status line.
+- **Breaking:** the exported formatting and config utilities (`formatPage`, `formatDatabase`, `formatBlocks`, `formatSearch`, `getTitleFromProperties`, `loadConfig`, `resolveConfigPath`).
+- The `axios`, `portfinder`, and `@modelcontextprotocol/sdk` dependencies, and the unused `@earendil-works/pi-ai` and `typebox` peer dependencies.
+
 ## [3.0.5] - 2026-10-06
 
 ### Changed

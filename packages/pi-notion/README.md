@@ -1,13 +1,12 @@
 # @feniix/pi-notion
 
-[Notion MCP](https://developers.notion.com/docs/mcp) extension for [pi](https://pi.dev/) — connect to Notion via OAuth and use Notion's official MCP tools.
+[Notion MCP](https://developers.notion.com/docs/mcp) for [pi](https://pi.dev/). It registers Notion's hosted MCP server with pi's built-in MCP support and adds what is specific to Notion.
 
 ## Features
 
-- **MCP OAuth Connect**: Connect to Notion's official MCP server
-- **Dynamic Tool Registration**: Auto-discovers and registers available Notion MCP tools after connect
-- **Connection Management**: Connect, disconnect, and check status via tools or `/notion`
-- **Guardrails**: Advisory warnings for common Notion tool mistakes
+- **Notion MCP server**: registers `https://mcp.notion.com/mcp` as the `notion` server. pi's built-in MCP support handles sign-in, token refresh, reconnects, and tool exposure.
+- **Deferred tools**: Notion's tools (57 at the time of writing) are not declared to the model until `tool_search` loads the ones it needs.
+- **Skill**: `workspace-explorer` teaches the model Notion's search modes, database schemas, and write operations.
 
 ## Install
 
@@ -21,69 +20,72 @@ Ephemeral (one-off) use:
 pi -e npm:@feniix/pi-notion
 ```
 
-## Setup (Recommended)
-
-This package is MCP-first and uses Notion's hosted MCP endpoint:
-
-- MCP URL: `https://mcp.notion.com/mcp`
-- Auth: OAuth in browser
-
-### Connect
-
-Either run:
+## Sign in
 
 ```bash
-/notion
+/mcp login notion
 ```
 
-or call:
+or, from a shell:
 
-- `notion_mcp_connect`
+```bash
+pi mcp login notion
+```
 
-### Check status
+pi opens Notion's authorization page and waits for approval. Over SSH, or when the browser runs on another machine, paste the URL the browser was redirected to into the sign-in screen. `/notion` prints these instructions.
 
-- `notion_mcp_status`
-
-### Disconnect
-
-- `notion_mcp_disconnect`
+pi stores the credentials in `~/.pi/agent/mcp-auth.json` and refreshes them on its own. `/mcp` shows the connection status and tools; `/mcp logout notion` signs out. See "MCP Servers" (`docs/mcp.md`) in pi's documentation for the details.
 
 ## Tools
 
-### Always available
+Tools are named `mcp__notion__<tool>`, with `-` replaced by `_`: Notion's `notion-search` is `mcp__notion__notion_search`. Run `/mcp` to list them.
 
-| Tool | Description |
-|------|-------------|
-| `notion_mcp_connect` | Connect to Notion MCP server via OAuth |
-| `notion_mcp_disconnect` | Disconnect and clear stored MCP config |
-| `notion_mcp_status` | Show current MCP connection status |
+## Configuration
 
-### After connecting
+The `notion` server uses `deferred` exposure. To change it, or to configure the server yourself, add a `notion` entry to `~/.pi/agent/mcp.json`; an `mcp.json` entry takes precedence over the one this extension registers:
 
-Notion MCP tools are discovered from the server and registered dynamically.
+```json
+{
+  "mcpServers": {
+    "notion": {
+      "url": "https://mcp.notion.com/mcp",
+      "exposure": "deferred",
+      "toolExposure": { "notion-search": "direct", "notion-fetch": "direct" }
+    }
+  }
+}
+```
 
-Use `notion_mcp_status` to list currently available tools.
+## Multiple workspaces
 
-## Authentication Notes
+Each Notion sign-in grants access to one workspace. For another workspace, add a server under another name to `~/.pi/agent/mcp.json`, with the same URL:
 
-This package requires MCP OAuth (`/notion` or `notion_mcp_connect`) for tool connectivity.
+```json
+{
+  "mcpServers": {
+    "notion-work": {
+      "url": "https://mcp.notion.com/mcp",
+      "exposure": "deferred",
+      "description": "Notion: work workspace"
+    }
+  }
+}
+```
 
-Session-start status checks for:
+Sign in with `/mcp login notion-work` and pick that workspace on Notion's consent screen. pi stores credentials per server name, so each server keeps its own sign-in. Its tools are named `mcp__notion_work__<tool>`. The description helps the model pick the right workspace.
 
-1. MCP OAuth config (`~/.pi/agent/notion-mcp-auth.json`, or `NOTION_MCP_AUTH_FILE` / `--notion-mcp-auth-file` if explicitly set)
-2. Legacy OAuth token files under `~/.pi/agent/extensions/`
-3. Legacy direct API token hints (`NOTION_API_KEY`, `NOTION_TOKEN`) and warns that MCP OAuth is still required.
+## Upgrading from 3.x
 
-Best practice: use `settings.json` for non-secret defaults only.
-Keep Notion credentials in a dedicated private file (by default `~/.pi/agent/notion-mcp-auth.json`) or in environment variables. If you want to move the auth file, set `NOTION_MCP_AUTH_FILE` or pass `--notion-mcp-auth-file` with a custom file path. Legacy aliases `NOTION_MCP_AUTH` and `--notion-mcp-auth` are still accepted but deprecated.
-
-For the legacy direct-token compatibility config path, prefer `NOTION_CONFIG_FILE` / `--notion-config-file`. Legacy aliases `NOTION_CONFIG` and `--notion-config` are still accepted but deprecated.
-
-Do not store tokens or client secrets in `settings.json`.
+- Sign in again with `/mcp login notion`. The 3.x auth file is not read. Delete it once you have signed in: `~/.pi/agent/notion-mcp-auth.json` (or the path in `NOTION_MCP_AUTH_FILE`) and `~/.pi/agent/notion-oauth-url.txt` if present.
+- `notion_mcp_connect`, `notion_mcp_disconnect`, and `notion_mcp_status` are gone. Use `/mcp`, `/mcp login notion`, and `/mcp logout notion`.
+- Notion tools are renamed from `notion-search` to `mcp__notion__notion_search`, and so on.
+- `NOTION_MCP_AUTH_FILE`, `--notion-mcp-auth-file`, `NOTION_CONFIG_FILE`, `--notion-config-file`, and their deprecated aliases are no longer read, and the session-start auth status line is gone.
+- The `setup-oauth` skill is removed; sign-in needs no skill.
+- The tool call guardrail warnings and numeric property coercion are removed.
 
 ## Requirements
 
-- pi v0.51.0 or later
+- pi 1.1.0 or later (built-in MCP support)
 
 ## License
 
