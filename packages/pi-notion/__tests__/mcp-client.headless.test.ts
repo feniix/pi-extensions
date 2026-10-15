@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { hyperlink, setCapabilityOverrides } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import notionMCPClientExtension, {
   announceAuthorizationUrl,
@@ -54,6 +55,7 @@ describe("pi-notion headless OAuth", () => {
   });
 
   afterEach(() => {
+    setCapabilityOverrides({});
     global.fetch = originalFetch;
     process.env.HOME = originalHome;
     if (originalSshConnection === undefined) delete process.env.SSH_CONNECTION;
@@ -163,7 +165,17 @@ describe("pi-notion headless OAuth", () => {
     expect(tokenBody.get("redirect_uri")).toBe(registeredRedirect);
   });
 
-  it("connects through /notion headless using the UI input prompt", async () => {
+  it.each([
+    { hyperlinks: false, urlLine: (authUrl: string) => `Open this URL in a browser on any machine:\n${authUrl}` },
+    {
+      hyperlinks: true,
+      urlLine: (authUrl: string) => `Open ${hyperlink("this Notion authorization link", authUrl)} in a browser.`,
+    },
+  ])("connects through /notion headless using the UI input prompt (hyperlinks: $hyperlinks)", async ({
+    hyperlinks,
+    urlLine,
+  }) => {
+    setCapabilityOverrides({ hyperlinks });
     const mockPi = {
       registerFlag: vi.fn(),
       getFlag: vi.fn(() => undefined),
@@ -196,9 +208,8 @@ describe("pi-notion headless OAuth", () => {
       (_, i) => (ctx.ui.notify.mock.invocationCallOrder[i] ?? 0) < promptOrder,
     );
     const [promptNotice] = noticesBeforePrompt.at(-1) ?? [];
-    expect(promptNotice).toMatch(
-      /^Open this URL in a browser on any machine:\nhttps:\/\/mcp\.notion\.com\/authorize\?/,
-    );
+    const authUrl = readFileSync(join(home, ".pi", "agent", "notion-oauth-url.txt"), "utf-8").trim();
+    expect(promptNotice?.startsWith(`${urlLine(authUrl)}\n\n`)).toBe(true);
     expect(promptNotice).toContain(join(home, ".pi", "agent", "notion-oauth-url.txt"));
     expect(ctx.ui.notify).toHaveBeenCalledWith("Connected! Session: session-...", "info");
   });

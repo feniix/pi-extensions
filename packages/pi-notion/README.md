@@ -50,7 +50,7 @@ The authorization URL is also saved to `~/.pi/agent/notion-oauth-url.txt` (mode 
 
 `/notion` uses this flow automatically when `SSH_CONNECTION` or `SSH_TTY` is set; run `/notion browser` to force the local callback flow instead (for example, when you forward the callback port).
 
-1. pi shows the authorization URL next to the paste prompt (it is also saved to `~/.pi/agent/notion-oauth-url.txt`). Open it in a browser on any machine.
+1. pi shows the authorization URL next to the paste prompt, as a clickable link in terminals that support one (it is also saved to `~/.pi/agent/notion-oauth-url.txt`). Open it in a browser on any machine.
 2. Approve access. The browser then redirects to `http://127.0.0.1:<random high port>/callback?...`, which fails to load; that is expected. The port is picked at random from 49152–65535 so it does not hit a dev server on a common port such as 3000.
 3. Paste that full redirect URL (with or without `http://`, or just its `?code=...&state=...` query string) into the pi prompt. A bare code is refused because it carries no state to check.
 

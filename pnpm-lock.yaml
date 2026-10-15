@@ -261,6 +261,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: '*'
         version: 1.1.0(@aws-sdk/credential-provider-node@3.972.84)(@modelcontextprotocol/sdk@1.31.0(supports-color@7.2.0)(zod@4.6.7))(@smithy/signature-v4@5.7.4)(supports-color@7.2.0)(ws@8.21.0)(zod@4.6.7)
+      '@earendil-works/pi-tui':
+        specifier: '*'
+        version: 1.1.0
       '@modelcontextprotocol/sdk':
         specifier: 1.31.0
         version: 1.31.0(supports-color@7.2.0)(zod@4.6.7)

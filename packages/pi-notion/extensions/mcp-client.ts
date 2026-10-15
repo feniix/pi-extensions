@@ -15,6 +15,7 @@ import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getCapabilities, hyperlink } from "@earendil-works/pi-tui";
 import { getPort as lookupPort } from "portfinder";
 import { Type } from "typebox";
 import { isNearExpiry } from "./token-expiry.js";
@@ -1206,7 +1207,9 @@ async function performOAuthConnection(notify: NotifyFn, manualInput?: OAuthInput
       // pi shows only the latest info notice, so this one repeats the URL rather than pointing back at an earlier one
       notify(
         [
-          `Open this URL in a browser on any machine:\n${authUrl}`,
+          getCapabilities().hyperlinks
+            ? `Open ${hyperlink("this Notion authorization link", authUrl)} in a browser.`
+            : `Open this URL in a browser on any machine:\n${authUrl}`,
           ...(savedUrlPath ? [`(also saved to ${savedUrlPath})`] : []),
           "After approving, the redirect page will fail to load; paste its full URL here.",
         ].join("\n\n"),
