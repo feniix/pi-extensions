@@ -1194,7 +1194,7 @@ async function performOAuthConnection(notify: NotifyFn, manualInput?: OAuthInput
     const registration = await registerClient(callbackUrl);
     const { codeVerifier, codeChallenge } = createPkceChallenge();
     const authUrl = buildAuthorizationUrl(registration, callbackUrl, codeChallenge, state);
-    announceAuthorizationUrl(authUrl, notify);
+    const savedUrlPath = announceAuthorizationUrl(authUrl, notify);
 
     let callbackResult: OAuthCallbackResult;
     if (callbackServer) {
@@ -1203,8 +1203,13 @@ async function performOAuthConnection(notify: NotifyFn, manualInput?: OAuthInput
       notify("Waiting for authorization callback...");
       callbackResult = await callbackServer.result;
     } else {
+      // pi shows only the latest info notice, so this one repeats the URL rather than pointing back at an earlier one
       notify(
-        "Open the saved Notion URL in a browser on any machine. After approving, the redirect page will fail to load; paste its full URL here.",
+        [
+          `Open this URL in a browser on any machine:\n${authUrl}`,
+          ...(savedUrlPath ? [`(also saved to ${savedUrlPath})`] : []),
+          "After approving, the redirect page will fail to load; paste its full URL here.",
+        ].join("\n\n"),
       );
       const pasted = await manualInput?.("Paste the Notion redirect URL", `${callbackUrl}?code=...&state=...`);
       callbackResult = parseManualOAuthCallbackInput(pasted ?? "", state);

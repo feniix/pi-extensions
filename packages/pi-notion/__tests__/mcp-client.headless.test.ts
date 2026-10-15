@@ -190,6 +190,16 @@ describe("pi-notion headless OAuth", () => {
     await command.handler("headless", ctx);
 
     expect(ctx.ui.input).toHaveBeenCalled();
+    // pi shows only the latest info notice, so the one shown with the prompt carries the URL itself
+    const promptOrder = ctx.ui.input.mock.invocationCallOrder[0] ?? 0;
+    const noticesBeforePrompt = ctx.ui.notify.mock.calls.filter(
+      (_, i) => (ctx.ui.notify.mock.invocationCallOrder[i] ?? 0) < promptOrder,
+    );
+    const [promptNotice] = noticesBeforePrompt.at(-1) ?? [];
+    expect(promptNotice).toMatch(
+      /^Open this URL in a browser on any machine:\nhttps:\/\/mcp\.notion\.com\/authorize\?/,
+    );
+    expect(promptNotice).toContain(join(home, ".pi", "agent", "notion-oauth-url.txt"));
     expect(ctx.ui.notify).toHaveBeenCalledWith("Connected! Session: session-...", "info");
   });
 
