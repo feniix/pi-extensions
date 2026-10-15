@@ -1,0 +1,15 @@
+Run the skill measurement
+
+---
+
+<task-notification>
+<task-id>bl2udf3dx</task-id>
+<tool-use-id>toolu_014g9jGLQp2vG43WPFWVtsw1</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-feniix-src-personal-pi-pi-extensions/c015d882-2744-41a4-b1fc-6be8d0631489/tasks/bl2udf3dx.output</output-file>
+<status>completed</status>
+<summary>Background command "Run 16 read-only Notion benchmark runs, 4 at a time" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+why not improve the skill? rather than delete it if the issue is just the bad tool name?

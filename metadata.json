@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.11.4",
+  "checkpoint_id": "01M4ZRBQNTXKA1HRDFE6ETEDPS",
+  "strategy": "manual-commit",
+  "branch": "fix/pi-notion-skill-tool-names",
+  "checkpoints_count": 4,
+  "files_touched": [
+    "packages/pi-notion/CHANGELOG.md",
+    "packages/pi-notion/__tests__/index.test.ts",
+    "packages/pi-notion/skills/workspace-explorer/SKILL.md",
+    "packages/pi-notion/skills/workspace-explorer/references/databases.md",
+    "packages/pi-notion/skills/workspace-explorer/references/failure-modes.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 68,
+    "cache_creation_tokens": 208489,
+    "cache_read_tokens": 5591241,
+    "output_tokens": 21686,
+    "api_call_count": 34
+  }
+}
