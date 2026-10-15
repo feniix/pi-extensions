@@ -220,5 +220,6 @@ describe("pi-devtools generated CLI command contract", () => {
         }
       }
     }
-  });
+    // runs `gh <command> --help` for every generated command; took 5.9s on a CI runner
+  }, 20_000);
 });
