@@ -1,0 +1,25 @@
+update the pr body, be concise
+
+---
+
+does pi-notion support more than one notion community simultaneously?
+
+---
+
+explain how come the mcp is not registered to /Users/feniix/.pi/agent/mcp.json but when I start pi with only the pi-notion ext I get this in pi
+
+/mcp
+
+MCP servers
+
+→ notion                          connected · 57 tools · resources · deferred · extension
+
+enter manage • escape/ctrl+c close
+
+---
+
+how could we support more than one community?
+
+---
+
+docs
