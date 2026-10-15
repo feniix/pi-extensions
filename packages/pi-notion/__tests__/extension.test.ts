@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import notion, { NOTION_MCP_SERVER, NOTION_MCP_URL, notionToolName } from "../extensions/index.js";
+import notion, { NOTION_MCP_SERVER, NOTION_MCP_URL } from "../extensions/index.js";
 
 interface MockPi {
   registerMcpServer: ReturnType<typeof vi.fn> | undefined;
@@ -17,14 +17,7 @@ const createMockPi = (overrides: Partial<MockPi> = {}): MockPi => ({
 
 function load(mockPi: MockPi = createMockPi()) {
   notion(mockPi as unknown as ExtensionAPI);
-  const toolCall = mockPi.on.mock.calls.find(([event]) => event === "tool_call")?.[1];
-  const notify = vi.fn();
-  return {
-    mockPi,
-    notify,
-    call: (toolName: string, input: Record<string, unknown>, parentToolCallId?: string) =>
-      toolCall({ type: "tool_call", toolName, toolCallId: "call-1", parentToolCallId, input }, { ui: { notify } }),
-  };
+  return { mockPi };
 }
 
 afterEach(() => {
@@ -53,7 +46,7 @@ describe("pi-notion extension", () => {
 
     expect(() => load(mockPi)).not.toThrow();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("already registered by another extension"));
-    expect(mockPi.on).toHaveBeenCalledWith("tool_call", expect.any(Function));
+    expect(mockPi.registerCommand).toHaveBeenCalledWith("notion", expect.any(Object));
   });
 
   it("warns on a pi without built-in MCP support", () => {
@@ -74,78 +67,12 @@ describe("pi-notion extension", () => {
     expect(name).toBe("notion");
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("/mcp login notion"), "info");
   });
-});
 
-describe("notionToolName", () => {
-  it.each([
-    ["mcp__notion__notion_search", "notion-search"],
-    ["mcp__notion__notion_query_meeting_notes", "notion-query-meeting-notes"],
-    // a server configured under another name in mcp.json
-    ["mcp__work_notion__notion_fetch", "notion-fetch"],
-  ])("maps %s to %s", (toolName, expected) => {
-    expect(notionToolName(toolName)).toBe(expected);
-  });
+  it("leaves Notion tool calls alone", () => {
+    // Live, every guardrail warning was wrong or repeated pi's own schema error, and coercion
+    // stored numbers sent to text properties as empty values
+    const { mockPi } = load();
 
-  it.each(["bash", "mcp__github__search_code", "notion_search", "mcp__notion__"])("ignores %s", (toolName) => {
-    expect(notionToolName(toolName)).toBeUndefined();
-  });
-});
-
-describe("guardrails", () => {
-  it("does not warn about notion-search's default mode or a missing filters key", async () => {
-    // Live, the default ai_search returned workspace pages (plus connected sources), and
-    // workspace_search worked without filters, so neither is a mistake.
-    const { call, notify } = load();
-
-    await call("mcp__notion__notion_search", { query: "meeting notes" });
-    await call("mcp__notion__notion_search", { query: "roadmap", content_search_mode: "workspace_search" });
-
-    expect(notify).not.toHaveBeenCalled();
-  });
-
-  it("warns for empty meeting note filters, including calls from codemode scripts", async () => {
-    const { call, notify } = load();
-
-    await call("mcp__notion__notion_query_meeting_notes", { filter: {} }, "codemode-1");
-
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Empty filter {} will fail"), "warning");
-  });
-
-  it("does not warn about notion-fetch ids", async () => {
-    // Live, raw ids (with and without dashes), page URLs, view:// and collection:// all fetched
-    const { call, notify } = load();
-
-    for (const id of [
-      "3602e80c-997d-8148-bbd7-c04900888008",
-      "3602e80c997d8148bbd7c04900888008",
-      "view://f062e80c-997d-8321-bc34-08d52551a877",
-    ]) {
-      await call("mcp__notion__notion_fetch", { id });
-    }
-
-    expect(notify).not.toHaveBeenCalled();
-  });
-
-  it("stays quiet for correct inputs and other tools", async () => {
-    const { call, notify } = load();
-
-    await call("mcp__notion__notion_search", { query: "q", content_search_mode: "workspace_search", filters: {} });
-    await call("mcp__notion__notion_fetch", { id: "https://www.notion.so/page-123" });
-    await call("mcp__github__search_code", { query: "notion" });
-    await call("bash", { command: "echo notion" });
-
-    expect(notify).not.toHaveBeenCalled();
-  });
-});
-
-describe("page properties", () => {
-  it("sends numeric strings unchanged, since Notion stores a number sent to a text property as empty", async () => {
-    // Live, "PRD Number": 999 sent to a text property was stored as "", while "999" was stored as "999"
-    const { call } = load();
-    const input = { pages: [{ properties: { "PRD Number": "999", Version: "1", Name: "Q3 plan" } }] };
-
-    await call("mcp__notion__notion_create_pages", input);
-
-    expect(input).toEqual({ pages: [{ properties: { "PRD Number": "999", Version: "1", Name: "Q3 plan" } }] });
+    expect(mockPi.on).not.toHaveBeenCalled();
   });
 });

@@ -6,7 +6,6 @@
 
 - **Notion MCP server**: registers `https://mcp.notion.com/mcp` as the `notion` server. pi's built-in MCP support handles sign-in, token refresh, reconnects, and tool exposure.
 - **Deferred tools**: Notion's tools (57 at the time of writing) are not declared to the model until `tool_search` loads the ones it needs.
-- **Guardrails**: advisory warnings for common Notion tool mistakes, also for calls made from `codemode` scripts.
 - **Skill**: `workspace-explorer` teaches the model Notion's search modes, database schemas, and write operations.
 
 ## Install
@@ -57,8 +56,6 @@ The `notion` server uses `deferred` exposure. To change it, or to configure the 
 }
 ```
 
-The guardrails apply to Notion tools under any server name.
-
 ## Upgrading from 3.x
 
 - Sign in again with `/mcp login notion`. The 3.x auth file is not read. Delete it once you have signed in: `~/.pi/agent/notion-mcp-auth.json` (or the path in `NOTION_MCP_AUTH_FILE`) and `~/.pi/agent/notion-oauth-url.txt` if present.
@@ -66,6 +63,7 @@ The guardrails apply to Notion tools under any server name.
 - Notion tools are renamed from `notion-search` to `mcp__notion__notion_search`, and so on.
 - `NOTION_MCP_AUTH_FILE`, `--notion-mcp-auth-file`, `NOTION_CONFIG_FILE`, `--notion-config-file`, and their deprecated aliases are no longer read, and the session-start auth status line is gone.
 - The `setup-oauth` skill is removed; sign-in needs no skill.
+- The tool call guardrail warnings and numeric property coercion are removed.
 
 ## Requirements
 
