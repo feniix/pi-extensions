@@ -17,7 +17,7 @@ For detailed reference on specific operations, see:
 
 Notion's tools are named `mcp__notion__<tool>`, with `-` replaced by `_`: `notion-search` is `mcp__notion__notion_search`. This skill uses Notion's own names. They are deferred: load the ones you need with `tool_search` before calling them, or call them from a `codemode` script.
 
-`tool_search` ranks by matching words, not exact names, so a tool's own name often loads a similar tool instead (`notion-query-data-sources` loads `notion-query-multiple-data-sources`). These queries load the right tool, also with a `mcp__notion` prefix. Before the first Notion call, load every tool the task needs at once: send these `tool_search` calls in parallel, each with `"limit": 1`:
+`tool_search` ranks by matching words, not exact names, so a tool's own name often loads a similar tool instead (`notion-query-data-sources` loads `notion-query-multiple-data-sources`). These queries load the right tool, also with a `mcp__notion` prefix. Before the first Notion call, load every tool the task needs at once: send these `tool_search` calls in parallel as separate tool calls (`tool_search` is not available inside `codemode`), each with `"limit": 1`:
 
 | Tool | `tool_search` query |
 |---|---|
