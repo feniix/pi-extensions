@@ -6,7 +6,7 @@ context: fork
 
 # Notion Workspace Explorer
 
-Explore and navigate Notion workspaces after connecting with the setup-oauth skill.
+Explore and navigate Notion workspaces through Notion's MCP server, which pi connects with its built-in MCP support.
 
 For detailed reference on specific operations, see:
 - `references/databases.md` — Database schemas, DDL types, views, queries, property formats
@@ -15,11 +15,9 @@ For detailed reference on specific operations, see:
 
 ## Prerequisites
 
-Ensure Notion MCP is connected:
-```
-notion_mcp_status
-```
-If not connected, use the **setup-oauth** skill first.
+Notion's tools are named `mcp__notion__<tool>`, with `-` replaced by `_`: `notion-search` is `mcp__notion__notion_search`. This skill uses Notion's own names. They are deferred: load the ones you need with `tool_search` (for example "notion search") before calling them, or call them from a `codemode` script.
+
+If no Notion tools are found, or calls fail because Notion needs sign-in, ask the user to run `/mcp login notion`. Do not try to sign in yourself.
 
 ## Search (Critical: Get This Right)
 
@@ -173,4 +171,4 @@ Read `references/failure-modes.md` for a comprehensive error table. The most com
 3. **SELECT values not in schema** — fetch schema first, add options with `notion-update-data-source`
 4. **Empty filter `{}` on meeting notes** — must have `operator` and `filters` keys
 5. **Trying to fetch `view://` URLs** — use `notion-query-database-view` instead
-6. **Token expired (401)** — run `/notion` to re-authenticate
+6. **Sign-in expired (401 after pi's automatic refresh)** — ask the user to run `/mcp login notion`

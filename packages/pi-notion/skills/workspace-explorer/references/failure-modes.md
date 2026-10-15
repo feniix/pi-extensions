@@ -27,7 +27,7 @@
 | `Could not load new parent...or missing edit permission` | Invalid target for move-pages | Target page doesn't exist or you don't have edit access |
 | `notion-update-view` doesn't change type | View type (table/board/etc.) is immutable | Create a new view with the desired type instead |
 | H1 heading dropped in created page | Notion uses page title as H1 | Use H2+ in `content` — H1 is stripped |
-| Saved token expired (401 `invalid_token`) | MCP OAuth token has limited lifetime | Run `/notion` to re-authenticate — the flow will get a new token |
+| Sign-in expired (401 `invalid_token`) | pi refreshes tokens automatically; this means the refresh was refused | Ask the user to run `/mcp login notion` |
 | `Expected property name in double quotes for SORT BY` | DSL property names not quoted | Use double quotes: `SORT BY "Status" ASC` not `SORT BY Status ASC` |
 | `Form block pointer is undefined on form view` | Creating form view on database without form block | Form views need a pre-existing form block — use other view types instead |
 | `String not found` in selection_with_ellipsis | Comment selection doesn't match page content | The `start...end` pattern must match actual text — fetch the page first to see current content |
@@ -76,4 +76,4 @@
 - View types (table/board/list/etc.) cannot be changed after creation
 - `notion-get-users` with `user_id: "self"` returns the authenticated user
 - Pages cannot be trashed via MCP — only databases support `in_trash`
-- Tokens expire — if you get 401 `invalid_token`, run `/notion` to re-authenticate
+- pi refreshes expired tokens on its own; a 401 `invalid_token` that persists means the user must run `/mcp login notion`

@@ -2,183 +2,37 @@
  * Notion Extension for pi
  *
  * Features:
- * - SessionStart: checks Notion authentication and prints status
+ * - Registers Notion's hosted MCP server with pi's built-in MCP support, which handles OAuth,
+ *   token refresh, reconnects, and tool exposure
  * - Tool call guardrails: advisory warnings for common Notion mistakes
+ * - Numeric property coercion: numeric strings in page properties are sent as numbers
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
-import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, McpServerConfig } from "@earendil-works/pi-coding-agent";
+
+const NOTION_MCP_SERVER = "notion";
+const NOTION_MCP_URL = "https://mcp.notion.com/mcp";
+
+const NOTION_MCP_CONFIG: McpServerConfig = {
+  url: NOTION_MCP_URL,
+  // 57 tools: declared to the model only after tool_search finds them
+  exposure: "deferred",
+  description:
+    "Notion workspace: search and fetch pages and databases, create and update pages, comments, and meeting notes",
+};
 
 // =============================================================================
-// Config Paths
+// Tool names
 // =============================================================================
 
-function getHomeDir(): string {
-  return process.env.HOME || homedir();
-}
-
-function getAgentDir(): string {
-  return join(getHomeDir(), ".pi", "agent");
-}
-
-function getConfigDir(): string {
-  return join(getAgentDir(), "extensions");
-}
-
-function resolveOptionalPath(path: string): string {
-  const trimmed = path.trim();
-  if (trimmed.startsWith("~/")) {
-    return join(getHomeDir(), trimmed.slice(2));
-  }
-  if (trimmed.startsWith("~")) {
-    return join(getHomeDir(), trimmed.slice(1));
-  }
-  if (isAbsolute(trimmed)) {
-    return trimmed;
-  }
-  return resolve(process.cwd(), trimmed);
-}
-
-function getLegacyMcpConfigFile(): string {
-  return join(getConfigDir(), "notion-mcp.json");
-}
-
-function getLegacyAuthFile(): string {
-  return join(getConfigDir(), "notion-mcp-auth.json");
-}
-
-function migrateLegacyMcpConfigFile(): string {
-  const configuredPath = process.env.NOTION_MCP_AUTH_FILE;
-  if (typeof configuredPath === "string" && configuredPath.trim().length > 0) {
-    return resolveOptionalPath(configuredPath);
-  }
-
-  const legacyConfiguredPath = process.env.NOTION_MCP_AUTH;
-  if (typeof legacyConfiguredPath === "string" && legacyConfiguredPath.trim().length > 0) {
-    console.warn("[pi-notion] NOTION_MCP_AUTH is deprecated; use NOTION_MCP_AUTH_FILE.");
-    return resolveOptionalPath(legacyConfiguredPath);
-  }
-
-  const nextPath = join(getAgentDir(), "notion-mcp-auth.json");
-  const legacyPaths = [getLegacyAuthFile(), getLegacyMcpConfigFile()];
-
-  for (const legacyPath of legacyPaths) {
-    if (!existsSync(nextPath) && existsSync(legacyPath)) {
-      try {
-        mkdirSync(getAgentDir(), { recursive: true });
-        renameSync(legacyPath, nextPath);
-        console.warn(`[pi-notion] Migrated legacy MCP auth file from ${legacyPath} to ${nextPath}.`);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.warn(`[pi-notion] Failed to migrate legacy MCP auth file ${legacyPath}: ${message}`);
-      }
-    }
-  }
-
-  return nextPath;
-}
-
-function getMcpConfigFile(): string {
-  return migrateLegacyMcpConfigFile();
-}
-
-function getTokenFile(): string {
-  return join(getConfigDir(), "notion-tokens.json");
-}
-
-// =============================================================================
-// Token Types
-// =============================================================================
-
-interface OAuthTokens {
-  accessToken: string;
-  refreshToken: string;
-  tokenType: string;
-  expiresAt: number;
-}
-
-interface NotionUserInfo {
-  workspaceId: string;
-  workspaceName: string;
-  workspaceIcon?: string;
-  botId: string;
-  ownerEmail?: string;
-  ownerName?: string;
-}
-
-interface AuthStatus {
-  authenticated: boolean;
-  workspaceName?: string;
-  message: string;
-}
-
-// =============================================================================
-// Authentication Check
-// =============================================================================
-
-function readJsonIfExists<T>(path: string): T | null {
-  if (!existsSync(path)) return null;
-  try {
-    return JSON.parse(readFileSync(path, "utf-8")) as T;
-  } catch {
-    return null;
-  }
-}
-
-function getMcpConfigAuthStatus(): AuthStatus | null {
-  const config = readJsonIfExists<{ accessToken?: string; mcpUrl?: string }>(getMcpConfigFile());
-  if (typeof config?.accessToken !== "string" || config.accessToken.trim().length === 0) return null;
-
-  return {
-    authenticated: true,
-    message: `[notion] MCP config found (${config.mcpUrl ?? "https://mcp.notion.com/mcp"})`,
-  };
-}
-
-function getOAuthTokenAuthStatus(): AuthStatus | null {
-  const tokenFile = getTokenFile();
-  const tokens = readJsonIfExists<OAuthTokens>(tokenFile);
-  if (!tokens?.accessToken || tokens.expiresAt <= Date.now()) return null;
-
-  const userInfoPath = tokenFile.replace("-tokens.json", "-user.json");
-  const userInfo = readJsonIfExists<NotionUserInfo>(userInfoPath);
-  if (!userInfo) {
-    return {
-      authenticated: true,
-      message: "[notion] Authenticated (OAuth tokens valid)",
-    };
-  }
-
-  return {
-    authenticated: true,
-    workspaceName: userInfo.workspaceName,
-    message: `[notion] Authenticated as ${userInfo.workspaceName || "Unknown workspace"}`,
-  };
-}
-
-function getLegacyEnvAuthStatus(): AuthStatus | null {
-  const apiKey = process.env.NOTION_API_KEY ?? process.env.NOTION_TOKEN;
-  if (!apiKey) return null;
-
-  return {
-    authenticated: false,
-    message: process.env.NOTION_API_KEY
-      ? "[notion] NOTION_API_KEY detected (legacy direct API token). MCP OAuth is still required: run /notion."
-      : "[notion] NOTION_TOKEN detected (legacy). MCP OAuth is still required: run /notion.",
-  };
-}
-
-function checkNotionAuth(): AuthStatus {
-  return (
-    getMcpConfigAuthStatus() ??
-    getOAuthTokenAuthStatus() ??
-    getLegacyEnvAuthStatus() ?? {
-      authenticated: false,
-      message: "[notion] Not authenticated. Use /notion to connect your Notion workspace.",
-    }
-  );
+/**
+ * Notion's own name for a built-in MCP tool name, or undefined for other tools. Built-in MCP names
+ * tools `mcp__<server>__<tool>` with `-` replaced by `_`; any server name matches, since a user may
+ * configure Notion under another name in mcp.json.
+ */
+function notionToolName(toolName: string): string | undefined {
+  const match = /^mcp__.+__(notion_[a-z0-9_]+)$/.exec(toolName);
+  return match?.[1]?.replaceAll("_", "-");
 }
 
 // =============================================================================
@@ -243,23 +97,53 @@ const toolChecks: Record<string, CheckFn> = {
   "notion-query-meeting-notes": checkMeetingNotes,
 };
 
-function extractShortName(toolName: string): string {
-  const parts = toolName.split("__");
-  return parts.at(-1) ?? toolName;
+// =============================================================================
+// Numeric Property Coercion
+// =============================================================================
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function handleToolGuardrails(
-  event: { toolName: string; input?: Record<string, unknown> },
-  ctx: ExtensionContext,
-) {
-  // Only check Notion MCP tools
-  if (!event.toolName.includes("notion")) return;
+function isNumericString(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value));
+}
 
-  const shortName = extractShortName(event.toolName);
-  const checkFn = toolChecks[shortName];
-  if (!checkFn) return;
+function coercePropertyMap(properties: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(properties).map(([propName, propValue]) => [
+      propName,
+      isNumericString(propValue) ? Number(propValue) : coerceNumericProperties(propValue),
+    ]),
+  );
+}
 
-  const warnings = checkFn(event.input ?? {});
+/** Models often send number properties as strings, which Notion rejects. */
+function coerceNumericProperties(obj: unknown): unknown {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) return obj.map(coerceNumericProperties);
+  if (!isRecord(obj)) return obj;
+
+  return Object.fromEntries(
+    Object.entries(obj).map(([key, value]) => [
+      key,
+      key === "properties" && isRecord(value) ? coercePropertyMap(value) : coerceNumericProperties(value),
+    ]),
+  );
+}
+
+// =============================================================================
+// Tool Call Handler
+// =============================================================================
+
+function handleToolCall(event: { toolName: string; input?: Record<string, unknown> }, ctx: ExtensionContext) {
+  const name = notionToolName(event.toolName);
+  if (!name || !event.input) return;
+
+  // pi runs the call with event.input, so it has to be changed in place
+  Object.assign(event.input, coerceNumericProperties(event.input));
+
+  const warnings = toolChecks[name]?.(event.input) ?? [];
   if (warnings.length > 0) {
     ctx.ui.notify(`[notion]\n${warnings.join("\n")}`, "warning");
   }
@@ -269,140 +153,35 @@ async function handleToolGuardrails(
 // Exports
 // =============================================================================
 
-export { checkNotionAuth, extractShortName, toolChecks };
+export { coerceNumericProperties, NOTION_MCP_SERVER, NOTION_MCP_URL, notionToolName, toolChecks };
 
 // =============================================================================
 // Extension Entry Point
 // =============================================================================
 
 export default function notion(pi: ExtensionAPI) {
-  pi.registerFlag("--notion-config-file", {
-    description: "Path to a custom JSON config file for direct-token compatibility overrides.",
-    type: "string",
-  });
-  pi.registerFlag("--notion-config", {
-    description: "Deprecated alias for --notion-config-file.",
-    type: "string",
-  });
-
-  const configFileFlag = pi.getFlag("--notion-config-file");
-  const legacyConfigFlag = pi.getFlag("--notion-config");
-  if (typeof configFileFlag === "string" && configFileFlag.trim().length > 0) {
-    process.env.NOTION_CONFIG_FILE = configFileFlag;
-  } else if (typeof legacyConfigFlag === "string" && legacyConfigFlag.trim().length > 0) {
-    console.warn("[pi-notion] --notion-config is deprecated; use --notion-config-file.");
-    process.env.NOTION_CONFIG_FILE = legacyConfigFlag;
+  if (typeof pi.registerMcpServer !== "function") {
+    console.warn("[pi-notion] Notion MCP needs pi 1.1.0 or later, which has built-in MCP support.");
+  } else {
+    try {
+      pi.registerMcpServer(NOTION_MCP_SERVER, NOTION_MCP_CONFIG);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[pi-notion] Could not register the Notion MCP server: ${message}`);
+    }
   }
 
-  // SessionStart: check auth and print status
-  pi.on("session_start", async () => {
-    const auth = checkNotionAuth();
-    console.log(auth.message);
+  pi.registerCommand("notion", {
+    description: "How to sign in to Notion (handled by pi's built-in MCP support)",
+    async handler(_args, ctx) {
+      ctx.ui.notify(
+        "Notion is served by pi's built-in MCP support. Sign in with /mcp login notion (or `pi mcp login notion` in a shell); /mcp shows its status.",
+        "info",
+      );
+    },
   });
 
-  // Tool call: advisory guardrails for Notion tools
   pi.on("tool_call", async (event, ctx) => {
-    await handleToolGuardrails(event, ctx);
+    handleToolCall(event, ctx);
   });
 }
-
-// =============================================================================
-// Utility Functions (kept for other extensions/tests)
-// =============================================================================
-
-interface NotionConfig {
-  token?: string;
-}
-
-function resolveConfigPath(configPath: string): string {
-  const trimmed = configPath.trim();
-  if (trimmed.startsWith("~/")) return join(getHomeDir(), trimmed.slice(2));
-  if (trimmed.startsWith("~")) return join(getHomeDir(), trimmed.slice(1));
-  return resolve(process.cwd(), trimmed);
-}
-
-function loadConfigFile(path: string): NotionConfig | null {
-  if (!existsSync(path)) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(readFileSync(path, "utf-8")) as NotionConfig;
-  } catch {
-    return null;
-  }
-}
-
-function loadConfig(configPath?: string): NotionConfig | null {
-  if (configPath) return loadConfigFile(resolveConfigPath(configPath));
-  if (process.env.NOTION_CONFIG_FILE) return loadConfigFile(resolveConfigPath(process.env.NOTION_CONFIG_FILE));
-  if (process.env.NOTION_CONFIG) {
-    console.warn("[pi-notion] NOTION_CONFIG is deprecated; use NOTION_CONFIG_FILE.");
-    return loadConfigFile(resolveConfigPath(process.env.NOTION_CONFIG));
-  }
-  return null;
-}
-
-interface TitleProp {
-  type?: string;
-  title?: Array<{ plain_text: string }>;
-}
-
-function getTitleFromProperties(properties: Record<string, unknown>): string {
-  const titleProp = Object.values(properties).find((p: unknown) => (p as TitleProp)?.type === "title") as
-    | TitleProp
-    | undefined;
-  if (titleProp?.title) {
-    return titleProp.title.map((t) => t.plain_text).join("") || "Untitled";
-  }
-  return "Untitled";
-}
-
-function formatPage(page: { id: string; url: string; properties: Record<string, unknown> }) {
-  const title = getTitleFromProperties(page.properties);
-  return `# Page: ${page.id}\nURL: ${page.url}\nTitle: ${title}\n\n## Properties\n${JSON.stringify(page.properties, null, 2)}`;
-}
-
-function formatDatabase(database: {
-  id: string;
-  title?: Array<{ plain_text: string }>;
-  properties: Record<string, unknown>;
-}) {
-  const title = database.title?.map((t) => t.plain_text).join("") || "Untitled";
-  return `# Database: ${database.id}\nTitle: ${title}\n\n## Properties\n${JSON.stringify(database.properties, null, 2)}`;
-}
-
-function formatBlocks(result: { results: Array<{ type: string; [key: string]: unknown }> }) {
-  if (!result.results?.length) return "No blocks found.";
-  return result.results
-    .map((block) => {
-      const type = block.type || "unknown";
-      const content = (block[type] as Record<string, unknown>) || {};
-      const text = (content.text as Array<{ plain_text: string }>)?.map((t) => t.plain_text).join("") || "";
-      return `[${type}] ${text}`;
-    })
-    .join("\n");
-}
-
-function formatSearch(result: { results: unknown[] }) {
-  if (!result.results?.length) return "No results found.";
-  return result.results
-    .map((item: unknown) => {
-      const obj = item as { object: string; id: string; properties?: Record<string, unknown> };
-      const type = obj.object;
-      const title = obj.properties ? getTitleFromProperties(obj.properties) : "Untitled";
-      return `- [${type}] ${title} (${obj.id})`;
-    })
-    .join("\n");
-}
-
-// Re-export utilities
-export {
-  formatBlocks,
-  formatDatabase,
-  formatPage,
-  formatSearch,
-  getTitleFromProperties,
-  loadConfig,
-  resolveConfigPath,
-};
