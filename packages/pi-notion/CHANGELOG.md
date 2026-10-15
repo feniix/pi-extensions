@@ -9,6 +9,25 @@ uncertain release boundaries are noted rather than inferred.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-14
+
+### Changed
+
+- **Breaking:** serve Notion through pi's built-in MCP support. The extension registers `https://mcp.notion.com/mcp` as the `notion` server with `deferred` exposure, and pi handles sign-in, token refresh, reconnects, sign-in over SSH, and tool exposure. Requires pi 1.1.0 or later.
+- **Breaking:** Notion tools are named `mcp__notion__notion_*` (for example `mcp__notion__notion_search`) and are declared to the model only after `tool_search` loads them.
+- **Breaking:** sign in with `/mcp login notion` or `pi mcp login notion`. The 3.x auth file is not read; `/notion` now prints the sign-in instructions.
+- Guardrails match built-in MCP tool names under any server name, including calls made from `codemode` scripts.
+- Numeric property coercion runs on the `tool_call` event, so it also applies to calls made from `codemode` scripts.
+- The `workspace-explorer` skill explains the built-in tool names and how to load them.
+
+### Removed
+
+- **Breaking:** the custom MCP client and the legacy OAuth module, with the `notion_mcp_connect`, `notion_mcp_disconnect`, and `notion_mcp_status` tools.
+- **Breaking:** the `setup-oauth` skill.
+- **Breaking:** `NOTION_MCP_AUTH_FILE`, `--notion-mcp-auth-file`, `NOTION_CONFIG_FILE`, `--notion-config-file`, their deprecated aliases, and the session-start auth status line.
+- **Breaking:** the exported formatting and config utilities (`formatPage`, `formatDatabase`, `formatBlocks`, `formatSearch`, `getTitleFromProperties`, `loadConfig`, `resolveConfigPath`).
+- The `axios`, `portfinder`, and `@modelcontextprotocol/sdk` dependencies, and the unused `@earendil-works/pi-ai` and `typebox` peer dependencies.
+
 ## [3.0.5] - 2026-10-06
 
 ### Changed
