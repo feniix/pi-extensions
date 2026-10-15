@@ -3,7 +3,7 @@
 ## Table of Contents
 - [Discover Databases](#discover-databases)
 - [Fetch Database Schema](#fetch-database-schema)
-- [Query a Database View](#query-a-database-view)
+- [Query a Database](#query-a-database)
 - [Create a Database](#create-a-database)
 - [DDL Column Types](#ddl-column-types)
 - [Update Database Schema](#update-database-schema)
@@ -13,7 +13,10 @@
 
 ## Discover Databases
 
-Use `workspace_search` — databases appear with `"type": "database"` in results.
+Search by name — databases appear with `"type": "database"` in results:
+```
+notion-search: { "query": "PRDs" }
+```
 
 ## Fetch Database Schema
 
@@ -36,20 +39,35 @@ notion-fetch: { "id": "collection://3372e80c-997d-80bd-abee-000bc4bf4cd1" }
 
 Returns the data source schema, property definitions, and SQLite DDL — same schema info as fetching the parent database but without view information.
 
-## Query a Database View
+## Query a Database
 
-Use the `view://` URL from the database fetch response:
+`notion-query-data-sources` takes all its arguments inside `data`, in one of three modes.
+
+**SQL (default, read-only):** filter, sort, and aggregate. Use the table and column names from the fetched `<sqlite-table>`; the table name is the `collection://` URL.
 ```
-notion-query-database-view: {
-  "view_url": "view://3372e80c-997d-8090-8144-000c95adf05a"
-}
+notion-query-data-sources: { "data": {
+  "data_source_urls": ["collection://3372e80c-997d-80bd-abee-000bc4bf4cd1"],
+  "query": "SELECT * FROM \"collection://3372e80c-997d-80bd-abee-000bc4bf4cd1\" WHERE \"Status\" = ?",
+  "params": ["In Progress"]
+} }
 ```
 
-**Failure mode:** If the `view://` URL alone doesn't work, try the full database URL with `?v=` query param.
+**View:** a saved view's rows, with its filters and sorts. Paginate with `start_cursor` from `next_cursor`.
+```
+notion-query-data-sources: { "data": { "mode": "view", "view_url": "<view-url-from-fetch>" } }
+```
 
-Returns rows as JSON objects with column values.
-
-`notion-query-database-view` does NOT accept filter or sort parameters — it returns all rows using the view's saved configuration. To filter/sort, create a new view with `notion-create-view` with the desired configuration.
+**Rows:** rows with rich text, links, and mentions intact, with structured `filter` and `sort`. Use it before rewriting a rich-text property, since SQL text drops mentions and link targets.
+```
+notion-query-data-sources: { "data": {
+  "mode": "rows",
+  "data_source_url": "collection://3372e80c-997d-80bd-abee-000bc4bf4cd1",
+  "filter": { "type": "group", "operator": "and", "filters": [
+    { "type": "property", "property": "Status", "propertyType": "select", "operator": "enum_is", "value": { "type": "exact", "value": "In Progress" } }
+  ] },
+  "limit": 20
+} }
+```
 
 ## Create a Database
 
@@ -163,7 +181,7 @@ Returns the updated database schema with all columns.
 
 ## Create a View
 
-Requires `database_id`, `data_source_id`, `name`, and `type`. Use the `configure` DSL for filters, sorts, and grouping.
+Requires `data_source_id`, `name`, `type`, and exactly one of `database_id` (a view tab on the database) or `parent_page_id` (a linked view on a page). Use the `configure` DSL for filters, sorts, and grouping. Create views only when the user wants one; to read filtered rows, query the data source instead.
 
 **Basic table view:**
 ```
@@ -207,8 +225,6 @@ notion-create-view: {
   "configure": "FILTER \"Status\" = \"To Do\"; SORT BY \"Name\" ASC"
 }
 ```
-
-This is the way to filter database queries — `notion-query-database-view` uses the view's saved config, so create a filtered view first, then query it.
 
 **DSL directives:** `FILTER`, `SORT BY`, `GROUP BY`, `CALENDAR BY`, `TIMELINE BY`, `MAP BY`, `SHOW`, `HIDE`, `COVER`, `CHART`. **Property names must be double-quoted.**
 

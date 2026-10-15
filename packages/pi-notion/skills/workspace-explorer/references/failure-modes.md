@@ -4,22 +4,20 @@
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| Results from Google Drive, Slack, or other connected sources | Default `ai_search` mode searches connected sources too | Add `"content_search_mode": "workspace_search"` for Notion pages only |
+| Results from Google Drive, Slack, or other connected sources | Search without filters also covers connected sources | Ignore results whose `type` is not a Notion type, or add a filter (any filter returns Notion results only) |
 | `object_not_found` on fetch | Passing a team ID instead of page/database ID | Team IDs can't be fetched — use search with `teamspace_id` filter |
-| `must have required property 'filter'` | Missing filter in meeting notes | Use `{"filter": {"operator": "and", "filters": []}}` |
-| `must have required property 'operator'` | Empty filter `{}` in meeting notes | Filter must have `operator` and `filters` keys |
+| `filter.operator: must have required properties operator` | Empty filter `{}` in meeting notes | Give the filter an `operator` and `filters`, or leave `filter` out |
 | `page_id should be a valid uuid` | Passing full URL to comments | Use just the UUID (with or without dashes) |
-| `Invalid database view URL` | Wrong view URL format | Use `view://` URLs from `notion-fetch` database response |
+| `data: must have required properties data` | `notion-query-data-sources` arguments not wrapped | Put every argument inside `"data": { ... }` |
 | Empty `{}` from get-comments | No comments on the page | Not an error — page has no comments |
-| Fetched a `view://` URL but got no rows | Fetching a view returns its definition (data source, properties), not its rows | Use `notion-query-database-view` for the rows |
+| Fetched a `view://` URL but got no rows | Fetching a view returns its definition (data source, properties), not its rows | Use `notion-query-data-sources` (`"mode": "view"` or SQL) for the rows |
 | `Expected a type keyword, got "TEXT"` | Using SQL types in create-database DDL | Use Notion types: `TITLE`, `SELECT`, `NUMBER`, `DATE`, `RICH_TEXT`, etc. |
 | `item was already in the target location` | Moving a page to its current parent | Not an error — page is already where you want it |
 | `Invalid select value for property` | SELECT property value not in options list | Fetch schema to check available options; add missing options with `notion-update-data-source` first |
 | `Invalid number value for property` | NUMBER property value sent as string | Ensure numbers are passed as actual JSON numbers, not strings |
 | `requires a content_updates parameter` | Passing `content` to update-page | Use `update_content` command with `content_updates` array, or `replace_content` with `new_str` |
-| No pagination cursor in search results | Search doesn't expose cursor for next page | Use `page_size` up to 25; no way to paginate beyond that in a single query |
-| `notion-query-database-view` ignores filters/sorts | View tool uses saved view config only | Create a new view with desired filters via `notion-create-view` instead |
-| `query: must NOT have fewer than 1 characters` | Empty query string `""` | Query must be at least 1 character |
+| No pagination cursor in search results | Search doesn't expose a cursor | Use `page_size` up to 50, or narrow the search |
+| SQL error on a column name | Guessed a column name | Use the names in the fetched `<sqlite-table>`; dates are `date:<Name>:start` |
 | `notion-duplicate-page` ignores target parent | Tool only accepts `page_id`, no parent param | Duplicate then use `notion-move-pages` to relocate |
 | `Invalid multi_select value` | MULTI_SELECT value not in options | Same as SELECT — add options to schema first via `notion-update-data-source` |
 | `Invalid isDateTime value` | DATE `is_datetime` not a number | Must be `0` (date) or `1` (datetime), not boolean or string |
@@ -30,25 +28,25 @@
 | `Expected property name in double quotes for SORT BY` | DSL property names not quoted | Use double quotes: `SORT BY "Status" ASC` not `SORT BY Status ASC` |
 | `Form block pointer is undefined on form view` | Creating form view on database without form block | Form views need a pre-existing form block — use other view types instead |
 | `String not found` in selection_with_ellipsis | Comment selection doesn't match page content | The `start...end` pattern must match actual text — fetch the page first to see current content |
-| No way to trash pages via MCP | `notion-update-page` does not have `in_trash` param | Only databases can be trashed via `notion-update-data-source` with `in_trash: true`. Page trashing requires the Notion UI |
+| Need to trash pages | — | `notion-delete-pages` moves pages to trash; `notion-restore-pages` brings them back |
 | Database restore with `in_trash: false` still shows deleted | Database restore may be incomplete via API | Restore databases through the Notion UI instead |
-| No permanent delete API | MCP only supports soft delete (databases only) | Use Notion UI Trash > Delete permanently for permanent deletion |
+| No permanent delete API | MCP only moves to trash | Use Notion UI Trash > Delete permanently for permanent deletion |
 
 ## Quick Tips
 
 ### Search
-- Use `content_search_mode: "workspace_search"` to find a page or database by name; the default `ai_search` is better for questions about a topic
-- `"filters"` is optional; include it only to narrow by date or creator
+- Start with just `query`; add parameters only to narrow the search
+- Any filter returns Notion results only; without filters, connected sources are included
 - Set `max_highlight_length: 0` to keep search responses small
 - Use `page_url` to scope search within a specific page and its children
 - Use `data_source_url` with `collection://` to search within a database's rows
 - Combine `created_date_range` and `created_by_user_ids` filters to narrow results
-- Search results are capped at `page_size` (max 25) — no pagination cursor is exposed
+- Search results are capped at `page_size` (max 50) — no pagination cursor is exposed
 
 ### Fetching
 - `notion-fetch` accepts the `url` from search results or the page ID (with or without dashes)
 - `notion-fetch` works with `collection://` URLs to get data source schemas directly
-- Fetching a `view://` URL returns the view's definition, not its rows — use `notion-query-database-view` for rows
+- Fetching a `view://` URL returns the view's definition, not its rows — use `notion-query-data-sources` for rows
 
 ### Databases
 - Database schemas are in SQLite DDL format — easy to read column names and types
@@ -57,8 +55,9 @@
 - CHECKBOX values use `"__YES__"` / `"__NO__"`, not `true`/`false`
 - DATE properties expand to three columns: `date:ColName:start`, `date:ColName:end`, `date:ColName:is_datetime`
 - STATUS type auto-creates groups (to_do, in_progress, complete) with default options
-- To filter/sort: create a filtered view with `notion-create-view`, then query it
-- `notion-create-view` requires both `database_id` and `data_source_id`
+- To filter/sort rows: SQL or rows mode in `notion-query-data-sources`; do not create a view to read
+- `notion-create-view` needs `data_source_id` plus one of `database_id` or `parent_page_id`
+- Meeting notes: `notion-query-meeting-notes`, not search
 
 ### Writing
 - Multiple pages can be created in one `notion-create-pages` call — `parent` is top-level, shared by all pages
@@ -74,5 +73,5 @@
 - View configure DSL requires double-quoted property names: `SORT BY "Status" ASC`
 - View types (table/board/list/etc.) cannot be changed after creation
 - `notion-get-users` with `user_id: "self"` returns the authenticated user
-- Pages cannot be trashed via MCP — only databases support `in_trash`
+- `notion-delete-pages` trashes pages; `notion-restore-pages` restores them
 - pi refreshes expired tokens on its own; a 401 `invalid_token` that persists means the user must run `/mcp login notion`
