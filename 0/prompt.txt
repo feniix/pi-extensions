@@ -1,0 +1,21 @@
+/i-have-adhd
+
+---
+
+go
+
+---
+
+can you test it to find a database? there is a database named PRD or PRDs
+
+---
+
+write it
+
+---
+
+if we remove coercion and we remove most of the guardrails, is it worth having a notion extension?
+
+---
+
+thin
