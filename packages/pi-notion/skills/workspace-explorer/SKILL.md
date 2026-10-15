@@ -15,7 +15,16 @@ For detailed reference on specific operations, see:
 
 ## Prerequisites
 
-Notion's tools are named `mcp__notion__<tool>`, with `-` replaced by `_`: `notion-search` is `mcp__notion__notion_search`. This skill uses Notion's own names. They are deferred: load the ones you need with `tool_search` (for example "notion search") before calling them, or call them from a `codemode` script.
+Notion's tools are named `mcp__notion__<tool>`, with `-` replaced by `_`: `notion-search` is `mcp__notion__notion_search`. This skill uses Notion's own names. They are deferred: load the ones you need with `tool_search` before calling them, or call them from a `codemode` script.
+
+`tool_search` ranks by matching words, not exact names, so a tool's own name often loads a similar tool instead (`notion-query-data-sources` loads `notion-query-multiple-data-sources`). These queries load the right tool, also with a `mcp__notion` prefix. Before the first Notion call, load every tool the task needs at once: send these `tool_search` calls in parallel, each with `"limit": 1`:
+
+| Tool | `tool_search` query |
+|---|---|
+| `notion-search` | `search connected sources` |
+| `notion-fetch` | `notion fetch` |
+| `notion-query-data-sources` | `faithful structured rows` |
+| `notion-query-meeting-notes` | `query meeting notes` |
 
 If no Notion tools are found, or calls fail because Notion needs sign-in, ask the user to run `/mcp login notion`. Do not try to sign in yourself.
 

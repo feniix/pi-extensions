@@ -13,6 +13,7 @@ uncertain release boundaries are noted rather than inferred.
 
 - The `workspace-explorer` skill named `notion-query-database-view`, which Notion's MCP server no longer offers, and taught search modes its `notion-search` no longer has. It now uses `notion-query-data-sources` (SQL, view, and rows modes, with every argument inside `data`), starts searches with just a query, sends meeting-note questions to `notion-query-meeting-notes`, and no longer tells the model to create a view to filter rows or that pages cannot be trashed.
 - A test checks that the skill names only tools Notion's MCP server offers.
+- The skill gives `tool_search` queries that load the right Notion tool, since `tool_search` ranks by matching words and a tool's own name often loads a similar tool (`notion-query-data-sources` loaded `notion-query-multiple-data-sources`).
 
 ## [4.0.0] - 2026-10-14
 
