@@ -5,7 +5,6 @@
  * - Registers Notion's hosted MCP server with pi's built-in MCP support, which handles OAuth,
  *   token refresh, reconnects, and tool exposure
  * - Tool call guardrails: advisory warnings for common Notion mistakes
- * - Numeric property coercion: numeric strings in page properties are sent as numbers
  */
 
 import type { ExtensionAPI, ExtensionContext, McpServerConfig } from "@earendil-works/pi-coding-agent";
@@ -65,50 +64,12 @@ const toolChecks: Record<string, CheckFn> = {
 };
 
 // =============================================================================
-// Numeric Property Coercion
-// =============================================================================
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isNumericString(value: unknown): value is string {
-  return typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value));
-}
-
-function coercePropertyMap(properties: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(properties).map(([propName, propValue]) => [
-      propName,
-      isNumericString(propValue) ? Number(propValue) : coerceNumericProperties(propValue),
-    ]),
-  );
-}
-
-/** Models often send number properties as strings, which Notion rejects. */
-function coerceNumericProperties(obj: unknown): unknown {
-  if (obj === null || obj === undefined) return obj;
-  if (Array.isArray(obj)) return obj.map(coerceNumericProperties);
-  if (!isRecord(obj)) return obj;
-
-  return Object.fromEntries(
-    Object.entries(obj).map(([key, value]) => [
-      key,
-      key === "properties" && isRecord(value) ? coercePropertyMap(value) : coerceNumericProperties(value),
-    ]),
-  );
-}
-
-// =============================================================================
 // Tool Call Handler
 // =============================================================================
 
 function handleToolCall(event: { toolName: string; input?: Record<string, unknown> }, ctx: ExtensionContext) {
   const name = notionToolName(event.toolName);
   if (!name || !event.input) return;
-
-  // pi runs the call with event.input, so it has to be changed in place
-  Object.assign(event.input, coerceNumericProperties(event.input));
 
   const warnings = toolChecks[name]?.(event.input) ?? [];
   if (warnings.length > 0) {
@@ -120,7 +81,7 @@ function handleToolCall(event: { toolName: string; input?: Record<string, unknow
 // Exports
 // =============================================================================
 
-export { coerceNumericProperties, NOTION_MCP_SERVER, NOTION_MCP_URL, notionToolName, toolChecks };
+export { NOTION_MCP_SERVER, NOTION_MCP_URL, notionToolName, toolChecks };
 
 // =============================================================================
 // Extension Entry Point

@@ -7,7 +7,6 @@
 - **Notion MCP server**: registers `https://mcp.notion.com/mcp` as the `notion` server. pi's built-in MCP support handles sign-in, token refresh, reconnects, and tool exposure.
 - **Deferred tools**: Notion's tools (57 at the time of writing) are not declared to the model until `tool_search` loads the ones it needs.
 - **Guardrails**: advisory warnings for common Notion tool mistakes, also for calls made from `codemode` scripts.
-- **Numeric property coercion**: numeric strings in page properties (`"5"`) are sent as numbers, which Notion requires.
 - **Skill**: `workspace-explorer` teaches the model Notion's search modes, database schemas, and write operations.
 
 ## Install
@@ -58,7 +57,7 @@ The `notion` server uses `deferred` exposure. To change it, or to configure the 
 }
 ```
 
-The guardrails and coercion apply to Notion tools under any server name.
+The guardrails apply to Notion tools under any server name.
 
 ## Upgrading from 3.x
 

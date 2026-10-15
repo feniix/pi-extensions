@@ -17,13 +17,14 @@ uncertain release boundaries are noted rather than inferred.
 - **Breaking:** Notion tools are named `mcp__notion__notion_*` (for example `mcp__notion__notion_search`) and are declared to the model only after `tool_search` loads them.
 - **Breaking:** sign in with `/mcp login notion` or `pi mcp login notion`. The 3.x auth file is not read; `/notion` now prints the sign-in instructions.
 - Guardrails match built-in MCP tool names under any server name, including calls made from `codemode` scripts.
-- Numeric property coercion runs on the `tool_call` event, so it also applies to calls made from `codemode` scripts.
 - The `workspace-explorer` skill explains the built-in tool names and how to load them.
 - Drop the `notion-fetch` guardrail. Tested against live Notion, raw page IDs (with and without dashes) and `view://` URLs both fetch; a `view://` fetch returns the view's definition, not its rows, which the skill now says.
 - Drop the `notion-search` guardrail. Tested against live Notion, the default `ai_search` returns workspace pages (plus connected sources such as Google Drive), not just calendar events, and `workspace_search` works without `filters`. The `workspace-explorer` skill now explains when to use each mode instead of always forcing `workspace_search` and `filters: {}`.
 
 ### Removed
 
+- Numeric property coercion. It turned every numeric string under `properties` into a number, and Notion stores a number sent to a text property as an empty value without an error: tested against live Notion, `"PRD Number": "999"` was stored as `""`. 3.x has the same bug.
+- **Breaking:** the `coerceNumericProperties` export.
 - **Breaking:** the custom MCP client and the legacy OAuth module, with the `notion_mcp_connect`, `notion_mcp_disconnect`, and `notion_mcp_status` tools.
 - **Breaking:** the `setup-oauth` skill.
 - **Breaking:** `NOTION_MCP_AUTH_FILE`, `--notion-mcp-auth-file`, `NOTION_CONFIG_FILE`, `--notion-config-file`, their deprecated aliases, and the session-start auth status line.

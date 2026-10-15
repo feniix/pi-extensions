@@ -1,11 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import notion, {
-  coerceNumericProperties,
-  NOTION_MCP_SERVER,
-  NOTION_MCP_URL,
-  notionToolName,
-} from "../extensions/index.js";
+import notion, { NOTION_MCP_SERVER, NOTION_MCP_URL, notionToolName } from "../extensions/index.js";
 
 interface MockPi {
   registerMcpServer: ReturnType<typeof vi.fn> | undefined;
@@ -143,42 +138,14 @@ describe("guardrails", () => {
   });
 });
 
-describe("numeric property coercion", () => {
-  it("rewrites numeric strings in page properties in place, so pi sends the coerced arguments", async () => {
+describe("page properties", () => {
+  it("sends numeric strings unchanged, since Notion stores a number sent to a text property as empty", async () => {
+    // Live, "PRD Number": 999 sent to a text property was stored as "", while "999" was stored as "999"
     const { call } = load();
-    const input = {
-      pages: [{ properties: { Count: "5", Price: " 2.50 ", Name: "Q3 plan", Year: "" } }],
-      query: "2024",
-    };
+    const input = { pages: [{ properties: { "PRD Number": "999", Version: "1", Name: "Q3 plan" } }] };
 
     await call("mcp__notion__notion_create_pages", input);
 
-    expect(input).toEqual({
-      pages: [{ properties: { Count: 5, Price: 2.5, Name: "Q3 plan", Year: "" } }],
-      query: "2024",
-    });
-  });
-
-  it("leaves non-Notion tool inputs untouched", async () => {
-    const { call } = load();
-    const input = { properties: { Count: "5" } };
-
-    await call("mcp__other__create", input);
-
-    expect(input).toEqual({ properties: { Count: "5" } });
-  });
-
-  it("coerces nested property maps without touching other values", () => {
-    expect(
-      coerceNumericProperties({
-        data: { properties: { Score: "10", Tags: ["1", "2"] } },
-        properties: { Nested: { properties: { Depth: "3" } } },
-        id: "42",
-      }),
-    ).toEqual({
-      data: { properties: { Score: 10, Tags: ["1", "2"] } },
-      properties: { Nested: { properties: { Depth: 3 } } },
-      id: "42",
-    });
+    expect(input).toEqual({ pages: [{ properties: { "PRD Number": "999", Version: "1", Name: "Q3 plan" } }] });
   });
 });
