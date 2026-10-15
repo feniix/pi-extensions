@@ -15,55 +15,44 @@ For detailed reference on specific operations, see:
 
 ## Prerequisites
 
-Notion's tools are named `mcp__notion__<tool>`, with `-` replaced by `_`: `notion-search` is `mcp__notion__notion_search`. This skill uses Notion's own names. They are deferred: load the ones you need with `tool_search` (for example "notion search") before calling them, or call them from a `codemode` script.
+Notion's tools are named `mcp__notion__<tool>`, with `-` replaced by `_`: `notion-search` is `mcp__notion__notion_search`. This skill uses Notion's own names. They are deferred: load the ones you need with `tool_search` before calling them, or call them from a `codemode` script.
+
+`tool_search` ranks by matching words, not exact names, so a tool's own name often loads a similar tool instead (`notion-query-data-sources` loads `notion-query-multiple-data-sources`). These queries load the right tool, also with a `mcp__notion` prefix. Before the first Notion call, load every tool the task needs at once: send these `tool_search` calls in parallel as separate tool calls (`tool_search` is not available inside `codemode`), each with `"limit": 1`:
+
+| Tool | `tool_search` query |
+|---|---|
+| `notion-search` | `search connected sources` |
+| `notion-fetch` | `notion fetch` |
+| `notion-query-data-sources` | `faithful structured rows` |
+| `notion-query-meeting-notes` | `query meeting notes` |
 
 If no Notion tools are found, or calls fail because Notion needs sign-in, ask the user to run `/mcp login notion`. Do not try to sign in yourself.
 
 A user with several Notion workspaces has one server per workspace, such as `mcp__notion__*` and `mcp__notion_work__*`. Use the server whose name or description matches the workspace the user means; if that is unclear, ask which workspace before calling. Pages and IDs from one workspace do not exist in another.
 
-## Search (Critical: Get This Right)
+## Search
 
-`notion-search` has two modes. Both return Notion pages; they rank differently and cover different sources. Pick the mode for the request:
+Start with just a query; add other parameters only to narrow the search:
 
-| Mode | What it returns | Use for |
-|------|----------------|---------|
-| `workspace_search` | Notion pages and databases only, matched on titles and keywords | A page or database you can name ("the Estimation Platform Proposal page"), discovering databases |
-| `ai_search` (default) | Notion pages ranked by meaning, plus connected sources such as Google Drive and Slack | Questions about a topic, where the answer may sit in a sub-page or another tool |
-
-When `ai_search` results include connected sources, each result's `type` says where it came from (for example `page` or `google-drive`). If the user wants Notion content only, use `workspace_search`.
-
-### Search the workspace
 ```
-notion-search: {
-  "query": "topic",
-  "query_type": "internal",
-  "content_search_mode": "workspace_search",
-  "filters": {},
-  "page_size": 25,
-  "max_highlight_length": 0
-}
+notion-search: { "query": "Estimation Platform Proposal" }
 ```
 
-`filters` is optional; use it to narrow by date or creator (below). Query must be at least 1 character.
+Without filters, `notion-search` ranks Notion pages by meaning and also returns connected sources such as Google Drive and Slack; each result's `type` says where it came from (for example `page` or `google-drive`). Any filter, or a sort other than relevance, returns Notion results only, matched on keywords.
 
 ### Narrow search scope
 
-- **By teamspace:** Add `"teamspace_id": "<team-uuid>"` (get IDs from `notion-get-teams`)
-- **Within a page:** Add `"page_url": "https://www.notion.so/<page-id>"` to search under that page and its children
-- **Within a database:** Use `"data_source_url": "collection://<id>"` to search rows (note: this uses `ai_search` regardless of `content_search_mode`)
-- **By date:** Add `"created_date_range": {"start_date": "2026-04-01", "end_date": "2026-04-07"}` inside `filters`
-- **By creator:** Add `"created_by_user_ids": ["<user-uuid>"]` inside `filters` (get IDs from `notion-get-users`)
+- **Within a page:** `"page_url": "<page-url-or-id>"` searches that page and its children
+- **Within a database:** `"data_source_url": "collection://<id>"` searches its rows
+- **By teamspace:** `"teamspace_id": "<team-uuid>"` (get IDs from `notion-get-teams`)
+- **By date:** `"filters": {"created_date_range": {"start_date": "2026-04-01", "end_date": "2026-04-07"}}`
+- **By creator:** `"filters": {"created_by_user_ids": ["<user-uuid>"]}` (`"me"` for the signed-in user)
+- `"max_highlight_length": 0` keeps responses small; `page_size` goes up to 50
 
 ### Search for users
 ```
-notion-search: {
-  "query": "Sebastian",
-  "query_type": "user",
-  "filters": {}
-}
+notion-search: { "query": "Sebastian", "query_type": "user" }
 ```
-
-Results are capped at `page_size` (max 25) with no pagination cursor.
 
 ## Fetching Content
 
@@ -81,7 +70,7 @@ Pages return Notion-flavored markdown with `<ancestor-path>` (parent hierarchy),
 
 **Cannot fetch:** Team/teamspace IDs (use `notion-get-teams` + search instead).
 
-**`view://` URLs:** fetching one returns the view's definition (its `collection://` data source, displayed properties, and type), not its rows. Use `notion-query-database-view` for the rows.
+**`view://` URLs:** fetching one returns the view's definition (its `collection://` data source, displayed properties, and type), not its rows. Use `notion-query-data-sources` for the rows.
 
 ## Working with Databases
 
@@ -97,26 +86,27 @@ Workspaces often have databases with similar or identical names across different
 
 ```
 # 1. Find the database
-notion-search: {
-  "query": "project name",
-  "query_type": "internal",
-  "content_search_mode": "workspace_search",
-  "filters": {},
-  "page_size": 25,
-  "max_highlight_length": 0
-}
+notion-search: { "query": "PRDs" }
 
-# 2. Fetch schema — get data source and view URLs
+# 2. Fetch it: the schema (<sqlite-table>), its collection:// data source URL, and its views
 notion-fetch: { "id": "<database-url-from-search>" }
 
-# 3. Query the database view
-notion-query-database-view: { "view_url": "view://<view-id-from-fetch>" }
+# 3a. Filter and sort with SQL, using the column names from <sqlite-table>
+notion-query-data-sources: { "data": {
+  "data_source_urls": ["collection://<id>"],
+  "query": "SELECT * FROM \"collection://<id>\" WHERE \"Status\" != ? ORDER BY \"date:Date:start\" DESC LIMIT 20",
+  "params": ["Done"]
+} }
+
+# 3b. Or read a saved view's rows, with its own filters and sorts
+notion-query-data-sources: { "data": { "mode": "view", "view_url": "<view-url-from-fetch>" } }
 ```
 
 **Key things to know:**
-- `notion-query-database-view` does NOT accept filter/sort params — it uses the view's saved config
-- To filter/sort: create a new view with `notion-create-view` first, then query it
-- `view://` URLs come from fetching a database, not from search results
+- All arguments go inside `data`; leaving it out fails with `data: must have required properties data`
+- SQL is the default mode and is read-only. Use only the table and column names the fetch shows; date columns expand to `date:<Name>:start` and `date:<Name>:end`
+- `"mode": "rows"` with `data_source_url`, `filter`, and `sort` returns rows with rich text, links, and mentions intact; use it before rewriting a rich-text property
+- Do not create a view just to filter rows; SQL or rows mode filters without changing the workspace
 - Database schemas are in SQLite DDL format
 
 For creating databases, modifying schemas, creating views, and property value formats, read `references/databases.md`.
@@ -156,12 +146,15 @@ Other commands: `update_properties`, `replace_content`, `apply_template`, `updat
 - `notion-get-users: { "user_id": "self" }` — get current authenticated user
 
 ### Meeting notes
-`notion-query-meeting-notes` requires a filter with an `operator` — empty `{}` will fail:
+For meeting notes, use `notion-query-meeting-notes`, not search: it queries Notion's AI meeting notes directly and is much faster. Filter by date, title, or attendees; with no `filter` it returns recent meeting notes.
 ```
 notion-query-meeting-notes: {
-  "filter": { "operator": "and", "filters": [] }
+  "filter": { "operator": "and", "filters": [
+    { "property": "created_time", "filter": { "operator": "date_is_within", "value": { "type": "relative", "value": "the_past_month" } } }
+  ] }
 }
 ```
+It covers only Notion's AI meeting notes. If it returns nothing and the user keeps meeting notes as ordinary pages, say so and offer to search for them.
 
 ### Comments, move, duplicate, trash
 See `references/write-operations.md` for the full API.
@@ -170,9 +163,9 @@ See `references/write-operations.md` for the full API.
 
 Read `references/failure-modes.md` for a comprehensive error table. The most common mistakes:
 
-1. **Expecting Notion-only results from the default mode** — `ai_search` also returns connected sources; use `workspace_search` for Notion pages only
-2. **Using `id` instead of `url` from search results** — `object_not_found`
+1. **Leaving out `data` in `notion-query-data-sources`** — every argument goes inside `"data": { ... }`
+2. **Guessing SQL column names** — fetch the database first and use the names in `<sqlite-table>`
 3. **SELECT values not in schema** — fetch schema first, add options with `notion-update-data-source`
-4. **Empty filter `{}` on meeting notes** — must have `operator` and `filters` keys
-5. **Fetching a `view://` URL to read rows** — it returns the view's definition only; use `notion-query-database-view` for the rows
+4. **Searching for meeting notes** — use `notion-query-meeting-notes`
+5. **Fetching a `view://` URL to read rows** — it returns the view's definition only; use `notion-query-data-sources` for the rows
 6. **Sign-in expired (401 after pi's automatic refresh)** — ask the user to run `/mcp login notion`
