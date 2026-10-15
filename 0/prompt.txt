@@ -1,0 +1,45 @@
+check the CI on 189
+
+---
+
+so again before we merge
+
+---
+
+so again before we merge is it really worth keeping pi-notion around vs raw mcp?
+
+---
+
+merge
+
+---
+
+<task-notification>
+<task-id>bwm68y0m7</task-id>
+<tool-use-id>toolu_01L1fnsr1kgYVAwarQL2Ywq5</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-feniix-src-personal-pi-pi-extensions/c015d882-2744-41a4-b1fc-6be8d0631489/tasks/bwm68y0m7.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for the release run and check npm" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+git push origin --delete fix/pi-notion-token-refresh-headless-oauth
+
+---
+
+https://github.com/feniix/pi-extensions/actions/runs/38723186622/job/116382590671
+
+---
+
+<task-notification>
+<task-id>bftxsvxvj</task-id>
+<tool-use-id>toolu_01PuDFE8DbyTtHt97e6DvnW6</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-feniix-src-personal-pi-pi-extensions/c015d882-2744-41a4-b1fc-6be8d0631489/tasks/bftxsvxvj.output</output-file>
+<status>completed</status>
+<summary>Background command "Wait for the CI rerun on main" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+fix it
