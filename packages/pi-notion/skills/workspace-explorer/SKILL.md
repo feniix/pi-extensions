@@ -65,7 +65,7 @@ Results are capped at `page_size` (max 25) with no pagination cursor.
 
 ## Fetching Content
 
-**Always use the `url` field from search results** — raw `id` values often fail.
+Pass the `url` field from search results, or the page's ID (with or without dashes). Both work.
 
 ```
 notion-fetch: { "id": "https://www.notion.so/<page-url-from-search>" }
@@ -77,7 +77,9 @@ Pages return Notion-flavored markdown with `<ancestor-path>` (parent hierarchy),
 - `"include_discussions": true` — include inline comment threads
 - `"include_transcript": true` — for meeting pages with audio/video
 
-**Cannot fetch:** Team/teamspace IDs (use `notion-get-teams` + search instead) or `view://` URLs (use `notion-query-database-view` instead).
+**Cannot fetch:** Team/teamspace IDs (use `notion-get-teams` + search instead).
+
+**`view://` URLs:** fetching one returns the view's definition (its `collection://` data source, displayed properties, and type), not its rows. Use `notion-query-database-view` for the rows.
 
 ## Working with Databases
 
@@ -170,5 +172,5 @@ Read `references/failure-modes.md` for a comprehensive error table. The most com
 2. **Using `id` instead of `url` from search results** — `object_not_found`
 3. **SELECT values not in schema** — fetch schema first, add options with `notion-update-data-source`
 4. **Empty filter `{}` on meeting notes** — must have `operator` and `filters` keys
-5. **Trying to fetch `view://` URLs** — use `notion-query-database-view` instead
+5. **Fetching a `view://` URL to read rows** — it returns the view's definition only; use `notion-query-database-view` for the rows
 6. **Sign-in expired (401 after pi's automatic refresh)** — ask the user to run `/mcp login notion`

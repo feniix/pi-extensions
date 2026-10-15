@@ -108,14 +108,27 @@ describe("guardrails", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("warns for raw fetch ids and empty meeting note filters, including calls from codemode scripts", async () => {
+  it("warns for empty meeting note filters, including calls from codemode scripts", async () => {
     const { call, notify } = load();
 
-    await call("mcp__notion__notion_fetch", { id: "12345" }, "codemode-1");
-    await call("mcp__notion__notion_query_meeting_notes", { filter: {} });
+    await call("mcp__notion__notion_query_meeting_notes", { filter: {} }, "codemode-1");
 
-    expect(notify).toHaveBeenNthCalledWith(1, expect.stringContaining("Prefer the 'url' field"), "warning");
-    expect(notify).toHaveBeenNthCalledWith(2, expect.stringContaining("Empty filter {} will fail"), "warning");
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Empty filter {} will fail"), "warning");
+  });
+
+  it("does not warn about notion-fetch ids", async () => {
+    // Live, raw ids (with and without dashes), page URLs, view:// and collection:// all fetched
+    const { call, notify } = load();
+
+    for (const id of [
+      "3602e80c-997d-8148-bbd7-c04900888008",
+      "3602e80c997d8148bbd7c04900888008",
+      "view://f062e80c-997d-8321-bc34-08d52551a877",
+    ]) {
+      await call("mcp__notion__notion_fetch", { id });
+    }
+
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("stays quiet for correct inputs and other tools", async () => {

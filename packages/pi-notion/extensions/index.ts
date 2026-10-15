@@ -41,21 +41,6 @@ function notionToolName(toolName: string): string | undefined {
 
 type CheckFn = (input: Record<string, unknown>) => string[];
 
-function checkNotionFetch(input: Record<string, unknown>): string[] {
-  const warnings: string[] = [];
-  const id = String(input.id ?? "");
-
-  if (!id) return warnings;
-
-  if (id.startsWith("view://")) {
-    warnings.push("⚠ notion-fetch: 'view://' URLs can't be fetched — use notion-query-database-view instead.");
-  } else if (!id.startsWith("https://") && !id.startsWith("collection://")) {
-    warnings.push("⚠ notion-fetch: Using raw ID. Prefer the 'url' field from search results for reliability.");
-  }
-
-  return warnings;
-}
-
 function checkMeetingNotes(input: Record<string, unknown>): string[] {
   const warnings: string[] = [];
 
@@ -76,7 +61,6 @@ function checkMeetingNotes(input: Record<string, unknown>): string[] {
 }
 
 const toolChecks: Record<string, CheckFn> = {
-  "notion-fetch": checkNotionFetch,
   "notion-query-meeting-notes": checkMeetingNotes,
 };
 
