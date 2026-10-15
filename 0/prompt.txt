@@ -1,0 +1,15 @@
+it says 
+
+Open the saved Notion URL in a browser on any machine. After approving, the redirect page will fail to load; paste its full URL here.
+
+Paste the Notion redirect URL                                                                                                                                                                                                                                                                                                                                                      >
+
+enter submit  escape/ctrl+c cancel
+
+
+
+I wonder what url is referring to?
+
+---
+
+hmm but it should past it in the chat so I can use it
