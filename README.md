@@ -54,6 +54,9 @@ Replace `pi-devtools` with any package name from the table above.
 
 ## Develop
 
+For optional web search and page fetching while contributing with Claude Code,
+see [Parallel Search MCP setup](docs/guides/parallel-search-mcp.md).
+
 This repository is a pnpm workspace. It requires Node.js 22.19.0 or newer
 and pnpm 12.8.1 (pinned in `package.json`).
 
