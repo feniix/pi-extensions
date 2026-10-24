@@ -49,7 +49,7 @@ pi -e npm:@feniix/pi-exa
 
 You need an Exa API key from [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) for retrieval tools. The local `exa_research_*` planning tools work without an API key because they do not call Exa network APIs.
 
-If you configure `enabledTools`, it acts as a strict allowlist. Include the `exa_research_*` names if you want the planner tools available with an explicit allowlist. With `--exa-enable-cycles`, the four local `exa_research_*` planner tools stay available even when the allowlist omits them, because cycles need them and they never call Exa or spend.
+If you configure `enabledTools`, it acts as a strict allowlist. Include the `exa_research_*` names if you want the planner tools available with an explicit allowlist. With cycles enabled by flag or config, the four local `exa_research_*` planner tools stay available even when the allowlist omits them, because cycles need them and they never call Exa or spend.
 
 ### Recommended: environment variable
 
@@ -115,12 +115,46 @@ Example:
       "web_find_similar_exa"
     ],
     "advancedEnabled": false,
-    "researchEnabled": false
+    "researchEnabled": false,
+    "cyclesEnabled": false,
+    "timeoutMs": 60000,
+    "researchTimeoutMs": 180000,
+    "submitTimeoutMs": 30000,
+    "monitorIntervalMs": 5000
   }
 }
 ```
 
 `apiKey` is accepted in settings files for compatibility, but `pi-exa` will warn when it is loaded there. Prefer `EXA_API_KEY` or `--exa-config-file` for secrets.
+
+### Global and project options
+
+All options below are accepted under `"pi-exa"` in global or project settings,
+or at the root of an explicit Exa config file:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `enabledTools` | Default tool set | Strict tool allowlist; cycles retain their four local planner tools. |
+| `advancedEnabled` | `false` | Enable advanced search when no allowlist is set. |
+| `researchEnabled` | `false` | Enable Agent research when no allowlist is set. |
+| `cyclesEnabled` | `false` | Enable durable Pi research cycles; does not approve spending. |
+| `timeoutMs` | Per-tool: 60000 or 180000 | Override the default timeout for all Pi Exa calls, including advanced search and blocking research. |
+| `researchTimeoutMs` | 180000 | Override the timeout specifically for blocking Agent research, ahead of `timeoutMs`. |
+| `submitTimeoutMs` | 30000 | Bound the guided submission acknowledgement wait; expiry does not cancel remote work. |
+| `monitorIntervalMs` | 5000 | Initial background-monitor delay; later checks back off with jitter. |
+| `apiKey` | Unset | Accepted for compatibility; prefer an environment variable or private config file. |
+
+Durations must be JSON integers from `1` through `2147483647` milliseconds.
+Invalid values are ignored, falling back to the next valid source or built-in
+default. For the four duration options, precedence is CLI flag → environment
+(`EXA_TIMEOUT_MS` / `EXA_RESEARCH_TIMEOUT_MS`, where applicable) → config →
+built-in defaults. Within settings, explicit project duration values override
+global values; omitted or invalid project durations inherit global values.
+An explicit config file replaces global/project settings rather than merging.
+
+Restart Pi or use `/reload` after editing settings. Submission and monitoring
+settings apply only to Pi cycles, not MCP. MCP timeout configuration continues
+to use `EXA_TIMEOUT_MS` and `EXA_RESEARCH_TIMEOUT_MS`.
 
 ## CLI flags
 
@@ -143,7 +177,28 @@ Example:
 
 ### Opt-in durable Pi planning
 
-Start Pi with `--exa-enable-cycles` to use durable research planning. Guided
+Start Pi with `--exa-enable-cycles` or set `cyclesEnabled: true` in your Exa
+config to use durable research planning. To enable it globally, merge this into
+`~/.pi/agent/settings.json`:
+
+```json
+{
+  "pi-exa": {
+    "cyclesEnabled": true,
+    "researchEnabled": true
+  }
+}
+```
+
+Restart Pi or run `/reload` after changing settings. Project `.pi/settings.json`
+overrides the global `cyclesEnabled` value when explicitly set; omitting it
+inherits the global value. Explicit `--exa-config-file` / `EXA_CONFIG_FILE`
+configuration replaces settings-file configuration and also accepts `cyclesEnabled`.
+An explicit boolean `exa-enable-cycles` flag takes precedence over config.
+Cycles remain off by default and Pi-only; this setting does not enable MCP cycles
+or authorize paid work. Research enablement and its tool allowlist remain separate.
+
+Guided
 Agent research also needs `web_research_exa` enabled (`--exa-enable-research`
 or your Exa config); Pi warns at startup when cycles are on without it.
 
@@ -835,6 +890,6 @@ Same rules as the Pi adapter:
 
 ## Notes
 
-- `exa_research_*` planning tools are enabled by default when no explicit `enabledTools` allowlist is configured (and always with `--exa-enable-cycles`), local-only, and do not require an Exa API key.
+- `exa_research_*` planning tools are enabled by default when no explicit `enabledTools` allowlist is configured (and always in Pi with cycles enabled by flag or config), local-only, and do not require an Exa API key.
 - `web_search_advanced_exa` and `web_research_exa` are opt-in and disabled by default.
 - Research/tool output may include both `text` and `details.parsedOutput` depending on `outputSchema.type`.

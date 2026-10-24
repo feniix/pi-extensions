@@ -178,6 +178,20 @@ describe("pi-exa extension", () => {
     expect(result.content[0].text).toContain("timed out after 75ms");
   });
 
+  it.each([
+    { name: "web_search_exa", setting: "timeoutMs" },
+    { name: "web_research_exa", setting: "researchTimeoutMs" },
+  ])("uses $setting from an explicit config file", async ({ name, setting }) => {
+    mockSearch.mockReturnValue(new Promise(() => {}));
+    mockAgentCreate.mockReturnValue(new Promise(() => {}));
+    const configPath = writeTempConfig({ [setting]: 10, researchEnabled: true });
+    const mockPi = createMockPi({ "exa-config-file": configPath, "exa-api-key": "flag-key" });
+    exaExtension(mockPi as unknown as ExtensionAPI);
+    const tool = getRegisteredTool(mockPi, name);
+    const result = await tool.execute("call", { query: "test" }, undefined, undefined, undefined as never);
+    expect(result.content[0].text).toContain("timed out after 10ms");
+  });
+
   it("withdraws a factory-registered tool that a late --exa-config-file disables", async () => {
     const directory = await mkdtemp(join(tmpdir(), "exa-late-config-"));
     const config = join(directory, "exa.json");

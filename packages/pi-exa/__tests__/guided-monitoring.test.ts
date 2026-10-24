@@ -78,6 +78,7 @@ interface HostOptions {
   sessionId?: string;
   directory?: string;
   hasUI?: boolean;
+  monitorFromConfig?: boolean;
 }
 
 interface Entry {
@@ -103,6 +104,7 @@ async function host(options: HostOptions = {}) {
         "web_research_exa",
       ],
       apiKey: "offline-fixture-key",
+      monitorIntervalMs: options.monitorFromConfig ? 20 : undefined,
     }),
   );
   const tools = new Map<string, Parameters<PiToolRegistration["registerTool"]>[0]>();
@@ -141,7 +143,7 @@ async function host(options: HostOptions = {}) {
         ? true
         : name === "exa-config-file"
           ? config
-          : name === "exa-monitor-interval-ms"
+          : name === "exa-monitor-interval-ms" && !options.monitorFromConfig
             ? "20"
             : undefined,
     registerTool: (tool: Parameters<PiToolRegistration["registerTool"]>[0]) => tools.set(tool.name, tool),
@@ -208,7 +210,7 @@ const monitorOf = (record: { monitors?: Array<Record<string, unknown>> }, attemp
 
 describe("background monitoring and completion delivery", () => {
   it("returns control with a registered monitor, observes with bounded GETs, persists the outcome, delivers one notice and acknowledges it", async () => {
-    const pi = await host();
+    const pi = await host({ monitorFromConfig: true });
     offlineGet
       .mockResolvedValueOnce({ id: "agent_run_pending", status: "running" })
       .mockResolvedValueOnce({ id: "agent_run_pending", status: "running" })

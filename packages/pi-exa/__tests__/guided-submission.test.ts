@@ -67,6 +67,7 @@ afterEach(async () => {
 interface HostOptions {
   ui?: "approve" | "decline" | "none";
   submitTimeoutMs?: number;
+  configSubmitTimeoutMs?: number;
   sessionId?: string;
   directory?: string;
 }
@@ -88,6 +89,7 @@ async function host(options: HostOptions = {}) {
         "web_research_exa",
       ],
       apiKey: "offline-fixture-key",
+      submitTimeoutMs: options.configSubmitTimeoutMs,
     }),
   );
   const tools = new Map<string, Parameters<PiToolRegistration["registerTool"]>[0]>();
@@ -398,8 +400,11 @@ describe("guided research from request through approved submission", () => {
     expect(record.status).toBe("planning");
   });
 
-  it("keeps an unacknowledged create unknown, saves a genuine late run ID on the original attempt and never resubmits", async () => {
-    const pi = await host({ submitTimeoutMs: 1_500 });
+  it.each([
+    { submitTimeoutMs: 1_500 },
+    { configSubmitTimeoutMs: 1_500 },
+  ])("keeps an unacknowledged create unknown using timeout $submitTimeoutMs/$configSubmitTimeoutMs", async (options) => {
+    const pi = await host(options);
     const { cycleId, projectId } = await readyCycle(pi);
     const proposal = await propose(pi, cycleId);
     let releaseCreate: ((run: AgentRun) => void) | undefined;

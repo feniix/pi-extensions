@@ -39,6 +39,14 @@ describe("pi-exa resolveConfigPath", () => {
 });
 
 describe("pi-exa parseConfig", () => {
+  it.each([true, false])("preserves cyclesEnabled=%s", (cyclesEnabled) => {
+    expect(parseConfig({ cyclesEnabled }).cyclesEnabled).toBe(cyclesEnabled);
+  });
+
+  it.each([undefined, "true", 1, null])("does not opt into cycles for %s", (cyclesEnabled) => {
+    expect(parseConfig({ cyclesEnabled }).cyclesEnabled).toBeUndefined();
+  });
+
   it("parses valid config", () => {
     const raw = {
       apiKey: "test-key",
@@ -280,7 +288,11 @@ describe("pi-exa settings config", () => {
     }
   });
 
-  it("loads settings from standard pi settings files", async () => {
+  it.each([
+    { projectCycles: undefined, expected: true },
+    { projectCycles: false, expected: false },
+    { projectCycles: true, expected: true },
+  ])("loads cycle settings with project override $projectCycles", async ({ projectCycles, expected }) => {
     const originalHome = process.env.HOME;
     const originalCwd = process.cwd();
     const tempHome = mkdtempSync(join(tmpdir(), "pi-exa-settings-home-"));
@@ -291,12 +303,23 @@ describe("pi-exa settings config", () => {
 
     writeFileSync(
       join(tempHome, ".pi", "agent", "settings.json"),
-      JSON.stringify({ "pi-exa": { enabledTools: ["web_search_exa"] } }),
+      JSON.stringify({
+        "pi-exa": {
+          enabledTools: ["web_search_exa"],
+          cyclesEnabled: true,
+          timeoutMs: 100,
+          researchTimeoutMs: 200,
+          submitTimeoutMs: 300,
+          monitorIntervalMs: 400,
+        },
+      }),
       "utf-8",
     );
     writeFileSync(
       join(tempProject, ".pi", "settings.json"),
-      JSON.stringify({ "pi-exa": { advancedEnabled: true } }),
+      JSON.stringify({
+        "pi-exa": { advancedEnabled: true, cyclesEnabled: projectCycles, timeoutMs: 500, monitorIntervalMs: 0 },
+      }),
       "utf-8",
     );
 
@@ -310,6 +333,13 @@ describe("pi-exa settings config", () => {
       expect(result?.apiKey).toBeUndefined();
       expect(result?.enabledTools).toEqual(["web_search_exa"]);
       expect(result?.advancedEnabled).toBe(true);
+      expect(result?.cyclesEnabled).toBe(expected);
+      expect(result).toMatchObject({
+        timeoutMs: 500,
+        researchTimeoutMs: 200,
+        submitTimeoutMs: 300,
+        monitorIntervalMs: 400,
+      });
     } finally {
       process.chdir(originalCwd);
       if (originalHome) process.env.HOME = originalHome;
