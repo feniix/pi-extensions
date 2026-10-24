@@ -10,6 +10,19 @@ publication version mismatches are called out explicitly.
 
 ## [Unreleased]
 
+## [7.1.0] - 2026-10-24
+
+### Added
+
+- Enable durable Pi research cycles through `pi-exa.cyclesEnabled` in global/project settings or `cyclesEnabled` in an explicit config file, without requiring `--exa-enable-cycles`. Cycles remain off by default and retain all existing spending approvals.
+- Configure `timeoutMs`, `researchTimeoutMs`, `submitTimeoutMs`, and `monitorIntervalMs` through the same settings/config files. Explicit project values override global values; omitted or invalid project durations inherit global settings.
+- Document the complete global configuration options, defaults, precedence, and Pi/MCP boundaries.
+
+### Changed
+
+- Resolve Pi durations from CLI flags, then applicable timeout environment variables, then configuration, then built-in defaults. `EXA_TIMEOUT_MS` and `EXA_RESEARCH_TIMEOUT_MS` now also apply to Pi calls.
+- Validate Pi durations as positive integer milliseconds within Node's timer range. Malformed, fractional, nonpositive, and overflowing values fall back to the next valid source instead of accepting partial CLI values or overflowing timers.
+
 ## [7.0.0] - 2026-10-14
 
 The MCP stdio server now serves only MCP protocol `2026-07-28`. Pi behavior is unchanged.
