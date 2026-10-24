@@ -9,6 +9,13 @@ are noted rather than inferred.
 
 ## [Unreleased]
 
+## [3.0.6] - 2026-10-24
+
+### Changed
+
+- Refresh shared workspace dependencies and security overrides, including the MCP SDK 1.32.1 resolution used during development.
+- Validate against Pi 1.4.0 while keeping the root Pi development dependency ranges on 1.x. Extension behavior is unchanged.
+
 ## [3.0.5] - 2026-10-06
 
 ### Changed

@@ -400,51 +400,51 @@ describe("guided research from request through approved submission", () => {
     expect(record.status).toBe("planning");
   });
 
-  it.each([
-    { submitTimeoutMs: 1_500 },
-    { configSubmitTimeoutMs: 1_500 },
-  ])("keeps an unacknowledged create unknown using timeout $submitTimeoutMs/$configSubmitTimeoutMs", async (options) => {
-    const pi = await host(options);
-    const { cycleId, projectId } = await readyCycle(pi);
-    const proposal = await propose(pi, cycleId);
-    let releaseCreate: ((run: AgentRun) => void) | undefined;
-    offlineCreate.mockImplementationOnce(
-      () =>
-        new Promise<AgentRun>((resolve) => {
-          releaseCreate = resolve;
-        }),
-    );
-    const submitted = await pi.call("web_research_exa", {
-      researchMode: "submit",
-      cycleId,
-      proposalId: proposal.proposalId,
-    });
-    expect(submitted.isError).toBe(true);
-    expect(submitted.content[0].text).toContain("SUBMISSION_UNKNOWN");
-    expect(submitted.content[0].text).not.toContain("agent_run");
-    expect(submitted.details).toMatchObject({ runId: null, state: "unknown" });
-    expect(offlineCreate).toHaveBeenCalledTimes(1);
-    expect(offlineCancel).not.toHaveBeenCalled();
-    let record = JSON.parse(await readFile(await pi.recordPath(cycleId, projectId), "utf8"));
-    expect(record.attempts[0]).toMatchObject({ status: "unknown" });
-    expect(record.attempts[0].result).toBeUndefined();
-    expect(record.status).toBe("unknown");
-    // A genuine late acknowledgement settles the original attempt without a new create.
-    (releaseCreate as (run: AgentRun) => void)({ id: "agent_run_late", status: "running" });
-    await vi.waitFor(async () => {
-      record = JSON.parse(await readFile(await pi.recordPath(cycleId, projectId), "utf8"));
-      expect(record.attempts[0].result?.remoteId).toBe("agent_run_late");
-    });
-    expect(record.attempts[0].status).toBe("unknown");
-    expect(offlineCreate).toHaveBeenCalledTimes(1);
-    const retry = await pi.call("web_research_exa", {
-      researchMode: "submit",
-      cycleId,
-      proposalId: proposal.proposalId,
-    });
-    expect(retry.isError).toBe(true);
-    expect(offlineCreate).toHaveBeenCalledTimes(1);
-  });
+  it.each([{ submitTimeoutMs: 1_500 }, { configSubmitTimeoutMs: 1_500 }])(
+    "keeps an unacknowledged create unknown using timeout $submitTimeoutMs/$configSubmitTimeoutMs",
+    async (options) => {
+      const pi = await host(options);
+      const { cycleId, projectId } = await readyCycle(pi);
+      const proposal = await propose(pi, cycleId);
+      let releaseCreate: ((run: AgentRun) => void) | undefined;
+      offlineCreate.mockImplementationOnce(
+        () =>
+          new Promise<AgentRun>((resolve) => {
+            releaseCreate = resolve;
+          }),
+      );
+      const submitted = await pi.call("web_research_exa", {
+        researchMode: "submit",
+        cycleId,
+        proposalId: proposal.proposalId,
+      });
+      expect(submitted.isError).toBe(true);
+      expect(submitted.content[0].text).toContain("SUBMISSION_UNKNOWN");
+      expect(submitted.content[0].text).not.toContain("agent_run");
+      expect(submitted.details).toMatchObject({ runId: null, state: "unknown" });
+      expect(offlineCreate).toHaveBeenCalledTimes(1);
+      expect(offlineCancel).not.toHaveBeenCalled();
+      let record = JSON.parse(await readFile(await pi.recordPath(cycleId, projectId), "utf8"));
+      expect(record.attempts[0]).toMatchObject({ status: "unknown" });
+      expect(record.attempts[0].result).toBeUndefined();
+      expect(record.status).toBe("unknown");
+      // A genuine late acknowledgement settles the original attempt without a new create.
+      (releaseCreate as (run: AgentRun) => void)({ id: "agent_run_late", status: "running" });
+      await vi.waitFor(async () => {
+        record = JSON.parse(await readFile(await pi.recordPath(cycleId, projectId), "utf8"));
+        expect(record.attempts[0].result?.remoteId).toBe("agent_run_late");
+      });
+      expect(record.attempts[0].status).toBe("unknown");
+      expect(offlineCreate).toHaveBeenCalledTimes(1);
+      const retry = await pi.call("web_research_exa", {
+        researchMode: "submit",
+        cycleId,
+        proposalId: proposal.proposalId,
+      });
+      expect(retry.isError).toBe(true);
+      expect(offlineCreate).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("discloses and approves optional exploratory retrieval through the dialog before dispatch", async () => {
     const pi = await host();

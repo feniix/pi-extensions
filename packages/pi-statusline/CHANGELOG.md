@@ -7,6 +7,13 @@ publication metadata. Dates are npm publication dates (UTC).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-24
+
+### Changed
+
+- Refresh shared workspace dependencies, security overrides, and Biome tooling.
+- Validate against Pi 1.4.0 while preserving the existing Pi 1.x peer dependency ranges. Footer behavior is unchanged.
+
 ## [1.0.0] - 2026-10-05
 
 ### Changed

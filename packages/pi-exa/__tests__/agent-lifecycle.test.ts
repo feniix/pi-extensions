@@ -234,41 +234,41 @@ it("snapshots inspection metadata before an asynchronous host observer can mutat
   expect(sdk.create).not.toHaveBeenCalled();
 });
 
-it.each([
-  "timeout",
-  "aborted",
-])("keeps original GET observation attached after local inspection %s without remote cancellation", async (reason) => {
-  vi.useFakeTimers();
-  const signal = new AbortController();
-  let resolve!: (run: { id: string; status: "completed"; costDollars: { total: number } }) => void;
-  sdk.get.mockReturnValue(
-    new Promise((done) => {
-      resolve = done;
-    }),
-  );
-  const events: unknown[] = [];
-  const pending = inspectResearchRun("offline", "agent_run_existing", {
-    timeoutMs: 10,
-    signal: signal.signal,
-    observer: {
-      beforeGet: async () => () => {},
-      raw: async (phase, run) => {
-        events.push([phase, run.status, run.costDollars?.total]);
+it.each(["timeout", "aborted"])(
+  "keeps original GET observation attached after local inspection %s without remote cancellation",
+  async (reason) => {
+    vi.useFakeTimers();
+    const signal = new AbortController();
+    let resolve!: (run: { id: string; status: "completed"; costDollars: { total: number } }) => void;
+    sdk.get.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const events: unknown[] = [];
+    const pending = inspectResearchRun("offline", "agent_run_existing", {
+      timeoutMs: 10,
+      signal: signal.signal,
+      observer: {
+        beforeGet: async () => () => {},
+        raw: async (phase, run) => {
+          events.push([phase, run.status, run.costDollars?.total]);
+        },
       },
-    },
-  });
-  const assertion = expect(pending).rejects.toThrow(/stopped locally.*no remote cancellation/i);
-  await vi.advanceTimersByTimeAsync(0);
-  if (reason === "timeout") await vi.advanceTimersByTimeAsync(10);
-  else signal.abort();
-  await assertion;
-  resolve({ id: "agent_run_existing", status: "completed", costDollars: { total: 0 } });
-  await vi.runAllTimersAsync();
-  expect(events).toEqual([["get", "completed", 0]]);
-  expect(sdk.get).toHaveBeenCalledTimes(1);
-  expect(sdk.create).not.toHaveBeenCalled();
-  expect(sdk.cancel).not.toHaveBeenCalled();
-});
+    });
+    const assertion = expect(pending).rejects.toThrow(/stopped locally.*no remote cancellation/i);
+    await vi.advanceTimersByTimeAsync(0);
+    if (reason === "timeout") await vi.advanceTimersByTimeAsync(10);
+    else signal.abort();
+    await assertion;
+    resolve({ id: "agent_run_existing", status: "completed", costDollars: { total: 0 } });
+    await vi.runAllTimersAsync();
+    expect(events).toEqual([["get", "completed", 0]]);
+    expect(sdk.get).toHaveBeenCalledTimes(1);
+    expect(sdk.create).not.toHaveBeenCalled();
+    expect(sdk.cancel).not.toHaveBeenCalled();
+  },
+);
 
 it("blocks GET on revoked final inspection guard or an already-aborted signal", async () => {
   const signal = new AbortController();

@@ -14,20 +14,13 @@ describe("Exa runtime configuration", () => {
     expect(parseConfig(config)).toMatchObject(config);
   });
 
-  it.each([
-    0,
-    -1,
-    1.5,
-    Number.NaN,
-    Number.POSITIVE_INFINITY,
-    2_147_483_648,
-    "100",
-    null,
-    true,
-  ])("ignores invalid config duration %s", (value) => {
-    const parsed = parseConfig(Object.fromEntries(keys.map((key) => [key, value])));
-    for (const key of keys) expect(parsed[key]).toBeUndefined();
-  });
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648, "100", null, true])(
+    "ignores invalid config duration %s",
+    (value) => {
+      const parsed = parseConfig(Object.fromEntries(keys.map((key) => [key, value])));
+      for (const key of keys) expect(parsed[key]).toBeUndefined();
+    },
+  );
 
   it("uses config when flags and environment are absent", () => {
     vi.stubEnv("EXA_TIMEOUT_MS", "");

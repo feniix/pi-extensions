@@ -39,21 +39,21 @@
     ]
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.3.5",
-    "@earendil-works/pi-ai": "^1.1.0",
-    "@earendil-works/pi-coding-agent": "^1.1.0",
-    "@earendil-works/pi-tui": "^1.1.0",
+    "@biomejs/biome": "^2.6.2",
+    "@earendil-works/pi-ai": "1.x",
+    "@earendil-works/pi-coding-agent": "1.x",
+    "@earendil-works/pi-tui": "1.x",
     "@modelcontextprotocol/client": "^2.3.1",
-    "@types/node": "22.19.19",
-    "@vitest/coverage-v8": "^4.1.2",
+    "@types/node": "22.20.5",
+    "@vitest/coverage-v8": "^4.1.12",
     "@xterm/addon-unicode11": "0.9.0",
     "@xterm/headless": "6.0.0",
-    "typebox": "^1.0.0",
-    "typescript": "^5.5.0",
-    "vitest": "^4.0.18"
+    "typebox": "^1.4.3",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
   },
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.32.1"
   }
 }

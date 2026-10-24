@@ -26,17 +26,13 @@ describe("decimal monetary conversion", () => {
     expect(moneyMicros(dollars)).toBe(exposure);
   });
 
-  it.each([
-    NaN,
-    Infinity,
-    -Infinity,
-    -0.1,
-    Number.MAX_VALUE,
-    9007199254.740992,
-  ])("rejects invalid or unsafe amounts %s for both purposes", (dollars) => {
-    expect(() => moneyMicros(dollars, true)).toThrow();
-    expect(() => moneyMicros(dollars)).toThrow();
-  });
+  it.each([NaN, Infinity, -Infinity, -0.1, Number.MAX_VALUE, 9007199254.740992])(
+    "rejects invalid or unsafe amounts %s for both purposes",
+    (dollars) => {
+      expect(() => moneyMicros(dollars, true)).toThrow();
+      expect(() => moneyMicros(dollars)).toThrow();
+    },
+  );
 });
 
 describe("exploratory accounting policy", () => {

@@ -638,44 +638,50 @@ describe("Pi cycle commands and tools", () => {
   it.each([
     { originalDollars: 0.000123, conflict: false },
     { originalDollars: 0.000124, conflict: true },
-  ])("uses a real mock SDK GET to distinguish legacy receipt replay from changed dollars $originalDollars", async ({
-    originalDollars,
-    conflict,
-  }) => {
-    const { pi, artifact } = await readyAgentHost();
-    const reply = {
-      id: "agent_historical_receipt",
-      status: "completed",
-      output: { structured: { answer: "done" } },
-      costDollars: { total: originalDollars },
-    } satisfies AgentRun;
-    offlineCreate.mockResolvedValueOnce(reply);
-    const initial = await pi.submit(artifact.cycleId);
-    expect(initial.isError).toBe(false);
-    const status = (await pi.call("exa_research_status")).details;
-    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
-    const path = join(pi.context.cwd, "agent", "research-cycles", String(status.projectId), `${artifact.cycleId}.json`);
-    const legacy = JSON.parse(await readFile(path, "utf8"));
-    legacy.ledger[0].reportedMicros = Math.ceil(originalDollars * 1_000_000);
-    await writeFile(path, JSON.stringify(legacy));
-    await pi.command?.handler(`resume ${artifact.cycleId}`, pi.context);
-    offlineGet.mockResolvedValueOnce({ ...reply, costDollars: { total: 0.000123 } });
-    const recovered = await pi.call("web_research_exa", {
-      researchMode: "recover",
-      cycleId: artifact.cycleId,
-      attemptId: initial.details.attemptId,
-    });
-    expect(recovered.isError).toBe(false);
-    const retained = JSON.parse(await readFile(path, "utf8"));
-    expect(retained.ledger[0].reportedMicros).toBe(124);
-    expect(retained.ledger[0].conflictingMicros ?? []).toEqual(conflict ? [123] : []);
-    expect(retained.grants).toEqual(legacy.grants);
-    expect(retained.attempts).toHaveLength(1);
-    expect(offlineCreate).toHaveBeenCalledOnce();
-    expect(offlineGet).toHaveBeenCalledExactlyOnceWith(reply.id);
-    expect(offlineCancel).not.toHaveBeenCalled();
-    await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
-  });
+  ])(
+    "uses a real mock SDK GET to distinguish legacy receipt replay from changed dollars $originalDollars",
+    async ({ originalDollars, conflict }) => {
+      const { pi, artifact } = await readyAgentHost();
+      const reply = {
+        id: "agent_historical_receipt",
+        status: "completed",
+        output: { structured: { answer: "done" } },
+        costDollars: { total: originalDollars },
+      } satisfies AgentRun;
+      offlineCreate.mockResolvedValueOnce(reply);
+      const initial = await pi.submit(artifact.cycleId);
+      expect(initial.isError).toBe(false);
+      const status = (await pi.call("exa_research_status")).details;
+      await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+      const path = join(
+        pi.context.cwd,
+        "agent",
+        "research-cycles",
+        String(status.projectId),
+        `${artifact.cycleId}.json`,
+      );
+      const legacy = JSON.parse(await readFile(path, "utf8"));
+      legacy.ledger[0].reportedMicros = Math.ceil(originalDollars * 1_000_000);
+      await writeFile(path, JSON.stringify(legacy));
+      await pi.command?.handler(`resume ${artifact.cycleId}`, pi.context);
+      offlineGet.mockResolvedValueOnce({ ...reply, costDollars: { total: 0.000123 } });
+      const recovered = await pi.call("web_research_exa", {
+        researchMode: "recover",
+        cycleId: artifact.cycleId,
+        attemptId: initial.details.attemptId,
+      });
+      expect(recovered.isError).toBe(false);
+      const retained = JSON.parse(await readFile(path, "utf8"));
+      expect(retained.ledger[0].reportedMicros).toBe(124);
+      expect(retained.ledger[0].conflictingMicros ?? []).toEqual(conflict ? [123] : []);
+      expect(retained.grants).toEqual(legacy.grants);
+      expect(retained.attempts).toHaveLength(1);
+      expect(offlineCreate).toHaveBeenCalledOnce();
+      expect(offlineGet).toHaveBeenCalledExactlyOnceWith(reply.id);
+      expect(offlineCancel).not.toHaveBeenCalled();
+      await pi.handlers.get("session_shutdown")?.({} as never, pi.context);
+    },
+  );
 
   it("projects Agent progress and final response once each with consistent completion guidance", async () => {
     const { pi, artifact } = await readyAgentHost();
@@ -1500,42 +1506,43 @@ describe("Pi cycle commands and tools", () => {
     { tool: "web_fetch_exa", endpoint: "getContents", args: { urls: ["https://example.com/source"] } },
     { tool: "web_find_similar_exa", endpoint: "findSimilar", args: { url: "https://example.com/source" } },
     { tool: "web_answer_exa", endpoint: "answer", args: { query: "topic" } },
-  ] as const)("captures $tool results from its actual SDK endpoint after spending authorization", async ({
-    tool,
-    endpoint,
-    args,
-  }) => {
-    const pi = await host();
-    await pi.command?.handler("start topic", pi.context);
-    const status = (await pi.call("exa_research_status")).details;
-    await pi.command?.handler(`approve ${status.id} 1 ${tool}`, pi.context);
-    offlineSearch.mockResolvedValue({
-      results: [{ id: "https://example.com/source", url: "https://example.com/source", title: "Source", text: "body" }],
-      citations: [
-        { id: "https://example.com/source", url: "https://example.com/source", title: "Source", text: "body" },
-      ],
-      answer: "Generated answer",
-      requestId: "offline",
-      costDollars: { total: 0 },
-    });
-    let response = await pi.call(tool, { ...args, cycleId: status.id });
-    if (response.isError && typeof response.details.requestHash === "string") {
-      await pi.command?.handler(`approve-request ${status.id} ${response.details.requestHash} 0.02`, pi.context);
-      response = await pi.call(tool, { ...args, cycleId: status.id });
-    }
-    expect(response.isError, JSON.stringify(response)).not.toBe(true);
-    for (const [name, spy] of Object.entries(offlineEndpoints)) {
-      expect(spy).toHaveBeenCalledTimes(name === endpoint ? 1 : 0);
-    }
-    expect(response.details).toMatchObject({
-      candidates: [{ url: "https://example.com/source", decision: "candidate", provenance: [{ tool }] }],
-    });
-    expect((await pi.call("exa_research_status")).details).toMatchObject({
-      sources: [],
-      criteriaCoverage: { supported: 0 },
-      ledger: [{ reportedMicros: 0 }],
-    });
-  });
+  ] as const)(
+    "captures $tool results from its actual SDK endpoint after spending authorization",
+    async ({ tool, endpoint, args }) => {
+      const pi = await host();
+      await pi.command?.handler("start topic", pi.context);
+      const status = (await pi.call("exa_research_status")).details;
+      await pi.command?.handler(`approve ${status.id} 1 ${tool}`, pi.context);
+      offlineSearch.mockResolvedValue({
+        results: [
+          { id: "https://example.com/source", url: "https://example.com/source", title: "Source", text: "body" },
+        ],
+        citations: [
+          { id: "https://example.com/source", url: "https://example.com/source", title: "Source", text: "body" },
+        ],
+        answer: "Generated answer",
+        requestId: "offline",
+        costDollars: { total: 0 },
+      });
+      let response = await pi.call(tool, { ...args, cycleId: status.id });
+      if (response.isError && typeof response.details.requestHash === "string") {
+        await pi.command?.handler(`approve-request ${status.id} ${response.details.requestHash} 0.02`, pi.context);
+        response = await pi.call(tool, { ...args, cycleId: status.id });
+      }
+      expect(response.isError, JSON.stringify(response)).not.toBe(true);
+      for (const [name, spy] of Object.entries(offlineEndpoints)) {
+        expect(spy).toHaveBeenCalledTimes(name === endpoint ? 1 : 0);
+      }
+      expect(response.details).toMatchObject({
+        candidates: [{ url: "https://example.com/source", decision: "candidate", provenance: [{ tool }] }],
+      });
+      expect((await pi.call("exa_research_status")).details).toMatchObject({
+        sources: [],
+        criteriaCoverage: { supported: 0 },
+        ledger: [{ reportedMicros: 0 }],
+      });
+    },
+  );
   it("captures attributed SDK candidates, curates them explicitly, and isolates unrelated standalone results", async () => {
     const pi = await host();
     await pi.command?.handler("start topic", pi.context);
@@ -1610,27 +1617,27 @@ describe("Pi cycle commands and tools", () => {
     expect(pi.command?.description).not.toMatch(/replacement remain[s]? gated|recovery.*remain[s]? gated/i);
   });
 
-  it.each([
-    "cycleId",
-    "expectedRevision",
-    "artifactHash",
-  ])("rejects standalone requests carrying %s without dispatch or ledger mutation", async (field) => {
-    const pi = await host();
-    await pi.command?.handler("start topic", pi.context);
-    const before = (await pi.call("exa_research_status")).details;
-    const reference = field === "cycleId" ? before.id : field === "expectedRevision" ? before.revision : "a".repeat(64);
-    const response = await pi.call("web_search_exa", {
-      query: "topic",
-      researchMode: "standalone",
-      [field]: reference,
-    });
-    expect(response.isError).toBe(true);
-    expect(response.content[0]).toMatchObject({
-      text: expect.stringContaining("Standalone requests must omit cycle references"),
-    });
-    expect(offlineSearch).not.toHaveBeenCalled();
-    expect((await pi.call("exa_research_status")).details).toEqual(before);
-  });
+  it.each(["cycleId", "expectedRevision", "artifactHash"])(
+    "rejects standalone requests carrying %s without dispatch or ledger mutation",
+    async (field) => {
+      const pi = await host();
+      await pi.command?.handler("start topic", pi.context);
+      const before = (await pi.call("exa_research_status")).details;
+      const reference =
+        field === "cycleId" ? before.id : field === "expectedRevision" ? before.revision : "a".repeat(64);
+      const response = await pi.call("web_search_exa", {
+        query: "topic",
+        researchMode: "standalone",
+        [field]: reference,
+      });
+      expect(response.isError).toBe(true);
+      expect(response.content[0]).toMatchObject({
+        text: expect.stringContaining("Standalone requests must omit cycle references"),
+      });
+      expect(offlineSearch).not.toHaveBeenCalled();
+      expect((await pi.call("exa_research_status")).details).toEqual(before);
+    },
+  );
 
   it("retries the original genuine total after a transient write failure rather than replacing it with missing evidence", async () => {
     const pi = await host();
@@ -1890,53 +1897,53 @@ describe("Pi cycle commands and tools", () => {
     expect(JSON.stringify(saved)).not.toContain("DO_NOT_ARCHIVE_RESPONSE");
   });
 
-  it.each([
-    "abort",
-    "timeout",
-  ])("keeps %s liability until its late raw receipt, including after archive", async (mode) => {
-    const pi = await host(true, mode === "timeout" ? 500 : undefined);
-    await pi.command?.handler("start topic", pi.context);
-    const status = (await pi.call("exa_research_status")).details;
-    await pi.command?.handler(`approve ${status.id} 1`, pi.context);
-    let resolve!: (response: Record<string, unknown>) => void;
-    let entered!: () => void;
-    const barrier = new Promise<void>((done) => {
-      entered = done;
-    });
-    const sdk = new Promise<Record<string, unknown>>((done) => {
-      resolve = done;
-    });
-    offlineSearch.mockImplementationOnce(async () => {
-      entered();
-      return sdk;
-    });
-    const abort = new AbortController();
-    const pending = pi.call("web_search_exa", { query: "topic", cycleId: status.id }, abort.signal);
-    await Promise.race([
-      barrier,
-      pending.then(() => {
-        throw new Error("SDK did not start.");
-      }),
-    ]);
-    if (mode === "abort") abort.abort();
-    const interrupted = await pending;
-    expect(interrupted.details.accounting).toMatchObject({ reason: "UNKNOWN_LIABILITY" });
-    await pi.command?.handler(`archive ${status.id}`, pi.context);
-    expect(pi.notify).toHaveBeenLastCalledWith(expect.stringContaining("does not cancel"), "info");
-    resolve({ results: [], costDollars: { total: 0.009 } });
-    await vi.waitFor(async () => {
-      await pi.command?.handler("list", pi.context);
-      const saved = JSON.parse(pi.notify.mock.lastCall?.[0] ?? "[]")[0];
-      expect(saved).toMatchObject({
-        archived: true,
-        ledger: [{ status: "reported", reportedMicros: 9_000 }],
-        accounting: { reportedDollars: 0.009, pendingEstimatedDollars: 0 },
+  it.each(["abort", "timeout"])(
+    "keeps %s liability until its late raw receipt, including after archive",
+    async (mode) => {
+      const pi = await host(true, mode === "timeout" ? 500 : undefined);
+      await pi.command?.handler("start topic", pi.context);
+      const status = (await pi.call("exa_research_status")).details;
+      await pi.command?.handler(`approve ${status.id} 1`, pi.context);
+      let resolve!: (response: Record<string, unknown>) => void;
+      let entered!: () => void;
+      const barrier = new Promise<void>((done) => {
+        entered = done;
       });
-      expect(saved).not.toHaveProperty("owner");
-      expect(saved.grants).toHaveLength(1);
-    });
-    expect(offlineSearch).toHaveBeenCalledOnce();
-  });
+      const sdk = new Promise<Record<string, unknown>>((done) => {
+        resolve = done;
+      });
+      offlineSearch.mockImplementationOnce(async () => {
+        entered();
+        return sdk;
+      });
+      const abort = new AbortController();
+      const pending = pi.call("web_search_exa", { query: "topic", cycleId: status.id }, abort.signal);
+      await Promise.race([
+        barrier,
+        pending.then(() => {
+          throw new Error("SDK did not start.");
+        }),
+      ]);
+      if (mode === "abort") abort.abort();
+      const interrupted = await pending;
+      expect(interrupted.details.accounting).toMatchObject({ reason: "UNKNOWN_LIABILITY" });
+      await pi.command?.handler(`archive ${status.id}`, pi.context);
+      expect(pi.notify).toHaveBeenLastCalledWith(expect.stringContaining("does not cancel"), "info");
+      resolve({ results: [], costDollars: { total: 0.009 } });
+      await vi.waitFor(async () => {
+        await pi.command?.handler("list", pi.context);
+        const saved = JSON.parse(pi.notify.mock.lastCall?.[0] ?? "[]")[0];
+        expect(saved).toMatchObject({
+          archived: true,
+          ledger: [{ status: "reported", reportedMicros: 9_000 }],
+          accounting: { reportedDollars: 0.009, pendingEstimatedDollars: 0 },
+        });
+        expect(saved).not.toHaveProperty("owner");
+        expect(saved.grants).toHaveLength(1);
+      });
+      expect(offlineSearch).toHaveBeenCalledOnce();
+    },
+  );
 
   it("requires and consumes operator permission for an exact unsupported request", async () => {
     const pi = await host();
@@ -2182,68 +2189,68 @@ describe("Pi cycle commands and tools", () => {
     }
   });
 
-  it.each([
-    "completed",
-    "unknown",
-  ])("blocks %s attempts after archive while unrelated continuations remain standalone", async (lifecycle) => {
-    const pi = await host();
-    await pi.command?.handler("start topic", pi.context);
-    const status = (await pi.call("exa_research_status")).details;
-    const path = join(pi.context.cwd, "agent", "research-cycles", String(status.projectId), `${status.id}.json`);
-    const record = JSON.parse(await readFile(path, "utf8"));
-    record.status = lifecycle;
-    record.attempts = [{ id: "attempt-one", status: lifecycle, runId: "remote-one" }];
-    await writeFile(path, JSON.stringify(record));
-    const forwarded = vi.fn(async () => ({ content: [{ type: "text" as const, text: "offline" }], details: {} }));
-    const tools = new Map<string, Parameters<PiToolRegistration["registerTool"]>[0]>();
-    const registration = cyclePiRegistration({
-      on: vi.fn(),
-      registerCommand: vi.fn(),
-      registerTool: (tool: Parameters<PiToolRegistration["registerTool"]>[0]) => {
-        tools.set(tool.name, tool);
-      },
-    } as unknown as ExtensionAPI);
-    registration.registerTool({
-      name: "web_research_exa",
-      label: "Offline",
-      description: "Offline",
-      parameters: Type.Object({ query: Type.String() }),
-      execute: forwarded,
-    });
-    const tool = tools.get("web_research_exa");
-    if (!tool) throw new Error("Missing offline research tool");
-    const call = () =>
-      tool.execute(
+  it.each(["completed", "unknown"])(
+    "blocks %s attempts after archive while unrelated continuations remain standalone",
+    async (lifecycle) => {
+      const pi = await host();
+      await pi.command?.handler("start topic", pi.context);
+      const status = (await pi.call("exa_research_status")).details;
+      const path = join(pi.context.cwd, "agent", "research-cycles", String(status.projectId), `${status.id}.json`);
+      const record = JSON.parse(await readFile(path, "utf8"));
+      record.status = lifecycle;
+      record.attempts = [{ id: "attempt-one", status: lifecycle, runId: "remote-one" }];
+      await writeFile(path, JSON.stringify(record));
+      const forwarded = vi.fn(async () => ({ content: [{ type: "text" as const, text: "offline" }], details: {} }));
+      const tools = new Map<string, Parameters<PiToolRegistration["registerTool"]>[0]>();
+      const registration = cyclePiRegistration({
+        on: vi.fn(),
+        registerCommand: vi.fn(),
+        registerTool: (tool: Parameters<PiToolRegistration["registerTool"]>[0]) => {
+          tools.set(tool.name, tool);
+        },
+      } as unknown as ExtensionAPI);
+      registration.registerTool({
+        name: "web_research_exa",
+        label: "Offline",
+        description: "Offline",
+        parameters: Type.Object({ query: Type.String() }),
+        execute: forwarded,
+      });
+      const tool = tools.get("web_research_exa");
+      if (!tool) throw new Error("Missing offline research tool");
+      const call = () =>
+        tool.execute(
+          "test",
+          {
+            query: "continuation",
+            previousRunId: "remote-one",
+            researchMode: "standalone",
+          },
+          undefined,
+          undefined,
+          pi.context,
+        );
+      // This decorator has no local active pointer: identifiable durable attempts
+      // still belong to their project cycle, not an unrelated standalone call.
+      expect((await call()).isError).toBe(true);
+      await pi.command?.handler("archive", pi.context);
+      expect((await call()).isError).toBe(true);
+      expect(forwarded).not.toHaveBeenCalled();
+      const unrelated = await tool.execute(
         "test",
         {
-          query: "continuation",
-          previousRunId: "remote-one",
+          query: "unrelated",
+          previousRunId: "unrelated-run",
           researchMode: "standalone",
         },
         undefined,
         undefined,
         pi.context,
       );
-    // This decorator has no local active pointer: identifiable durable attempts
-    // still belong to their project cycle, not an unrelated standalone call.
-    expect((await call()).isError).toBe(true);
-    await pi.command?.handler("archive", pi.context);
-    expect((await call()).isError).toBe(true);
-    expect(forwarded).not.toHaveBeenCalled();
-    const unrelated = await tool.execute(
-      "test",
-      {
-        query: "unrelated",
-        previousRunId: "unrelated-run",
-        researchMode: "standalone",
-      },
-      undefined,
-      undefined,
-      pi.context,
-    );
-    expect(unrelated.isError).not.toBe(true);
-    expect(forwarded).toHaveBeenCalledTimes(1);
-  });
+      expect(unrelated.isError).not.toBe(true);
+      expect(forwarded).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("publishes a root-object schema for provider-compatible routing arguments", async () => {
     const pi = await host();

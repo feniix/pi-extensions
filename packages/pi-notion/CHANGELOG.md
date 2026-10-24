@@ -9,6 +9,13 @@ uncertain release boundaries are noted rather than inferred.
 
 ## [Unreleased]
 
+## [4.0.2] - 2026-10-24
+
+### Changed
+
+- Update Node.js 22 type definitions to 22.20.5 and refresh shared workspace dependencies and security overrides.
+- Validate against Pi 1.4.0 while keeping the root Pi development dependency ranges on 1.x. Extension behavior and the existing Pi 1.1.0 minimum requirement are unchanged.
+
 ## [4.0.1] - 2026-10-15
 
 ### Fixed

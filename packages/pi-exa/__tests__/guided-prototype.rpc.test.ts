@@ -200,7 +200,8 @@ describe("guided background research prototype in a real pi --mode rpc process",
     const lastAssistant = pi.records
       .filter((record) => record.type === "message_end" && (record.message as { role?: string }).role === "assistant")
       .at(-1);
-    expect(JSON.stringify((lastAssistant?.message as { content: unknown }).content)).toContain("The research finished");
+    if (!lastAssistant) throw new Error("Missing assistant message");
+    expect(JSON.stringify((lastAssistant.message as { content: unknown }).content)).toContain("The research finished");
 
     // A second approved attempt is still pending when the session is replaced.
     void pi

@@ -102,7 +102,8 @@ describe("pi-devtools", () => {
         vi.mocked(execGit).mockClear();
         vi.mocked(execGh).mockClear();
         const tool = toolDefinitions.find((candidate) => candidate.name === name);
-        await (tool?.execute as (...args: unknown[]) => Promise<unknown>)("call-id", params, undefined, undefined, {
+        if (!tool) throw new Error(`Missing tool: ${name}`);
+        await (tool.execute as (...args: unknown[]) => Promise<unknown>)("call-id", params, undefined, undefined, {
           cwd: sentinelCwd,
         });
 
@@ -129,7 +130,8 @@ describe("pi-devtools", () => {
       try {
         writeFileSync(join(cwd, "custom.json"), '{"version":"1.0.0"}\n');
         const tool = toolDefinitions.find(({ name }) => name === "devtools_bump_version");
-        await (tool?.execute as (...args: unknown[]) => Promise<unknown>)(
+        if (!tool) throw new Error("Missing tool: devtools_bump_version");
+        await (tool.execute as (...args: unknown[]) => Promise<unknown>)(
           "call-id",
           { newVersion: "1.1.0", file: "custom.json" },
           undefined,

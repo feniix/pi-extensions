@@ -79,38 +79,37 @@ it("does not permit an assessment below the known fixed price or reuse a consume
   });
 });
 
-it.each([
-  null,
-  { answer: 7 },
-  { answer: "valid", extra: "unrequested" },
-])("classifies remote completed invalid output %j as local failure, never remote failure", (output) => {
-  const provenance: EvidenceProvenance = {
-    operationId: "operation",
-    revision: 1,
-    requestHash: "a".repeat(64),
-    tool: "web_research_exa",
-    retrievedAt: "2026-10-11",
-  };
-  const result = curateAgentRun(
-    {
-      id: "agent_run_one",
-      status: "completed",
-      costDollars: { total: 0 },
-      output: { structured: output, text: "unvalidated output" },
-    },
-    { type: "object", required: ["answer"], properties: { answer: { type: "string" } }, additionalProperties: false },
-    provenance,
-  );
-  expect(result).toMatchObject({
-    remoteStatus: "completed",
-    terminal: true,
-    processing: "failed",
-    totalDollars: 0,
-    diagnostics: ["INVALID_TASK_OUTPUT: recover and validate the existing run; never submit a replacement."],
-  });
-  expect(result.taskOutput).toBeUndefined();
-  expect(JSON.stringify(result)).not.toContain("unvalidated");
-});
+it.each([null, { answer: 7 }, { answer: "valid", extra: "unrequested" }])(
+  "classifies remote completed invalid output %j as local failure, never remote failure",
+  (output) => {
+    const provenance: EvidenceProvenance = {
+      operationId: "operation",
+      revision: 1,
+      requestHash: "a".repeat(64),
+      tool: "web_research_exa",
+      retrievedAt: "2026-10-11",
+    };
+    const result = curateAgentRun(
+      {
+        id: "agent_run_one",
+        status: "completed",
+        costDollars: { total: 0 },
+        output: { structured: output, text: "unvalidated output" },
+      },
+      { type: "object", required: ["answer"], properties: { answer: { type: "string" } }, additionalProperties: false },
+      provenance,
+    );
+    expect(result).toMatchObject({
+      remoteStatus: "completed",
+      terminal: true,
+      processing: "failed",
+      totalDollars: 0,
+      diagnostics: ["INVALID_TASK_OUTPUT: recover and validate the existing run; never submit a replacement."],
+    });
+    expect(result.taskOutput).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain("unvalidated");
+  },
+);
 
 it("keeps pending costs provisional and filters usage to requested provider metadata", () => {
   const provenance: EvidenceProvenance = {
@@ -144,53 +143,53 @@ it("keeps pending costs provisional and filters usage to requested provider meta
   expect(result.taskOutput).toBeUndefined();
 });
 
-it.each([
-  "failed",
-  "cancelled",
-])("retains a closed remote diagnostic for %s without copying arbitrary error prose or credentials", (status) => {
-  const provenance: EvidenceProvenance = {
-    operationId: "operation",
-    revision: 1,
-    requestHash: "a".repeat(64),
-    tool: "web_research_exa",
-    retrievedAt: "2026-10-11",
-  };
-  const result = curateAgentRun(
-    {
-      id: "agent_run_error",
-      status,
-      costDollars: { total: 0.01 },
-      error: {
-        code: "INVALID_REQUEST",
-        message: "secret credential and private excerpt",
-        path: "https://example.com/?sig=credential",
-        actual: { apiKey: "secret" },
-      },
-    },
-    { type: "object" },
-    provenance,
-  );
-  expect(result).toMatchObject({
-    remoteStatus: status,
-    processing: "not-applicable",
-    totalDollars: 0.01,
-    remoteError: { kind: "exa-reported-error", category: "invalid-request", code: "INVALID_REQUEST" },
-  });
-  expect(JSON.stringify(result)).not.toMatch(/secret|credential|private excerpt|sig=/);
-  expect(
-    curateAgentRun(
+it.each(["failed", "cancelled"])(
+  "retains a closed remote diagnostic for %s without copying arbitrary error prose or credentials",
+  (status) => {
+    const provenance: EvidenceProvenance = {
+      operationId: "operation",
+      revision: 1,
+      requestHash: "a".repeat(64),
+      tool: "web_research_exa",
+      retrievedAt: "2026-10-11",
+    };
+    const result = curateAgentRun(
       {
         id: "agent_run_error",
         status,
-        error: { code: "secret-opaque-code", message: "secret" },
+        costDollars: { total: 0.01 },
+        error: {
+          code: "INVALID_REQUEST",
+          message: "secret credential and private excerpt",
+          path: "https://example.com/?sig=credential",
+          actual: { apiKey: "secret" },
+        },
       },
       { type: "object" },
       provenance,
-    ),
-  ).toMatchObject({
-    remoteError: { category: "unknown" },
-  });
-});
+    );
+    expect(result).toMatchObject({
+      remoteStatus: status,
+      processing: "not-applicable",
+      totalDollars: 0.01,
+      remoteError: { kind: "exa-reported-error", category: "invalid-request", code: "INVALID_REQUEST" },
+    });
+    expect(JSON.stringify(result)).not.toMatch(/secret|credential|private excerpt|sig=/);
+    expect(
+      curateAgentRun(
+        {
+          id: "agent_run_error",
+          status,
+          error: { code: "secret-opaque-code", message: "secret" },
+        },
+        { type: "object" },
+        provenance,
+      ),
+    ).toMatchObject({
+      remoteError: { category: "unknown" },
+    });
+  },
+);
 
 it("retains only validated task output and curated credential-free grounding, never the full SDK response", () => {
   const raw = {

@@ -48,20 +48,17 @@ describe("release changelog gate", () => {
     expect(result.stderr).toContain("Usage:");
   });
 
-  it.each([
-    "pi-devtools",
-    "pi-exa",
-    "pi-notion",
-    "pi-ref-tools",
-    "pi-statusline",
-  ])("ships a valid current changelog for %s", (name) => {
-    const packagePath = fileURLToPath(new URL(`../../${name}/`, import.meta.url));
-    const result = spawnSync(process.execPath, [script, packagePath], { encoding: "utf8" });
-    expect(result.stderr).toBe("");
-    expect(result.status).toBe(0);
-    const manifest = JSON.parse(readFileSync(join(packagePath, "package.json"), "utf8"));
-    expect(manifest.files).toContain("CHANGELOG.md");
-  });
+  it.each(["pi-devtools", "pi-exa", "pi-notion", "pi-ref-tools", "pi-statusline"])(
+    "ships a valid current changelog for %s",
+    (name) => {
+      const packagePath = fileURLToPath(new URL(`../../${name}/`, import.meta.url));
+      const result = spawnSync(process.execPath, [script, packagePath], { encoding: "utf8" });
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      const manifest = JSON.parse(readFileSync(join(packagePath, "package.json"), "utf8"));
+      expect(manifest.files).toContain("CHANGELOG.md");
+    },
+  );
 
   it("gates checks and revalidates immediately before publication", () => {
     const workflow = readFileSync(new URL("../../../.github/workflows/release.yml", import.meta.url), "utf8");

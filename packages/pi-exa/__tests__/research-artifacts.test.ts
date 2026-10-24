@@ -80,16 +80,15 @@ describe("research request artifact compiler", () => {
     expect(compileResearchArtifact(record).request.outputSchema).toEqual(taskSchema);
   });
 
-  it.each([
-    "completed",
-    "running",
-    "unknown",
-  ] as const)("cannot compile %s cycles into executable requests", (status) => {
-    const record = cycle();
-    record.status = status;
-    record.executionPlan = { goal: "Research", taskSchema: { type: "object" } };
-    expect(() => compileResearchArtifact(record)).toThrow("CYCLE_NOT_EXECUTABLE");
-  });
+  it.each(["completed", "running", "unknown"] as const)(
+    "cannot compile %s cycles into executable requests",
+    (status) => {
+      const record = cycle();
+      record.status = status;
+      record.executionPlan = { goal: "Research", taskSchema: { type: "object" } };
+      expect(() => compileResearchArtifact(record)).toThrow("CYCLE_NOT_EXECUTABLE");
+    },
+  );
 
   it("rejects non-JSON row values and keeps caller mutations outside authoritative state", () => {
     const record = cycle();

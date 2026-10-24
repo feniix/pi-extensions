@@ -9,6 +9,13 @@ uncertain release boundaries are noted rather than inferred.
 
 ## [Unreleased]
 
+## [3.1.5] - 2026-10-24
+
+### Changed
+
+- Refresh shared workspace dependencies and security overrides; validate against Pi 1.4.0 while keeping the root Pi development dependency ranges on 1.x.
+- Update tests for Biome 2.6 formatting and explicitly guard missing tool definitions before execution. Extension behavior is unchanged.
+
 ## [3.1.4] - 2026-10-06
 
 ### Changed

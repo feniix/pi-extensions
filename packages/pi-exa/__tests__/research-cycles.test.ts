@@ -51,21 +51,21 @@ describe("research storage availability regressions", () => {
     expect(await fs.readdir(root)).toEqual([]);
   });
 
-  it.each([
-    false,
-    true,
-  ])("removes candidate links before the protected action, including failure=%s", async (failure) => {
-    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
-    roots.push(root);
-    const action = withResearchStorageLock(root, async () => {
-      expect(await fs.readdir(root)).toEqual([".lock"]);
-      if (failure) throw new Error("protected action failed");
-      return "success";
-    });
-    if (failure) await expect(action).rejects.toThrow("protected action failed");
-    else await expect(action).resolves.toBe("success");
-    expect(await fs.readdir(root)).toEqual([]);
-  });
+  it.each([false, true])(
+    "removes candidate links before the protected action, including failure=%s",
+    async (failure) => {
+      const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+      roots.push(root);
+      const action = withResearchStorageLock(root, async () => {
+        expect(await fs.readdir(root)).toEqual([".lock"]);
+        if (failure) throw new Error("protected action failed");
+        return "success";
+      });
+      if (failure) await expect(action).rejects.toThrow("protected action failed");
+      else await expect(action).resolves.toBe("success");
+      expect(await fs.readdir(root)).toEqual([]);
+    },
+  );
 
   it("recovers a proven dead transaction lock without dropping records", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
@@ -681,53 +681,53 @@ describe("durable research cycles", () => {
     expect(await readFile(path, "utf8")).toBe(json);
   });
 
-  it.each([
-    "hidden-amendment",
-    "zero-floor",
-  ])("rejects replacement proof %s despite internally matching amount and prefix fields", async (corruption) => {
-    const { controller, cycle, hash, root } = await readyAgent();
-    const first = (await controller.reserveAgent()).attempt;
-    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
-    (await original.beforeCreate())();
-    await original.raw("create", { id: "agent_run_cutoff", status: "running" });
-    await original.finish();
-    const approved = await controller.grantReplacement(cycle.id, first.id, hash, 0.2);
-    const risk = approved.grants.at(-1);
-    if (!risk || !("id" in risk)) throw new Error("Risk missing");
-    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
-    const second = (await controller.reserveAgent({}, "replace")).attempt;
-    await controller.agentLifecycleObserver(cycle.id, second.id, hash).finish();
-    if (corruption === "hidden-amendment")
-      await controller.grantUncertainty(cycle.id, "liability", first.operationId, 0.3);
-    await controller.detach();
-    const saved = await controller.inspect(cycle.id);
-    const entry = saved.attempts.find((item) => "id" in item && item.id === second.id);
-    if (!entry) throw new Error("Intent missing");
-    const proof = Reflect.get(entry, "retryAuthorization");
-    if (!proof || typeof proof !== "object") throw new Error("Proof missing");
-    if (corruption === "hidden-amendment") {
-      const amendment = saved.grants.at(-1);
-      if (!amendment) throw new Error("Amendment missing");
-      Reflect.set(amendment, "issuedAt", new Date(Date.parse(second.createdAt) - 1).toISOString());
-    } else {
-      const grant = saved.grants.find((item) => "id" in item && item.id === risk.id);
-      if (!grant) throw new Error("Risk missing");
-      const liability = saved.grants.find(
-        (item) => "id" in item && item.id === Reflect.get(grant, "liabilityPermissionId"),
-      );
-      if (!liability) throw new Error("Liability missing");
-      Reflect.set(grant, "originalAllowanceMicros", 0);
-      Reflect.set(liability, "allowanceMicros", 0);
-      const history = Reflect.get(proof, "history");
-      if (!Array.isArray(history) || !history[0]) throw new Error("History missing");
-      Reflect.set(history[0], "knownLiabilityMicros", 0);
-    }
-    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
-    const json = JSON.stringify(saved);
-    await writeFile(path, json);
-    await expect(controller.resume(cycle.id)).rejects.toThrow("Invalid retry intent authorization.");
-    expect(await readFile(path, "utf8")).toBe(json);
-  });
+  it.each(["hidden-amendment", "zero-floor"])(
+    "rejects replacement proof %s despite internally matching amount and prefix fields",
+    async (corruption) => {
+      const { controller, cycle, hash, root } = await readyAgent();
+      const first = (await controller.reserveAgent()).attempt;
+      const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+      (await original.beforeCreate())();
+      await original.raw("create", { id: "agent_run_cutoff", status: "running" });
+      await original.finish();
+      const approved = await controller.grantReplacement(cycle.id, first.id, hash, 0.2);
+      const risk = approved.grants.at(-1);
+      if (!risk || !("id" in risk)) throw new Error("Risk missing");
+      await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+      const second = (await controller.reserveAgent({}, "replace")).attempt;
+      await controller.agentLifecycleObserver(cycle.id, second.id, hash).finish();
+      if (corruption === "hidden-amendment")
+        await controller.grantUncertainty(cycle.id, "liability", first.operationId, 0.3);
+      await controller.detach();
+      const saved = await controller.inspect(cycle.id);
+      const entry = saved.attempts.find((item) => "id" in item && item.id === second.id);
+      if (!entry) throw new Error("Intent missing");
+      const proof = Reflect.get(entry, "retryAuthorization");
+      if (!proof || typeof proof !== "object") throw new Error("Proof missing");
+      if (corruption === "hidden-amendment") {
+        const amendment = saved.grants.at(-1);
+        if (!amendment) throw new Error("Amendment missing");
+        Reflect.set(amendment, "issuedAt", new Date(Date.parse(second.createdAt) - 1).toISOString());
+      } else {
+        const grant = saved.grants.find((item) => "id" in item && item.id === risk.id);
+        if (!grant) throw new Error("Risk missing");
+        const liability = saved.grants.find(
+          (item) => "id" in item && item.id === Reflect.get(grant, "liabilityPermissionId"),
+        );
+        if (!liability) throw new Error("Liability missing");
+        Reflect.set(grant, "originalAllowanceMicros", 0);
+        Reflect.set(liability, "allowanceMicros", 0);
+        const history = Reflect.get(proof, "history");
+        if (!Array.isArray(history) || !history[0]) throw new Error("History missing");
+        Reflect.set(history[0], "knownLiabilityMicros", 0);
+      }
+      const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+      const json = JSON.stringify(saved);
+      await writeFile(path, json);
+      await expect(controller.resume(cycle.id)).rejects.toThrow("Invalid retry intent authorization.");
+      expect(await readFile(path, "utf8")).toBe(json);
+    },
+  );
 
   it("rejects a post-intent nonce substituted into an extended historical grant prefix", async () => {
     const { controller, cycle, hash, root } = await readyAgent();
@@ -816,38 +816,37 @@ describe("durable research cycles", () => {
     await controller.detach();
   });
 
-  it.each([
-    "published-success",
-    "pending-success",
-    "liability-growth",
-  ])("rechecks %s in the synchronous final replacement guard after durable claim", async (change) => {
-    const { controller, cycle, hash } = await readyAgent();
-    const first = (await controller.reserveAgent()).attempt;
-    const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
-    (await original.beforeCreate())();
-    await original.raw("create", { id: "agent_run_before_guard", status: "running" });
-    await original.finish();
-    await controller.grantReplacement(cycle.id, first.id, hash, 0.2);
-    await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
-    const second = (await controller.reserveAgent({}, "replace")).attempt;
-    const replacement = controller.agentLifecycleObserver(cycle.id, second.id, hash);
-    const send = await replacement.beforeCreate();
-    const completion = original.raw("get", {
-      id: "agent_run_before_guard",
-      status: change === "liability-growth" ? "running" : "completed",
-      costDollars: { total: change === "liability-growth" ? 0.4 : 0.1 },
-      output: { answer: "original success blocks a later create" },
-    });
-    if (change !== "pending-success") await completion;
-    expect(send).toThrow(change === "liability-growth" ? "REPLACEMENT_LIABILITY_CHANGED" : "CYCLE_NOT_EXECUTABLE");
-    await completion;
-    await replacement.finish();
-    const saved = await controller.inspect(cycle.id);
-    expect(saved.status).toBe(change === "liability-growth" ? "unknown" : "completed");
-    expect(saved.attempts[1]).toMatchObject({ status: "not-dispatched" });
-    expect(saved.ledger[1]).toMatchObject({ status: "not-dispatched" });
-    await controller.detach();
-  });
+  it.each(["published-success", "pending-success", "liability-growth"])(
+    "rechecks %s in the synchronous final replacement guard after durable claim",
+    async (change) => {
+      const { controller, cycle, hash } = await readyAgent();
+      const first = (await controller.reserveAgent()).attempt;
+      const original = controller.agentLifecycleObserver(cycle.id, first.id, hash);
+      (await original.beforeCreate())();
+      await original.raw("create", { id: "agent_run_before_guard", status: "running" });
+      await original.finish();
+      await controller.grantReplacement(cycle.id, first.id, hash, 0.2);
+      await controller.grantUncertainty(cycle.id, "request", hash, 0.2);
+      const second = (await controller.reserveAgent({}, "replace")).attempt;
+      const replacement = controller.agentLifecycleObserver(cycle.id, second.id, hash);
+      const send = await replacement.beforeCreate();
+      const completion = original.raw("get", {
+        id: "agent_run_before_guard",
+        status: change === "liability-growth" ? "running" : "completed",
+        costDollars: { total: change === "liability-growth" ? 0.4 : 0.1 },
+        output: { answer: "original success blocks a later create" },
+      });
+      if (change !== "pending-success") await completion;
+      expect(send).toThrow(change === "liability-growth" ? "REPLACEMENT_LIABILITY_CHANGED" : "CYCLE_NOT_EXECUTABLE");
+      await completion;
+      await replacement.finish();
+      const saved = await controller.inspect(cycle.id);
+      expect(saved.status).toBe(change === "liability-growth" ? "unknown" : "completed");
+      expect(saved.attempts[1]).toMatchObject({ status: "not-dispatched" });
+      expect(saved.ledger[1]).toMatchObject({ status: "not-dispatched" });
+      await controller.detach();
+    },
+  );
 
   it("rechecks a durable frozen-artifact assertion before preparing the actual GET guard", async () => {
     const { controller, cycle, hash, root, artifact } = await readyAgent();
@@ -1068,45 +1067,46 @@ describe("durable research cycles", () => {
     { originalDollars: 0.000123, incomingDollars: 0.000123, conflictingMicros: [] },
     { originalDollars: 0.000124, incomingDollars: 0.000123, conflictingMicros: [123] },
     { originalDollars: 0.000123, incomingDollars: 0.000122, conflictingMicros: [122] },
-  ])("preserves historical rounding only for identical known terminal dollars $originalDollars -> $incomingDollars", async ({
-    originalDollars,
-    incomingDollars,
-    conflictingMicros,
-  }) => {
-    const { controller, cycle, hash, root } = await readyAgent();
-    const { attempt } = await controller.reserveAgent();
-    const observer = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
-    (await observer.beforeCreate())();
-    const reply = {
-      id: "agent_legacy_receipt",
-      status: "completed",
-      output: { structured: { answer: "done" } },
-      costDollars: { total: originalDollars },
-    } satisfies Parameters<typeof observer.raw>[1];
-    await observer.raw("create", reply);
-    await observer.finish();
-    await controller.detach();
-    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
-    const saved = JSON.parse(await readFile(path, "utf8"));
-    // Exact old converter result, with the original curated SDK dollar amount
-    // and all authorization/attempt/operation metadata untouched.
-    saved.ledger[0].reportedMicros = Math.ceil(originalDollars * 1_000_000);
-    await writeFile(path, JSON.stringify(saved));
-    const resumed = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "two" });
-    await resumed.resume(cycle.id);
-    const before = await resumed.inspect(cycle.id);
-    await resumed.agentLifecycleObserver(cycle.id, attempt.id, hash).raw("get", {
-      ...reply,
-      costDollars: { total: incomingDollars },
-    });
-    const after = await resumed.inspect(cycle.id);
-    expect(after.ledger[0]).toMatchObject({ reportedMicros: 124, status: "reported" });
-    expect("conflictingMicros" in after.ledger[0] ? after.ledger[0].conflictingMicros : []).toEqual(conflictingMicros);
-    expect(after.grants).toEqual(before.grants);
-    expect(after.status).toBe("completed");
-    if (!conflictingMicros.length) expect(after).toEqual(before);
-    await resumed.detach();
-  });
+  ])(
+    "preserves historical rounding only for identical known terminal dollars $originalDollars -> $incomingDollars",
+    async ({ originalDollars, incomingDollars, conflictingMicros }) => {
+      const { controller, cycle, hash, root } = await readyAgent();
+      const { attempt } = await controller.reserveAgent();
+      const observer = controller.agentLifecycleObserver(cycle.id, attempt.id, hash);
+      (await observer.beforeCreate())();
+      const reply = {
+        id: "agent_legacy_receipt",
+        status: "completed",
+        output: { structured: { answer: "done" } },
+        costDollars: { total: originalDollars },
+      } satisfies Parameters<typeof observer.raw>[1];
+      await observer.raw("create", reply);
+      await observer.finish();
+      await controller.detach();
+      const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+      const saved = JSON.parse(await readFile(path, "utf8"));
+      // Exact old converter result, with the original curated SDK dollar amount
+      // and all authorization/attempt/operation metadata untouched.
+      saved.ledger[0].reportedMicros = Math.ceil(originalDollars * 1_000_000);
+      await writeFile(path, JSON.stringify(saved));
+      const resumed = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "two" });
+      await resumed.resume(cycle.id);
+      const before = await resumed.inspect(cycle.id);
+      await resumed.agentLifecycleObserver(cycle.id, attempt.id, hash).raw("get", {
+        ...reply,
+        costDollars: { total: incomingDollars },
+      });
+      const after = await resumed.inspect(cycle.id);
+      expect(after.ledger[0]).toMatchObject({ reportedMicros: 124, status: "reported" });
+      expect("conflictingMicros" in after.ledger[0] ? after.ledger[0].conflictingMicros : []).toEqual(
+        conflictingMicros,
+      );
+      expect(after.grants).toEqual(before.grants);
+      expect(after.status).toBe("completed");
+      if (!conflictingMicros.length) expect(after).toEqual(before);
+      await resumed.detach();
+    },
+  );
 
   it("releases only proven pre-SDK nondispatch and never erases the durable attempt or silently replaces it", async () => {
     const { controller, cycle, hash } = await readyAgent();
@@ -1262,57 +1262,57 @@ describe("durable research cycles", () => {
     await expect(controller.reserveAgent()).rejects.toThrow("CYCLE_NOT_EXECUTABLE");
     await controller.detach();
   });
-  it.each([
-    "detach",
-    "archive",
-  ] as const)("prevents candidate publication when %s revokes capture during temporary-file sync", async (action) => {
-    const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
-    roots.push(root);
-    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
-    const cycle = await controller.start("question");
-    await controller.grantBudget(cycle.id, 1);
-    const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
-    const original = await vi.importActual<typeof fs>("node:fs/promises");
-    let enter!: () => void;
-    let release!: () => void;
-    const entered = new Promise<void>((resolve) => {
-      enter = resolve;
-    });
-    const hold = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    vi.mocked(fs.open).mockImplementation(async (...args) => {
-      const handle = await original.open(...args);
-      if (
-        String(args[0]).startsWith(join(root, "store", controller.projectId, `${cycle.id}.json.`)) &&
-        String(args[0]).endsWith(".tmp")
-      ) {
-        const sync = handle.sync.bind(handle);
-        vi.spyOn(handle, "sync").mockImplementationOnce(async () => {
-          enter();
-          await hold;
-          await sync();
-        });
-      }
-      return handle;
-    });
-    const pending = controller.explorationEvidenceObserver(
-      cycle.id,
-      operation.id,
-      operation.requestHash,
-    )({
-      results: [{ url: "https://example.com/revoked", title: "Revoked" }],
-    });
-    await entered;
-    const ending = controller[action]();
-    release();
-    await expect(pending).rejects.toThrow("capture was detached before publication");
-    await ending;
-    expect((await controller.inspect(cycle.id)).candidates ?? []).toEqual([]);
-    vi.mocked(fs.open).mockReset();
-    await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.009 });
-    expect((await controller.inspect(cycle.id)).ledger).toMatchObject([{ reportedMicros: 9_000 }]);
-  });
+  it.each(["detach", "archive"] as const)(
+    "prevents candidate publication when %s revokes capture during temporary-file sync",
+    async (action) => {
+      const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
+      roots.push(root);
+      const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "one" });
+      const cycle = await controller.start("question");
+      await controller.grantBudget(cycle.id, 1);
+      const { operation } = await controller.reserveExploration("web_search_exa", { query: "question" });
+      const original = await vi.importActual<typeof fs>("node:fs/promises");
+      let enter!: () => void;
+      let release!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve;
+      });
+      const hold = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.mocked(fs.open).mockImplementation(async (...args) => {
+        const handle = await original.open(...args);
+        if (
+          String(args[0]).startsWith(join(root, "store", controller.projectId, `${cycle.id}.json.`)) &&
+          String(args[0]).endsWith(".tmp")
+        ) {
+          const sync = handle.sync.bind(handle);
+          vi.spyOn(handle, "sync").mockImplementationOnce(async () => {
+            enter();
+            await hold;
+            await sync();
+          });
+        }
+        return handle;
+      });
+      const pending = controller.explorationEvidenceObserver(
+        cycle.id,
+        operation.id,
+        operation.requestHash,
+      )({
+        results: [{ url: "https://example.com/revoked", title: "Revoked" }],
+      });
+      await entered;
+      const ending = controller[action]();
+      release();
+      await expect(pending).rejects.toThrow("capture was detached before publication");
+      await ending;
+      expect((await controller.inspect(cycle.id)).candidates ?? []).toEqual([]);
+      vi.mocked(fs.open).mockReset();
+      await controller.reconcileExploration(cycle.id, operation.id, operation.requestHash, { totalDollars: 0.009 });
+      expect((await controller.inspect(cycle.id)).ledger).toMatchObject([{ reportedMicros: 9_000 }]);
+    },
+  );
 
   it("reports an already-published capture truthfully when archive revokes during directory sync", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-cycles-"));
@@ -1853,30 +1853,29 @@ describe("durable research cycles", () => {
     else expect(saved.ledger).toMatchObject([{ status: "unknown" }]);
   });
 
-  it.each([
-    "grant-cycle",
-    "grant-project",
-    "ledger-cycle",
-  ])("rejects restored accounting identity outside its containing cycle: %s", async (mismatch) => {
-    const root = await mkdtemp(join(tmpdir(), "exa-accounting-identity-"));
-    roots.push(root);
-    const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "operator" });
-    const cycle = await controller.start("topic");
-    await controller.grantBudget(cycle.id, 1);
-    await controller.reserveExploration("web_search_exa", { query: "topic" });
-    const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
-    const saved = JSON.parse(await readFile(path, "utf8"));
-    if (mismatch === "grant-cycle") saved.grants[0].cycleId = "foreign-cycle";
-    else if (mismatch === "grant-project") saved.grants[0].projectId = "foreign-project";
-    else saved.ledger[0].cycleId = "foreign-cycle";
-    const corrupted = JSON.stringify(saved);
-    await writeFile(path, corrupted);
-    await expect(controller.inspect(cycle.id)).rejects.toThrow("Accounting identity conflict");
-    await expect(controller.reserveExploration("web_search_exa", { query: "new" })).rejects.toThrow(
-      "Accounting identity conflict",
-    );
-    expect(await readFile(path, "utf8")).toBe(corrupted);
-  });
+  it.each(["grant-cycle", "grant-project", "ledger-cycle"])(
+    "rejects restored accounting identity outside its containing cycle: %s",
+    async (mismatch) => {
+      const root = await mkdtemp(join(tmpdir(), "exa-accounting-identity-"));
+      roots.push(root);
+      const controller = await createResearchCycles({ root: join(root, "store"), cwd: root, sessionId: "operator" });
+      const cycle = await controller.start("topic");
+      await controller.grantBudget(cycle.id, 1);
+      await controller.reserveExploration("web_search_exa", { query: "topic" });
+      const path = join(root, "store", controller.projectId, `${cycle.id}.json`);
+      const saved = JSON.parse(await readFile(path, "utf8"));
+      if (mismatch === "grant-cycle") saved.grants[0].cycleId = "foreign-cycle";
+      else if (mismatch === "grant-project") saved.grants[0].projectId = "foreign-project";
+      else saved.ledger[0].cycleId = "foreign-cycle";
+      const corrupted = JSON.stringify(saved);
+      await writeFile(path, corrupted);
+      await expect(controller.inspect(cycle.id)).rejects.toThrow("Accounting identity conflict");
+      await expect(controller.reserveExploration("web_search_exa", { query: "new" })).rejects.toThrow(
+        "Accounting identity conflict",
+      );
+      expect(await readFile(path, "utf8")).toBe(corrupted);
+    },
+  );
 
   it("durably shares one operator ceiling between simultaneous exploratory reservations", async () => {
     const root = await mkdtemp(join(tmpdir(), "exa-accounting-"));

@@ -10,6 +10,18 @@ publication version mismatches are called out explicitly.
 
 ## [Unreleased]
 
+## [7.1.1] - 2026-10-24
+
+### Changed
+
+- Upgrade `exa-js` to the compatible 2.26 release and refresh shared workspace dependencies and security overrides.
+- Validate against Pi 1.4.0 while keeping the root Pi development dependency ranges on 1.x; migrate test formatting to Biome 2.6.
+
+### Security
+
+- Update workspace resolutions for the MCP SDK, Undici, Vite, Vitest, body-parser, ip-address, and fast-uri to patched releases.
+- The transitive Zod 3 advisory GHSA-mrhx-c7xc-m3w5 remains unresolved pending a compatible upstream migration; it is not suppressed.
+
 ## [7.1.0] - 2026-10-24
 
 ### Added
