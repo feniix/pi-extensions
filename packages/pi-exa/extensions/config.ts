@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExaToolTimeouts } from "./tools.js";
 
 // =============================================================================
 // Types
@@ -16,6 +17,11 @@ export interface ExaConfig {
   enabledTools?: string[];
   advancedEnabled?: boolean;
   researchEnabled?: boolean;
+  cyclesEnabled?: boolean;
+  timeoutMs?: number;
+  researchTimeoutMs?: number;
+  submitTimeoutMs?: number;
+  monitorIntervalMs?: number;
 }
 
 export interface AuthResolution {
@@ -37,6 +43,17 @@ export function normalizeString(value: unknown): string | undefined {
 
 function getHomeDir(): string {
   return process.env.HOME || homedir();
+}
+
+/** Node timers overflow to 1ms above this bound; never accept those values. */
+function durationMs(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 2_147_483_647
+    ? value
+    : undefined;
+}
+
+function durationString(value: unknown): number | undefined {
+  return typeof value === "string" && /^\d+$/.test(value.trim()) ? durationMs(Number(value)) : undefined;
 }
 
 // =============================================================================
@@ -76,6 +93,11 @@ export function parseConfig(raw: unknown): ExaConfig {
       : undefined,
     advancedEnabled: typeof obj.advancedEnabled === "boolean" ? obj.advancedEnabled : false,
     researchEnabled: typeof obj.researchEnabled === "boolean" ? obj.researchEnabled : false,
+    cyclesEnabled: typeof obj.cyclesEnabled === "boolean" ? obj.cyclesEnabled : undefined,
+    timeoutMs: durationMs(obj.timeoutMs),
+    researchTimeoutMs: durationMs(obj.researchTimeoutMs),
+    submitTimeoutMs: durationMs(obj.submitTimeoutMs),
+    monitorIntervalMs: durationMs(obj.monitorIntervalMs),
   };
 }
 
@@ -118,6 +140,11 @@ function loadSettingsConfig(path: string): ExaConfig | null {
       apiKey: parsedConfig.apiKey,
       advancedEnabled: parsedConfig.advancedEnabled,
       researchEnabled: parsedConfig.researchEnabled,
+      cyclesEnabled: parsedConfig.cyclesEnabled,
+      timeoutMs: parsedConfig.timeoutMs,
+      researchTimeoutMs: parsedConfig.researchTimeoutMs,
+      submitTimeoutMs: parsedConfig.submitTimeoutMs,
+      monitorIntervalMs: parsedConfig.monitorIntervalMs,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -170,6 +197,11 @@ export function loadConfig(configPath?: string): ExaConfig | null {
     enabledTools: projectConfig?.enabledTools ?? globalConfig?.enabledTools,
     advancedEnabled: projectConfig?.advancedEnabled ?? globalConfig?.advancedEnabled,
     researchEnabled: projectConfig?.researchEnabled ?? globalConfig?.researchEnabled,
+    cyclesEnabled: projectConfig?.cyclesEnabled ?? globalConfig?.cyclesEnabled,
+    timeoutMs: projectConfig?.timeoutMs ?? globalConfig?.timeoutMs,
+    researchTimeoutMs: projectConfig?.researchTimeoutMs ?? globalConfig?.researchTimeoutMs,
+    submitTimeoutMs: projectConfig?.submitTimeoutMs ?? globalConfig?.submitTimeoutMs,
+    monitorIntervalMs: projectConfig?.monitorIntervalMs ?? globalConfig?.monitorIntervalMs,
   };
 }
 
@@ -200,6 +232,31 @@ function getConfigOverrideFlag(pi: ExtensionAPI): string | undefined {
 
 export function getResolvedConfig(pi: ExtensionAPI): ExaConfig | null {
   return loadConfig(getConfigOverrideFlag(pi));
+}
+
+export function areCyclesEnabled(pi: ExtensionAPI, config: ExaConfig | null): boolean {
+  const flag = pi.getFlag("exa-enable-cycles");
+  return typeof flag === "boolean" ? flag : (config?.cyclesEnabled ?? false);
+}
+
+export function resolveRuntimeSettings(
+  pi: Pick<ExtensionAPI, "getFlag">,
+  config: ExaConfig | null,
+): { timeouts?: ExaToolTimeouts; submitTimeoutMs?: number; monitorIntervalMs?: number } {
+  const def =
+    durationString(pi.getFlag("exa-timeout-ms")) ?? durationString(process.env.EXA_TIMEOUT_MS) ?? config?.timeoutMs;
+  const research =
+    durationString(pi.getFlag("exa-research-timeout-ms")) ??
+    durationString(process.env.EXA_RESEARCH_TIMEOUT_MS) ??
+    config?.researchTimeoutMs;
+  const timeouts: ExaToolTimeouts = {};
+  if (def !== undefined) timeouts.default = def;
+  if (research !== undefined) timeouts.web_research_exa = research;
+  return {
+    timeouts: def === undefined && research === undefined ? undefined : timeouts,
+    submitTimeoutMs: durationString(pi.getFlag("exa-submit-timeout-ms")) ?? config?.submitTimeoutMs,
+    monitorIntervalMs: durationString(pi.getFlag("exa-monitor-interval-ms")) ?? config?.monitorIntervalMs,
+  };
 }
 
 // =============================================================================

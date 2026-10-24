@@ -16,7 +16,13 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type PiToolRegistration, registerPiTools } from "@feniix/bridgekit/pi";
-import { getResolvedConfig, isToolEnabledForConfig, resolveAuth } from "./config.js";
+import {
+  areCyclesEnabled,
+  getResolvedConfig,
+  isToolEnabledForConfig,
+  resolveAuth,
+  resolveRuntimeSettings,
+} from "./config.js";
 import {
   type CycleInspectionFactory,
   type CycleMonitorInspector,
@@ -25,7 +31,7 @@ import {
   cyclePiRegistration,
 } from "./cycle-pi.js";
 import { createResearchPlanner } from "./research-planner.js";
-import { createExaTools, type ExaToolsOptions, type ExaToolTimeouts } from "./tools.js";
+import { createExaTools, type ExaToolsOptions } from "./tools.js";
 import { getExaRenderers } from "./tui-renderers.js";
 import { inspectResearchRun } from "./web-research.js";
 
@@ -87,23 +93,6 @@ function registerFlags(pi: ExtensionAPI): void {
   });
 }
 
-function parsePositiveIntFlag(value: string | boolean | undefined): number | undefined {
-  if (typeof value !== "string") return undefined;
-  const n = Number.parseInt(value.trim(), 10);
-  if (!Number.isFinite(n) || n <= 0) return undefined;
-  return n;
-}
-
-function resolvePiTimeouts(pi: ExtensionAPI): ExaToolTimeouts | undefined {
-  const def = parsePositiveIntFlag(pi.getFlag("exa-timeout-ms"));
-  const research = parsePositiveIntFlag(pi.getFlag("exa-research-timeout-ms"));
-  if (def === undefined && research === undefined) return undefined;
-  const out: ExaToolTimeouts = {};
-  if (def !== undefined) out.default = def;
-  if (research !== undefined) out.web_research_exa = research;
-  return out;
-}
-
 /** Local, non-spending planner tools that research cycles need; they never call Exa. */
 const CYCLE_PLANNER_TOOLS = new Set([
   "exa_research_step",
@@ -127,11 +116,12 @@ export default function exaExtension(pi: ExtensionAPI) {
   // at factory time and at session_start share the same in-memory plan.
   const planner = createResearchPlanner();
   // Timeouts are resolved when a call runs, so flags applied after the factory still count.
-  const timeouts = () => resolvePiTimeouts(pi);
-  // --exa-enable-cycles is an explicit opt-in, so it keeps the local planner tools available even
+  const runtimeSettings = () => resolveRuntimeSettings(pi, resolvedConfig);
+  const timeouts = () => runtimeSettings().timeouts;
+  // Cycles are an explicit opt-in, so they keep the local planner tools available even
   // when an older explicit enabledTools list omits them; they never call Exa or spend.
   const isEnabled = (toolName: string) =>
-    (CYCLE_PLANNER_TOOLS.has(toolName) && pi.getFlag("exa-enable-cycles") === true) ||
+    (CYCLE_PLANNER_TOOLS.has(toolName) && areCyclesEnabled(pi, resolvedConfig)) ||
     isToolEnabledForConfig(pi, resolvedConfig, toolName);
   const registered = new Map<string, Parameters<PiToolRegistration["registerTool"]>[0]>();
   const recorder: PiToolRegistration = {
@@ -185,7 +175,7 @@ export default function exaExtension(pi: ExtensionAPI) {
     resolvedConfig = getResolvedConfig(pi);
     tools = buildTools();
     reconcile(tools);
-    if (!cyclesInstalled && pi.getFlag("exa-enable-cycles") === true) {
+    if (!cyclesInstalled && areCyclesEnabled(pi, resolvedConfig)) {
       const retrievalFactory: CycleRetrievalFactory = (name, usageObserver) => {
         let selected: ReturnType<CycleRetrievalFactory>;
         registerPiTools(
@@ -225,7 +215,7 @@ export default function exaExtension(pi: ExtensionAPI) {
       const submissionFactory: CycleSubmissionFactory = Object.assign(
         (observer: Parameters<CycleSubmissionFactory>[0]) =>
           researchFactory({
-            agentSubmission: { observer, createWaitMs: parsePositiveIntFlag(pi.getFlag("exa-submit-timeout-ms")) },
+            agentSubmission: { observer, createWaitMs: runtimeSettings().submitTimeoutMs },
           }),
         { available: () => isToolEnabledForConfig(pi, resolvedConfig, "web_research_exa") },
       );
@@ -234,7 +224,7 @@ export default function exaExtension(pi: ExtensionAPI) {
         if (!apiKey) throw Object.assign(new Error("Exa API key is not configured."), { statusCode: 401 });
         return inspectResearchRun(apiKey, runId, { observer, timeoutMs });
       };
-      const monitorInterval = parsePositiveIntFlag(pi.getFlag("exa-monitor-interval-ms"));
+      const monitorInterval = runtimeSettings().monitorIntervalMs;
       const registration = cyclePiRegistration(
         pi,
         retrievalFactory,

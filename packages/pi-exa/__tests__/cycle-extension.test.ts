@@ -93,7 +93,12 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-async function host(enabled = true, timeoutMs?: number, enabledTools: readonly string[] = hostToolNames) {
+async function host(
+  enabled: boolean | null = true,
+  timeoutMs?: number,
+  enabledTools: readonly string[] = hostToolNames,
+  cyclesEnabled?: boolean,
+) {
   const directory = await mkdtemp(join(tmpdir(), "exa-cycle-host-"));
   directories.push(directory);
   vi.stubEnv("PI_CODING_AGENT_DIR", join(directory, "agent"));
@@ -103,6 +108,7 @@ async function host(enabled = true, timeoutMs?: number, enabledTools: readonly s
     JSON.stringify({
       enabledTools,
       apiKey: "offline-fixture-key",
+      cyclesEnabled,
     }),
   );
   const tools = new Map<string, Parameters<PiToolRegistration["registerTool"]>[0]>();
@@ -138,7 +144,7 @@ async function host(enabled = true, timeoutMs?: number, enabledTools: readonly s
     sendMessage,
     getFlag: (name: string) =>
       name === "exa-enable-cycles"
-        ? enabled
+        ? (enabled ?? undefined)
         : name === "exa-config-file"
           ? config
           : name === "exa-monitor-interval-ms"
@@ -207,6 +213,26 @@ describe("Pi guided research availability", () => {
 });
 
 describe("Pi cycles with an explicit enabledTools list", () => {
+  it.each([
+    { flag: null, config: true, expected: true },
+    { flag: false, config: true, expected: false },
+    { flag: true, config: false, expected: true },
+    { flag: null, config: false, expected: false },
+    { flag: null, config: undefined, expected: false },
+  ])("resolves cycles from flag $flag and config $config", async ({ flag, config, expected }) => {
+    const pi = await host(flag, undefined, ["web_search_exa"], config);
+    expect(Boolean(pi.command)).toBe(expected);
+    expect(pi.tools.has("exa_research_status")).toBe(expected);
+    if (expected) {
+      const started = await pi.call("exa_research_status", { action: "start", topic: "Configured cycles" });
+      expect(started.isError).not.toBe(true);
+      expect(started.details.topic).toBe("Configured cycles");
+      expect(pi.tools.has("web_research_exa")).toBe(false);
+      expect(offlineSearch).not.toHaveBeenCalled();
+      expect(offlineCreate).not.toHaveBeenCalled();
+    }
+  });
+
   it("keeps the local planner tools available when cycles are enabled, even if the list omits them", async () => {
     const webOnly = hostToolNames.filter((name) => name.startsWith("web_"));
     const pi = await host(true, undefined, webOnly);
